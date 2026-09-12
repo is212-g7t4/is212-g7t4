@@ -1,0 +1,13 @@
+{
+  "name": "is212-g7t4",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "concurrently -n frontend,backend -c blue,green \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "npm --prefix frontend/event-management-ui run dev",
+    "dev:backend": "docker compose up"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
