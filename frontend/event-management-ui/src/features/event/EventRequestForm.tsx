@@ -15,6 +15,15 @@ interface EventFormData {
   registrationNeeds: string;
 }
 
+interface FormErrors {
+  eventName?: string
+  description?: string
+  purpose?: string
+  preferredStartDate?: string
+  preferredEndDate?: string
+  expectedAttendance?: string
+}
+
 function EventRequestForm() {
   const [formData, setFormData] = useState<EventFormData>({
     eventName: "",
@@ -28,23 +37,85 @@ function EventRequestForm() {
     equipmentRequirements: "",
     registrationNeeds: "",
   });
+  const [errors, setErrors] = useState<FormErrors>({})
+  const validateForm = (): boolean => {
+  const newErrors: FormErrors = {}
+
+  // Required field validation
+  if (!formData.eventName.trim()) {
+    newErrors.eventName = 'Event Name is required.'
+  }
+
+  if (!formData.description.trim()) {
+    newErrors.description = 'Description is required.'
+  }
+
+  if (!formData.purpose.trim()) {
+    newErrors.purpose = 'Purpose is required.'
+  }
+
+  if (!formData.preferredStartDate) {
+    newErrors.preferredStartDate =
+      'Preferred Start Date & Time is required.'
+  }
+
+  if (!formData.preferredEndDate) {
+    newErrors.preferredEndDate =
+      'Preferred End Date & Time is required.'
+  }
+
+  // Expected attendance validation
+  if (!formData.expectedAttendance) {
+    newErrors.expectedAttendance = 'Expected Attendance is required.'
+  } else if (Number(formData.expectedAttendance) <= 0) {
+    newErrors.expectedAttendance =
+      'Expected Attendance must be greater than 0.'
+  }
+
+  // Date validation
+  if (
+    formData.preferredStartDate &&
+    formData.preferredEndDate &&
+    new Date(formData.preferredEndDate) <
+      new Date(formData.preferredStartDate)
+  ) {
+    newErrors.preferredEndDate =
+      'End date and time cannot be before the start date and time.'
+  }
+
+  setErrors(newErrors)
+
+  return Object.keys(newErrors).length === 0
+}
 
   const handleChange = (
-    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
-    const { name, value } = event.target;
+  event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+) => {
+  const { name, value } = event.target
 
-    setFormData((previousData) => ({
-      ...previousData,
-      [name]: value,
-    }));
-  };
+  setFormData((previousData) => ({
+    ...previousData,
+    [name]: value,
+  }))
+
+  setErrors((previousErrors) => ({
+    ...previousErrors,
+    [name]: undefined,
+  }))
+}
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  event.preventDefault()
 
-    console.log(formData);
-  };
+  const isValid = validateForm()
+
+  if (!isValid) {
+    return
+  }
+
+  console.log('Form is valid:', formData)
+
+}
 
   return (
     <div className="event-request-page">
@@ -78,6 +149,12 @@ function EventRequestForm() {
                 onChange={handleChange}
                 placeholder="e.g. Southeast Asia Technology Conference"
               />
+
+              {errors.eventName && (
+              <span className="error-message">
+                {errors.eventName}
+              </span>
+            )}
             </div>
 
             <div className="form-group">
@@ -93,6 +170,11 @@ function EventRequestForm() {
                 placeholder="Provide a brief description of the event."
                 rows={5}
               />
+              {errors.description && (
+              <span className="error-message">
+                {errors.description}
+              </span>
+              )}
             </div>
 
             <div className="form-group">
@@ -108,6 +190,11 @@ function EventRequestForm() {
                 placeholder="What is the main purpose or objective of this event?"
                 rows={4}
               />
+              {errors.purpose && (
+                <span className="error-message">
+                  {errors.purpose}
+                </span>
+              )}
             </div>
           </section>
 
@@ -134,6 +221,11 @@ function EventRequestForm() {
                   value={formData.preferredStartDate}
                   onChange={handleChange}
                 />
+                {errors.preferredStartDate && (
+                  <span className="error-message">
+                    {errors.preferredStartDate}
+                  </span>
+                )}
               </div>
 
               <div className="form-group">
@@ -149,6 +241,12 @@ function EventRequestForm() {
                   value={formData.preferredEndDate}
                   onChange={handleChange}
                 />
+
+                {errors.preferredEndDate && (
+                  <span className="error-message">
+                    {errors.preferredEndDate}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -166,6 +264,11 @@ function EventRequestForm() {
                 onChange={handleChange}
                 placeholder="e.g. 150"
               />
+              {errors.expectedAttendance && (
+                <span className="error-message">
+                  {errors.expectedAttendance}
+                </span>
+              )}
             </div>
           </section>
 
