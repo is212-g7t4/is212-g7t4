@@ -1,15 +1,30 @@
 :root {
-  font-family:
-    Inter,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-
-  color: #1f2937;
-  background-color: #f4f6f8;
-
+  --color-primary: #2458a6;
+  --color-primary-dark: #173b73;
+  --color-secondary: #e9eef7;
+  --color-ink: #172033;
+  --color-muted: #657084;
+  --color-border: #dce2ec;
+  --color-surface: #ffffff;
+  --color-background: #f5f7fb;
+  --color-success: #16805d;
+  --color-success-soft: #e4f5ee;
+  --color-warning: #a86711;
+  --color-warning-soft: #fff2d9;
+  --color-error: #b33d4d;
+  --color-error-soft: #fde9ed;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+  --radius: 8px;
+  --shadow: 0 8px 24px rgba(30, 48, 80, 0.06);
+  font-family: Georgia, 'Times New Roman', serif;
+  color: var(--color-ink);
+  background: var(--color-background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -28,13 +43,8 @@ body,
   min-height: 100vh;
 }
 
-body {
-  margin: 0;
-  background-color: #f4f6f8;
-}
+body { margin: 0; background: var(--color-background); }
 
-button,
-input,
-textarea {
+button, input, textarea, select {
   font: inherit;
 }
