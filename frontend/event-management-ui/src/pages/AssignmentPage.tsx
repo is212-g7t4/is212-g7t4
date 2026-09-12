@@ -1,0 +1,6 @@
+import { users } from '../mockData'
+import { StatusBadge } from '../components/FormControls'
+
+export function AssignmentPage({ coordinator, setCoordinator, onSave }: { coordinator: string; setCoordinator: (value: string) => void; onSave: () => void }) {
+  return <div className="page-stack"><section className="panel event-summary"><div><p className="eyebrow">EVENT EVT-001</p><h2>Southeast Asia Technology Conference</h2><p className="muted">24 Oct 2026 · Auditorium · 280 attendees</p></div><StatusBadge status="Pending" /></section><section className="panel"><div className="section-heading"><div><p className="eyebrow">DELEGATION</p><h2>Select an event coordinator</h2><p className="muted">Assign or reassign ownership for this event.</p></div><span className="current-assignee">Current: {coordinator}</span></div><div className="user-list">{users.map((user) => <button className={`user-row ${coordinator === user.name ? 'selected' : ''}`} key={user.name} onClick={() => setCoordinator(user.name)}><span className="avatar">{user.initials}</span><span><strong>{user.name}</strong><small>{user.role}</small></span><span className="radio-mark">{coordinator === user.name ? '●' : '○'}</span></button>)}</div><div className="form-actions"><button className="button primary" onClick={onSave}>Save assignment</button></div></section></div>
+}
