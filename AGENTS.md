@@ -148,3 +148,12 @@ Jira ticket key in the commit message (e.g. `PROJ-123: fix venue conflict
 check`), and if so, which key.** Don't guess the key or silently omit it —
 Jira's commit integration relies on the key being present and correct, and
 picking the wrong ticket misattributes the work.
+
+**Branch naming:** every branch should be named after the Jira ticket it
+implements, in the form `<SCRUM-KEY>-<kebab-case-summary>` — e.g. `SCRUM-84`
+titled "Set Up Repository" becomes `SCRUM-84-set-up-repository`. Look the
+ticket up (or ask the user for its key and summary) before branching rather
+than guessing; don't invent a key or a summary. Branch off `main`, and open
+the PR back into `main` when the work is ready — `main` is protected, so
+direct pushes and force-pushes to it are rejected and all changes must land
+via PR.

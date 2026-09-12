@@ -37,7 +37,7 @@ is212-g7t4/
 │   ├── forum-service/                  # atomic, MongoDB (planned)
 │   └── email-sms-wrapper-service/      # wrapper (planned)
 ├── docs/
-├── docker-compose.yml                  # planned — not yet created
+├── docker-compose.yml                  # scaffolded — wires up the two templates only
 ├── AGENTS.md
 ├── INDEX.md
 └── README.md
@@ -108,15 +108,21 @@ uv run flask --app app run --debug
 uv run pytest
 ```
 
-## Running everything locally (once real services + docker-compose.yml exist)
+## Running everything locally
+
+`docker-compose.yml` currently wires up only the two templates as
+placeholders — add a service entry there each time a real service is copied
+from a template (see the comment in that file).
 
 ```
-docker compose up
+npm run dev          # frontend (Vite) + backend (docker compose up), together
+npm run dev:frontend # frontend only
+npm run dev:backend  # backend only, via docker compose up
 ```
 
-Will bring up every Flask service + RabbitMQ. Supabase and MongoDB Atlas stay
-cloud-hosted (not run locally) — each service reads its connection string
-from its own `.env`.
+`docker compose up` will eventually bring up every Flask service + RabbitMQ.
+Supabase and MongoDB Atlas stay cloud-hosted (not run locally) — each service
+reads its connection string from its own `.env`.
 
 ## Open architecture questions
 
