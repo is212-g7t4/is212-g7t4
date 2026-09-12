@@ -42,6 +42,12 @@
   padding: 28px 36px;
   border-bottom: 1px solid #e5e7eb;
 }
+.error-message {
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.4;
+}
 
 .section-header {
   margin-bottom: 24px;
@@ -142,6 +148,17 @@
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
+.form-group input.input-error,
+.form-group textarea.input-error {
+  border-color: #dc2626;
+}
+
+.form-group input.input-error:focus,
+.form-group textarea.input-error:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
 
 /* Footer */
 
