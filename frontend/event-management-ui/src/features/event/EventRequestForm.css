@@ -35,6 +35,129 @@
 .event-request-form {
   width: 100%;
 }
+/* Missing fields popup */
+
+.validation-popup-overlay {
+  position: fixed;
+  inset: 0;
+
+  z-index: 2000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 20px;
+
+  background: rgba(17, 24, 39, 0.55);
+}
+
+.validation-popup {
+  width: 100%;
+  max-width: 480px;
+
+  padding: 24px;
+
+  background: #ffffff;
+  border-radius: 12px;
+
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.18),
+    0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+.validation-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  margin-bottom: 12px;
+}
+
+.validation-popup-header h2 {
+  margin: 0;
+
+  color: #111827;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.validation-popup-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 32px;
+  height: 32px;
+
+  border: none;
+  border-radius: 50%;
+
+  background: #f3f4f6;
+  color: #4b5563;
+
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.validation-popup-close:hover {
+  background: #e5e7eb;
+}
+
+.validation-popup p {
+  margin: 0 0 16px;
+
+  color: #4b5563;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.missing-fields-list {
+  margin: 0;
+  padding: 14px 18px 14px 36px;
+
+  border-radius: 8px;
+
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.missing-fields-list li {
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.missing-fields-list li:last-child {
+  margin-bottom: 0;
+}
+
+.validation-popup-actions {
+  display: flex;
+  justify-content: flex-end;
+
+  margin-top: 22px;
+}
+
+.validation-popup-button {
+  height: 42px;
+
+  padding: 0 18px;
+
+  border: none;
+  border-radius: 8px;
+
+  background: #2563eb;
+  color: #ffffff;
+
+  font-size: 14px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.validation-popup-button:hover {
+  background: #1d4ed8;
+}
 
 /* Sections */
 
