@@ -38,35 +38,53 @@ function EventRequestForm() {
     registrationNeeds: "",
   });
   const [errors, setErrors] = useState<FormErrors>({})
+
+  const [missingFields, setMissingFields] = useState<string[]>([])
+  const [showMissingFieldsPopup, setShowMissingFieldsPopup] = useState(false)
   const validateForm = (): boolean => {
   const newErrors: FormErrors = {}
+  const newMissingFields: string[] = []
 
-  // Required field validation
+  // Event Name
   if (!formData.eventName.trim()) {
     newErrors.eventName = 'Event Name is required.'
+    newMissingFields.push('Event Name')
   }
 
+  // Description
   if (!formData.description.trim()) {
     newErrors.description = 'Description is required.'
+    newMissingFields.push('Description')
   }
 
+  // Purpose
   if (!formData.purpose.trim()) {
     newErrors.purpose = 'Purpose is required.'
+    newMissingFields.push('Purpose')
   }
 
+  // Start Date
   if (!formData.preferredStartDate) {
     newErrors.preferredStartDate =
       'Preferred Start Date & Time is required.'
+
+    newMissingFields.push('Preferred Start Date & Time')
   }
 
+  // End Date
   if (!formData.preferredEndDate) {
     newErrors.preferredEndDate =
       'Preferred End Date & Time is required.'
+
+    newMissingFields.push('Preferred End Date & Time')
   }
 
-  // Expected attendance validation
+  // Expected Attendance
   if (!formData.expectedAttendance) {
-    newErrors.expectedAttendance = 'Expected Attendance is required.'
+    newErrors.expectedAttendance =
+      'Expected Attendance is required.'
+
+    newMissingFields.push('Expected Attendance')
   } else if (Number(formData.expectedAttendance) <= 0) {
     newErrors.expectedAttendance =
       'Expected Attendance must be greater than 0.'
@@ -84,6 +102,11 @@ function EventRequestForm() {
   }
 
   setErrors(newErrors)
+  setMissingFields(newMissingFields)
+
+  if (newMissingFields.length > 0) {
+    setShowMissingFieldsPopup(true)
+  }
 
   return Object.keys(newErrors).length === 0
 }
@@ -364,6 +387,45 @@ function EventRequestForm() {
           </div>
         </form>
       </div>
+       {showMissingFieldsPopup && (
+      <div className="validation-popup-overlay">
+        <div className="validation-popup">
+          <div className="validation-popup-header">
+            <h2>Missing Required Fields</h2>
+
+            <button
+              type="button"
+              className="validation-popup-close"
+              onClick={() => setShowMissingFieldsPopup(false)}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+
+          <p>
+            Please complete the following required fields before
+            submitting your event request:
+          </p>
+
+          <ul className="missing-fields-list">
+            {missingFields.map((field) => (
+              <li key={field}>{field}</li>
+            ))}
+          </ul>
+
+          <div className="validation-popup-actions">
+            <button
+              type="button"
+              className="validation-popup-button"
+              onClick={() => setShowMissingFieldsPopup(false)}
+            >
+              Back to Form
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }
