@@ -296,7 +296,7 @@ wheels = [
 ]
 
 [[package]]
-name = "template-service"
+name = "template-atomic-service"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
