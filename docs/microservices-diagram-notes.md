@@ -210,3 +210,4 @@ layout as the reference jpg. Atomic services never call each other or another
 service directly (matches the SOA module's "atomic implies independent of
 other services" principle) — only composites reach into atomics, into Forum,
 and into the broker.
+
