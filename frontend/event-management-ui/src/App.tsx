@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { Sidebar, Topbar } from './components/Navigation'
-import { initialEvent, initialRequests, users } from './mockData'
+import { users } from './mockData'
 import { AssignmentPage } from './pages/AssignmentPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ManagePage } from './pages/ManagePage'
-import { ReviewPage } from './pages/ReviewPage'
+import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import type { EventData, Role, Route } from './types'
 
@@ -29,9 +29,19 @@ function getRoute(): Route {
 function App() {
   const [route, setRoute] = useState<Route>(getRoute)
   const [role, setRole] = useState<Role>('Requester')
-  const [event, setEvent] = useState<EventData>(initialEvent)
+  const [event, setEvent] = useState<EventData>({
+  eventName: '',
+  description: '',
+  purpose: '',
+  preferredStartDate: '',
+  preferredEndDate: '',
+  expectedAttendance: '',
+  venueRequirements: '',
+  accessibilityNeeds: '',
+  equipmentRequirements: '',
+  registrationNeeds: '',
+})
   const [coordinator, setCoordinator] = useState(users[0].name)
-  const [requests, setRequests] = useState(initialRequests)
   const [notice, setNotice] = useState('')
 
   useEffect(() => {
@@ -56,10 +66,10 @@ function App() {
       <Topbar route={route} role={role} onRoleChange={setRole} />
       {notice && <div className="notice" role="status">{notice}</div>}
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} />}
-      {route === 'submit' && <SubmissionPage event={event} updateEvent={updateEvent} onSubmit={() => setNotice('Event request saved locally as a mock submission.')} />}
+      {route === 'submit' && <SubmissionPage role={role} />}
       {route === 'assignment' && <AssignmentPage coordinator={coordinator} setCoordinator={setCoordinator} onSave={() => setNotice(`Coordinator updated locally to ${coordinator}.`)} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
-      {route === 'review' && <ReviewPage role={role} requests={requests} setRequests={setRequests} onAction={(message) => setNotice(message)} />}
+      {route === 'review' && <SubmittedRequestsPage key={role} role={role} />}
     </main>
   </div>
 }
