@@ -1,9 +1,18 @@
 import os
+from uuid import UUID
 
 import psycopg2
 from flask import Flask, jsonify, request
 
-from app.models import FIELDS, list_submitted, submit_event
+from app.models import (
+    FIELDS,
+    EventNotAssignedError,
+    EventNotFoundError,
+    EventNotSubmittedError,
+    approve_event,
+    list_submitted,
+    submit_event,
+)
 from app.validation import validate
 
 
@@ -22,7 +31,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Origin"] = app.config["FRONTEND_ORIGIN"]
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         return response
 
     @app.errorhandler(psycopg2.Error)
@@ -52,6 +61,26 @@ def create_app(config=None):
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         return jsonify(events=list_submitted(app.config["DATABASE_URL"]))
+
+    @app.patch("/events/<uuid:event_id>/approve")
+    def approve(event_id):
+        data = request.get_json(silent=True)
+        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
+        try:
+            coordinator_id = str(UUID(coordinator_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            approved = approve_event(app.config["DATABASE_URL"], str(event_id), coordinator_id)
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(message="This event request is not assigned to the current coordinator."), 403
+        except EventNotSubmittedError:
+            return jsonify(message="Only submitted event requests can be approved."), 409
+        return jsonify(approved), 200
 
     return app
 
