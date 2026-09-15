@@ -2,8 +2,11 @@ import type { EventData } from '../../types'
 
 export interface SubmittedEvent extends EventData {
   id: string
-  status: 'Submitted'
+  status: 'Submitted' | 'Approved'
   submittedAt: string | null
+  coordinatorId: string | null
+  approvedBy: string | null
+  approvedAt: string | null
 }
 
 export const requiredFields: [keyof EventData, string][] = [
@@ -38,10 +41,14 @@ export class SubmissionError extends Error {
   }
 }
 
-export async function eventApi(path: string, data?: EventData) {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+export async function eventApi(
+  path: string,
+  data?: EventData | { coordinatorId: string },
+  method?: 'POST' | 'PATCH',
+) {
+  const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}
   const response = await fetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}${path}`, {
-    method: data ? 'POST' : 'GET', headers, ...(data ? { body: JSON.stringify(data) } : {}),
+    method: method || (data ? 'POST' : 'GET'), headers, ...(data ? { body: JSON.stringify(data) } : {}),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new SubmissionError(body.message || 'Unable to complete the request.', body.missingFields, body.errors)

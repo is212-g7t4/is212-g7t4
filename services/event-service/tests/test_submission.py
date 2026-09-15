@@ -31,7 +31,8 @@ def saved_row():
     row.update(event_id="00000000-0000-0000-0000-000000000001", status="Submitted",
                submission_date=datetime(2026, 9, 15, 1, 30),
                preferred_start_date=datetime(2026, 10, 1, 9),
-               preferred_end_date=datetime(2026, 10, 1, 17), expected_attendance=25)
+               preferred_end_date=datetime(2026, 10, 1, 17), expected_attendance=25,
+               coordinator_id=None)
     row["description"] = json.dumps({"_connectsphere": "event-submission-v1",
                                      "description": VALID["description"], "purpose": VALID["purpose"]})
     return row
@@ -132,7 +133,7 @@ def test_empty_queue(setup):
     ('{"other":"value"}', '{"other":"value"}', ""), ("[]", "[]", ""),
 ])
 def test_legacy_descriptions_are_not_rewritten(value, description, purpose):
-    assert unpack_description(value) == (description, purpose)
+    assert unpack_description(value) == (description, purpose, None)
 
 
 def test_nullable_legacy_fields_serialize():
@@ -172,4 +173,100 @@ def test_health_and_browser_cors(setup):
     response = client.options("/events", headers={"Origin": "http://localhost:5173"})
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
     assert "Access-Control-Allow-Origin" not in client.options("/events", headers={"Origin": "https://other.example"}).headers
+
+
+COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
+OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def approved_row():
+    row = saved_row()
+    row["status"] = "Approved"
+    row["coordinator_id"] = COORDINATOR_ID
+    row["description"] = json.dumps({
+        "_connectsphere": "event-submission-v1",
+        "description": VALID["description"],
+        "purpose": VALID["purpose"],
+        "approval": {
+            "coordinatorId": COORDINATOR_ID,
+            "approvedAt": "2026-09-15T02:30:00.000000+00:00",
+        },
+    })
+    return row
+
+
+def test_approval_changes_status_and_records_audit_metadata(setup):
+    client, connection, cursor = setup
+    assigned = saved_row()
+    assigned["coordinator_id"] = COORDINATOR_ID
+    cursor.fetchone.side_effect = [assigned, approved_row()]
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001/approve",
+        json={"coordinatorId": COORDINATOR_ID},
+    )
+
+    assert response.status_code == 200
+    assert response.json["status"] == "Approved"
+    assert response.json["approvedBy"] == COORDINATOR_ID
+    assert response.json["approvedAt"] == "2026-09-15T02:30:00.000000+00:00"
+    assert cursor.execute.call_count == 2
+    update_query, parameters = cursor.execute.call_args.args
+    assert "SET status = 'Approved'" in update_query
+    assert "CURRENT_TIMESTAMP" in update_query
+    assert parameters == [VALID["description"], VALID["purpose"], COORDINATOR_ID,
+                          "00000000-0000-0000-0000-000000000001"]
+    connection.__exit__.assert_called_once()
+
+
+def test_approval_is_rejected_for_another_coordinators_assignment(setup):
+    client, _, cursor = setup
+    assigned = saved_row()
+    assigned["coordinator_id"] = OTHER_COORDINATOR_ID
+    cursor.fetchone.return_value = assigned
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001/approve",
+        json={"coordinatorId": COORDINATOR_ID},
+    )
+
+    assert response.status_code == 403
+    assert cursor.execute.call_count == 1
+
+
+def test_approval_is_rejected_when_event_is_not_submitted(setup):
+    client, _, cursor = setup
+    assigned = saved_row()
+    assigned.update(coordinator_id=COORDINATOR_ID, status="Approved")
+    cursor.fetchone.return_value = assigned
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001/approve",
+        json={"coordinatorId": COORDINATOR_ID},
+    )
+
+    assert response.status_code == 409
+    assert cursor.execute.call_count == 1
+
+
+def test_approval_returns_not_found_for_unknown_event(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = None
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001/approve",
+        json={"coordinatorId": COORDINATOR_ID},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("body", [{}, None, {"coordinatorId": "not-a-uuid"}])
+def test_approval_requires_valid_current_coordinator(body, setup):
+    response = setup[0].patch(
+        "/events/00000000-0000-0000-0000-000000000001/approve",
+        json=body,
+    )
+    assert response.status_code == 400
+    setup[2].execute.assert_not_called()
+
+
 
