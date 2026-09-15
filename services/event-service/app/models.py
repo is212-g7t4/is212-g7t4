@@ -26,16 +26,17 @@ def unpack_description(value):
     try:
         details = json.loads(value or "")
     except (ValueError, TypeError):
-        return value or "", ""
+        return value or "", "", None
     if (isinstance(details, dict) and details.get("_connectsphere") == "event-submission-v1"
             and isinstance(details.get("description"), str) and isinstance(details.get("purpose"), str)):
-        return details["description"], details["purpose"]
-    return value or "", ""
+        approval = details.get("approval")
+        return details["description"], details["purpose"], approval if isinstance(approval, dict) else None
+    return value or "", "", None
 
 
 def serialize(row):
     result = {key: row[column] or "" for key, column in FIELDS.items()}
-    result["description"], result["purpose"] = unpack_description(row["description"])
+    result["description"], result["purpose"], approval = unpack_description(row["description"])
     for key in ("preferredStartDate", "preferredEndDate"):
         result[key] = result[key].isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
@@ -45,6 +46,9 @@ def serialize(row):
         # submission_date is timestamp WITHOUT time zone, stored as UTC by this service.
         submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
         if row["submission_date"] else None,
+        coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
+        approvedBy=approval.get("coordinatorId") if approval else None,
+        approvedAt=approval.get("approvedAt") if approval else None,
     )
     return result
 
@@ -64,7 +68,7 @@ def submit_event(database_url, data):
                     (event_id, {COLUMNS}, status, submission_date)
                     VALUES (%s, {", ".join(["%s"] * len(FIELDS))},
                             'Submitted', timezone('UTC', CURRENT_TIMESTAMP))
-                    RETURNING event_id, {COLUMNS}, status, submission_date""",
+                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
                 [event_id, *values],
             )
             saved = cursor.fetchone()
@@ -76,9 +80,63 @@ def list_submitted(database_url):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT event_id, {COLUMNS}, status, submission_date
+                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
                     FROM public.event_service WHERE status = 'Submitted'
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
             )
             return [serialize(row) for row in cursor.fetchall()]
+
+
+class EventNotFoundError(Exception):
+    pass
+
+
+class EventNotAssignedError(Exception):
+    pass
+
+
+class EventNotSubmittedError(Exception):
+    pass
+
+
+def approve_event(database_url, event_id, coordinator_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                    FROM public.event_service
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+                raise EventNotAssignedError
+            if event["status"] != "Submitted":
+                raise EventNotSubmittedError
+
+            description, purpose, _ = unpack_description(event["description"])
+            cursor.execute(
+                f"""UPDATE public.event_service
+                    SET status = 'Approved',
+                        description = jsonb_build_object(
+                            '_connectsphere', 'event-submission-v1',
+                            'description', %s,
+                            'purpose', %s,
+                            'approval', jsonb_build_object(
+                                'coordinatorId', %s,
+                                'approvedAt', to_char(
+                                    timezone('UTC', CURRENT_TIMESTAMP),
+                                    'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'
+                                )
+                            )
+                        )::text
+                    WHERE event_id = %s
+                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                [description, purpose, coordinator_id, event_id],
+            )
+            approved = cursor.fetchone()
+    return serialize(approved)
 
