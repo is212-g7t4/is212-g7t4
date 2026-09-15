@@ -1,15 +1,25 @@
 export type Role = 'Requester' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support'
 export type Route = 'dashboard' | 'submit' | 'assignment' | 'manage' | 'review'
-export type RequestStatus = 'Pending' | 'Approved' | 'Rejected'
+export type RequestStatus =
+  | 'Pending'
+  | 'Submitted'
+  | 'Approved'
+  | 'Rejected'
 
 export interface EventData {
-  title: string
+  // Required fields
+  eventName: string
   description: string
   purpose: string
-  date: string
-  venue: string
-  equipment: string
-  attendance: string
+  preferredStartDate: string
+  preferredEndDate: string
+  expectedAttendance: string
+
+  // Optional fields
+  venueRequirements: string
+  accessibilityNeeds: string
+  equipmentRequirements: string
+  registrationNeeds: string
 }
 
 export interface MockRequest {
