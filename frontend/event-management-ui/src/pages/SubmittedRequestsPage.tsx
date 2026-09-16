@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { users } from '../mockData'
 
-export function SubmittedRequestsPage({ role }: { role: Role }) {
+export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Role; assignedOnly?: boolean }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -23,6 +23,7 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
     id: import.meta.env.VITE_CURRENT_COORDINATOR_ID || users[0].id,
     name: import.meta.env.VITE_CURRENT_COORDINATOR_NAME || users[0].name,
   }
+  const visibleEvents = assignedOnly ? events.filter((event) => event.coordinatorId === currentCoordinator.id) : events
   useEffect(() => {
     if (role !== 'Event Coordinator') return
     let active = true
@@ -83,11 +84,11 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
   if (role !== 'Event Coordinator') return <p className="role-warning">Submitted event requests are visible to Event Coordinators.</p>
   return <div className="page-stack">
     {popup && <SubmissionPopup {...popup} onClose={() => setPopup(null)} />}
-    <section className="intro"><h1>Submitted event requests</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}. Preferred times are Singapore time (SGT).</p>
+    <section className="intro"><h1>{assignedOnly ? 'Assigned Events' : 'Submitted event requests'}</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}. Preferred times are Singapore time (SGT).</p>
       <button className="button" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh requests</button></section>
     {loading ? <p role="status">Loading submitted requests…</p> : error ? <p role="alert">{error}</p> :
-      events.length === 0 ? <p>No submitted event requests yet.</p> :
-      events.map((event) => <article key={event.id} className="panel event-card">
+      visibleEvents.length === 0 ? <p>{assignedOnly ? 'No events are assigned to you yet.' : 'No submitted event requests yet.'}</p> :
+      visibleEvents.map((event) => <article key={event.id} className="panel event-card">
         <header className="event-card-header"><div><p className="eyebrow">EVENT REQUEST</p><h2>{event.eventName}</h2></div><StatusBadge status={event.status} /></header>
         <p className="event-card-submitted">Submitted {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
         <dl className="event-details">{[
