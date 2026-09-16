@@ -15,6 +15,7 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
   const [coordinators, setCoordinators] = useState<Coordinator[]>([])
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const [selectedCoordinator, setSelectedCoordinator] = useState<Record<string, string>>({})
+  const [reassigning, setReassigning] = useState<Record<string, boolean>>({})
   const [assignmentError, setAssignmentError] = useState<Record<string, string>>({})
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
   const currentCoordinator = {
@@ -45,6 +46,7 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
       setEvents((current) => current.map((item) => item.id === event.id
         ? { ...item, coordinatorId: assignedId }
         : item))
+      setReassigning((current) => ({ ...current, [event.id]: false }))
     } catch (cause) {
       setAssignmentError((current) => ({
         ...current,
@@ -86,21 +88,35 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
     {loading ? <p role="status">Loading submitted requests…</p> : error ? <p role="alert">{error}</p> :
       events.length === 0 ? <p>No submitted event requests yet.</p> :
       events.map((event) => <article key={event.id} className="panel event-card">
-        <h2>{event.eventName}</h2><StatusBadge status={event.status} />
-        <p>Submitted: {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
-        <dl>{[
+        <header className="event-card-header"><div><p className="eyebrow">EVENT REQUEST</p><h2>{event.eventName}</h2></div><StatusBadge status={event.status} /></header>
+        <p className="event-card-submitted">Submitted {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
+        <dl className="event-details">{[
           ['Description', event.description], ['Purpose', event.purpose],
           ['Preferred start', event.preferredStartDate.replace('T', ' ')],
           ['Preferred end', event.preferredEndDate.replace('T', ' ')],
           ['Expected attendance', event.expectedAttendance],
           ['Venue requirements', event.venueRequirements], ['Accessibility needs', event.accessibilityNeeds],
           ['Equipment requirements', event.equipmentRequirements], ['Registration needs', event.registrationNeeds],
-        ].map(([label, value]) => <div key={label}><dt><strong>{label}</strong></dt><dd style={{ whiteSpace: 'pre-wrap' }}>{value || 'Not specified'}</dd></div>)}</dl>
-        {event.coordinatorId === currentCoordinator.id
-          ? <button className="button approve" disabled={approvingId === event.id} onClick={() => approve(event)}>{approvingId === event.id ? 'Approving…' : 'Approve'}</button>
-          : event.coordinatorId
-            ? <p className="muted">Assigned to {coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username || event.coordinatorId}.</p>
-            : <div className="event-card-actions">
+        ].map(([label, value]) => <div className="event-detail" key={label}><dt>{label}</dt><dd>{value || 'Not specified'}</dd></div>)}</dl>
+        {event.coordinatorId
+          ? <div className="event-card-actions">
+              <p className="muted">Assigned to {coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username || event.coordinatorId}.</p>
+              <button className="button secondary" onClick={() => {
+                const alternative = coordinators.find((coordinator) => coordinator.user_id !== event.coordinatorId)
+                setSelectedCoordinator((current) => ({ ...current, [event.id]: current[event.id] || alternative?.user_id || '' }))
+                setReassigning((current) => ({ ...current, [event.id]: true }))
+              }}>Reassign Coordinator</button>
+              {reassigning[event.id] && <div className="assignment-picker">
+                <label htmlFor={`reassign-coordinator-${event.id}`}>New coordinator</label>
+                <select id={`reassign-coordinator-${event.id}`} value={selectedCoordinator[event.id]} onChange={(change) => setSelectedCoordinator((current) => ({ ...current, [event.id]: change.target.value }))}>
+                  {coordinators.map((coordinator) => <option key={coordinator.user_id} value={coordinator.user_id}>{coordinator.username} · {coordinator.email}</option>)}
+                </select>
+                <button className="button approve" disabled={assigningId === event.id} onClick={() => assign(event)}>{assigningId === event.id ? 'Reassigning…' : 'Confirm Reassignment'}</button>
+                {assignmentError[event.id] && <p className="assignment-error" role="alert">{assignmentError[event.id]}</p>}
+              </div>}
+              {event.coordinatorId === currentCoordinator.id && <button className="button approve" disabled={approvingId === event.id} onClick={() => approve(event)}>{approvingId === event.id ? 'Approving…' : 'Approve'}</button>}
+            </div>
+          : <div className="event-card-actions">
                 <button className="button primary" onClick={() => setSelectedCoordinator((current) => ({ ...current, [event.id]: current[event.id] || coordinators[0]?.user_id || '' }))}>Assign Coordinator</button>
                 {selectedCoordinator[event.id] && <div className="assignment-picker">
                   <label htmlFor={`coordinator-${event.id}`}>Coordinator</label>
