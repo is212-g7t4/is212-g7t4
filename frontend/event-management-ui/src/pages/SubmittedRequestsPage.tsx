@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Role } from '../types'
-import { eventApi } from '../features/event/submission'
-import type { SubmittedEvent } from '../features/event/submission'
+import { assignmentApi, eventApi } from '../features/event/submission'
+import type { Coordinator, SubmittedEvent } from '../features/event/submission'
 import { StatusBadge } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { users } from '../mockData'
@@ -12,6 +12,10 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
   const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [coordinators, setCoordinators] = useState<Coordinator[]>([])
+  const [assigningId, setAssigningId] = useState<string | null>(null)
+  const [selectedCoordinator, setSelectedCoordinator] = useState<Record<string, string>>({})
+  const [assignmentError, setAssignmentError] = useState<Record<string, string>>({})
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
   const currentCoordinator = {
     ...users[0],
@@ -21,13 +25,35 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
   useEffect(() => {
     if (role !== 'Event Coordinator') return
     let active = true
-    eventApi('/events/submitted').then((body) => {
-      if (active) setEvents(body.events)
+    Promise.all([eventApi('/events/submitted'), assignmentApi('/coordinators')]).then(([eventBody, coordinatorBody]) => {
+      if (!active) return
+      setEvents(eventBody.events)
+      setCoordinators(coordinatorBody.coordinators)
     }).catch((cause: Error) => {
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [role, refresh])
+  const assign = async (event: SubmittedEvent) => {
+    const coordinatorId = selectedCoordinator[event.id]
+    if (!coordinatorId) return
+    setAssigningId(event.id)
+    setAssignmentError((current) => ({ ...current, [event.id]: '' }))
+    try {
+      const result = await assignmentApi(`/events/${event.id}/assign-coordinator/${coordinatorId}`, 'POST')
+      const assignedId = result.assignedCoordinatorId || coordinatorId
+      setEvents((current) => current.map((item) => item.id === event.id
+        ? { ...item, coordinatorId: assignedId }
+        : item))
+    } catch (cause) {
+      setAssignmentError((current) => ({
+        ...current,
+        [event.id]: cause instanceof Error ? cause.message : 'Unable to assign the coordinator.',
+      }))
+    } finally {
+      setAssigningId(null)
+    }
+  }
   const approve = async (event: SubmittedEvent) => {
     setApprovingId(event.id)
     try {
@@ -59,7 +85,7 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
       <button className="button" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh requests</button></section>
     {loading ? <p role="status">Loading submitted requests…</p> : error ? <p role="alert">{error}</p> :
       events.length === 0 ? <p>No submitted event requests yet.</p> :
-      events.map((event) => <article key={event.id} className="panel">
+      events.map((event) => <article key={event.id} className="panel event-card">
         <h2>{event.eventName}</h2><StatusBadge status={event.status} />
         <p>Submitted: {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
         <dl>{[
@@ -71,8 +97,20 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
           ['Equipment requirements', event.equipmentRequirements], ['Registration needs', event.registrationNeeds],
         ].map(([label, value]) => <div key={label}><dt><strong>{label}</strong></dt><dd style={{ whiteSpace: 'pre-wrap' }}>{value || 'Not specified'}</dd></div>)}</dl>
         {event.coordinatorId === currentCoordinator.id
-          ? <button className="button approve" disabled={approvingId === event.id} onClick={() => approve(event)}>{approvingId === event.id ? 'Approving…' : 'Approve Request'}</button>
-          : <p className="muted">Approval is unavailable because this request is not assigned to {currentCoordinator.name}.</p>}
+          ? <button className="button approve" disabled={approvingId === event.id} onClick={() => approve(event)}>{approvingId === event.id ? 'Approving…' : 'Approve'}</button>
+          : event.coordinatorId
+            ? <p className="muted">Assigned to {coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username || event.coordinatorId}.</p>
+            : <div className="event-card-actions">
+                <button className="button primary" onClick={() => setSelectedCoordinator((current) => ({ ...current, [event.id]: current[event.id] || coordinators[0]?.user_id || '' }))}>Assign Coordinator</button>
+                {selectedCoordinator[event.id] && <div className="assignment-picker">
+                  <label htmlFor={`coordinator-${event.id}`}>Coordinator</label>
+                  <select id={`coordinator-${event.id}`} value={selectedCoordinator[event.id]} onChange={(change) => setSelectedCoordinator((current) => ({ ...current, [event.id]: change.target.value }))}>
+                    {coordinators.map((coordinator) => <option key={coordinator.user_id} value={coordinator.user_id}>{coordinator.username} · {coordinator.email}</option>)}
+                  </select>
+                  <button className="button approve" disabled={assigningId === event.id} onClick={() => assign(event)}>{assigningId === event.id ? 'Assigning…' : 'Confirm Assignment'}</button>
+                  {assignmentError[event.id] && <p className="assignment-error" role="alert">{assignmentError[event.id]}</p>}
+                </div>}
+              </div>}
       </article>)}
   </div>
 }

@@ -36,6 +36,12 @@ select:focus, input:focus, textarea:focus { border-color: var(--color-primary); 
 .card-number, .card-arrow { color: var(--color-primary); font-family: sans-serif; font-size: 12px; font-weight: bold; }
 .card-arrow { align-self: end; font-size: 20px; }
 .panel { padding: 26px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); box-shadow: var(--shadow); }
+.event-card { display: flex; flex-direction: column; }
+.event-card-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; margin-top: 24px; }
+.assignment-picker { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; width: 100%; }
+.assignment-picker label { color: var(--color-muted); font-family: sans-serif; font-size: 12px; font-weight: bold; }
+.assignment-picker select { min-width: min(100%, 310px); }
+.assignment-error { flex-basis: 100%; margin: 0; color: var(--color-error); font-family: sans-serif; font-size: 12px; text-align: right; }
 .event-meta { display: flex; gap: 48px; padding: 18px 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); color: var(--color-muted); font-family: sans-serif; font-size: 11px; }
 .event-meta strong { display: block; margin-bottom: 4px; color: var(--color-ink); font-size: 14px; }
 .text-button { margin-top: 18px; padding: 0; border: 0; background: transparent; color: var(--color-primary); font-family: sans-serif; font-size: 13px; font-weight: bold; cursor: pointer; }

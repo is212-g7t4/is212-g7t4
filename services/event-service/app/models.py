@@ -99,6 +99,22 @@ class EventNotSubmittedError(Exception):
     pass
 
 
+def update_event_coordinator(database_url, event_id, coordinator_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""UPDATE public.event_service
+                    SET coordinator_id = %s
+                    WHERE event_id = %s
+                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                [coordinator_id, event_id],
+            )
+            assigned = cursor.fetchone()
+            if not assigned:
+                raise EventNotFoundError
+    return serialize(assigned)
+
+
 def approve_event(database_url, event_id, coordinator_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
