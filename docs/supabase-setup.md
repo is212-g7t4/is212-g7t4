@@ -12,9 +12,9 @@ if you've been added to the Supabase org yourself:
 1. Log into [supabase.com](https://supabase.com/dashboard) with the account
    that was invited to the `is212-g7t4` org.
 2. Open the **is212-g7t4** project.
-3. Go to **Project Settings → Database → Connection string**, and copy the
-   password (or reset it there if you don't have it and nobody else does
-   either — note this invalidates the old password for everyone).
+3. Click **Connect** (top of the project page), and copy the password shown
+   there (or reset it if you don't have it and nobody else does either —
+   note this invalidates the old password for everyone).
 
 ## 2. Set up your `.env`
 
@@ -25,9 +25,14 @@ cp .env.example services/<your-service>/.env
 ```
 
 Then edit `services/<your-service>/.env` and replace `<DB-PASSWORD>` with
-the real password from step 1. `SUPABASE_URL` and `SUPABASE_ANON_KEY` are
-already filled in — those are safe to be public (the anon/publishable key
-is meant for client-side use), only the DB password is a real secret.
+the real password from step 1. `DATABASE_URL` is already set to the
+**session pooler** connection string — use it as-is, don't switch to the
+direct connection (`db.<ref>.supabase.co`) host, since that requires IPv6
+and won't connect on most networks.
+
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` are already filled in — those are
+safe to be public (the anon/publishable key is meant for client-side use),
+only the DB password is a real secret.
 
 **Never commit `.env`** — it's already covered by `.gitignore`.
 
@@ -36,9 +41,8 @@ is meant for client-side use), only the DB password is a real secret.
 Every table has Row Level Security (RLS) turned on with **no policies**
 defined yet. That means:
 
-- If you connect with `DATABASE_URL` (the `postgres` role, direct Postgres
-  connection) — RLS doesn't apply to this role. Full read/write access,
-  works normally.
+- If you connect with `DATABASE_URL` (the `postgres` role) — RLS doesn't
+  apply to this role. Full read/write access, works normally.
 - If you use the Supabase client library (`supabase-py`, JS client, or the
   REST API) with `SUPABASE_ANON_KEY` — every query returns zero rows and
   every write is rejected, because RLS defaults to deny with no policies.
@@ -61,7 +65,7 @@ uv add sqlalchemy psycopg2-binary
 
 All 8 tables live in the **public** schema of the `is212-g7t4` project (ref
 `gjrbkvljlvroghwvhjtc`). Full column definitions are in
-[`supabase/migrations/20260912150524_create_service_tables.sql`](../supabase/migrations/20260912150524_create_service_tables.sql)
+[`database/supabase/migrations/20260912150524_create_service_tables.sql`](../database/supabase/migrations/20260912150524_create_service_tables.sql)
 — that file is the source of truth; the summary below is just an index.
 
 | Table | Owning service | Key columns |
@@ -104,10 +108,13 @@ with get_connection() as conn:
 ## 7. If you need to change the schema (add columns, add a table)
 
 This requires the Supabase CLI, which is already scaffolded in this repo
-(`supabase/config.toml`, `supabase/migrations/`).
+under `database/supabase/` (`config.toml`, `migrations/`). The CLI expects
+its `supabase/` folder to be in your current directory, so run these from
+`database/`, not the repo root:
 
 ```
 brew install supabase/tap/supabase   # one-time, if you don't have it
+cd database
 supabase login                        # opens a browser — needs your Supabase account to have access to the project
 supabase link --project-ref gjrbkvljlvroghwvhjtc
 supabase migration new <name>
