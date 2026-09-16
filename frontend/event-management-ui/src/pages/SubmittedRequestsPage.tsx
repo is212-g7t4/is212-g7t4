@@ -110,7 +110,7 @@ export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Ro
               {reassigning[event.id] && <div className="assignment-picker">
                 <label htmlFor={`reassign-coordinator-${event.id}`}>New coordinator</label>
                 <select id={`reassign-coordinator-${event.id}`} value={selectedCoordinator[event.id]} onChange={(change) => setSelectedCoordinator((current) => ({ ...current, [event.id]: change.target.value }))}>
-                  {coordinators.map((coordinator) => <option key={coordinator.user_id} value={coordinator.user_id}>{coordinator.username} · {coordinator.email}</option>)}
+                  {coordinators.filter((coordinator) => coordinator.user_id !== event.coordinatorId).map((coordinator) => <option key={coordinator.user_id} value={coordinator.user_id}>{coordinator.username} · {coordinator.email}</option>)}
                 </select>
                 <button className="button approve" disabled={assigningId === event.id} onClick={() => assign(event)}>{assigningId === event.id ? 'Reassigning…' : 'Confirm Reassignment'}</button>
                 {assignmentError[event.id] && <p className="assignment-error" role="alert">{assignmentError[event.id]}</p>}
