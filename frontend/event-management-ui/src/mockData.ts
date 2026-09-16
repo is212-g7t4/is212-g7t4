@@ -8,9 +8,9 @@ export const roles: Role[] = [
 ]
 
 export const users = [
-  { id: '11111111-1111-4111-8111-111111111111', name: 'Alicia Tan', role: 'Event Coordinator', initials: 'AT' },
-  { id: '22222222-2222-4222-8222-222222222222', name: 'Marcus Lim', role: 'Event Coordinator', initials: 'ML' },
-  { id: '33333333-3333-4333-8333-333333333333', name: 'Priya Nair', role: 'Event Coordinator', initials: 'PN' },
+  { id: 'e7334aa9-eb3a-4c45-84b5-280501b6c109', name: 'Alicia Tan', role: 'Event Coordinator', initials: 'AT' },
+  { id: '7912075d-46f5-405b-9af3-05502f42f173', name: 'Marcus Lim', role: 'Event Coordinator', initials: 'ML' },
+  { id: '7110f1a8-e707-4b76-9fb0-57808310da98', name: 'Priya Nair', role: 'Event Coordinator', initials: 'PN' },
 ]
 
 export const initialRequests: MockRequest[] = [

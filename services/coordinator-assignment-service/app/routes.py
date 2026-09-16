@@ -56,7 +56,7 @@ def assign_coordinator(event_id, coordinator_id):
         # and is available
         try:
             available_coordinators = get_available_coordinators()
-            coordinator_ids = [c.get("id") for c in available_coordinators]
+            coordinator_ids = [c.get("user_id", c.get("id")) for c in available_coordinators]
             
             if coordinator_id not in coordinator_ids:
                 return jsonify(

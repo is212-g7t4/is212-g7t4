@@ -9,6 +9,15 @@ export interface SubmittedEvent extends EventData {
   approvedAt: string | null
 }
 
+export interface Coordinator {
+  user_id: string
+  username: string
+  email: string
+  role: string
+  organization: string
+  contact_details: string
+}
+
 export const requiredFields: [keyof EventData, string][] = [
   ['eventName', 'Event Name'], ['description', 'Description'], ['purpose', 'Purpose'],
   ['preferredStartDate', 'Preferred Start Date & Time'],
@@ -52,6 +61,15 @@ export async function eventApi(
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new SubmissionError(body.message || 'Unable to complete the request.', body.missingFields, body.errors)
+  return body
+}
+
+export async function assignmentApi(path: string, method: 'GET' | 'POST' = 'GET') {
+  const response = await fetch(`${import.meta.env.VITE_COORDINATOR_ASSIGNMENT_SERVICE_URL || 'http://localhost:5004'}${path}`, {
+    method,
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new SubmissionError(body.error || 'Unable to complete the coordinator assignment.')
   return body
 }
 
