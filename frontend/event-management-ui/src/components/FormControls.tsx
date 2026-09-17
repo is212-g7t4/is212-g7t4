@@ -31,7 +31,7 @@ type FieldProps = {
   onChange: (value: string) => void
   textarea?: boolean
   required?: boolean
-  type?: 'text' | 'number' | 'datetime-local'
+  type?: 'text' | 'number' | 'datetime-local' | 'date'
   placeholder?: string
   min?: string
 }

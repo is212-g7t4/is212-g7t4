@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { users } from '../mockData'
 
-export function SubmittedRequestsPage({ role }: { role: Role }) {
+export function SubmittedRequestsPage({ role, onViewDetails }: { role: Role; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -21,13 +21,13 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
   useEffect(() => {
     if (role !== 'Event Coordinator') return
     let active = true
-    eventApi('/events/submitted').then((body) => {
+    eventApi(`/events/submitted?coordinatorId=${currentCoordinator.id}`).then((body) => {
       if (active) setEvents(body.events)
     }).catch((cause: Error) => {
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [role, refresh])
+  }, [role, refresh, currentCoordinator.id])
   const approve = async (event: SubmittedEvent) => {
     setApprovingId(event.id)
     try {
@@ -58,9 +58,10 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
     <section className="intro"><h1>Submitted event requests</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}. Preferred times are Singapore time (SGT).</p>
       <button className="button" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh requests</button></section>
     {loading ? <p role="status">Loading submitted requests…</p> : error ? <p role="alert">{error}</p> :
-      events.length === 0 ? <p>No submitted event requests yet.</p> :
+      events.length === 0 ? <p>No submitted event requests assigned to you yet.</p> :
       events.map((event) => <article key={event.id} className="panel">
         <h2>{event.eventName}</h2><StatusBadge status={event.status} />
+        <button className="button small" onClick={() => onViewDetails(event.id)}>View details →</button>
         <p>Submitted: {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
         <dl>{[
           ['Description', event.description], ['Purpose', event.purpose],
@@ -70,9 +71,7 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
           ['Venue requirements', event.venueRequirements], ['Accessibility needs', event.accessibilityNeeds],
           ['Equipment requirements', event.equipmentRequirements], ['Registration needs', event.registrationNeeds],
         ].map(([label, value]) => <div key={label}><dt><strong>{label}</strong></dt><dd style={{ whiteSpace: 'pre-wrap' }}>{value || 'Not specified'}</dd></div>)}</dl>
-        {event.coordinatorId === currentCoordinator.id
-          ? <button className="button approve" disabled={approvingId === event.id} onClick={() => approve(event)}>{approvingId === event.id ? 'Approving…' : 'Approve Request'}</button>
-          : <p className="muted">Approval is unavailable because this request is not assigned to {currentCoordinator.name}.</p>}
+        <button className="button approve" disabled={approvingId === event.id} onClick={() => approve(event)}>{approvingId === event.id ? 'Approving…' : 'Approve Request'}</button>
       </article>)}
   </div>
 }

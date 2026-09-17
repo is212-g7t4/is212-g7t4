@@ -76,13 +76,14 @@ def submit_event(database_url, data):
     return serialize(saved)
 
 
-def list_submitted(database_url):
+def list_submitted(database_url, coordinator_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public.event_service WHERE status = 'Submitted'
-                    ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
+                    FROM public.event_service WHERE status = 'Submitted' AND coordinator_id = %s
+                    ORDER BY submission_date ASC NULLS LAST, event_id ASC""",
+                [coordinator_id],
             )
             return [serialize(row) for row in cursor.fetchall()]
 
@@ -97,6 +98,52 @@ class EventNotAssignedError(Exception):
 
 class EventNotSubmittedError(Exception):
     pass
+
+
+def list_events(database_url, coordinator_id, status=None, venue=None, date_from=None, date_to=None):
+    conditions = ["coordinator_id = %s"]
+    params = [coordinator_id]
+    if status:
+        conditions.append("status = %s")
+        params.append(status)
+    if venue:
+        escaped = venue.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append("venue_requirements ILIKE %s ESCAPE '\\'")
+        params.append(f"%{escaped}%")
+    if date_to:
+        conditions.append("preferred_start_date <= %s")
+        params.append(date_to)
+    if date_from:
+        conditions.append("preferred_end_date >= %s")
+        params.append(date_from)
+    where_clause = " AND ".join(conditions)
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                    FROM public.event_service
+                    WHERE {where_clause}
+                    ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC""",
+                params,
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def get_event(database_url, event_id, coordinator_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                    FROM public.event_service
+                    WHERE event_id = %s""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+    if not event:
+        raise EventNotFoundError
+    if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+        raise EventNotAssignedError
+    return serialize(event)
 
 
 def approve_event(database_url, event_id, coordinator_id):
