@@ -4,6 +4,7 @@ import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { StatusBadge } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
+import { RejectionDialog } from '../components/RejectionDialog'
 import { users } from '../mockData'
 
 export function SubmittedRequestsPage({ role }: { role: Role }) {
@@ -102,7 +103,7 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
           ? <div className="table-actions"><button className="button approve" disabled={decisionId === event.id} onClick={() => approve(event)}>{decisionId === event.id ? 'Processing…' : 'Approve Request'}</button><button className="button reject" disabled={decisionId === event.id} onClick={() => { setRejecting(event); setReason('') }}>Reject Request</button></div>
           : <p className="muted">Actions are unavailable because this request is not assigned to {currentCoordinator.name}.</p>}
       </article>)}
-    {rejecting && <section className="panel"><h2>Reject {rejecting.eventName}</h2><label htmlFor="rejection-reason">Reason for rejection</label><textarea id="rejection-reason" value={reason} onChange={(change) => setReason(change.target.value)} placeholder="Explain why this request cannot proceed as submitted." /><div className="table-actions"><button className="button" onClick={() => { setRejecting(null); setReason('') }}>Cancel</button><button className="button reject" disabled={!reason.trim() || decisionId === rejecting.id} onClick={reject}>{decisionId === rejecting.id ? 'Rejecting…' : 'Confirm rejection'}</button></div></section>}
+    {rejecting && <RejectionDialog eventName={rejecting.eventName} reason={reason} submitting={decisionId === rejecting.id} onReasonChange={setReason} onCancel={() => { setRejecting(null); setReason('') }} onConfirm={reject} />}
   </div>
 }
 
