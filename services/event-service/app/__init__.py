@@ -2,7 +2,10 @@ import os
 from uuid import UUID
 
 import psycopg2
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+
+load_dotenv()
 
 from app.models import (
     FIELDS,
