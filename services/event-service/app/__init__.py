@@ -29,10 +29,14 @@ def create_app(config=None):
 
     @app.after_request
     def cors(response):
-        if request.headers.get("Origin") == app.config["FRONTEND_ORIGIN"]:
-            response.headers["Access-Control-Allow-Origin"] = app.config[
-                "FRONTEND_ORIGIN"
-            ]
+        origin = request.headers.get("Origin")
+        configured_origin = app.config["FRONTEND_ORIGIN"]
+        allowed_origins = {configured_origin}
+        if configured_origin:
+            allowed_origins.add(configured_origin.replace("localhost", "127.0.0.1"))
+            allowed_origins.add(configured_origin.replace("127.0.0.1", "localhost"))
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type"
             response.headers["Access-Control-Allow-Methods"] = (
