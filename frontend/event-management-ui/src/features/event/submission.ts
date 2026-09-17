@@ -2,7 +2,7 @@ import type { EventData } from '../../types'
 
 export interface SubmittedEvent extends EventData {
   id: string
-  status: 'Submitted' | 'Approved'
+  status: 'Submitted' | 'Approved' | 'Rejected'
   submittedAt: string | null
   coordinatorId: string | null
   approvedBy: string | null
