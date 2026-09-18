@@ -254,6 +254,7 @@ def test_health_and_browser_cors(setup):
     client = setup[0]
     assert client.get("/health").json == {"status": "ok"}
     response = client.options("/events", headers={"Origin": "http://localhost:5173"})
+    assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
     assert (
         "Access-Control-Allow-Origin"
@@ -261,6 +262,21 @@ def test_health_and_browser_cors(setup):
             "/events", headers={"Origin": "https://other.example"}
         ).headers
     )
+
+
+def test_reject_preflight_is_allowed(setup):
+    client = setup[0]
+    response = client.options(
+        "/events/00000000-0000-0000-0000-000000000001/reject",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert "PATCH" in response.headers["Access-Control-Allow-Methods"]
 
 
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"

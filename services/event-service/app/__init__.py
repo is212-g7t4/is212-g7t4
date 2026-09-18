@@ -42,10 +42,14 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, Accept"
+            )
             response.headers["Access-Control-Allow-Methods"] = (
                 "GET, POST, PATCH, OPTIONS"
             )
+        if request.method == "OPTIONS":
+            response.status_code = 200
         return response
 
     @app.errorhandler(psycopg2.Error)
