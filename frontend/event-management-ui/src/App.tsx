@@ -12,7 +12,6 @@ const paths: Record<Route, string> = {
   submit: '/events/new',
   manage: '/events/evt-001/edit',
   review: '/requests/review',
-  assigned: '/events/assigned',
 }
 
 function getRoute(): Route {
@@ -20,7 +19,6 @@ function getRoute(): Route {
   if (path === '/events/new') return 'submit'
   if (path.includes('/edit')) return 'manage'
   if (path === '/requests/review') return 'review'
-  if (path === '/events/assigned') return 'assigned'
   return 'dashboard'
 }
 
@@ -58,7 +56,7 @@ function App() {
   }
 
   return <div className="app-shell">
-    <Sidebar route={route} role={role} onNavigate={navigate} />
+    <Sidebar route={route} onNavigate={navigate} />
     <main className="main-content">
       <Topbar route={route} role={role} onRoleChange={setRole} />
       {notice && <div className="notice" role="status">{notice}</div>}
@@ -66,7 +64,6 @@ function App() {
       {route === 'submit' && <SubmissionPage role={role} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
       {route === 'review' && <SubmittedRequestsPage key={role} role={role} />}
-      {route === 'assigned' && <SubmittedRequestsPage key={role} role={role} assignedOnly />}
     </main>
   </div>
 }
