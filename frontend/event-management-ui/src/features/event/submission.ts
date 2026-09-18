@@ -2,11 +2,18 @@ import type { EventData } from '../../types'
 
 export interface SubmittedEvent extends EventData {
   id: string
-  status: 'Submitted' | 'Approved'
+  status: 'Submitted' | 'Approved' | 'Rejected'
   submittedAt: string | null
   coordinatorId: string | null
-  approvedBy: string | null
-  approvedAt: string | null
+  decision: EventDecision | null
+  decisionHistory: EventDecision[]
+}
+
+export interface EventDecision {
+  status: 'Approved' | 'Rejected'
+  coordinatorId: string
+  decidedAt: string
+  reason: string | null
 }
 
 export const requiredFields: [keyof EventData, string][] = [
@@ -43,7 +50,7 @@ export class SubmissionError extends Error {
 
 export async function eventApi(
   path: string,
-  data?: EventData | { coordinatorId: string },
+  data?: EventData | { coordinatorId: string; reason?: string },
   method?: 'POST' | 'PATCH',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}

@@ -33,7 +33,7 @@ Open http://localhost:5173. The frontend calls http://localhost:5003 by default.
 For a different API address, set VITE_EVENT_SERVICE_URL in the frontend .env.
 If Vite uses a different port, set FRONTEND_ORIGIN in the service .env to that origin.
 
-## Event Coordinator approval
+## Event Coordinator approval and rejection
 
 The prototype role selector does not provide a signed-in user's UUID. Configure an
 existing coordinator in `frontend/event-management-ui/.env`:
@@ -43,7 +43,11 @@ VITE_CURRENT_COORDINATOR_ID=<existing Event Coordinator user_id>
 VITE_CURRENT_COORDINATOR_NAME=<coordinator display name>
 ```
 
-The queue shows **Approve Request** only when an event's `coordinator_id` matches
-that UUID. The backend repeats the assignment check while locking the event row and
-only approves requests whose current status is `Submitted`.
+The queue shows decision actions only when an event's `coordinator_id` matches
+that UUID. Rejection requires a non-empty reason. The backend repeats the assignment
+check while locking the event row and only approves or rejects requests whose current
+status is `Submitted`.
+
+Decisions are returned in `decision` and retained in `decisionHistory`. Each decision
+records its status, coordinator ID, UTC timestamp, and rejection reason when present.
 

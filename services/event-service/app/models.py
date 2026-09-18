@@ -1,6 +1,6 @@
 import json
 from contextlib import closing
-from datetime import UTC
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import psycopg2
@@ -22,21 +22,46 @@ COLUMNS = ", ".join(FIELDS.values())
 
 
 def unpack_description(value):
+    description, purpose, decision, _ = unpack_decision(value)
+    return description, purpose, decision
+
+
+def unpack_decision(value):
     # Legacy plain descriptions remain readable. Only unpack our versioned envelope.
     try:
         details = json.loads(value or "")
     except (ValueError, TypeError):
-        return value or "", "", None
-    if (isinstance(details, dict) and details.get("_connectsphere") == "event-submission-v1"
-            and isinstance(details.get("description"), str) and isinstance(details.get("purpose"), str)):
-        approval = details.get("approval")
-        return details["description"], details["purpose"], approval if isinstance(approval, dict) else None
-    return value or "", "", None
+        return value or "", "", None, []
+    if (
+        isinstance(details, dict)
+        and details.get("_connectsphere") == "event-submission-v1"
+        and isinstance(details.get("description"), str)
+        and isinstance(details.get("purpose"), str)
+    ):
+        decision = details.get("decision")
+        if not isinstance(decision, dict):
+            approval = details.get(
+                "approval"
+            )  ## This can be removed if old format of events are gone/. This was added to support the old format of events that were submitted before the decision field was added.
+            if isinstance(approval, dict):
+                decision = {
+                    "status": "Approved",
+                    "coordinatorId": approval.get("coordinatorId"),
+                    "decidedAt": approval.get("approvedAt"),
+                    "reason": None,
+                }
+        history = details.get("decisionHistory")
+        if not isinstance(history, list):
+            history = [decision] if decision else []
+        return details["description"], details["purpose"], decision, history
+    return value or "", "", None, []
 
 
 def serialize(row):
     result = {key: row[column] or "" for key, column in FIELDS.items()}
-    result["description"], result["purpose"], approval = unpack_description(row["description"])
+    result["description"], result["purpose"], decision, history = unpack_decision(
+        row["description"]
+    )
     for key in ("preferredStartDate", "preferredEndDate"):
         result[key] = result[key].isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
@@ -45,21 +70,29 @@ def serialize(row):
         status=row["status"],
         # submission_date is timestamp WITHOUT time zone, stored as UTC by this service.
         submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
-        if row["submission_date"] else None,
+        if row["submission_date"]
+        else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
-        approvedBy=approval.get("coordinatorId") if approval else None,
-        approvedAt=approval.get("approvedAt") if approval else None,
+        decision=decision,
+        decisionHistory=history,
     )
     return result
 
 
 def submit_event(database_url, data):
     event_id = str(uuid4())
-    stored = {**data, "description": json.dumps({
-        "_connectsphere": "event-submission-v1",
-        "description": data["description"],
-        "purpose": data["purpose"],
-    }, ensure_ascii=False), "expectedAttendance": int(data["expectedAttendance"])}
+    stored = {
+        **data,
+        "description": json.dumps(
+            {
+                "_connectsphere": "event-submission-v1",
+                "description": data["description"],
+                "purpose": data["purpose"],
+            },
+            ensure_ascii=False,
+        ),
+        "expectedAttendance": int(data["expectedAttendance"]),
+    }
     values = [stored[key] for key in FIELDS]
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -99,7 +132,14 @@ class EventNotSubmittedError(Exception):
     pass
 
 
-def approve_event(database_url, event_id, coordinator_id):
+class RejectionReasonError(Exception):
+    pass
+
+
+def decide_event(database_url, event_id, coordinator_id, status, reason=None):
+    if status == "Rejected" and not isinstance(reason, str):
+        raise RejectionReasonError
+    reason_text = reason.strip() if isinstance(reason, str) else None
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -112,31 +152,61 @@ def approve_event(database_url, event_id, coordinator_id):
             event = cursor.fetchone()
             if not event:
                 raise EventNotFoundError
-            if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
                 raise EventNotAssignedError
             if event["status"] != "Submitted":
                 raise EventNotSubmittedError
 
-            description, purpose, _ = unpack_description(event["description"])
+            description, purpose, _, history = unpack_decision(event["description"])
+            if status == "Rejected" and not reason_text:
+                raise RejectionReasonError
+            decided_at = datetime.now(UTC).isoformat()
+            decision = {
+                "status": status,
+                "coordinatorId": coordinator_id,
+                "decidedAt": decided_at,
+                "reason": reason_text,
+            }
+            decision_history = [*history, decision]
             cursor.execute(
                 f"""UPDATE public.event_service
-                    SET status = 'Approved',
+                    SET status = %s,
                         description = jsonb_build_object(
                             '_connectsphere', 'event-submission-v1',
                             'description', %s,
                             'purpose', %s,
-                            'approval', jsonb_build_object(
+                            'decision', jsonb_build_object(
+                                'status', %s,
                                 'coordinatorId', %s,
-                                'approvedAt', to_char(
-                                    timezone('UTC', CURRENT_TIMESTAMP),
-                                    'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"'
-                                )
-                            )
+                                'decidedAt', %s,
+                                'reason', %s
+                            ),
+                            'decisionHistory', %s::jsonb
                         )::text
                     WHERE event_id = %s
                     RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
-                [description, purpose, coordinator_id, event_id],
+                [
+                    status,
+                    description,
+                    purpose,
+                    status,
+                    coordinator_id,
+                    decided_at,
+                    reason_text,
+                    json.dumps(decision_history),
+                    event_id,
+                ],
             )
-            approved = cursor.fetchone()
-    return serialize(approved)
+            decided = cursor.fetchone()
+    return serialize(decided)
 
+
+def approve_event(database_url, event_id, coordinator_id):
+    return decide_event(database_url, event_id, coordinator_id, "Approved")
+
+
+def reject_event(database_url, event_id, coordinator_id, reason):
+    return decide_event(database_url, event_id, coordinator_id, "Rejected", reason)
