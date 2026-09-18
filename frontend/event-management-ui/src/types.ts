@@ -1,5 +1,16 @@
 export type Role = 'Requester' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support'
-export type Route = 'dashboard' | 'submit' | 'manage' | 'review'
+export type Route = 'dashboard' | 'submit' | 'assignment' | 'manage' | 'review' | 'detail' | 'myEvents'
+
+export const routeTitles: Record<Route, string> = {
+  dashboard: 'Overview',
+  submit: 'Submit an event',
+  assignment: 'Coordinator assignment',
+  manage: 'Event information',
+  review: 'Request review',
+  detail: 'Event record',
+  myEvents: 'My events',
+}
+
 export type RequestStatus =
   | 'Pending'
   | 'Submitted'
