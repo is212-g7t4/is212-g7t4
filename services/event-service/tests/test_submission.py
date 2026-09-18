@@ -158,15 +158,36 @@ def test_optional_field_wrong_type(setup):
     )
 
 
-def test_ac2_coordinator_queue_loads_persisted_data(setup):
+def test_submitted_queue_loads_all_persisted_events_without_coordinator_filter(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [saved_row()]
     response = client.get("/events/submitted")
     assert response.status_code == 200
     assert response.json["events"][0]["eventName"] == "Community Workshop"
-    query = cursor.execute.call_args.args[0]
+    query, params = cursor.execute.call_args.args
     assert "WHERE status = 'Submitted'" in query
+    assert "coordinator_id = %s" not in query
     assert "ORDER BY submission_date ASC NULLS LAST" in query
+    assert params == []
+
+
+def test_submitted_queue_still_accepts_optional_coordinator_filter(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = []
+    response = client.get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}")
+    assert response.status_code == 200
+    assert response.json == {"events": []}
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" in query
+    assert params == [OTHER_COORDINATOR_ID]
+
+
+@pytest.mark.parametrize("query_string", ["?coordinatorId=not-a-uuid"])
+def test_submitted_queue_rejects_invalid_optional_coordinator_id(query_string, setup):
+    client, _, cursor = setup
+    response = client.get(f"/events/submitted{query_string}")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
 
 
 def test_empty_queue(setup):
@@ -247,7 +268,7 @@ def test_database_failure_never_reports_success(setup, operation):
 def test_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
     assert client.post("/events", json=VALID).status_code == 503
-    assert client.get("/events/submitted").status_code == 503
+    assert client.get(f"/events/submitted?coordinatorId={COORDINATOR_ID}").status_code == 503
 
 
 def test_health_and_browser_cors(setup):
