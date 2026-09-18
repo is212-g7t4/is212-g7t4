@@ -1,5 +1,5 @@
 export type Role = 'Requester' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support'
-export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'assigned'
+export type Route = 'dashboard' | 'submit' | 'manage' | 'review'
 export type RequestStatus =
   | 'Pending'
   | 'Submitted'

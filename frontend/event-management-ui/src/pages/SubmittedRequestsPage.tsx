@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { users } from '../mockData'
 
-export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Role; assignedOnly?: boolean }) {
+export function SubmittedRequestsPage({ role }: { role: Role }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -23,7 +23,6 @@ export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Ro
     id: import.meta.env.VITE_CURRENT_COORDINATOR_ID || users[0].id,
     name: import.meta.env.VITE_CURRENT_COORDINATOR_NAME || users[0].name,
   }
-  const visibleEvents = assignedOnly ? events.filter((event) => event.coordinatorId === currentCoordinator.id) : events
   useEffect(() => {
     if (role !== 'Event Coordinator') return
     let active = true
@@ -38,7 +37,13 @@ export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Ro
   }, [role, refresh])
   const assign = async (event: SubmittedEvent) => {
     const coordinatorId = selectedCoordinator[event.id]
-    if (!coordinatorId) return
+    if (!coordinatorId || coordinatorId === event.coordinatorId) {
+      setAssignmentError((current) => ({
+        ...current,
+        [event.id]: 'Choose a different coordinator before confirming.',
+      }))
+      return
+    }
     setAssigningId(event.id)
     setAssignmentError((current) => ({ ...current, [event.id]: '' }))
     try {
@@ -84,11 +89,11 @@ export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Ro
   if (role !== 'Event Coordinator') return <p className="role-warning">Submitted event requests are visible to Event Coordinators.</p>
   return <div className="page-stack">
     {popup && <SubmissionPopup {...popup} onClose={() => setPopup(null)} />}
-    <section className="intro"><h1>{assignedOnly ? 'Assigned Events' : 'Submitted event requests'}</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}. Preferred times are Singapore time (SGT).</p>
+    <section className="intro"><h1>Submitted event requests</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}. Preferred times are Singapore time (SGT).</p>
       <button className="button" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh requests</button></section>
     {loading ? <p role="status">Loading submitted requests…</p> : error ? <p role="alert">{error}</p> :
-      visibleEvents.length === 0 ? <p>{assignedOnly ? 'No events are assigned to you yet.' : 'No submitted event requests yet.'}</p> :
-      visibleEvents.map((event) => <article key={event.id} className="panel event-card">
+      events.length === 0 ? <p>No submitted event requests yet.</p> :
+      events.map((event) => <article key={event.id} className="panel event-card">
         <header className="event-card-header"><div><p className="eyebrow">EVENT REQUEST</p><h2>{event.eventName}</h2></div><StatusBadge status={event.status} /></header>
         <p className="event-card-submitted">Submitted {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
         <dl className="event-details">{[
@@ -103,13 +108,14 @@ export function SubmittedRequestsPage({ role, assignedOnly = false }: { role: Ro
           ? <div className="event-card-actions">
               <p className="muted">Assigned to {coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username || event.coordinatorId}.</p>
               <button className="button secondary" onClick={() => {
-                const alternative = coordinators.find((coordinator) => coordinator.user_id !== event.coordinatorId)
-                setSelectedCoordinator((current) => ({ ...current, [event.id]: current[event.id] || alternative?.user_id || '' }))
+                const candidates = coordinators.filter((coordinator) => coordinator.user_id !== event.coordinatorId)
+                const fallbackCoordinatorId = candidates[0]?.user_id || ''
+                setSelectedCoordinator((current) => ({ ...current, [event.id]: fallbackCoordinatorId }))
                 setReassigning((current) => ({ ...current, [event.id]: true }))
               }}>Reassign Coordinator</button>
               {reassigning[event.id] && <div className="assignment-picker">
                 <label htmlFor={`reassign-coordinator-${event.id}`}>New coordinator</label>
-                <select id={`reassign-coordinator-${event.id}`} value={selectedCoordinator[event.id]} onChange={(change) => setSelectedCoordinator((current) => ({ ...current, [event.id]: change.target.value }))}>
+                <select id={`reassign-coordinator-${event.id}`} value={selectedCoordinator[event.id] || coordinators.filter((coordinator) => coordinator.user_id !== event.coordinatorId)[0]?.user_id || ''} onChange={(change) => setSelectedCoordinator((current) => ({ ...current, [event.id]: change.target.value }))}>
                   {coordinators.filter((coordinator) => coordinator.user_id !== event.coordinatorId).map((coordinator) => <option key={coordinator.user_id} value={coordinator.user_id}>{coordinator.username} · {coordinator.email}</option>)}
                 </select>
                 <button className="button approve" disabled={assigningId === event.id} onClick={() => assign(event)}>{assigningId === event.id ? 'Reassigning…' : 'Confirm Reassignment'}</button>
