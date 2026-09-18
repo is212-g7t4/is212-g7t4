@@ -101,3 +101,17 @@ td small { color: var(--color-muted); font-size: 10px; }
 .submission-dialog { border: 0; border-radius: 16px; padding: 28px; max-width: min(520px, 85vw); box-shadow: 0 20px 60px #0003; }
 .submission-dialog::backdrop { background: #17213488; }
 .submission-dialog li { margin-bottom: 10px; }
+.rejection-dialog { width: min(520px, calc(100vw - 32px)); border: 0; border-radius: 16px; padding: 30px; color: var(--color-ink); box-shadow: 0 24px 70px #0004; }
+.rejection-dialog::backdrop { background: #17213499; backdrop-filter: blur(3px); }
+.rejection-dialog-header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.rejection-dialog-header .eyebrow { margin-bottom: 5px; color: var(--color-error); }
+.rejection-dialog-header h2 { margin: 0; font-size: 23px; }
+.rejection-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--color-error-soft); color: var(--color-error); font-family: sans-serif; font-size: 20px; font-weight: 800; }
+.rejection-dialog-copy { margin-bottom: 22px; color: var(--color-muted); font-family: sans-serif; font-size: 13px; line-height: 1.6; }
+.rejection-field { display: grid; gap: 8px; color: var(--color-ink); font-family: sans-serif; font-size: 12px; font-weight: bold; }
+.rejection-field > span { color: var(--color-error); font-size: 10px; font-weight: normal; text-transform: uppercase; }
+.rejection-field textarea { width: 100%; min-height: 112px; padding: 12px; resize: vertical; font-size: 13px; line-height: 1.5; }
+.rejection-field small { color: var(--color-muted); font-size: 10px; font-weight: normal; text-align: right; }
+.rejection-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.rejection-dialog-actions .button.reject:disabled { cursor: not-allowed; opacity: .5; }
+@media (max-width: 600px) { .rejection-dialog { padding: 24px; } .rejection-dialog-actions { flex-direction: column-reverse; } .rejection-dialog-actions .button { width: 100%; } }
