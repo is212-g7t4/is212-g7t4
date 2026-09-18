@@ -174,6 +174,36 @@ def test_empty_queue(setup):
     assert setup[0].get("/events/submitted").json == {"events": []}
 
 
+def test_assign_coordinator_updates_event(setup):
+    client, _, cursor = setup
+    assigned = saved_row()
+    assigned["coordinator_id"] = COORDINATOR_ID
+    cursor.fetchone.return_value = assigned
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": COORDINATOR_ID},
+    )
+
+    assert response.status_code == 200
+    assert response.json["coordinatorId"] == COORDINATOR_ID
+    query, parameters = cursor.execute.call_args.args
+    assert "SET coordinator_id = %s" in query
+    assert parameters == [COORDINATOR_ID, "00000000-0000-0000-0000-000000000001"]
+
+
+def test_assign_coordinator_returns_not_found(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = None
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": COORDINATOR_ID},
+    )
+
+    assert response.status_code == 404
+
+
 @pytest.mark.parametrize(
     "value,description,purpose",
     [
