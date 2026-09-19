@@ -27,7 +27,6 @@ def unpack_description(value):
 
 
 def unpack_decision(value):
-    # Legacy plain descriptions remain readable. Only unpack our versioned envelope.
     try:
         details = json.loads(value or "")
     except (ValueError, TypeError):
@@ -40,9 +39,7 @@ def unpack_decision(value):
     ):
         decision = details.get("decision")
         if not isinstance(decision, dict):
-            approval = details.get(
-                "approval"
-            )  ## This can be removed if old format of events are gone/. This was added to support the old format of events that were submitted before the decision field was added.
+            approval = details.get("approval")
             if isinstance(approval, dict):
                 decision = {
                     "status": "Approved",
@@ -68,10 +65,8 @@ def serialize(row):
     result.update(
         id=str(row["event_id"]),
         status=row["status"],
-        # submission_date is timestamp WITHOUT time zone, stored as UTC by this service.
         submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
-        if row["submission_date"]
-        else None,
+        if row["submission_date"] else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         decision=decision,
         decisionHistory=history,
@@ -105,7 +100,6 @@ def submit_event(database_url, data):
                 [event_id, *values],
             )
             saved = cursor.fetchone()
-    # The connection context commits before success is returned.
     return serialize(saved)
 
 
@@ -136,10 +130,27 @@ class RejectionReasonError(Exception):
     pass
 
 
+def update_event_coordinator(database_url, event_id, coordinator_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""UPDATE public.event_service
+                    SET coordinator_id = %s
+                    WHERE event_id = %s
+                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                [coordinator_id, event_id],
+            )
+            assigned = cursor.fetchone()
+            if not assigned:
+                raise EventNotFoundError
+    return serialize(assigned)
+
+
 def decide_event(database_url, event_id, coordinator_id, status, reason=None):
     if status == "Rejected" and not isinstance(reason, str):
         raise RejectionReasonError
     reason_text = reason.strip() if isinstance(reason, str) else None
+
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -152,17 +163,14 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             event = cursor.fetchone()
             if not event:
                 raise EventNotFoundError
-            if (
-                not event["coordinator_id"]
-                or str(event["coordinator_id"]) != coordinator_id
-            ):
+            if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
                 raise EventNotAssignedError
             if event["status"] != "Submitted":
                 raise EventNotSubmittedError
-
-            description, purpose, _, history = unpack_decision(event["description"])
             if status == "Rejected" and not reason_text:
                 raise RejectionReasonError
+
+            description, purpose, _, history = unpack_decision(event["description"])
             decided_at = datetime.now(UTC).isoformat()
             decision = {
                 "status": status,
