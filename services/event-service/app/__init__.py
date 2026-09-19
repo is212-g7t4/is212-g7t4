@@ -2,7 +2,10 @@ import os
 from uuid import UUID
 
 import psycopg2
+from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+
+load_dotenv()
 
 from app.models import (
     FIELDS,
@@ -14,6 +17,7 @@ from app.models import (
     list_submitted,
     reject_event,
     submit_event,
+    update_event_coordinator,
 )
 from app.validation import validate
 
@@ -38,10 +42,14 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, Accept"
+            )
             response.headers["Access-Control-Allow-Methods"] = (
                 "GET, POST, PATCH, OPTIONS"
             )
+        if request.method == "OPTIONS":
+            response.status_code = 200
         return response
 
     @app.errorhandler(psycopg2.Error)
@@ -81,6 +89,24 @@ def create_app(config=None):
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         return jsonify(events=list_submitted(app.config["DATABASE_URL"]))
+
+    @app.patch("/events/<uuid:event_id>")
+    def assign_coordinator(event_id):
+        data = request.get_json(silent=True)
+        coordinator_id = data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
+        try:
+            coordinator_id = str(UUID(coordinator_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid coordinator ID is required."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            assigned = update_event_coordinator(
+                app.config["DATABASE_URL"], str(event_id), coordinator_id
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        return jsonify(assigned), 200
 
     @app.patch("/events/<uuid:event_id>/approve")
     def approve(event_id):
