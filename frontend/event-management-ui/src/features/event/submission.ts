@@ -25,6 +25,8 @@ export interface Coordinator {
   contact_details: string
 }
 
+export type EventUpdate = Partial<EventData> & { coordinatorId: string }
+
 export const requiredFields: [keyof EventData, string][] = [
   ['eventName', 'Event Name'], ['description', 'Description'], ['purpose', 'Purpose'],
   ['preferredStartDate', 'Preferred Start Date & Time'],
@@ -59,7 +61,7 @@ export class SubmissionError extends Error {
 
 export async function eventApi(
   path: string,
-  data?: EventData | { coordinatorId: string; reason?: string },
+  data?: EventData | EventUpdate | { coordinatorId: string; reason?: string },
   method?: 'POST' | 'PATCH',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}

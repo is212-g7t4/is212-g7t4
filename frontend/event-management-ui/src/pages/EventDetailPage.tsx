@@ -5,7 +5,7 @@ import type { SubmittedEvent } from '../features/event/submission'
 import { StatusBadge } from '../components/FormControls'
 import { users } from '../mockData'
 
-export function EventDetailPage({ eventId, role, currentCoordinatorId, currentCoordinatorName, backLabel, onBack }: { eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; backLabel: string; onBack: () => void }) {
+export function EventDetailPage({ eventId, role, currentCoordinatorId, currentCoordinatorName, backLabel, onBack, onEdit }: { eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; backLabel: string; onBack: () => void; onEdit: (id: string) => void }) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -34,7 +34,7 @@ export function EventDetailPage({ eventId, role, currentCoordinatorId, currentCo
       <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh</button>
     </section>
     {loading ? <p role="status">Loading event details…</p> : error ? <p role="alert">{error}</p> : event && <article className="panel">
-      <h2>{event.eventName}</h2><StatusBadge status={event.status} />
+      <h2>{event.eventName}</h2><StatusBadge status={event.status} /> <button className="button small" onClick={() => onEdit(event.id)}>Edit event</button>
       <p>Submitted: {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
       {event.decision?.decidedAt && <p>Decision: {event.decision.status} on {new Date(event.decision.decidedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT</p>}
       <dl>{[

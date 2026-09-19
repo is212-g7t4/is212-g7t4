@@ -10,6 +10,7 @@ load_dotenv()
 
 from app.models import (
     FIELDS,
+    EventConflictError,
     EventNotAssignedError,
     EventNotFoundError,
     EventNotSubmittedError,
@@ -21,6 +22,7 @@ from app.models import (
     reject_event,
     submit_event,
     update_event_coordinator,
+    update_event_information,
 )
 from app.validation import validate
 
@@ -31,6 +33,7 @@ def create_app(config=None):
         DATABASE_URL=os.getenv("DATABASE_URL"),
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
         MAX_CONTENT_LENGTH=65536,
+        ARRANGEMENT_CONFLICT_CHECKER=lambda event_id, current, proposed: [],
     )
     app.config.update(config or {})
 
@@ -92,7 +95,9 @@ def create_app(config=None):
             try:
                 coordinator_id = str(UUID(coordinator_id))
             except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid current coordinator ID is required."), 400
+                return jsonify(
+                    message="A valid current coordinator ID is required."
+                ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
@@ -168,13 +173,17 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>")
     def assign_coordinator(event_id):
         data = request.get_json(silent=True)
-        coordinator_id = data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
+        coordinator_id = (
+            data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
+        )
         try:
             coordinator_id = str(UUID(coordinator_id))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid coordinator ID is required."), 400
         if not app.config["DATABASE_URL"]:
-            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+            return jsonify(
+                message="DATABASE_URL is not configured for Event Service."
+            ), 503
         try:
             assigned = update_event_coordinator(
                 app.config["DATABASE_URL"], str(event_id), coordinator_id
@@ -182,6 +191,48 @@ def create_app(config=None):
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
         return jsonify(assigned), 200
+
+    @app.patch("/events/<uuid:event_id>/update")
+    def update_information(event_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        coordinator_id = data.pop("coordinatorId", "")
+        try:
+            coordinator_id = str(UUID(coordinator_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Event Service."
+            ), 503
+        try:
+            updated = update_event_information(
+                app.config["DATABASE_URL"],
+                str(event_id),
+                coordinator_id,
+                data,
+                app.config["ARRANGEMENT_CONFLICT_CHECKER"],
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(
+                message="This event request is not assigned to the current coordinator."
+            ), 403
+        except EventConflictError as error:
+            return jsonify(
+                message="The change conflicts with an existing event arrangement.",
+                conflicts=error.conflicts,
+            ), 409
+        except ValueError as error:
+            details = error.args[0]
+            if isinstance(details, dict):
+                return jsonify(
+                    message="Please correct the event details.", **details
+                ), 400
+            return jsonify(message=str(details)), 400
+        return jsonify(updated), 200
 
     @app.patch("/events/<uuid:event_id>/approve")
     def approve(event_id):

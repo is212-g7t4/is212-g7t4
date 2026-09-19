@@ -10,7 +10,7 @@ import { SubmissionPage } from './pages/SubmissionPage'
 import { AssignmentPage } from './pages/AssignmentPage'
 import { users } from './mockData'
 import { routeTitles } from './types'
-import type { EventData, Role, Route } from './types'
+import type { Role, Route } from './types'
 
 const paths: Record<Route, string> = {
   dashboard: '/',
@@ -38,30 +38,25 @@ function getEventId(): string | null {
   return match ? match[1] : null
 }
 
+function getManageEventId(): string | null {
+  const match = window.location.pathname.match(/^\/events\/([^/]+)\/edit$/)
+  return match ? match[1] : null
+}
+
 function App() {
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
+  const [manageEventId, setManageEventId] = useState<string | null>(getManageEventId)
   const [detailOrigin, setDetailOrigin] = useState<Route>('review')
   const [role, setRole] = useState<Role>('Requester')
   const [activeCoordinatorId, setActiveCoordinatorId] = useState(users[0].id)
-  const [event, setEvent] = useState<EventData>({
-    eventName: '',
-    description: '',
-    purpose: '',
-    preferredStartDate: '',
-    preferredEndDate: '',
-    expectedAttendance: '',
-    venueRequirements: '',
-    accessibilityNeeds: '',
-    equipmentRequirements: '',
-    registrationNeeds: '',
-  })
   const [notice, setNotice] = useState('')
 
   useEffect(() => {
     const handlePopState = () => {
       setRoute(getRoute())
       setEventId(getEventId())
+      setManageEventId(getManageEventId())
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -81,8 +76,11 @@ function App() {
     setRoute('detail')
   }
 
-  const updateEvent = (field: keyof EventData, value: string) => {
-    setEvent((current) => ({ ...current, [field]: value }))
+  const navigateToManage = (id: string) => {
+    setNotice('')
+    setManageEventId(id)
+    window.history.pushState({}, '', `/events/${id}/edit`)
+    setRoute('manage')
   }
 
   const activeCoordinator = users.find((user) => user.id === activeCoordinatorId) ?? users[0]
@@ -105,10 +103,10 @@ function App() {
         }}
         onSave={() => setNotice(`Logged in as ${activeCoordinator.name}.`)}
       />}
-      {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
+      {route === 'manage' && manageEventId && <ManagePage eventId={manageEventId} coordinatorId={activeCoordinatorId} onSaved={setNotice} />}
       {route === 'review' && <SubmittedRequestsPage key={`${role}-${activeCoordinatorId}`} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={`${role}-${activeCoordinatorId}`} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} onViewDetails={navigateToEvent} />}
-      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeCoordinatorId}`} eventId={eventId} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
+      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeCoordinatorId}`} eventId={eventId} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} onEdit={navigateToManage} />}
     </main>
   </div>
 }

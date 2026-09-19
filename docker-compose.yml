@@ -22,3 +22,10 @@ services:
       - ./services/event-service/.env
     ports:
       - "5003:5000"
+
+  coordinator-assignment-service:
+    build: ./services/coordinator-assignment-service
+    environment:
+      EVENT_SERVICE_URL: http://event-service:5000
+    ports:
+      - "5004:5000"

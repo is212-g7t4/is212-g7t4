@@ -6,6 +6,8 @@ from uuid import uuid4
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from app.validation import validate
+
 # Only columns owned by Event Service; no queries to other services' tables.
 FIELDS = {
     "eventName": "event_name",
@@ -19,6 +21,15 @@ FIELDS = {
     "registrationNeeds": "registration_needs",
 }
 COLUMNS = ", ".join(FIELDS.values())
+LOW_IMPACT_FIELDS = {"eventName", "description", "purpose", "registrationNeeds"}
+HIGH_IMPACT_FIELDS = {
+    "preferredStartDate",
+    "preferredEndDate",
+    "expectedAttendance",
+    "venueRequirements",
+    "equipmentRequirements",
+    "accessibilityNeeds",
+}
 
 
 def unpack_description(value):
@@ -66,7 +77,8 @@ def serialize(row):
         id=str(row["event_id"]),
         status=row["status"],
         submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
-        if row["submission_date"] else None,
+        if row["submission_date"]
+        else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         decision=decision,
         decisionHistory=history,
@@ -133,6 +145,11 @@ class EventNotSubmittedError(Exception):
     pass
 
 
+class EventConflictError(Exception):
+    def __init__(self, conflicts):
+        self.conflicts = conflicts
+
+
 class RejectionReasonError(Exception):
     pass
 
@@ -153,7 +170,71 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
     return serialize(assigned)
 
 
-def list_events(database_url, coordinator_id, status=None, venue=None, date_from=None, date_to=None):
+def update_event_information(
+    database_url, event_id, coordinator_id, changes, conflict_checker
+):
+    unknown_fields = set(changes) - set(FIELDS)
+    if unknown_fields:
+        raise ValueError(
+            f"Unsupported event fields: {', '.join(sorted(unknown_fields))}"
+        )
+
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                    FROM public.event_service
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            current_row = cursor.fetchone()
+            if not current_row:
+                raise EventNotFoundError
+            if (
+                not current_row["coordinator_id"]
+                or str(current_row["coordinator_id"]) != coordinator_id
+            ):
+                raise EventNotAssignedError
+
+            current = serialize(current_row)
+            proposed = {**current, **changes}
+            missing, errors = validate(proposed)
+            if missing or errors:
+                raise ValueError({"missingFields": missing, "errors": errors})
+
+            changed_fields = {
+                field for field in changes if changes[field] != current[field]
+            }
+            if changed_fields & HIGH_IMPACT_FIELDS:
+                conflicts = conflict_checker(event_id, current, proposed)
+                if conflicts:
+                    raise EventConflictError(conflicts)
+
+            stored = {key: proposed[key] for key in FIELDS}
+            stored["description"] = json.dumps(
+                {
+                    "_connectsphere": "event-submission-v1",
+                    "description": proposed["description"],
+                    "purpose": proposed["purpose"],
+                },
+                ensure_ascii=False,
+            )
+            stored["expectedAttendance"] = int(proposed["expectedAttendance"])
+            cursor.execute(
+                f"""UPDATE public.event_service
+                    SET {", ".join(f"{column} = %s" for column in FIELDS.values())}
+                    WHERE event_id = %s
+                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                [stored[key] for key in FIELDS] + [event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def list_events(
+    database_url, coordinator_id, status=None, venue=None, date_from=None, date_to=None
+):
     conditions = ["coordinator_id = %s"]
     params = [coordinator_id]
     if status:
@@ -216,7 +297,10 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             event = cursor.fetchone()
             if not event:
                 raise EventNotFoundError
-            if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
                 raise EventNotAssignedError
             if event["status"] != "Submitted":
                 raise EventNotSubmittedError
