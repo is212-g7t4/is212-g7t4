@@ -5,6 +5,7 @@ import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { Field, StatusBadge } from '../components/FormControls'
 import { users } from '../mockData'
+import { ManagePage } from './ManagePage'
 
 const STATUS_OPTIONS = ['', 'Submitted', 'Approved', 'Rejected']
 
@@ -17,6 +18,7 @@ export function MyEventsPage({ role, currentCoordinatorId, currentCoordinatorNam
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [query, setQuery] = useState({ status: '', venue: '', dateFrom: '', dateTo: '' })
+  const [editingEvent, setEditingEvent] = useState<SubmittedEvent | null>(null)
   const currentCoordinator = {
     ...users[0],
     id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || users[0].id,
@@ -49,6 +51,10 @@ export function MyEventsPage({ role, currentCoordinatorId, currentCoordinatorNam
   if (role !== 'Event Coordinator') return <p className="role-warning">My events is visible to Event Coordinators.</p>
 
   return <div className="page-stack">
+    {editingEvent && <ManagePage event={editingEvent} coordinatorId={currentCoordinator.id} onClose={() => setEditingEvent(null)} onSaved={(saved) => {
+      setEvents((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setEditingEvent(null)
+    }} />}
     <section className="intro"><h1>My events</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}.</p></section>
     <form className="panel" onSubmit={applyFilters}>
       <div className="field-row">
@@ -69,7 +75,7 @@ export function MyEventsPage({ role, currentCoordinatorId, currentCoordinatorNam
         <h2>{event.eventName}</h2><StatusBadge status={event.status} />
         <p>{event.preferredStartDate.replace('T', ' ')} – {event.preferredEndDate.replace('T', ' ')}</p>
         <p className="muted">{event.venueRequirements || 'No venue requirements specified'}</p>
-        <button className="button small" onClick={() => onViewDetails(event.id)}>View details →</button>
+        <div className="table-actions"><button className="button small" onClick={() => onViewDetails(event.id)}>View details →</button><button className="button small secondary" onClick={() => setEditingEvent(event)}>Edit event</button></div>
       </article>)}
   </div>
 }
