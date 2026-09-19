@@ -7,7 +7,7 @@ import { SubmissionPopup } from '../components/SubmissionPopup'
 import { RejectionDialog } from '../components/RejectionDialog'
 import { users } from '../mockData'
 
-export function SubmittedRequestsPage({ role }: { role: Role }) {
+export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoordinatorName, onViewDetails }: { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -24,8 +24,8 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
 
   const currentCoordinator = {
     ...users[0],
-    id: import.meta.env.VITE_CURRENT_COORDINATOR_ID || users[0].id,
-    name: import.meta.env.VITE_CURRENT_COORDINATOR_NAME || users[0].name,
+    id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || users[0].id,
+    name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || users[0].name,
   }
 
   useEffect(() => {
@@ -136,6 +136,9 @@ export function SubmittedRequestsPage({ role }: { role: Role }) {
       events.length === 0 ? <p>No submitted event requests yet.</p> :
       events.map((event) => <article key={event.id} className="panel event-card">
         <header className="event-card-header"><div><p className="eyebrow">EVENT REQUEST</p><h2>{event.eventName}</h2></div><StatusBadge status={event.status} /></header>
+        <div className="event-card-actions">
+          <button className="button small" onClick={() => onViewDetails(event.id)}>View details →</button>
+        </div>
         <p className="event-card-submitted">Submitted {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
         <dl className="event-details">{[
           ['Description', event.description], ['Purpose', event.purpose],
