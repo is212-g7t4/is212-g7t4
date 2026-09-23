@@ -38,17 +38,17 @@ only the DB password is a real secret.
 
 ## 3. Important: connect via `DATABASE_URL`, not the Supabase client
 
-Every table has Row Level Security (RLS) turned on with **no policies**
-defined yet. That means:
+The supplied schema export does **not** include RLS settings, policies or
+role grants. Their current state has not been verified; do not assume that
+an anonymous Supabase client can read these tables, or that RLS protects
+requests made through a privileged backend connection.
 
-- If you connect with `DATABASE_URL` (the `postgres` role) — RLS doesn't
-  apply to this role. Full read/write access, works normally.
-- If you use the Supabase client library (`supabase-py`, JS client, or the
-  REST API) with `SUPABASE_ANON_KEY` — every query returns zero rows and
-  every write is rejected, because RLS defaults to deny with no policies.
-
-So for now, always use `DATABASE_URL` with a regular Postgres driver/ORM,
-not the Supabase SDK, to read or write these tables.
+The existing backend pattern is `DATABASE_URL` with a Postgres driver.
+Keep that connection server-side. A privileged `postgres` connection can
+bypass RLS, so the availability API must independently verify authentication
+and allow only Event Coordinators, Venue Staff and Technical Support Staff.
+Do not trust the frontend role switcher or a caller-supplied role.
+Inspect live policies and grants before enabling direct browser data access.
 
 ## 4. Add a Postgres driver to your service
 
@@ -63,39 +63,111 @@ uv add sqlalchemy psycopg2-binary
 
 ## 5. The tables
 
-All 8 tables live in the **public** schema of the `is212-g7t4` project (ref
-`gjrbkvljlvroghwvhjtc`). Table names are **PascalCase, quoted, no `_service`
-suffix** (e.g. `"Event"`, not `event_service`) — they were renamed directly
-on the shared project after initial setup; unquoted names fold to lowercase
-in Postgres, so `FROM Event` (unquoted) will *not* match `"Event"`, always
-quote them. Full column definitions are in the migrations under
-[`database/supabase/migrations/`](../database/supabase/migrations/) (base
-schema in `20260912150524_create_service_tables.sql`, the rename in
-`20260923115843_rename_tables_to_pascalcase.sql`, plus later additive ones
-like the `manager_id` column) — those files are the source of truth; the
-summary below is just an index.
+The eight tables below are documented from the user-supplied Supabase
+context-only schema export reviewed on 2026-09-23. This is **schema review,
+not a live database or application integration verification**. Do not execute
+that export as a migration. The previously linked migration
+`20260912150524_create_service_tables.sql` is absent from this checkout.
 
-| Table | Owning service | Key columns |
+The export spells table names in PascalCase. PostgreSQL folds unquoted
+identifiers to lowercase, so use double quotes for the intended mixed-case
+names (for example `public."VenueBooking"`). Because the context export omits
+those quotes, confirm the exact stored names before deploying:
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+ORDER BY table_name;
+```
+
+| Exported table name / intended SQL identifier | Owning service | Key columns |
 |---|---|---|
-| `"Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`/`coordinator_id` → `"User".user_id` |
-| `"EventChangeReq"` | Event (change requests) | `change_id` (PK), `event_id` → `"Event"`, `reviewed_by` → `"User"` |
-| `"Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity` |
-| `"User"` | User | `user_id` (PK), `username`, `email`, `role`, `manager_id` → `"User".user_id` (self-referential — null for a manager, another user's id for someone reporting to them) |
-| `"VenueBooking"` | Booking Conflict | `booking_id` (PK), `event_id`/`venue_id`/`requested_by`/`reviewed_by` (FKs) |
-| `"Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb) |
-| `"Registration"` | Registration | `registration_id` (PK), `event_id`/`attendee_id` (FKs) |
-| `"EquipmentRequest"` | Equipment Availability | `equipment_request_id` (PK), `event_id`/`equipment_id`/`reviewed_by` (FKs) |
+| `public."Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`, `coordinator_id` |
+| `public."EventChangeReq"` | Event | `change_id` (PK), `event_id`, `requested_changes` (jsonb), `reviewed_by` |
+| `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity` |
+| `public."User"` | User | `user_id` (PK), `username`, `email`, `role`, `manager_id` (self-reference) |
+| `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `status`, `requested_by`, `reviewed_by` |
+| `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `supported_layouts` (jsonb), `operational_status` |
+| `public."Registration"` | Registration | `registration_id` (PK), `event_id`, `attendee_id` |
+| `public."EquipmentRequest"` | Equipment Availability | `equipment_request_id` (PK), `event_id`, `equipment_id`, `quantity_requested`, `reviewed_by` |
+
+### Venue Availability ownership and this sprint's scope
+
+Venue Availability now owns both booking records and conflict checking.
+There is no separate Booking Conflict atomic service or duplicate booking
+table in the agreed design. Conflict is calculated from venue, time range
+and status; no stored `conflict` column is needed. Venue Service continues
+to own the catalogue. The older separation described in `INDEX.md`,
+`AGENTS.md`, and the architecture documents needs a coordinated follow-up
+update; it is not the current ownership decision.
+
+`VenueBooking` supplies the fields needed for a booking-based day/week/month
+calendar and overlap detection. All three internal roles can inspect ranges
+and choose one venue from a simple selector. Venue search/filtering and
+booking submission are separate work, not prerequisites for this read UI.
+Approved bookings block selection; pending requests are displayed but do
+not block. Rejected/cancelled requests do not block. These are agreed rules,
+not verified existing database status values.
+
+Scheduled maintenance/operational blocks (`venueBlock`) are **deferred to
+next sprint**. The current schema cannot represent those intervals.
+`Venue.operational_status` is not a substitute for a dated block. This sprint
+therefore covers booking-based availability only, not the original plan's
+recorded operational-block coverage. Record that scope reduction in Jira;
+do not claim the full Week 4 unavailability requirement is complete.
+
+### Schema sufficiency and implementation prerequisites
+
+| Check | Supplied schema | Required handling |
+|---|---|---|
+| Booking identity and relationships | UUID PK; FKs to Event, Venue and User | Existing references support the model; foreign-key columns remain nullable. |
+| Booking range | Both fields are `timestamp without time zone`, nullable | Agree/document a timezone convention. Prefer a reviewed migration to `TIMESTAMPTZ`; conversion must explicitly use the verified timezone of existing data. |
+| Required values | Only `booking_id` is `NOT NULL` | Require venue, event, requester, start, end and status in write validation; audit/backfill before adding DB `NOT NULL` constraints. Never silently treat malformed rows as free time. |
+| Range validity | No end-after-start check shown | Validate end > start; add a DB CHECK after auditing existing data. |
+| Status | Unconstrained nullable varchar | Inspect distinct live values and agree one canonical enum/check before mapping approved/pending states. |
+| Concurrent approvals | No overlap exclusion constraint shown | Recheck and save under a transaction-safe per-venue lock or equivalent DB enforcement. Every blocking write must follow the same rule. |
+| Query performance | PKs shown; secondary indexes not supplied | Inspect live indexes; add a venue/time-range index if needed. |
+| Internal-only access | User role field exists; JWT linkage/policies not established by this export | Integrate real auth and enforce server-side roles; test direct external-user API denial. |
+
+No new booking columns are required for basic conflict computation. However,
+the schema alone does not enforce valid intervals, canonical statuses or
+no-double-booking, and it does not implement authentication or calendar APIs.
+An approved event is not automatically an approved venue booking.
+
+Query intervals as start-inclusive, end-exclusive: an overlap exists when
+`existing_start < range_end AND existing_end > range_start`. Exclude the
+current booking ID when checking an edit. For calendar reads, return pending
+records as well as approved records; only approved records block selection.
+
+Example parameterized read (assuming the intended quoted table name has
+been confirmed). Bind timezone-naive boundaries using the agreed convention
+while the database retains `timestamp without time zone`:
+
+```sql
+SELECT booking_id, venue_id, requested_start_time, requested_end_time, status
+FROM public."VenueBooking"
+WHERE venue_id = %s
+  AND requested_start_time < %s  -- visible range end
+  AND requested_end_time > %s    -- visible range start
+ORDER BY requested_start_time, booking_id;
+```
+
+### Existing application compatibility
+
+The checked-out Event Service still queries `public.event_service`, and
+other source references may also use legacy names. If the exported renames
+are already applied and no compatibility views exist, those queries will
+fail. Coordinate a separate code update (or an explicitly agreed temporary
+compatibility migration) before claiming the running app matches this schema.
+This documentation update does not rename tables or modify application SQL.
 
 There is **no Postgres-level schema wall** between services — all tables
 share `public`, so the database itself won't stop your service from
 querying another service's table. Per `AGENTS.md`'s service boundaries,
 still only read/write the table(s) your service owns; if you need data from
 another service, go through that service's HTTP API, not its table
-directly. (If your service is a deliberately minimal read-only slice of a
-larger planned service — as `user-service` and `registration-service`
-currently are — it still only owns its one table; the frontend calls it
-directly for simple reads, per `AGENTS.md`'s "UI (or a composite) calls the
-owning service directly.")
+directly.
 
 ## 6. Example: connecting from Flask
 
@@ -109,7 +181,7 @@ def get_connection():
 # Example: read from the table your service owns
 with get_connection() as conn:
     with conn.cursor() as cur:
-        cur.execute('select event_id, event_name, status from public."Event" limit 10;')
+        cur.execute("select event_id, event_name, status from public.\"Event\" limit 10;")
         rows = cur.fetchall()
 ```
 
@@ -119,7 +191,9 @@ with get_connection() as conn:
 ## 7. If you need to change the schema (add columns, add a table)
 
 This requires the Supabase CLI, which is already scaffolded in this repo
-under `database/supabase/` (`config.toml`, `migrations/`). The CLI expects
+under `database/supabase/` (`config.toml` exists; no migration SQL is present
+in this checkout). Recover/version the existing schema baseline before
+applying new migrations. The CLI expects
 its `supabase/` folder to be in your current directory, so run these from
 `database/`, not the repo root:
 
@@ -137,12 +211,3 @@ Don't make schema changes directly in the Supabase dashboard SQL editor —
 migrations should be committed so everyone's local history matches the
 remote project. Coordinate with the team before changing a table another
 service's code already depends on.
-
-This isn't theoretical: the 8 tables were renamed directly on the shared
-project (to the current PascalCase names) outside of any migration. Every
-service querying the old snake_case names started failing with a 503 (the
-real "relation does not exist" error was hidden behind each service's
-generic database-error handler) until the code was updated and a
-`rename_tables_to_pascalcase.sql` migration was added afterward to bring
-migration history back in sync with what the dashboard change had already
-done live.
