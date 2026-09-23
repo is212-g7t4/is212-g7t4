@@ -71,9 +71,11 @@ export async function eventApi(
   return body
 }
 
-export async function assignmentApi(path: string, method: 'GET' | 'POST' = 'GET') {
+export async function assignmentApi(path: string, method: 'GET' | 'POST' = 'GET', data?: Record<string, string>) {
   const response = await fetch(`${import.meta.env.VITE_COORDINATOR_ASSIGNMENT_SERVICE_URL || 'http://localhost:5004'}${path}`, {
     method,
+    headers: data ? { 'Content-Type': 'application/json' } : undefined,
+    ...(data ? { body: JSON.stringify(data) } : {}),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new SubmissionError(body.error || 'Unable to complete the coordinator assignment.')

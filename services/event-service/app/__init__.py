@@ -93,12 +93,13 @@ def create_app(config=None):
                 coordinator_id = str(UUID(coordinator_id))
             except (ValueError, TypeError, AttributeError):
                 return jsonify(message="A valid current coordinator ID is required."), 400
+        is_manager = request.args.get("isManager") in ("true", "1")
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         return jsonify(
-            events=list_submitted(app.config["DATABASE_URL"], coordinator_id)
+            events=list_submitted(app.config["DATABASE_URL"], coordinator_id, is_manager)
         )
 
     @app.get("/events")
@@ -110,6 +111,7 @@ def create_app(config=None):
 
         status = request.args.get("status") or None
         venue = request.args.get("venue") or None
+        is_manager = request.args.get("isManager") in ("true", "1")
 
         date_from = date_to = None
         try:
@@ -142,6 +144,7 @@ def create_app(config=None):
                 venue,
                 date_from,
                 date_to,
+                is_manager,
             )
         )
 
@@ -151,12 +154,13 @@ def create_app(config=None):
             coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
+        is_manager = request.args.get("isManager") in ("true", "1")
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         try:
-            event = get_event(app.config["DATABASE_URL"], str(event_id), coordinator_id)
+            event = get_event(app.config["DATABASE_URL"], str(event_id), coordinator_id, is_manager)
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
         except EventNotAssignedError:
