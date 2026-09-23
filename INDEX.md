@@ -7,9 +7,12 @@ it owns. For *why* the architecture looks like this, see
 this file is a directory, not a design rationale.
 
 > **Status:** two template services and the frontend's dependencies are
-> scaffolded (see below); the 15 real services listed in this file are still
-> **planned** — copy the matching template to create each one. Update the
-> status column as each service is actually created.
+> scaffolded (see below); User, Event, Coordinator Assignment, and
+> Registration are built (see their rows below — User and Registration are
+> deliberately minimal, read-only slices of their eventually-planned scope);
+> the remaining real services in this file are still **planned** — copy the
+> matching template to create each one. Update the status column as each
+> service is actually created.
 
 ## Repo map
 
@@ -21,23 +24,23 @@ is212-g7t4/
 │   ├── _template-atomic-service/       # copy this to start any atomic service
 │   ├── _template-composite-service/    # copy this to start any composite service
 │   ├── event-workflow-service/         # composite (planned)
-│   ├── coordinator-assignment-service/ # composite (planned)
+│   ├── coordinator-assignment-service/ # composite (built)
 │   ├── venue-booking-service/          # composite (planned)
 │   ├── equipment-reservation-service/  # composite (planned)
 │   ├── attendee-registration-service/  # composite (planned)
-│   ├── user-service/                   # atomic (planned)
-│   ├── event-service/                  # atomic (planned)
+│   ├── user-service/                   # atomic (built, read-only)
+│   ├── event-service/                  # atomic (built)
 │   ├── venue-service/                  # atomic (planned)
 │   ├── booking-conflict-service/       # atomic (planned)
 │   ├── venue-availability-service/     # atomic (planned)
 │   ├── equipment-service/              # atomic (planned)
 │   ├── equipment-availability-service/ # atomic (planned)
-│   ├── registration-service/           # atomic (planned)
+│   ├── registration-service/           # atomic (built, read-only)
 │   ├── notification-service/           # atomic (planned)
 │   ├── forum-service/                  # atomic, MongoDB (planned)
 │   └── email-sms-wrapper-service/      # wrapper (planned)
 ├── docs/
-├── docker-compose.yml                  # scaffolded — wires up the two templates only
+├── docker-compose.yml                  # wires up User, Event, Coordinator Assignment, Registration, plus the composite template placeholder
 ├── AGENTS.md
 ├── INDEX.md
 └── README.md
@@ -69,7 +72,7 @@ composites are allowed to call other services.
 | Service | Path | Calls | Description | Status |
 |---|---|---|---|---|
 | Event Workflow Service | `services/event-workflow-service/` | Booking Conflict, Equipment Availability, Forum, Broker | Re-validates existing venue/equipment commitments on event change; cascades cancellations. **Provisional** — see open question below. | planned |
-| Coordinator Assignment Service | `services/coordinator-assignment-service/` | User, Event, Forum, Broker | Assigns/reassigns the Event Coordinator on an event. | planned |
+| Coordinator Assignment Service | `services/coordinator-assignment-service/` | User, Event, Forum, Broker | Assigns/reassigns the Event Coordinator on an event; only the Event Coordinator manager may do so. No Forum call yet. | built |
 | Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Booking Conflict, Venue Availabilities, Forum, Broker | Two sub-flows: booking request submission, and venue-staff approval/rejection. | planned |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment Availability, Forum, Broker | Two sub-flows: request submission, and technical-support approval/rejection. | planned |
 | Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration, Broker | Register/withdraw an attendee for an event. No Forum call. | planned |
@@ -81,14 +84,14 @@ call another service, Forum, or the broker.
 
 | Service | Path | Data store | Owns | Status |
 |---|---|---|---|---|
-| User | `services/user-service/` | Supabase Postgres + Supabase Auth | Accounts, roles, login/JWT issuance | planned |
-| Event | `services/event-service/` | Supabase Postgres | Event entity: details, status, change-request records | planned |
+| User | `services/user-service/` | Supabase Postgres | Accounts, roles, manager relationship. Read-only (`GET /users`, `GET /users/:id`) — Supabase Auth/login/JWT issuance not implemented yet | built (read-only) |
+| Event | `services/event-service/` | Supabase Postgres | Event entity: details, status, change-request records | built |
 | Venue | `services/venue-service/` | Supabase Postgres | Venue catalogue (capacity, facilities, accessibility, layouts) + suitability-check computation | planned |
 | Booking Conflict | `services/booking-conflict-service/` | Supabase Postgres | Conflict-detection algorithm only — no booking records | planned |
 | Venue Availabilities | `services/venue-availability-service/` | Supabase Postgres | Actual venue booking records: id, eventId, venueId, status, proposed date/time, decision reason | planned |
 | Equipment | `services/equipment-service/` | Supabase Postgres | Equipment catalogue only (types, quantities owned, technical specs) — no reservation data | planned |
 | Equipment Availability | `services/equipment-availability-service/` | Supabase Postgres | Reservation records + availability-checking algorithm | planned |
-| Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records | planned |
+| Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Read-only (`GET /registrations?eventId=`) — no registration/withdrawal endpoints yet; called directly by the frontend (a "simple read," no composite needed) | built (read-only) |
 | Notification | `services/notification-service/` | Supabase Postgres | Notification records; consumes the broker queue, calls the Email/SMS Wrapper | planned |
 | Forum / Communication | `services/forum-service/` | **MongoDB (Atlas)** | All communication tied to a request — clarifications, approval/rejection reasons, comments — keyed by `entityType` + `entityId` | planned |
 
@@ -110,9 +113,10 @@ uv run pytest
 
 ## Running everything locally
 
-`docker-compose.yml` currently wires up only the two templates as
-placeholders — add a service entry there each time a real service is copied
-from a template (see the comment in that file).
+`docker-compose.yml` wires up the composite template placeholder plus the
+real services built so far (User, Event, Coordinator Assignment,
+Registration) — add a service entry there each time another real service is
+copied from a template (see the comment in that file).
 
 ```
 npm run dev          # frontend (Vite) + backend (docker compose up), together

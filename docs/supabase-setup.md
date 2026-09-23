@@ -64,27 +64,38 @@ uv add sqlalchemy psycopg2-binary
 ## 5. The tables
 
 All 8 tables live in the **public** schema of the `is212-g7t4` project (ref
-`gjrbkvljlvroghwvhjtc`). Full column definitions are in
-[`database/supabase/migrations/20260912150524_create_service_tables.sql`](../database/supabase/migrations/20260912150524_create_service_tables.sql)
-— that file is the source of truth; the summary below is just an index.
+`gjrbkvljlvroghwvhjtc`). Table names are **PascalCase, quoted, no `_service`
+suffix** (e.g. `"Event"`, not `event_service`) — they were renamed directly
+on the shared project after initial setup; unquoted names fold to lowercase
+in Postgres, so `FROM Event` (unquoted) will *not* match `"Event"`, always
+quote them. Full column definitions are in the migrations under
+[`database/supabase/migrations/`](../database/supabase/migrations/) (base
+schema in `20260912150524_create_service_tables.sql`, the rename in
+`20260923115843_rename_tables_to_pascalcase.sql`, plus later additive ones
+like the `manager_id` column) — those files are the source of truth; the
+summary below is just an index.
 
 | Table | Owning service | Key columns |
 |---|---|---|
-| `event_service` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`/`coordinator_id` → `user_service.user_id` |
-| `event_changereq` | Event (change requests) | `change_id` (PK), `event_id` → `event_service`, `reviewed_by` → `user_service` |
-| `equipment_service` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity` |
-| `user_service` | User | `user_id` (PK), `username`, `email`, `role` |
-| `booking_service` | Booking Conflict | `booking_id` (PK), `event_id`/`venue_id`/`requested_by`/`reviewed_by` (FKs) |
-| `venue_service` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb) |
-| `registration_service` | Registration | `registration_id` (PK), `event_id`/`attendee_id` (FKs) |
-| `equipment_request` | Equipment Availability | `equipment_request_id` (PK), `event_id`/`equipment_id`/`reviewed_by` (FKs) |
+| `"Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`/`coordinator_id` → `"User".user_id` |
+| `"EventChangeReq"` | Event (change requests) | `change_id` (PK), `event_id` → `"Event"`, `reviewed_by` → `"User"` |
+| `"Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity` |
+| `"User"` | User | `user_id` (PK), `username`, `email`, `role`, `manager_id` → `"User".user_id` (self-referential — null for a manager, another user's id for someone reporting to them) |
+| `"VenueBooking"` | Booking Conflict | `booking_id` (PK), `event_id`/`venue_id`/`requested_by`/`reviewed_by` (FKs) |
+| `"Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb) |
+| `"Registration"` | Registration | `registration_id` (PK), `event_id`/`attendee_id` (FKs) |
+| `"EquipmentRequest"` | Equipment Availability | `equipment_request_id` (PK), `event_id`/`equipment_id`/`reviewed_by` (FKs) |
 
 There is **no Postgres-level schema wall** between services — all tables
 share `public`, so the database itself won't stop your service from
 querying another service's table. Per `AGENTS.md`'s service boundaries,
 still only read/write the table(s) your service owns; if you need data from
 another service, go through that service's HTTP API, not its table
-directly.
+directly. (If your service is a deliberately minimal read-only slice of a
+larger planned service — as `user-service` and `registration-service`
+currently are — it still only owns its one table; the frontend calls it
+directly for simple reads, per `AGENTS.md`'s "UI (or a composite) calls the
+owning service directly.")
 
 ## 6. Example: connecting from Flask
 
@@ -98,7 +109,7 @@ def get_connection():
 # Example: read from the table your service owns
 with get_connection() as conn:
     with conn.cursor() as cur:
-        cur.execute("select event_id, event_name, status from event_service limit 10;")
+        cur.execute('select event_id, event_name, status from public."Event" limit 10;')
         rows = cur.fetchall()
 ```
 
@@ -126,3 +137,12 @@ Don't make schema changes directly in the Supabase dashboard SQL editor —
 migrations should be committed so everyone's local history matches the
 remote project. Coordinate with the team before changing a table another
 service's code already depends on.
+
+This isn't theoretical: the 8 tables were renamed directly on the shared
+project (to the current PascalCase names) outside of any migration. Every
+service querying the old snake_case names started failing with a 503 (the
+real "relation does not exist" error was hidden behind each service's
+generic database-error handler) until the code was updated and a
+`rename_tables_to_pascalcase.sql` migration was added afterward to bring
+migration history back in sync with what the dashboard change had already
+done live.

@@ -1,14 +1,7 @@
 services:
-  # Placeholder entries until real services are copied from the templates
+  # Placeholder entry until more composites are copied from the template
   # (see INDEX.md). Add one entry per real service as it's created, following
   # the same pattern: build context, .env file, and a unique host port.
-  template-atomic-service:
-    build: ./services/_template-atomic-service
-    env_file:
-      - ./services/_template-atomic-service/.env.example
-    ports:
-      - "5001:5000"
-
   template-composite-service:
     build: ./services/_template-composite-service
     env_file:
@@ -16,9 +9,30 @@ services:
     ports:
       - "5002:5000"
 
+  user-service:
+    build: ./services/user-service
+    env_file:
+      - ./services/user-service/.env
+    ports:
+      - "5001:5000"
+
   event-service:
     build: ./services/event-service
     env_file:
       - ./services/event-service/.env
     ports:
       - "5003:5000"
+
+  coordinator-assignment-service:
+    build: ./services/coordinator-assignment-service
+    env_file:
+      - ./services/coordinator-assignment-service/.env
+    ports:
+      - "5004:5000"
+
+  registration-service:
+    build: ./services/registration-service
+    env_file:
+      - ./services/registration-service/.env
+    ports:
+      - "5005:5000"

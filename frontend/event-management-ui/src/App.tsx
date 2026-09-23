@@ -7,15 +7,15 @@ import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
-import { AssignmentPage } from './pages/AssignmentPage'
-import { users } from './mockData'
+import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
-import type { EventData, Role, Route } from './types'
+import type { EventData, Route, User } from './types'
+
+const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
 
 const paths: Record<Route, string> = {
   dashboard: '/',
   submit: '/events/new',
-  assignment: '/coordinator',
   manage: '/events/evt-001/edit',
   review: '/requests/review',
   detail: '/events',
@@ -25,7 +25,6 @@ const paths: Record<Route, string> = {
 function getRoute(): Route {
   const path = window.location.pathname
   if (path === '/events/new') return 'submit'
-  if (path === '/coordinator') return 'assignment'
   if (path.includes('/edit')) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
@@ -42,8 +41,14 @@ function App() {
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
   const [detailOrigin, setDetailOrigin] = useState<Route>('review')
-  const [role, setRole] = useState<Role>('Requester')
-  const [activeCoordinatorId, setActiveCoordinatorId] = useState(users[0].id)
+  const [users, setUsers] = useState<User[]>([])
+  const [activeUserId, setActiveUserId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(ACTIVE_USER_STORAGE_KEY) || ''
+    } catch {
+      return ''
+    }
+  })
   const [event, setEvent] = useState<EventData>({
     eventName: '',
     description: '',
@@ -67,6 +72,26 @@ function App() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
+  useEffect(() => {
+    let active = true
+    fetchUsers().then((fetched) => {
+      if (active) setUsers(fetched)
+    }).catch((cause: Error) => {
+      if (active) setNotice(cause.message)
+    })
+    return () => { active = false }
+  }, [])
+
+  const activeUser = users.find((user) => user.id === activeUserId) ?? users[0]
+
+  useEffect(() => {
+    try {
+      if (activeUser) localStorage.setItem(ACTIVE_USER_STORAGE_KEY, activeUser.id)
+    } catch {
+      // localStorage unavailable (e.g. private browsing) — active user just won't persist.
+    }
+  }, [activeUser])
+
   const navigate = (nextRoute: Route) => {
     setNotice('')
     window.history.pushState({}, '', paths[nextRoute])
@@ -85,30 +110,20 @@ function App() {
     setEvent((current) => ({ ...current, [field]: value }))
   }
 
-  const activeCoordinator = users.find((user) => user.id === activeCoordinatorId) ?? users[0]
+  const role = activeUser?.role ?? 'Event Organiser'
+  const isManager = activeUser?.role === 'Event Coordinator' && activeUser?.managerId === null
 
   return <div className="app-shell">
     <Sidebar route={route} onNavigate={navigate} />
     <main className="main-content">
-      <Topbar route={route} role={role} onRoleChange={setRole} />
+      <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className="notice" role="status">{notice}</div>}
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} />}
       {route === 'submit' && <SubmissionPage role={role} />}
-      {route === 'assignment' && <AssignmentPage
-        coordinator={activeCoordinator.name}
-        setCoordinator={(value) => {
-          const selected = users.find((user) => user.name === value)
-          if (selected) {
-            setActiveCoordinatorId(selected.id)
-            setNotice(`Logged in as ${selected.name}.`)
-          }
-        }}
-        onSave={() => setNotice(`Logged in as ${activeCoordinator.name}.`)}
-      />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
-      {route === 'review' && <SubmittedRequestsPage key={`${role}-${activeCoordinatorId}`} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} onViewDetails={navigateToEvent} />}
-      {route === 'myEvents' && <MyEventsPage key={`${role}-${activeCoordinatorId}`} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} onViewDetails={navigateToEvent} />}
-      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeCoordinatorId}`} eventId={eventId} role={role} currentCoordinatorId={activeCoordinatorId} currentCoordinatorName={activeCoordinator.name} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
+      {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>
 }
