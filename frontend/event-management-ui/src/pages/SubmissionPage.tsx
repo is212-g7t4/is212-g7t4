@@ -53,7 +53,7 @@ export function SubmissionPage({ role }: { role: Role }) {
       setPending(false)
     }
   }
-  if (role !== 'Requester') return <p className="role-warning">Only Event Organisers can submit event requests.</p>
+  if (role !== 'Event Organiser') return <p className="role-warning">Only Event Organisers can submit event requests.</p>
 
   return (
     <div className="page-stack">

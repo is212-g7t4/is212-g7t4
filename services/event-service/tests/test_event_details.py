@@ -63,7 +63,7 @@ def test_ac1_returns_full_event_details_for_assigned_coordinator(setup):
     assert body["coordinatorId"] == COORDINATOR_ID
     query, parameters = cursor.execute.call_args.args
     assert "SELECT event_id" in query
-    assert "FROM public.event_service" in query
+    assert 'FROM public."Event"' in query
     assert "FOR UPDATE" not in query
     assert parameters == [EVENT_ID]
 
@@ -107,3 +107,24 @@ def test_ac1_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
     response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}")
     assert response.status_code == 503
+
+
+def test_manager_can_view_event_assigned_to_a_different_coordinator(setup):
+    client, _, cursor = setup
+    assigned = saved_row()
+    assigned["coordinator_id"] = OTHER_COORDINATOR_ID
+    cursor.fetchone.return_value = assigned
+
+    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
+
+    assert response.status_code == 200
+    assert response.json["coordinatorId"] == OTHER_COORDINATOR_ID
+
+
+def test_manager_can_view_unassigned_event(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = saved_row()
+
+    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
+
+    assert response.status_code == 200
