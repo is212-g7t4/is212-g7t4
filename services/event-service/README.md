@@ -35,18 +35,23 @@ If Vite uses a different port, set FRONTEND_ORIGIN in the service .env to that o
 
 ## Event Coordinator approval and rejection
 
-The prototype role selector does not provide a signed-in user's UUID. Configure an
-existing coordinator in `frontend/event-management-ui/.env`:
-
-```dotenv
-VITE_CURRENT_COORDINATOR_ID=<existing Event Coordinator user_id>
-VITE_CURRENT_COORDINATOR_NAME=<coordinator display name>
-```
+The frontend's Topbar user picker (backed by `user-service`) supplies the
+signed-in user's real UUID as `coordinatorId` on every request — there's no
+mock role selector anymore. `VITE_CURRENT_COORDINATOR_ID`/`_NAME` in
+`frontend/event-management-ui/.env` are only a fallback used briefly while
+the real user list is still loading.
 
 The queue shows decision actions only when an event's `coordinator_id` matches
-that UUID. Rejection requires a non-empty reason. The backend repeats the assignment
+the caller's id. Rejection requires a non-empty reason. The backend repeats the assignment
 check while locking the event row and only approves or rejects requests whose current
 status is `Submitted`.
+
+The Event Coordinator manager (role `Event Coordinator`, `manager_id` is
+`null`) can bypass the `coordinator_id` filter/ownership check on the read
+endpoints (`/events`, `/events/submitted`, `/events/<id>`) by passing
+`isManager=true` — this lets them see every event, not just ones assigned to
+them. Approve/reject are **not** bypassed — the manager must be the assigned
+coordinator to approve or reject, same as anyone else.
 
 Decisions are returned in `decision` and retained in `decisionHistory`. Each decision
 records its status, coordinator ID, UTC timestamp, and rejection reason when present.

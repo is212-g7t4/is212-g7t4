@@ -64,7 +64,7 @@ def test_ac1_ac2_ac3_submit_existing_columns_and_return_confirmation_data(setup)
     assert response.json["purpose"] == "Learning"
     assert response.json["description"] == "A workshop"
     query, parameters = cursor.execute.call_args.args
-    assert "INSERT INTO public.event_service" in query
+    assert 'INSERT INTO public."Event"' in query
     assert "timezone('UTC', CURRENT_TIMESTAMP)" in query
     assert "organiser_id" not in query and "purpose" not in query
     assert "'Submitted'" in query
@@ -180,6 +180,17 @@ def test_submitted_queue_still_accepts_optional_coordinator_filter(setup):
     query, params = cursor.execute.call_args.args
     assert "coordinator_id = %s" in query
     assert params == [OTHER_COORDINATOR_ID]
+
+
+def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [saved_row()]
+    response = client.get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true")
+    assert response.status_code == 200
+    assert len(response.json["events"]) == 1
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" not in query
+    assert params == []
 
 
 @pytest.mark.parametrize("query_string", ["?coordinatorId=not-a-uuid"])

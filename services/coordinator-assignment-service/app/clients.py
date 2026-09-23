@@ -8,38 +8,23 @@ import httpx
 # calls, don't build a generic client.
 
 EVENT_SERVICE_URL = os.environ.get("EVENT_SERVICE_URL") or "http://localhost:5003"
-
-MOCK_COORDINATORS = [
-    {
-        "user_id": "e7334aa9-eb3a-4c45-84b5-280501b6c109",
-        "username": "Alicia Tan",
-        "email": "alicia.tan.test@connectsphere.local",
-        "role": "EventCoordinator",
-        "organization": "ConnectSphere",
-        "contact_details": "Test coordinator for approval workflow",
-    },
-    {
-        "user_id": "7912075d-46f5-405b-9af3-05502f42f173",
-        "username": "Marcus Lim",
-        "email": "marcus.lim@connectsphere.example",
-        "role": "EventCoordinator",
-        "organization": "ConnectSphere",
-        "contact_details": "+65 8234 5678",
-    },
-    {
-        "user_id": "7110f1a8-e707-4b76-9fb0-57808310da98",
-        "username": "Priya Nair",
-        "email": "priya.nair@connectsphere.example",
-        "role": "EventCoordinator",
-        "organization": "ConnectSphere",
-        "contact_details": "+65 8345 6789",
-    },
-]
+USER_SERVICE_URL = os.environ.get("USER_SERVICE_URL") or "http://localhost:5001"
 
 
 def get_available_coordinators() -> list:
-    """Return temporary coordinator records until User Service is available."""
-    return MOCK_COORDINATORS.copy()
+    """Return Event Coordinators from User Service."""
+    response = httpx.get(f"{USER_SERVICE_URL}/users", params={"role": "Event Coordinator"})
+    response.raise_for_status()
+    return response.json()["users"]
+
+
+def get_user(user_id: str) -> dict | None:
+    """Look up a single user from User Service, or None if they don't exist."""
+    response = httpx.get(f"{USER_SERVICE_URL}/users/{user_id}")
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
 
 
 def assign_event_coordinator(event_id: str, coordinator_id: str) -> dict:
