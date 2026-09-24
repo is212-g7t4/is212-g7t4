@@ -36,3 +36,10 @@ services:
       - ./services/registration-service/.env
     ports:
       - "5005:5000"
+
+  venue-service:
+    build: ./services/venue-service
+    env_file:
+      - ./services/event-service/.env
+    ports:
+      - "5006:5000"
