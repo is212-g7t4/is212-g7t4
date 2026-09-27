@@ -36,7 +36,6 @@ export interface EventData {
   expectedAttendance: string
 
   // Optional fields
-  venueId: string
   venueRequirements: string
   accessibilityNeeds: string
   equipmentRequirements: string
