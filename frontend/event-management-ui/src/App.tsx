@@ -59,6 +59,7 @@ function App() {
     preferredStartDate: '',
     preferredEndDate: '',
     expectedAttendance: '',
+    venueId: '',
     venueRequirements: '',
     accessibilityNeeds: '',
     equipmentRequirements: '',
@@ -126,7 +127,7 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
-      {route === 'venues' && <VenueCataloguePage role={role} />}
+      {route === 'venues' && <VenueCataloguePage role={role} currentUserId={activeUser?.id} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>
