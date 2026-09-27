@@ -71,7 +71,7 @@ def test_ac1_ac2_ac3_submit_existing_columns_and_return_confirmation_data(setup)
     assert UUID(parameters[0])
     assert parameters[5] == 25
     assert json.loads(parameters[2])["purpose"] == "Learning"
-    assert parameters[6:] == ["", "", "", ""]
+    assert parameters[6:] == [None, "", "", "", ""]
     connection.__exit__.assert_called_once()
     connection.close.assert_called_once()
 
@@ -185,7 +185,9 @@ def test_submitted_queue_still_accepts_optional_coordinator_filter(setup):
 def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [saved_row()]
-    response = client.get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true")
+    response = client.get(
+        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true"
+    )
     assert response.status_code == 200
     assert len(response.json["events"]) == 1
     query, params = cursor.execute.call_args.args
@@ -279,7 +281,10 @@ def test_database_failure_never_reports_success(setup, operation):
 def test_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
     assert client.post("/events", json=VALID).status_code == 503
-    assert client.get(f"/events/submitted?coordinatorId={COORDINATOR_ID}").status_code == 503
+    assert (
+        client.get(f"/events/submitted?coordinatorId={COORDINATOR_ID}").status_code
+        == 503
+    )
 
 
 def test_health_and_browser_cors(setup):

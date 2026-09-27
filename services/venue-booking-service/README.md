@@ -1,17 +1,19 @@
 # Venue booking
 
-Validates a venue booking request end to end before it's actioned. A
-composite — holds no data of its own, calls `event-service` (to confirm the
-event exists and is assigned to the requesting coordinator) and
-`venue-service` (to confirm the venue is a real catalogue entry, is
-operational, and has enough capacity).
+Processes a venue booking request end to end. A composite — holds no data of
+its own, calls `event-service` (to confirm the event exists and is assigned
+to the requesting coordinator), `venue-service` (to confirm the venue is a
+real catalogue entry, is operational, and has enough capacity), and
+`venue-availability-service` (to persist the booking and check for
+double-booking — see that service's README for the merged
+Venue Availability + Booking Conflict design).
 
 ## 1. Start the service
 
 Copy `.env.example` to `.env` — the defaults already match the Docker
-Compose service names for `EVENT_SERVICE_URL`/`VENUE_SERVICE_URL` (see the
-comment in that file for the localhost equivalents if running outside
-Docker):
+Compose service names for `EVENT_SERVICE_URL`/`VENUE_SERVICE_URL`/
+`VENUE_AVAILABILITY_SERVICE_URL` (see the comment in that file for the
+localhost equivalents if running outside Docker):
 
 ```
 cp .env.example services/venue-booking-service/.env
@@ -32,21 +34,26 @@ every other service.
 
 ## Endpoints
 
-- `POST /booking-requests` — validates a venue booking request. Body must
-  include `{"eventId": "...", "venueId": "...", "coordinatorId": "..."}`.
+- `POST /booking-requests` — submits a venue booking request. Body must
+  include `{"eventId": "...", "venueId": "...", "coordinatorId": "..."}`;
+  the event's `preferredStartDate`/`preferredEndDate` are used as the
+  requested booking window.
   - `404` if the event doesn't exist, or if `venueId` isn't in Venue
     Service's catalogue.
   - `403` if the event isn't assigned to `coordinatorId`.
-  - `409` if the venue exists but isn't `Operational`.
+  - `409` if the venue exists but isn't `Operational`, or if it's already
+    booked (Approved) for that time window.
   - `422` if the venue's capacity is below the event's expected attendance.
-  - `201` with `{"eventId", "venueId", "venueName", "status": "validated"}`
-    once all checks pass.
+  - `201` with the persisted booking (`status: "Pending Review"`) once all
+    checks pass.
+- `PATCH /booking-requests/<id>/approve` / `PATCH /booking-requests/<id>/reject`
+  — Venue Staff decision. Body must include `{"reviewedBy": "<user id>"}`.
+  - `404` if the booking doesn't exist.
+  - `409` on approve if another booking was approved for an overlapping time
+    since this one was requested (re-checked at decision time).
+  - `200` with the updated booking otherwise.
 
 ## Known limitation
 
-This only validates suitability — it does **not** check for double-booking
-or persist the booking request anywhere. That's the job of Booking Conflict
-Service and Venue Availabilities Service, neither of which is built yet (see
-`INDEX.md`). Once those exist, this service's `/booking-requests` flow
-should also call Booking Conflict Service and write the resulting record to
-Venue Availabilities Service before returning `201`.
+No Forum Service call for logging the approval/rejection reason, and no
+async notification — both flagged as planned but not built (see `INDEX.md`).

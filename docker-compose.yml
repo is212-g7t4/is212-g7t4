@@ -43,10 +43,3 @@ services:
       - ./services/event-service/.env
     ports:
       - "5006:5000"
-
-  venue-booking-service:
-    build: ./services/venue-booking-service
-    env_file:
-      - ./services/venue-booking-service/.env
-    ports:
-      - "5007:5000"

@@ -39,8 +39,8 @@ export function VenueSelect({
           {venues.map((venue) => (
             // Only Operational venues are selectable — everything else is
             // shown but disabled, which browsers render greyed out.
-            <option key={venue.id} value={venue.id} disabled={venue.status !== 'Operational'}>
-              {venue.name}{venue.status !== 'Operational' ? ` (${venue.status})` : ''}
+            <option key={venue.id} value={venue.id} disabled={venue.status !== 'Available'}>
+              {venue.name}{venue.status !== 'Available' ? ` (${venue.status})` : ''}
             </option>
           ))}
         </select>
