@@ -70,27 +70,31 @@ numbered separately.
   event, log the reason for reassignment, notify) and doesn't need to live
   inside the broader change/cancellation-impact workflow.
 - **Venue Booking Service** now explicitly checks **suitability** (via Venue
-  Service) *before* checking for booking **conflicts** (via Booking Conflict
-  Service). Like Equipment Reservation Service, it's two sub-flows in one
-  frame: request submission (persists the booking as `pending_review` in
-  **Venue Availabilities Service**) and a separate venue-staff
-  approval/rejection sub-flow (updates the Venue Availabilities record, logs
-  the decision reason to Forum Service, and notifies asynchronously).
-- **Booking Conflict Service owns the conflict-detection algorithm only** —
-  given a venue + time window, it checks for overlaps. It does **not** hold
-  the booking records themselves; those live in the separate **Venue
-  Availabilities Service** (id, eventId, venueId, status, proposed date/time,
-  decision reason). These are two different atomics, not one.
+  Service) *before* persisting the booking and checking for **conflicts**
+  (via Venue Availability Service). Like Equipment Reservation Service, it's
+  two sub-flows in one frame: request submission (persists the booking as
+  `Pending Review` in **Venue Availability Service**, which conflict-checks
+  it there) and a separate venue-staff approval/rejection sub-flow (updates
+  the Venue Availability record, logs the decision reason to Forum Service,
+  and notifies asynchronously).
+- **Venue Availability Service owns both the booking records and the
+  conflict-detection algorithm**, in one atomic (`public."VenueBooking"`:
+  id, eventId, venueId, status, proposed date/time, decision reason). This
+  merges what was originally drafted as two atomics — a stateless "Booking
+  Conflict Service" plus a separate "Venue Availabilities Service" — because
+  a stateless conflict-checker would have needed to read bookings owned by
+  the other service, which atomics can't do (see AGENTS.md). There is no
+  separate Booking Conflict service or table.
 - **Equipment Reservation Service** calls **Equipment Availability Service**
   only — not Equipment Service. Equipment Availability Service owns both the
   availability-checking algorithm *and* the actual reservation records
   (checked/held at submission, committed or released on approval/rejection).
   Equipment Service is a separate atomic that owns the equipment catalogue
   only (types, quantities owned, technical specs) and holds no reservation
-  data — this composite's flow never needs to call it. This mirrors the
-  Venue Booking Service / Booking Conflict Service + Venue Availabilities
-  split. It also now logs to Forum Service, but only on the approval/
-  rejection sub-flow.
+  data — this composite's flow never needs to call it. This now mirrors the
+  Venue Booking Service / Venue Availability Service pattern exactly (one
+  atomic owning both records and the algorithm). It also now logs to Forum
+  Service, but only on the approval/rejection sub-flow.
 
 ## Full service catalog
 
@@ -98,10 +102,10 @@ numbered separately.
 Venue Booking Service, Equipment Reservation Service, Attendee Registration
 Service.
 
-**Atomics (10, each own Postgres schema except Forum):** User, Event, Venue,
-Booking Conflict (the conflict-detection algorithm only), Venue Availabilities
-(the actual venue booking records: id, eventId, venueId, status, proposed
-date/time, decision reason), Equipment, Equipment Availability (equipment
+**Atomics (9, each own Postgres schema except Forum):** User, Event, Venue,
+Venue Availability (venue booking records — id, eventId, venueId, status,
+proposed date/time, decision reason — **and** the conflict-detection
+algorithm together, one atomic), Equipment, Equipment Availability (equipment
 reservation records + availability-checking algorithm), Registration,
 Notification, Forum / Communication (MongoDB).
 
@@ -119,30 +123,28 @@ Wrapper (called only by Notification Service).
 5. `HTTP 200 Resp {capacity, facilities, accessibility, layouts}` — Venue Service → Venue Booking Service
 6. `HTTP POST /venues/{venueId}/suitability-check {expectedAttendance, requiredFacilities}` — Venue Booking Service → Venue Service
 7. `HTTP 200 Resp {suitable, reasons}` — Venue Service → Venue Booking Service
-8. `HTTP POST /conflicts/check {venueId, date, startTime, endTime}` — Venue Booking Service → Booking Conflict Service
-9. `HTTP 200 Resp {hasConflict, conflictingBookingIds}` — Booking Conflict Service → Venue Booking Service
-10. `HTTP POST /venue-availabilities {eventId, venueId, proposedDate, startTime, endTime, status: pending_review}` — Venue Booking Service → Venue Availabilities Service
-11. `HTTP 201 Resp {bookingId, status: pending_review}` — Venue Availabilities Service → Venue Booking Service
-12. `HTTP 201 Resp {bookingId, status: pending_review}` — Venue Booking Service → UI
+8. `HTTP POST /venue-bookings {eventId, venueId, requestedStartTime, requestedEndTime, requestedBy}` — Venue Booking Service → Venue Availability Service (persists the booking and checks for conflicts against existing Approved bookings there)
+9. `HTTP 201 Resp {bookingId, status: Pending Review}` or `HTTP 409 Resp {message}` on conflict — Venue Availability Service → Venue Booking Service
+10. `HTTP 201 Resp {bookingId, status: Pending Review}` — Venue Booking Service → UI
 
 **Sub-flow B — venue staff approval/rejection** (continues once Venue Staff act on the pending request):
 
-13. `HTTP PATCH /booking-requests/{bookingId}/decision {decision, reason}` — UI → Venue Booking Service
-14. `HTTP PATCH /venue-availabilities/{bookingId} {status: approved|rejected}` — Venue Booking Service → Venue Availabilities Service
-15. `HTTP 200 Resp {bookingId, status}` — Venue Availabilities Service → Venue Booking Service
-16. `HTTP POST /forum/entries {entityType: BOOKING, entityId, type, message: reason}` — Venue Booking Service → Forum Service
-17. `HTTP 201 Resp {entryId}` — Forum Service → Venue Booking Service
-18. `PUBLISH notifications.queue {userId, type: BOOKING_DECISION, eventId, venueId, decision}` — Venue Booking Service → Message Broker (async)
-19. `HTTP POST /send {channel, to, template, data}` — Notification Service → Email/SMS Wrapper
-20. `HTTP 200 Resp {bookingId, status}` — Venue Booking Service → UI
+11. `HTTP PATCH /booking-requests/{bookingId}/approve|reject {reviewedBy, reason}` — UI → Venue Booking Service
+12. `HTTP PATCH /venue-bookings/{bookingId}/approve|reject {reviewedBy}` — Venue Booking Service → Venue Availability Service (re-checks for conflicts on approve)
+13. `HTTP 200 Resp {bookingId, status}` or `HTTP 409 Resp {message}` on conflict — Venue Availability Service → Venue Booking Service
+14. `HTTP POST /forum/entries {entityType: BOOKING, entityId, type, message: reason}` — Venue Booking Service → Forum Service
+15. `HTTP 201 Resp {entryId}` — Forum Service → Venue Booking Service
+16. `PUBLISH notifications.queue {userId, type: BOOKING_DECISION, eventId, venueId, decision}` — Venue Booking Service → Message Broker (async)
+17. `HTTP POST /send {channel, to, template, data}` — Notification Service → Email/SMS Wrapper
+18. `HTTP 200 Resp {bookingId, status}` — Venue Booking Service → UI
 
 ## Diagram 2 — Event Workflow Service (composite)
 
 1. `HTTP POST /events/{eventId}/change-requests {changedFields, reason}` — UI → Event Service
 2. `HTTP 201 Resp {changeRequestId, status}` — Event Service → UI
 3. `HTTP POST /workflows/event-change {eventId, changeRequestId, changedFields}` — Event Service → Event Workflow Service
-4. `HTTP POST /conflicts/check {venueId, newDate, newStartTime, newEndTime}` — Event Workflow Service → Booking Conflict Service
-5. `HTTP 200 Resp {hasConflict}` — Booking Conflict Service → Event Workflow Service
+4. `HTTP POST /venue-bookings/{bookingId}/conflicts-check {newDate, newStartTime, newEndTime}` — Event Workflow Service → Venue Availability Service
+5. `HTTP 200 Resp {hasConflict}` — Venue Availability Service → Event Workflow Service
 6. `HTTP GET /equipment-availability/reservations?eventId={eventId}` — Event Workflow Service → Equipment Availability Service
 7. `HTTP 200 Resp {reservationId, equipmentId, quantity}` — Equipment Availability Service → Event Workflow Service
 8. `HTTP POST /forum/entries {entityType: EVENT, entityId, type, message}` — Event Workflow Service → Forum Service
