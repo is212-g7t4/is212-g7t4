@@ -93,7 +93,88 @@ for the "system design" and "code quality" rubric criteria:
 - Install deps: `cd services/<name>-service && uv sync`
 - Run locally: `uv run flask --app app run --debug`
 - Run tests: `uv run pytest`
-- Run the whole system together: `docker compose up` from the repo root
+- Run the whole system together: see below
+
+## Running the whole stack locally
+
+The root `package.json` runs both halves at once with `concurrently`:
+
+```
+npm run dev            # frontend (Vite) + backend (docker compose up)
+npm run dev:frontend   # frontend only — Vite on :5173
+npm run dev:backend    # backend only — docker compose up
+```
+
+Run these **from the repo root**. `npm run dev` inside
+`frontend/event-management-ui/` is a different script — it's plain `vite`
+and starts no backend at all.
+
+### Every compose service needs its own `.env` first
+
+This is the most common way local dev "mysteriously" breaks. Docker Compose
+validates every `env_file` before it starts anything, so **one missing
+`.env` aborts the entire backend** with:
+
+```
+env file .../services/<name>-service/.env not found
+```
+
+Under `npm run dev` the frontend still comes up, so the app looks like it's
+running while every API call fails. Worse, some failures don't look like
+outages: if User Service is down the role falls back to `Event Organiser`,
+so role-gated nav items silently disappear and it reads as a permissions
+bug. Check the backend pane, or `docker compose ps`, before debugging the
+UI.
+
+Fix — one `.env` per service listed in `docker-compose.yml`:
+
+```
+for s in user event coordinator-assignment registration venue; do
+  cp .env "services/$s-service/.env"
+done
+```
+
+Each service also ships a `.env.example` listing the variables it needs; the
+root `.env` is a superset and works for all of them today. `.env` files are
+git-ignored — never commit one.
+
+Check it worked without building anything:
+
+```
+docker compose config >/dev/null && echo OK
+```
+
+Then `docker compose ps` should show every service `Up`, and
+`curl localhost:<port>/health` should return `{"status":"ok"}` — see
+INDEX.md for the port each service uses. Containers started with
+`docker compose up -d` outlive `npm run dev`; stop them with
+`docker compose down`.
+
+### `FRONTEND_ORIGIN` must match the port Vite actually used
+
+Every service does its own CORS check against a single `FRONTEND_ORIGIN`
+(plus its `127.0.0.1` twin), defaulting to `http://localhost:5173`. Vite
+does **not** insist on 5173 — if something else already holds the port it
+prints `Port 5173 is in use, trying another one...` and quietly moves to
+5174. The mismatch is easy to misread: the service returns `200` and the
+payload is fine, but with no `Access-Control-Allow-Origin` header the
+browser discards it, so the UI shows only a generic "unable to load" error
+while `curl` against the same endpoint looks perfectly healthy.
+
+Read the port out of the Vite banner, then either free 5173 and restart, or
+point the services at the port in use:
+
+```
+# in every services/*/.env, then: docker compose up -d
+FRONTEND_ORIGIN=http://localhost:5174
+```
+
+To confirm it's CORS rather than the service, compare the two — only the
+matching origin comes back with the header:
+
+```
+curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allow-origin
+```
 
 ## Testing expectations
 
