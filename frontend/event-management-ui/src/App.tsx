@@ -12,6 +12,7 @@ import { VenueDetailPage } from './pages/VenueDetailPage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Route, User } from './types'
+import { AlertIcon, CheckIcon } from './components/Icon'
 
 const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
 
@@ -74,7 +75,7 @@ function App() {
     equipmentRequirements: '',
     registrationNeeds: '',
   })
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<{ message: string; tone: 'success' | 'error' } | null>(null)
 
   useEffect(() => {
     const handlePopState = () => {
@@ -91,7 +92,7 @@ function App() {
     fetchUsers().then((fetched) => {
       if (active) setUsers(fetched)
     }).catch((cause: Error) => {
-      if (active) setNotice(cause.message)
+      if (active) setNotice({ message: `Unable to load users: ${cause.message}`, tone: 'error' })
     })
     return () => { active = false }
   }, [])
@@ -107,13 +108,13 @@ function App() {
   }, [activeUser])
 
   const navigate = (nextRoute: Route) => {
-    setNotice('')
+    setNotice(null)
     window.history.pushState({}, '', paths[nextRoute])
     setRoute(nextRoute)
   }
 
   const navigateToEvent = (id: string) => {
-    setNotice('')
+    setNotice(null)
     setDetailOrigin(route)
     setEventId(id)
     window.history.pushState({}, '', `/events/${id}`)
@@ -121,7 +122,7 @@ function App() {
   }
 
   const navigateToVenue = (id: string) => {
-    setNotice('')
+    setNotice(null)
     setVenueId(id)
     window.history.pushState({}, '', `/venues/${id}`)
     setRoute('venueDetail')
@@ -133,20 +134,21 @@ function App() {
 
   const role = activeUser?.role ?? 'Event Organiser'
   const isManager = activeUser?.role === 'Event Coordinator' && activeUser?.managerId === null
+  const resolveUserName = (userId: string | null | undefined) => users.find((user) => user.id === userId)?.username ?? null
 
   return <div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
     <main className="main-content">
       <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
-      {notice && <div className="notice" role="status">{notice}</div>}
-      {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} />}
+      {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
+      {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
       {route === 'submit' && <SubmissionPage role={role} />}
-      {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
-      {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
+      {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} />}
-      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
+      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>
 }
