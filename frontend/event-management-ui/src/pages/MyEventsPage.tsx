@@ -4,11 +4,10 @@ import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { Field, StatusBadge } from '../components/FormControls'
-import { users } from '../mockData'
 
 const STATUS_OPTIONS = ['', 'Submitted', 'Approved', 'Rejected']
 
-export function MyEventsPage({ role, currentCoordinatorId, currentCoordinatorName, onViewDetails }: { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }) {
+export function MyEventsPage({ role, isManager, currentCoordinatorId, currentCoordinatorName, onViewDetails }: { role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -18,15 +17,15 @@ export function MyEventsPage({ role, currentCoordinatorId, currentCoordinatorNam
   const [dateTo, setDateTo] = useState('')
   const [query, setQuery] = useState({ status: '', venue: '', dateFrom: '', dateTo: '' })
   const currentCoordinator = {
-    ...users[0],
-    id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || users[0].id,
-    name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || users[0].name,
+    id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || '',
+    name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || '',
   }
 
   useEffect(() => {
-    if (role !== 'Event Coordinator') return
+    if (role !== 'Event Coordinator' || !currentCoordinator.id) return
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
+    if (isManager) params.set('isManager', 'true')
     if (query.status) params.set('status', query.status)
     if (query.venue) params.set('venue', query.venue)
     if (query.dateFrom) params.set('dateFrom', query.dateFrom)
@@ -37,7 +36,7 @@ export function MyEventsPage({ role, currentCoordinatorId, currentCoordinatorNam
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [role, query, currentCoordinator.id])
+  }, [role, isManager, query, currentCoordinator.id])
 
   const applyFilters = (formEvent: FormEvent) => {
     formEvent.preventDefault()

@@ -1,33 +1,46 @@
-# _template-composite-service
+# Coordinator assignment
 
-Minimal, non-working skeleton demonstrating the file structure a
-**composite** service should follow (orchestrates atomics/Forum/the broker,
-holds no data of its own). Copy this directory to start a real composite
-service — see [INDEX.md](../../INDEX.md) for the list of composites still to
-be created, and [AGENTS.md](../../AGENTS.md) for the conventions this
-follows.
+Assigns or reassigns the Event Coordinator on an event. A composite — holds
+no data of its own, calls `user-service` (to validate coordinators and check
+who's making the request) and `event-service` (to persist the assignment).
 
-For the atomic-service pattern (a service that owns one entity + its own
-data store and never calls out), see
-[`../_template-atomic-service/`](../_template-atomic-service/).
+## 1. Start the service
 
-## Structure
+Copy `.env.example` to `.env` — the defaults already match the Docker
+Compose service names for `USER_SERVICE_URL`/`EVENT_SERVICE_URL` (see the
+comment in that file for the localhost equivalents if running outside
+Docker):
 
 ```
-app/
-├── __init__.py   # Flask app factory
-├── routes.py     # blueprint(s) — currently just a /health stub
-└── clients.py    # thin HTTP wrappers for calling downstream services
-tests/
-└── test_health.py
+cp .env.example services/coordinator-assignment-service/.env
 ```
 
-Note there's no `models.py` — composites don't own a database.
-
-## Commands
+Then run:
 
 ```
+cd services/coordinator-assignment-service
 uv sync
-uv run flask --app app run --debug
-uv run pytest
+uv run --env-file .env flask --app app run --port 5004
 ```
+
+Alternatively, after creating `.env`, run
+`docker compose up --build coordinator-assignment-service` from the
+repository root — or just `npm run dev`/`npm run dev:backend`, which brings
+this up alongside every other service.
+
+## Endpoints
+
+- `GET /coordinators` — every Event Coordinator, fetched from `user-service`.
+- `POST /events/<event_id>/assign-coordinator/<coordinator_id>` — assigns or
+  reassigns the coordinator on an event. Body must include
+  `{"actingUserId": "<user id>"}`; only the Event Coordinator manager (role
+  `Event Coordinator`, `manager_id` is `null`) may do this — `403` otherwise.
+  Validates `coordinator_id` is a real, available Event Coordinator before
+  calling `event-service` to persist the change.
+
+## Known limitation
+
+No Forum Service call yet for logging the assignment/reassignment reason —
+flagged as an open architecture question in `AGENTS.md`/`docs/microservices-catalog.md`
+(whether this composite needs one at all, since most assignments won't have
+a reason worth logging).

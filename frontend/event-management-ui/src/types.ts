@@ -1,14 +1,23 @@
-export type Role = 'Requester' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support'
-export type Route = 'dashboard' | 'submit' | 'assignment' | 'manage' | 'review' | 'detail' | 'myEvents'
+export type Role = 'Event Organiser' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support'
+export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'detail' | 'myEvents' | 'venues'
 
 export const routeTitles: Record<Route, string> = {
   dashboard: 'Overview',
   submit: 'Submit an event',
-  assignment: 'Coordinator assignment',
   manage: 'Event information',
   review: 'Request review',
   detail: 'Event record',
   myEvents: 'My events',
+  venues: 'Venue catalogue',
+}
+
+export interface User {
+  id: string
+  username: string
+  email: string
+  role: Role
+  organization: string
+  managerId: string | null
 }
 
 export type RequestStatus =
