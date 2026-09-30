@@ -4,6 +4,7 @@ import { SubmissionPopup } from '../components/SubmissionPopup'
 import { eventApi, SubmissionError, validateEvent } from '../features/event/submission'
 import type { EventData, Role } from '../types'
 import { Field, FormSection } from '../components/FormControls'
+import { VenueSelect } from '../features/venue/VenueSelect'
 
 export function SubmissionPage({ role }: { role: Role }) {
   const [pending, setPending] = useState(false)
@@ -16,6 +17,7 @@ export function SubmissionPage({ role }: { role: Role }) {
     preferredStartDate: '',
     preferredEndDate: '',
     expectedAttendance: '',
+    venueId: '',
     venueRequirements: '',
     accessibilityNeeds: '',
     equipmentRequirements: '',
@@ -53,7 +55,7 @@ export function SubmissionPage({ role }: { role: Role }) {
       setPending(false)
     }
   }
-  if (role !== 'Requester') return <p className="role-warning">Only Event Organisers can submit event requests.</p>
+  if (role !== 'Event Organiser') return <p className="role-warning">Only Event Organisers can submit event requests.</p>
 
   return (
     <div className="page-stack">
@@ -154,6 +156,11 @@ export function SubmissionPage({ role }: { role: Role }) {
           title="Event Requirements"
           hint="The following fields are optional. Provide any requirements that ConnectSphere should consider when reviewing your event."
         >
+          <VenueSelect
+            value={event.venueId}
+            onChange={(value) => updateEvent('venueId', value)}
+          />
+
           <Field
             label="Venue Requirements"
             value={event.venueRequirements}

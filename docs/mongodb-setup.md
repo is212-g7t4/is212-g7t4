@@ -60,7 +60,7 @@ entity.
 |---|---|---|
 | `_id` | string (UUID) | messageId — app-generated, not Mongo's auto ObjectId |
 | `threadId` | ObjectId | logical FK -> `threads._id` |
-| `senderId` | string | `user_service.user_id` — not a real FK, just a plain field |
+| `senderId` | string | `"User".user_id` — not a real FK, just a plain field |
 | `content` | string | |
 | `timestamp` | date | |
 | `attachments` | array | optional; list of `{filename, contentType, size, data}`, `data` is the raw file bytes |

@@ -13,6 +13,7 @@ FIELDS = {
     "preferredStartDate": "preferred_start_date",
     "preferredEndDate": "preferred_end_date",
     "expectedAttendance": "expected_attendance",
+    "venueId": "venue_id",
     "venueRequirements": "venue_requirements",
     "accessibilityNeeds": "accessibility_needs",
     "equipmentRequirements": "equipment_requirements",
@@ -62,11 +63,13 @@ def serialize(row):
     for key in ("preferredStartDate", "preferredEndDate"):
         result[key] = result[key].isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
+    result["venueId"] = str(row["venue_id"]) if row.get("venue_id") else ""
     result.update(
         id=str(row["event_id"]),
         status=row["status"],
         submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
-        if row["submission_date"] else None,
+        if row["submission_date"]
+        else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         decision=decision,
         decisionHistory=history,
@@ -87,12 +90,14 @@ def submit_event(database_url, data):
             ensure_ascii=False,
         ),
         "expectedAttendance": int(data["expectedAttendance"]),
+        # Empty string means "no venue chosen yet" — must be NULL, not "", for the uuid column.
+        "venueId": data.get("venueId") or None,
     }
     values = [stored[key] for key in FIELDS]
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""INSERT INTO public.event_service
+                f"""INSERT INTO public."Event"
                     (event_id, {COLUMNS}, status, submission_date)
                     VALUES (%s, {", ".join(["%s"] * len(FIELDS))},
                             'Submitted', timezone('UTC', CURRENT_TIMESTAMP))
@@ -103,15 +108,15 @@ def submit_event(database_url, data):
     return serialize(saved)
 
 
-def list_submitted(database_url, coordinator_id=None):
-    if coordinator_id is None:
+def list_submitted(database_url, coordinator_id=None, is_manager=False):
+    if is_manager or coordinator_id is None:
         query = f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public.event_service WHERE status = 'Submitted'
+                    FROM public."Event" WHERE status = 'Submitted'
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
         params = []
     else:
         query = f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public.event_service WHERE status = 'Submitted' AND coordinator_id = %s
+                    FROM public."Event" WHERE status = 'Submitted' AND coordinator_id = %s
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
         params = [coordinator_id]
 
@@ -141,7 +146,7 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""UPDATE public.event_service
+                f"""UPDATE public."Event"
                     SET coordinator_id = %s
                     WHERE event_id = %s
                     RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
@@ -153,9 +158,21 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
     return serialize(assigned)
 
 
-def list_events(database_url, coordinator_id, status=None, venue=None, date_from=None, date_to=None):
-    conditions = ["coordinator_id = %s"]
-    params = [coordinator_id]
+def list_events(
+    database_url,
+    coordinator_id,
+    status=None,
+    venue=None,
+    date_from=None,
+    date_to=None,
+    is_manager=False,
+):
+    if is_manager:
+        conditions = []
+        params = []
+    else:
+        conditions = ["coordinator_id = %s"]
+        params = [coordinator_id]
     if status:
         conditions.append("status = %s")
         params.append(status)
@@ -169,32 +186,34 @@ def list_events(database_url, coordinator_id, status=None, venue=None, date_from
     if date_from:
         conditions.append("preferred_end_date >= %s")
         params.append(date_from)
-    where_clause = " AND ".join(conditions)
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public.event_service
-                    WHERE {where_clause}
+                    FROM public."Event"
+                    {where_clause}
                     ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC""",
                 params,
             )
             return [serialize(row) for row in cursor.fetchall()]
 
 
-def get_event(database_url, event_id, coordinator_id):
+def get_event(database_url, event_id, coordinator_id, is_manager=False):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public.event_service
+                    FROM public."Event"
                     WHERE event_id = %s""",
                 [event_id],
             )
             event = cursor.fetchone()
     if not event:
         raise EventNotFoundError
-    if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+    if not is_manager and (
+        not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id
+    ):
         raise EventNotAssignedError
     return serialize(event)
 
@@ -208,7 +227,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public.event_service
+                    FROM public."Event"
                     WHERE event_id = %s
                     FOR UPDATE""",
                 [event_id],
@@ -216,7 +235,10 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             event = cursor.fetchone()
             if not event:
                 raise EventNotFoundError
-            if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
                 raise EventNotAssignedError
             if event["status"] != "Submitted":
                 raise EventNotSubmittedError
@@ -233,7 +255,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             }
             decision_history = [*history, decision]
             cursor.execute(
-                f"""UPDATE public.event_service
+                f"""UPDATE public."Event"
                     SET status = %s,
                         description = jsonb_build_object(
                             '_connectsphere', 'event-submission-v1',
