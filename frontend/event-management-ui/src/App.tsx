@@ -8,6 +8,7 @@ import { MyEventsPage } from './pages/MyEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
+import { VenueDetailPage } from './pages/VenueDetailPage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Route, User } from './types'
@@ -22,6 +23,7 @@ const paths: Record<Route, string> = {
   detail: '/events',
   myEvents: '/my-events',
   venues: '/venues',
+  venueDetail: '/venues',
 }
 
 function getRoute(): Route {
@@ -31,6 +33,7 @@ function getRoute(): Route {
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
   if (path === '/venues') return 'venues'
+  if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
   if (/^\/events\/[^/]+$/.test(path)) return 'detail'
   return 'dashboard'
 }
@@ -40,9 +43,15 @@ function getEventId(): string | null {
   return match ? match[1] : null
 }
 
+function getVenueId(): string | null {
+  const match = window.location.pathname.match(/^\/venues\/([^/]+)$/)
+  return match ? match[1] : null
+}
+
 function App() {
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
+  const [venueId, setVenueId] = useState<string | null>(getVenueId)
   const [detailOrigin, setDetailOrigin] = useState<Route>('review')
   const [users, setUsers] = useState<User[]>([])
   const [activeUserId, setActiveUserId] = useState<string>(() => {
@@ -59,6 +68,7 @@ function App() {
     preferredStartDate: '',
     preferredEndDate: '',
     expectedAttendance: '',
+    venueId: '',
     venueRequirements: '',
     accessibilityNeeds: '',
     equipmentRequirements: '',
@@ -70,6 +80,7 @@ function App() {
     const handlePopState = () => {
       setRoute(getRoute())
       setEventId(getEventId())
+      setVenueId(getVenueId())
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -109,6 +120,13 @@ function App() {
     setRoute('detail')
   }
 
+  const navigateToVenue = (id: string) => {
+    setNotice('')
+    setVenueId(id)
+    window.history.pushState({}, '', `/venues/${id}`)
+    setRoute('venueDetail')
+  }
+
   const updateEvent = (field: keyof EventData, value: string) => {
     setEvent((current) => ({ ...current, [field]: value }))
   }
@@ -126,7 +144,8 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
-      {route === 'venues' && <VenueCataloguePage role={role} />}
+      {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} />}
+      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>

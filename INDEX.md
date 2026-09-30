@@ -89,7 +89,7 @@ call another service, Forum, or the broker.
 |---|---|---|---|---|
 | User | `services/user-service/` | Supabase Postgres | Accounts, roles, manager relationship. Read-only (`GET /users`, `GET /users/:id`) — Supabase Auth/login/JWT issuance not implemented yet | built (read-only) |
 | Event | `services/event-service/` | Supabase Postgres | Event entity: details, status, change-request records | built |
-| Venue | `services/venue-service/` | Supabase Postgres | Venue catalogue (capacity, facilities, accessibility, layouts) + suitability-check computation | built (read-only; no suitability-check endpoint yet) |
+| Venue | `services/venue-service/` | Supabase Postgres | Venue catalogue (capacity, facilities, accessibility, layouts) + suitability-check computation. Read-only: `GET /venues` (catalogue) and `GET /venues/:id` (one venue's full profile, SCRUM-24) | built (read-only; no add/edit or suitability-check endpoint yet) |
 | Venue Availability | `services/venue-availability-service/` | Supabase Postgres | Venue booking records (`public."VenueBooking"`) **and** the overlap/conflict-checking algorithm together — merged design, see the service's README. Replaces the previously separate Booking Conflict Service. | built |
 | Equipment | `services/equipment-service/` | Supabase Postgres | Equipment catalogue only (types, quantities owned, technical specs) — no reservation data | planned |
 | Equipment Availability | `services/equipment-availability-service/` | Supabase Postgres | Reservation records + availability-checking algorithm | planned |
