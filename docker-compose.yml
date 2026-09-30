@@ -40,6 +40,6 @@ services:
   venue-service:
     build: ./services/venue-service
     env_file:
-      - ./services/event-service/.env
+      - ./services/venue-service/.env
     ports:
       - "5006:5000"

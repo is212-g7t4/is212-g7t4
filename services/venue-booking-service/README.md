@@ -41,7 +41,7 @@ every other service.
   - `404` if the event doesn't exist, or if `venueId` isn't in Venue
     Service's catalogue.
   - `403` if the event isn't assigned to `coordinatorId`.
-  - `409` if the venue exists but isn't `Operational`, or if it's already
+  - `409` if the venue exists but isn't `Available`, or if it's already
     booked (Approved) for that time window.
   - `422` if the venue's capacity is below the event's expected attendance.
   - `201` with the persisted booking (`status: "Pending Review"`) once all
