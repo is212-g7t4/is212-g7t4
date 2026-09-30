@@ -1,5 +1,5 @@
 export type Role = 'Event Organiser' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support'
-export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'detail' | 'myEvents' | 'venues'
+export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'detail' | 'myEvents' | 'venues' | 'venueDetail'
 
 export const routeTitles: Record<Route, string> = {
   dashboard: 'Overview',
@@ -9,6 +9,7 @@ export const routeTitles: Record<Route, string> = {
   detail: 'Event record',
   myEvents: 'My events',
   venues: 'Venue catalogue',
+  venueDetail: 'Venue details',
 }
 
 export interface User {
@@ -36,6 +37,7 @@ export interface EventData {
   expectedAttendance: string
 
   // Optional fields
+  venueId: string
   venueRequirements: string
   accessibilityNeeds: string
   equipmentRequirements: string
