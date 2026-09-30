@@ -129,10 +129,19 @@ silently resolve them while implementing; surface the question instead:
 - Whether **Forum Service** is actually needed inside **Coordinator
   Assignment Service** — most assignments won't have a reason worth logging.
 
-If you (the agent) notice the two architecture docs disagree on something
-(they previously did, on whether Venue Availabilities is a separate atomic
-from Booking Conflict — now resolved: **they are separate**, per
-[INDEX.md](INDEX.md)), stop and ask rather than picking one silently.
+If you (the agent) notice the two architecture docs disagree on something,
+stop and ask rather than picking one silently. This happened once already:
+whether Venue Availabilities is a separate atomic from Booking Conflict.
+That's now resolved — **they're merged into one atomic, Venue Availability
+Service** (`services/venue-availability-service/`), which owns both the
+booking records and the overlap/conflict-checking algorithm. This matches
+`docs/supabase-setup.md`'s schema (`public."VenueBooking"`) and how the
+Equipment domain is already decomposed (`Equipment Availability` owns both
+reservation records and its availability-checking algorithm). It also
+avoids a structural problem with the old split: a stateless Booking Conflict
+atomic would have needed to read bookings owned by Venue Availabilities,
+which atomics can't do. `INDEX.md`/`docs/microservices-catalog.md` reflect
+this; there is no separate Booking Conflict service/table.
 
 ## Process note — Scrum & Jira
 

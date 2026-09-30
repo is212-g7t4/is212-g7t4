@@ -45,11 +45,13 @@ assignments won't have a reason worth logging, only reassignments might.
 ### Venue Booking Service
 
 Processes venue booking requests end-to-end: checks suitability (capacity/
-facilities vs. the event's requirements) via Venue Service, checks for
-double-booking via Booking Conflict Service, persists the booking request
-itself in Venue Availabilities, and — only on the venue staff
-approval/rejection sub-flow — logs the decision reason to Forum Service and
-notifies asynchronously.
+facilities vs. the event's requirements) via Venue Service, then persists
+the booking request and checks for double-booking via Venue Availability
+Service (which owns both the records and the conflict check — see the
+Atomic services table below; this merges what used to be two separate
+services, Booking Conflict and Venue Availabilities), and — only on the
+venue staff approval/rejection sub-flow — logs the decision reason to Forum
+Service and notifies asynchronously.
 
 ### Equipment Reservation Service
 
@@ -80,8 +82,7 @@ data store (Postgres unless noted).
 | **User** | User accounts, roles, authentication |
 | **Event** | The Event entity: details, status, change-request records |
 | **Venue** | Venue catalogue — capacity, facilities, accessibility, layouts. Also runs the suitability-check computation (given an event's requirements as input) |
-| **Booking Conflict** | The conflict-detection algorithm only — given a venue + time window, checks for overlaps against existing bookings |
-| **Venue Availabilities** | The actual venue booking records: id, eventId, venueId, status (pending/approved/rejected), proposed date/time, decision reason |
+| **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason) **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
 | **Equipment** | Equipment catalogue only — types, quantities owned, technical specs. Does **not** hold reservation data |
 | **Equipment Availability** | The real reservation records and the availability-checking algorithm together: committed quantities per event/time window, and each request's status (pending_review → approved/rejected) |
 | **Registration** | Attendee registration records |

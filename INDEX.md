@@ -7,12 +7,16 @@ it owns. For *why* the architecture looks like this, see
 this file is a directory, not a design rationale.
 
 > **Status:** two template services and the frontend's dependencies are
-> scaffolded (see below); User, Event, Coordinator Assignment, and
-> Registration are built (see their rows below — User and Registration are
-> deliberately minimal, read-only slices of their eventually-planned scope);
-> the remaining real services in this file are still **planned** — copy the
-> matching template to create each one. Update the status column as each
-> service is actually created.
+> scaffolded (see below); User, Event, Coordinator Assignment, Registration,
+> Venue, Venue Booking, and Venue Availability are built (see their rows
+> below — User and Registration are deliberately minimal, read-only slices
+> of their eventually-planned scope); the remaining real services in this
+> file are still **planned** — copy the matching template to create each
+> one. Update the status column as each service is actually created.
+>
+> **Architecture note:** Booking Conflict Service (previously listed as a
+> separate atomic) has been merged into Venue Availability Service — see
+> that service's row below and its README for why.
 
 ## Repo map
 
@@ -25,14 +29,13 @@ is212-g7t4/
 │   ├── _template-composite-service/    # copy this to start any composite service
 │   ├── event-workflow-service/         # composite (planned)
 │   ├── coordinator-assignment-service/ # composite (built)
-│   ├── venue-booking-service/          # composite (planned)
+│   ├── venue-booking-service/          # composite (built)
 │   ├── equipment-reservation-service/  # composite (planned)
 │   ├── attendee-registration-service/  # composite (planned)
 │   ├── user-service/                   # atomic (built, read-only)
 │   ├── event-service/                  # atomic (built)
-│   ├── venue-service/                  # atomic (planned)
-│   ├── booking-conflict-service/       # atomic (planned)
-│   ├── venue-availability-service/     # atomic (planned)
+│   ├── venue-service/                   # atomic (built, read-only)
+│   ├── venue-availability-service/     # atomic (built) — owns booking records + conflict-checking
 │   ├── equipment-service/              # atomic (planned)
 │   ├── equipment-availability-service/ # atomic (planned)
 │   ├── registration-service/           # atomic (built, read-only)
@@ -73,7 +76,7 @@ composites are allowed to call other services.
 |---|---|---|---|---|
 | Event Workflow Service | `services/event-workflow-service/` | Booking Conflict, Equipment Availability, Forum, Broker | Re-validates existing venue/equipment commitments on event change; cascades cancellations. **Provisional** — see open question below. | planned |
 | Coordinator Assignment Service | `services/coordinator-assignment-service/` | User, Event, Forum, Broker | Assigns/reassigns the Event Coordinator on an event; only the Event Coordinator manager may do so. No Forum call yet. | built |
-| Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Booking Conflict, Venue Availabilities, Forum, Broker | Two sub-flows: booking request submission, and venue-staff approval/rejection. | planned |
+| Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Venue Availability, Forum, Broker | Two sub-flows: booking request submission (`POST /booking-requests`), and venue-staff approval/rejection (`PATCH /booking-requests/<id>/approve\|reject`). Validates event + venue, then persists/conflict-checks via Venue Availability Service. No Forum call/notification yet. | built |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment Availability, Forum, Broker | Two sub-flows: request submission, and technical-support approval/rejection. | planned |
 | Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration, Broker | Register/withdraw an attendee for an event. No Forum call. | planned |
 
@@ -86,9 +89,8 @@ call another service, Forum, or the broker.
 |---|---|---|---|---|
 | User | `services/user-service/` | Supabase Postgres | Accounts, roles, manager relationship. Read-only (`GET /users`, `GET /users/:id`) — Supabase Auth/login/JWT issuance not implemented yet | built (read-only) |
 | Event | `services/event-service/` | Supabase Postgres | Event entity: details, status, change-request records | built |
-| Venue | `services/venue-service/` | Supabase Postgres | Venue catalogue (capacity, facilities, accessibility, layouts) + suitability-check computation | planned |
-| Booking Conflict | `services/booking-conflict-service/` | Supabase Postgres | Conflict-detection algorithm only — no booking records | planned |
-| Venue Availabilities | `services/venue-availability-service/` | Supabase Postgres | Actual venue booking records: id, eventId, venueId, status, proposed date/time, decision reason | planned |
+| Venue | `services/venue-service/` | Supabase Postgres | Venue catalogue (capacity, facilities, accessibility, layouts) + suitability-check computation | built (read-only; no suitability-check endpoint yet) |
+| Venue Availability | `services/venue-availability-service/` | Supabase Postgres | Venue booking records (`public."VenueBooking"`) **and** the overlap/conflict-checking algorithm together — merged design, see the service's README. Replaces the previously separate Booking Conflict Service. | built |
 | Equipment | `services/equipment-service/` | Supabase Postgres | Equipment catalogue only (types, quantities owned, technical specs) — no reservation data | planned |
 | Equipment Availability | `services/equipment-availability-service/` | Supabase Postgres | Reservation records + availability-checking algorithm | planned |
 | Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Read-only (`GET /registrations?eventId=`) — no registration/withdrawal endpoints yet; called directly by the frontend (a "simple read," no composite needed) | built (read-only) |
@@ -115,8 +117,9 @@ uv run pytest
 
 `docker-compose.yml` wires up the composite template placeholder plus the
 real services built so far (User, Event, Coordinator Assignment,
-Registration) — add a service entry there each time another real service is
-copied from a template (see the comment in that file).
+Registration, Venue, Venue Booking, Venue Availability) — add a service
+entry there each time another real service is copied from a template (see
+the comment in that file).
 
 ```
 npm run dev          # frontend (Vite) + backend (docker compose up), together

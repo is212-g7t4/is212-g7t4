@@ -7,6 +7,7 @@ import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
+import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Route, User } from './types'
@@ -20,6 +21,7 @@ const paths: Record<Route, string> = {
   review: '/requests/review',
   detail: '/events',
   myEvents: '/my-events',
+  venues: '/venues',
 }
 
 function getRoute(): Route {
@@ -28,6 +30,7 @@ function getRoute(): Route {
   if (path.includes('/edit')) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
+  if (path === '/venues') return 'venues'
   if (/^\/events\/[^/]+$/.test(path)) return 'detail'
   return 'dashboard'
 }
@@ -114,7 +117,7 @@ function App() {
   const isManager = activeUser?.role === 'Event Coordinator' && activeUser?.managerId === null
 
   return <div className="app-shell">
-    <Sidebar route={route} onNavigate={navigate} />
+    <Sidebar route={route} role={role} onNavigate={navigate} />
     <main className="main-content">
       <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className="notice" role="status">{notice}</div>}
@@ -123,6 +126,7 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice('Event details saved locally.')} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'venues' && <VenueCataloguePage role={role} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>

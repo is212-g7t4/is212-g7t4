@@ -13,6 +13,7 @@ FIELDS = {
     "preferredStartDate": "preferred_start_date",
     "preferredEndDate": "preferred_end_date",
     "expectedAttendance": "expected_attendance",
+    "venueId": "venue_id",
     "venueRequirements": "venue_requirements",
     "accessibilityNeeds": "accessibility_needs",
     "equipmentRequirements": "equipment_requirements",
@@ -62,11 +63,13 @@ def serialize(row):
     for key in ("preferredStartDate", "preferredEndDate"):
         result[key] = result[key].isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
+    result["venueId"] = str(row["venue_id"]) if row.get("venue_id") else ""
     result.update(
         id=str(row["event_id"]),
         status=row["status"],
         submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
-        if row["submission_date"] else None,
+        if row["submission_date"]
+        else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         decision=decision,
         decisionHistory=history,
@@ -87,6 +90,8 @@ def submit_event(database_url, data):
             ensure_ascii=False,
         ),
         "expectedAttendance": int(data["expectedAttendance"]),
+        # Empty string means "no venue chosen yet" — must be NULL, not "", for the uuid column.
+        "venueId": data.get("venueId") or None,
     }
     values = [stored[key] for key in FIELDS]
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -153,7 +158,15 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
     return serialize(assigned)
 
 
-def list_events(database_url, coordinator_id, status=None, venue=None, date_from=None, date_to=None, is_manager=False):
+def list_events(
+    database_url,
+    coordinator_id,
+    status=None,
+    venue=None,
+    date_from=None,
+    date_to=None,
+    is_manager=False,
+):
     if is_manager:
         conditions = []
         params = []
@@ -198,7 +211,9 @@ def get_event(database_url, event_id, coordinator_id, is_manager=False):
             event = cursor.fetchone()
     if not event:
         raise EventNotFoundError
-    if not is_manager and (not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id):
+    if not is_manager and (
+        not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id
+    ):
         raise EventNotAssignedError
     return serialize(event)
 
@@ -220,7 +235,10 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             event = cursor.fetchone()
             if not event:
                 raise EventNotFoundError
-            if not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id:
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
                 raise EventNotAssignedError
             if event["status"] != "Submitted":
                 raise EventNotSubmittedError
