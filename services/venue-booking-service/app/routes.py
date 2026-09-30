@@ -30,7 +30,7 @@ def create_booking_request():
     - eventId: the event this booking is for — its preferredStartDate/
       preferredEndDate are used as the requested booking window
     - venueId: the venue being requested — must exist in Venue Service's
-      catalogue, be Operational, and have enough capacity
+      catalogue, be Available, and have enough capacity
     - coordinatorId: the Event Coordinator making the request; must be the
       coordinator assigned to the event
     """
@@ -63,8 +63,8 @@ def create_booking_request():
     venue = next((v for v in venues if v.get("id") == venue_id), None)
     if venue is None:
         return jsonify(message="Venue must be selected from the venue catalogue."), 404
-    if venue.get("status") != "Operational":
-        return jsonify(message=f"{venue['name']} is not currently operational."), 409
+    if venue.get("status") != "Available":
+        return jsonify(message=f"{venue['name']} is not currently available for booking."), 409
 
     expected_attendance = event.get("expectedAttendance")
     capacity = venue.get("capacity")

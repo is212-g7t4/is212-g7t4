@@ -1,19 +1,12 @@
-import json
 import os
-from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
-from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 
-
-def _json_value(value):
-    if isinstance(value, UUID):
-        return str(value)
-    return value
+from app.models import VenueNotFoundError, get_venue, list_venues
 
 
 def create_app(config=None):
@@ -27,14 +20,24 @@ def create_app(config=None):
     @app.after_request
     def cors(response):
         origin = request.headers.get("Origin")
-        if origin == app.config["FRONTEND_ORIGIN"]:
+        configured_origin = app.config["FRONTEND_ORIGIN"]
+        allowed_origins = {configured_origin}
+        if configured_origin:
+            allowed_origins.add(configured_origin.replace("localhost", "127.0.0.1"))
+            allowed_origins.add(configured_origin.replace("127.0.0.1", "localhost"))
+        if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        if request.method == "OPTIONS":
+            response.status_code = 200
         return response
 
     @app.errorhandler(psycopg2.Error)
     def database_failure(error):
-        return jsonify(message="Unable to load the venue catalogue."), 503
+        # Do not expose credentials, SQL or database internals in the response/log.
+        return jsonify(message="Unable to load venue data."), 503
 
     @app.get("/health")
     def health():
@@ -44,27 +47,17 @@ def create_app(config=None):
     def venues():
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Venue Service."), 503
-        with psycopg2.connect(app.config["DATABASE_URL"], connect_timeout=10) as connection:
-            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(
-                    """SELECT venue_id, venue_name, location, max_capacity,
-                              facilities, accessibility, supported_layouts,
-                              operational_status
-                       FROM public."Venue"
-                       ORDER BY venue_name ASC, venue_id ASC"""
-                )
-                records = []
-                for row in cursor.fetchall():
-                    records.append({
-                        "id": str(row["venue_id"]),
-                        "name": row["venue_name"] or "",
-                        "location": row["location"] or "",
-                        "capacity": row["max_capacity"],
-                        "facilities": row["facilities"] or [],
-                        "accessibility": row["accessibility"] or "",
-                        "supportedLayouts": row["supported_layouts"] or [],
-                        "status": row["operational_status"] or "Unknown",
-                    })
-        return jsonify(venues=records)
+        return jsonify(venues=list_venues(app.config["DATABASE_URL"]))
+
+    @app.get("/venues/<uuid:venue_id>")
+    def venue_details(venue_id):
+        # The `uuid` converter answers a malformed id with a 404 before we get here.
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Venue Service."), 503
+        try:
+            venue = get_venue(app.config["DATABASE_URL"], str(venue_id))
+        except VenueNotFoundError:
+            return jsonify(message="Venue not found."), 404
+        return jsonify(venue=venue)
 
     return app
