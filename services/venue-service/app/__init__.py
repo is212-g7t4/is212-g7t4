@@ -14,6 +14,7 @@ from app.models import (
     get_venue,
     list_venues,
     matches,
+    update_venue,
 )
 from app.validation import validate
 
@@ -83,7 +84,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
         return response
@@ -159,6 +160,41 @@ def create_app(config=None):
                 errors=["A venue with this name already exists."],
             ), 409
         return jsonify(venue=venue), 201
+
+    @app.route("/venues/<uuid:venue_id>", methods=["PUT"])
+    def edit_venue(venue_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        missing, errors = validate(data)
+        if missing or errors:
+            return jsonify(
+                message="Please correct the venue details.",
+                missingFields=missing,
+                errors=errors,
+            ), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Venue Service."), 503
+        details = {
+            "name": data["name"].strip(),
+            "location": data["location"].strip(),
+            "capacity": int(str(data["capacity"]).strip()),
+            "facilities": [item.strip() for item in data["facilities"]],
+            "accessibility": (data.get("accessibility") or "").strip(),
+            "supportedLayouts": [item.strip() for item in data["supportedLayouts"]],
+            "status": data["status"].strip(),
+        }
+        try:
+            venue = update_venue(app.config["DATABASE_URL"], str(venue_id), details)
+        except DuplicateVenueNameError:
+            return jsonify(
+                message="Please correct the venue details.",
+                missingFields=[],
+                errors=["A venue with this name already exists."],
+            ), 409
+        except VenueNotFoundError:
+            return jsonify(message="Venue not found."), 404
+        return jsonify(venue=venue), 200
 
     @app.route("/venues/<uuid:venue_id>", methods=["GET"])
     def venue_details(venue_id):

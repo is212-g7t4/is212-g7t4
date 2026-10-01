@@ -62,6 +62,14 @@ export class VenueSubmissionError extends Error {
 const venueServiceUrl = () => import.meta.env.VITE_VENUE_SERVICE_URL || 'http://localhost:5006'
 
 export async function createVenue(form: VenueFormData): Promise<Venue> {
+  return saveVenue('/venues', 'POST', form)
+}
+
+export async function updateVenue(venueId: string, form: VenueFormData): Promise<Venue> {
+  return saveVenue(`/venues/${encodeURIComponent(venueId)}`, 'PUT', form)
+}
+
+async function saveVenue(path: string, method: 'POST' | 'PUT', form: VenueFormData): Promise<Venue> {
   const payload = {
     name: form.name.trim(),
     location: form.location.trim(),
@@ -71,8 +79,8 @@ export async function createVenue(form: VenueFormData): Promise<Venue> {
     supportedLayouts: splitList(form.supportedLayouts),
     status: form.status.trim(),
   }
-  const response = await fetch(`${venueServiceUrl()}/venues`, {
-    method: 'POST',
+  const response = await fetch(`${venueServiceUrl()}${path}`, {
+    method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })

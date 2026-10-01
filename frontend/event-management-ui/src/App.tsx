@@ -11,7 +11,7 @@ import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
 import { VenueSearchPage } from './pages/VenueSearchPage'
-import { AddVenuePage } from './pages/AddVenuePage'
+import { AddVenuePage, EditVenuePage } from './pages/AddVenuePage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Route, User } from './types'
@@ -33,16 +33,18 @@ const paths: Record<Route, string> = {
   // venue detail page.
   venueSearch: '/venue-search',
   addVenue: '/venues/new',
+  editVenue: '/venues',
 }
 
 function getRoute(): Route {
   const path = window.location.pathname
   if (path === '/events/new') return 'submit'
-  if (path.includes('/edit')) return 'manage'
+  if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
   if (path === '/venue-availability') return 'venueCalendar'
   if (path === '/venues/new') return 'addVenue'
+  if (/^\/venues\/[^/]+\/edit$/.test(path)) return 'editVenue'
   if (path === '/venues') return 'venues'
   if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
@@ -56,7 +58,7 @@ function getEventId(): string | null {
 }
 
 function getVenueId(): string | null {
-  const match = window.location.pathname.match(/^\/venues\/([^/]+)$/)
+  const match = window.location.pathname.match(/^\/venues\/([^/]+)(?:\/edit)?$/)
   return match ? match[1] : null
 }
 
@@ -146,6 +148,13 @@ function App() {
     setRoute('venueDetail')
   }
 
+  const navigateToVenueEdit = (id: string) => {
+    setNotice(null)
+    setVenueId(id)
+    window.history.pushState({}, '', `/venues/${id}/edit`)
+    setRoute('editVenue')
+  }
+
   const updateEvent = (field: keyof EventData, value: string) => {
     setEvent((current) => ({ ...current, [field]: value }))
   }
@@ -166,10 +175,10 @@ function App() {
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
-  {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
-      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} />}
-  {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
+      {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
+      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
+      {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>

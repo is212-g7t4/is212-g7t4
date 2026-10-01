@@ -1,17 +1,58 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { SubmissionPopup } from '../components/SubmissionPopup'
-import { createVenue, emptyVenueForm, VENUE_STATUSES, validateVenueForm, VenueSubmissionError } from '../features/venue/venueForm'
+import { createVenue, emptyVenueForm, updateVenue, VENUE_STATUSES, validateVenueForm, VenueSubmissionError } from '../features/venue/venueForm'
 import type { VenueFormData } from '../features/venue/venueForm'
 import type { Role } from '../types'
 import { canManageVenues, VENUE_ACCESS_NOTICE } from '../features/venue/permissions'
 import { Field, FormSection, RoleWarning } from '../components/FormControls'
 import { Spinner } from '../components/Loading'
+import { fetchVenue } from '../features/venue/venues'
+import { ArrowLeftIcon } from '../components/Icon'
 
-export function AddVenuePage({ role, onSaved }: { role: Role; onSaved: (venueId: string) => void }) {
+type VenueFormPageProps = {
+  role: Role
+  onSaved: (venueId: string) => void
+  venueId?: string
+  onCancel?: () => void
+}
+
+export function AddVenuePage({ role, onSaved }: VenueFormPageProps) {
+  return <VenueFormPage role={role} onSaved={onSaved} />
+}
+
+export function EditVenuePage({ role, venueId, onSaved, onCancel }: VenueFormPageProps & { venueId: string }) {
+  return <VenueFormPage role={role} venueId={venueId} onSaved={onSaved} onCancel={onCancel} />
+}
+
+function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps) {
   const [pending, setPending] = useState(false)
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
   const [form, setForm] = useState<VenueFormData>(emptyVenueForm)
+  const [loading, setLoading] = useState(Boolean(venueId))
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    if (!venueId || !canManageVenues(role)) return
+    let active = true
+    fetchVenue(venueId).then((venue) => {
+      if (!active) return
+      setForm({
+        name: venue.name,
+        location: venue.location,
+        capacity: venue.capacity === null ? '' : String(venue.capacity),
+        facilities: venue.facilities.join(', '),
+        accessibility: venue.accessibility,
+        supportedLayouts: venue.supportedLayouts.join(', '),
+        status: venue.status,
+      })
+    }).catch((cause: Error) => {
+      if (active) setLoadError(cause.message)
+    }).finally(() => {
+      if (active) setLoading(false)
+    })
+    return () => { active = false }
+  }, [role, venueId])
 
   const update = (field: keyof VenueFormData, value: string) => {
     setForm((current) => ({ ...current, [field]: value }))
@@ -27,9 +68,12 @@ export function AddVenuePage({ role, onSaved }: { role: Role; onSaved: (venueId:
     }
     setPending(true)
     try {
-      const saved = await createVenue(form)
-      setForm(emptyVenueForm)
-      setPopup({ title: 'Venue Added', messages: [`${saved.name} was added to the catalogue.`] })
+      const saved = venueId ? await updateVenue(venueId, form) : await createVenue(form)
+      if (!venueId) setForm(emptyVenueForm)
+      setPopup({
+        title: venueId ? 'Venue Updated' : 'Venue Added',
+        messages: [venueId ? `${saved.name} was updated.` : `${saved.name} was added to the catalogue.`],
+      })
       onSaved(saved.id)
     } catch (cause) {
       setPopup(cause instanceof VenueSubmissionError ? {
@@ -43,12 +87,16 @@ export function AddVenuePage({ role, onSaved }: { role: Role; onSaved: (venueId:
 
   if (!canManageVenues(role)) return <RoleWarning>{VENUE_ACCESS_NOTICE}</RoleWarning>
 
+  if (loading) return <div className="page-stack"><p>Loading venue details…</p></div>
+  if (loadError) return <div className="page-stack">{onCancel && <button type="button" className="button small" onClick={onCancel}><ArrowLeftIcon size={13} /> Back to venue details</button>}<p className="field-error" role="alert">{loadError}</p></div>
+
   return (
     <div className="page-stack">
       {popup && <SubmissionPopup {...popup} onClose={() => setPopup(null)} />}
       <section className="intro">
-        <h1>Add Venue</h1>
-        <p className="muted">Add a new venue to the catalogue.</p>
+        {onCancel && <button type="button" className="button small" onClick={onCancel}><ArrowLeftIcon size={13} /> Back to venue details</button>}
+        <h1>{venueId ? 'Edit Venue' : 'Add Venue'}</h1>
+        <p className="muted">{venueId ? 'Update this venue’s details and operating status.' : 'Add a new venue to the catalogue.'}</p>
       </section>
 
       <form noValidate className="panel form-panel" onSubmit={handleSubmit}>
@@ -78,7 +126,7 @@ export function AddVenuePage({ role, onSaved }: { role: Role; onSaved: (venueId:
           <div className="form-actions">
             <button type="submit" className="button primary">
               {pending && <Spinner size={13} />}
-              {pending ? 'Saving…' : 'Save Venue'}
+              {pending ? 'Saving…' : venueId ? 'Save Changes' : 'Save Venue'}
             </button>
           </div>
         </fieldset>
