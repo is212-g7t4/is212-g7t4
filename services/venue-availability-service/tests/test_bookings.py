@@ -149,3 +149,4 @@ def test_get_bookings_lists_for_venue(setup):
 
     assert response.status_code == 200
     assert len(response.json["bookings"]) == 1
+
