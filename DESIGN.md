@@ -23,27 +23,27 @@ colors:
   error-soft: "#fbe9e8"
 typography:
   headline:
-    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "20px"
     fontWeight: 600
     lineHeight: 1.3
     letterSpacing: "-0.015em"
   title:
-    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "18px"
     fontWeight: 600
     letterSpacing: "-0.01em"
   subtitle:
-    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "14.5px"
     fontWeight: 600
   body:
-    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "13.5px"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontFamily: "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "10.5px"
     fontWeight: 600
     letterSpacing: "0.06em"
@@ -144,9 +144,9 @@ The palette is a tight neutral-gray scale carrying nearly all UI weight, with on
 
 ## Typography
 
-**Body Font:** Inter (with `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`)
+**Body Font:** IBM Plex Sans (with `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`)
 
-**Character:** A single, tightly-tracked Inter family for the entire interface — no serif or display face, no mono face for labels. Weight (400/500/600) and size (10.5px–22px) do the differentiating work, not font-family switching.
+**Character:** A single IBM Plex Sans family for the entire interface — a humanist face drawn for UI, chosen over a neutral grotesque because it stays legible at the 10.5–12px this system uses for chips and metadata, and gives the warm cream/crimson palette some personality — no serif or display face, no mono face for labels. Weight (400/500/600) and size (10.5px–22px) do the differentiating work, not font-family switching.
 
 ### Hierarchy
 - **Headline** (600, 20px, tight `-0.015em` tracking): page `h1` in the topbar.
@@ -222,5 +222,5 @@ Every status or availability state in the product (request status, venue availab
 - **Don't** introduce a kicker or eyebrow label above any heading — the build contains none, and none should be added (The No-Kicker Rule).
 - **Don't** use hard offset ("brutalist") shadows; every shadow in the shipped system is soft and ambient.
 - **Don't** introduce a second accent hue; the system is neutral gray plus one indigo pair, with success/warning/error reserved strictly for status semantics.
-- **Don't** use emoji, unicode symbols, or a system display face for icons or headings; the outline SVG set and Inter are the only vocabulary.
+- **Don't** use emoji, unicode symbols, or a system display face for icons or headings; the outline SVG set and IBM Plex Sans are the only vocabulary.
 - **Don't** reintroduce gradient text or gradient fills; none exist in the build and none are part of this system.
