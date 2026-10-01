@@ -14,7 +14,9 @@ def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
-        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
+        # The Vite dev server is pinned to 5174 (strictPort in
+        # vite.config.ts), so that is the origin the browser sends.
+        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
     app.config.update(config or {})
 
