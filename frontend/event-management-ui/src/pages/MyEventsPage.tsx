@@ -6,6 +6,7 @@ import type { SubmittedEvent } from '../features/event/submission'
 import { Field, RoleWarning, StatusBadge } from '../components/FormControls'
 import { ArrowRightIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
+import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 
 const STATUS_OPTIONS = ['', 'Submitted', 'Approved', 'Rejected']
 
@@ -66,11 +67,27 @@ export function MyEventsPage({ role, isManager, currentCoordinatorId, currentCoo
     </form>
     {loading ? <EventCardSkeletonList /> : error ? <p className="field-error" role="alert">{error}</p> :
       events.length === 0 ? <p>No events match these filters.</p> :
-      events.map((event) => <article key={event.id} className="panel">
-        <h2>{event.eventName}</h2><StatusBadge status={event.status} />
-        <p>{event.preferredStartDate.replace('T', ' ')} – {event.preferredEndDate.replace('T', ' ')}</p>
-        <p className="muted">{event.venueRequirements || 'No venue requirements specified'}</p>
-        <button className="button small" onClick={() => onViewDetails(event.id)}>View details <ArrowRightIcon size={13} /></button>
-      </article>)}
+      events.map((event) => {
+        const tile = getDateTile(event.preferredStartDate)
+        return (
+          <button key={event.id} type="button" className="panel event-row-card" onClick={() => onViewDetails(event.id)}>
+            <span className="event-row-date">
+              <span className="event-row-date-month">{tile.month}</span>
+              <span className="event-row-date-day">{tile.day}</span>
+            </span>
+
+            <span className="event-row-body">
+              <span className="event-row-heading">
+                <strong>{event.eventName}</strong>
+                <StatusBadge status={event.status} />
+              </span>
+              <span className="event-row-schedule muted">{formatSchedule(event.preferredStartDate, event.preferredEndDate)}</span>
+              <span className="event-row-venue muted">{event.venueRequirements || 'No venue requirements specified'}</span>
+            </span>
+
+            <ArrowRightIcon size={16} className="icon" />
+          </button>
+        )
+      })}
   </div>
 }
