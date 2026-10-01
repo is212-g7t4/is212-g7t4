@@ -1,14 +1,4 @@
 services:
-  # Placeholder entry until more composites are copied from the template
-  # (see INDEX.md). Add one entry per real service as it's created, following
-  # the same pattern: build context, .env file, and a unique host port.
-  template-composite-service:
-    build: ./services/_template-composite-service
-    env_file:
-      - ./services/_template-composite-service/.env.example
-    ports:
-      - "5002:5000"
-
   user-service:
     build: ./services/user-service
     env_file:
@@ -43,3 +33,17 @@ services:
       - ./services/venue-service/.env
     ports:
       - "5006:5000"
+
+  venue-booking-service:
+    build: ./services/venue-booking-service
+    env_file:
+      - ./services/venue-booking-service/.env
+    ports:
+      - "5007:5000"
+
+  venue-availability-service:
+    build: ./services/venue-availability-service
+    env_file:
+      - ./services/venue-availability-service/.env
+    ports:
+      - "5008:5000"
