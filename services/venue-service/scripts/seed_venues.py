@@ -74,7 +74,9 @@ VENUES = [
         "venue_name": "Innovation Lab",
         "location": "Level 7, Main Tower",
         "max_capacity": 60,
-        "facilities": {"wifi": True, "whiteboards": True, "movable_furniture": True},
+        # Singular "whiteboard" matches the other rows, so SCRUM-26's facility
+        # filter treats them as the same facility.
+        "facilities": {"wifi": True, "whiteboard": True, "movable_furniture": True},
         "accessibility": "Wheelchair accessible",
         "supported_layouts": ["workshop", "classroom"],
         "operational_status": "Available",

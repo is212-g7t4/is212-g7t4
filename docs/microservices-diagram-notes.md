@@ -112,7 +112,7 @@ Notification, Forum / Communication (MongoDB).
 **Infra:** Message Broker (RabbitMQ, async notifications only), Email/SMS
 Wrapper (called only by Notification Service).
 
-## Diagram 1 — Venue Booking Service (composite, two sub-flows)
+## Diagram 1 — Venue Booking Service (composite, three sub-flows)
 
 **Sub-flow A — booking request submission:**
 
@@ -137,6 +137,17 @@ Wrapper (called only by Notification Service).
 16. `PUBLISH notifications.queue {userId, type: BOOKING_DECISION, eventId, venueId, decision}` — Venue Booking Service → Message Broker (async)
 17. `HTTP POST /send {channel, to, template, data}` — Notification Service → Email/SMS Wrapper
 18. `HTTP 200 Resp {bookingId, status}` — Venue Booking Service → UI
+
+**Sub-flow C — venue search** (SCRUM-26; read-only, so no Forum entry and no
+broker message). Steps 20 and 22 are independent and run at the same time, so
+the search costs the slower call rather than their sum:
+
+19. `HTTP GET /venue-search?start=&end=&expectedAttendance=&minCapacity=&location=&layout=&facility=&accessibility=` — UI → Venue Booking Service
+20. `HTTP GET /venues?minCapacity=&location=&layout=&facility=&accessibility=` — Venue Booking Service → Venue Service (the suitability check over the catalogue)
+21. `HTTP 200 Resp {venues: [...]}` — Venue Service → Venue Booking Service
+22. `HTTP GET /venue-bookings?dateFrom={start}&dateTo={end}` — Venue Booking Service → Venue Availability Service (every venue's non-rejected bookings overlapping the window)
+23. `HTTP 200 Resp {bookings: [...]}` — Venue Availability Service → Venue Booking Service
+24. `HTTP 200 Resp {venues: [{...venue, availability}], count}`, or `HTTP 400 Resp {message, missing}` for an incomplete search — Venue Booking Service → UI
 
 ## Diagram 2 — Event Workflow Service (composite)
 

@@ -38,7 +38,9 @@ def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
-        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
+        # The Vite dev server is pinned to 5174 (strictPort in
+        # vite.config.ts), so that is the origin the browser sends.
+        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
     app.config.update(config or {})
 
@@ -71,6 +73,16 @@ def create_app(config=None):
             if request.args.get("dateTo")
             else None
         )
+        # SCRUM-26: a window the service can't read used to be dropped
+        # silently, so a typo returned every booking instead of the ones
+        # overlapping the search. Say so rather than answering the wrong
+        # question.
+        if (request.args.get("dateFrom") and not date_from) or (
+            request.args.get("dateTo") and not date_to
+        ):
+            return jsonify(
+                message="dateFrom and dateTo must be valid dates and times."
+            ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."

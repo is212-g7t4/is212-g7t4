@@ -31,7 +31,11 @@ Or `docker compose up --build venue-availability-service` / `npm run dev`.
 - `GET /venue-bookings?venueId=&dateFrom=&dateTo=` — calendar read. Returns
   `Pending Review` and `Approved` bookings in the given range (`Rejected`
   bookings are excluded); only `Approved` bookings should be treated as
-  blocking by the caller.
+  blocking by the caller. Omit `venueId` for every venue, which is how
+  SCRUM-26's venue search gets the bookings for its window in one call.
+  `400` if `dateFrom` or `dateTo` is present but isn't a naive ISO date-time
+  (`2026-11-10T09:00:00`; no time-zone offset, since `VenueBooking` stores
+  `timestamp without time zone`).
 - `POST /venue-bookings` — creates a booking request as `Pending Review`.
   Body: `{"eventId", "venueId", "requestedStartTime", "requestedEndTime", "requestedBy"}`.
   `409` if it overlaps an `Approved` booking for the same venue.
