@@ -4,6 +4,8 @@ from uuid import uuid4
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from app.calendar import SINGAPORE
+
 # Only columns owned by Venue Availability Service; no queries to other
 # services' tables. This atomic owns both the booking records and the
 # overlap/conflict computation over them (merged design — see AGENTS.md).
@@ -34,31 +36,77 @@ def serialize(row):
     }
 
 
-def list_bookings(database_url, venue_id=None, date_from=None, date_to=None):
-    """Calendar read. Rejected bookings are excluded; Pending Review and
-    Approved are both returned — only Approved should be treated as blocking
-    by the caller (see docs/supabase-setup.md)."""
-    conditions = ["status <> 'Rejected'"]
-    params = []
-    if venue_id:
-        conditions.append("venue_id = %s")
-        params.append(venue_id)
-    if date_to:
-        conditions.append("requested_start_time < %s")
-        params.append(date_to)
-    if date_from:
-        conditions.append("requested_end_time > %s")
-        params.append(date_from)
-    where_clause = f"WHERE {' AND '.join(conditions)}"
+def serialize_calendar(row):
+    result = serialize(row)
+    result["requestedStartTime"] = (
+        row["requested_start_time"].replace(tzinfo=SINGAPORE).isoformat()
+    )
+    result["requestedEndTime"] = (
+        row["requested_end_time"].replace(tzinfo=SINGAPORE).isoformat()
+    )
+    result["blocksSelection"] = row["status"] == "Approved"
+    return result
+
+
+class CalendarDataError(Exception):
+    """Cannot safely infer availability from the stored records."""
+
+
+def validate_calendar_row(row):
+    from datetime import datetime
+    from uuid import UUID
+
+    try:
+        for field in ("booking_id", "event_id", "venue_id"):
+            UUID(str(row[field]))
+        start, end = row["requested_start_time"], row["requested_end_time"]
+        if (
+            not isinstance(start, datetime)
+            or not isinstance(end, datetime)
+            or start.tzinfo is not None
+            or end.tzinfo is not None
+            or end <= start
+            or start in (datetime.min, datetime.max)
+            or end in (datetime.min, datetime.max)
+        ):
+            raise ValueError("Invalid local interval")
+        if row["status"] not in {"Approved", "Pending", "Pending Review"}:
+            raise ValueError("Unknown status")
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        raise CalendarDataError from error
+
+
+def list_bookings(database_url, venue_id, date_from, date_to):
+    """Bounded calendar read, including invalid candidates so they fail closed.
+
+    Null venue IDs cannot safely be assigned to any venue. Invalid intervals
+    for this venue (or an unknown venue) fail the entire read even outside the
+    window; otherwise malformed times could disappear in SQL comparisons.
+    """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."VenueBooking"
-                    {where_clause}
+                    WHERE (venue_id = %s OR venue_id IS NULL)
+                      AND (status IS NULL OR status NOT IN ('Rejected', 'Cancelled'))
+                      AND ((requested_start_time < %s AND requested_end_time > %s)
+                        OR requested_start_time IS NULL
+                        OR requested_end_time IS NULL
+                        OR requested_end_time <= requested_start_time)
                     ORDER BY requested_start_time ASC, booking_id ASC""",
-                params,
+                [venue_id, date_to, date_from],
             )
-            return [serialize(row) for row in cursor.fetchall()]
+            bookings = []
+            for row in cursor.fetchall():
+                if row.get("status") in {"Rejected", "Cancelled"}:
+                    continue
+                validate_calendar_row(row)
+                if (
+                    row["requested_start_time"] < date_to
+                    and row["requested_end_time"] > date_from
+                ):
+                    bookings.append(serialize_calendar(row))
+            return bookings
 
 
 def _has_conflict(cursor, venue_id, start, end, exclude_booking_id=None):
