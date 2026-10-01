@@ -3,6 +3,9 @@ import type { Role } from '../types'
 import { fetchVenue } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
 import { VENUE_ACCESS_NOTICE, canViewVenues } from '../features/venue/permissions'
+import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
+import { RoleWarning } from '../components/FormControls'
+import { DetailPanelSkeleton } from '../components/Loading'
 
 function statusClass(status: string): string {
   return status.toLowerCase().replace(/\s+/g, '-')
@@ -38,16 +41,16 @@ export function VenueDetailPage({ venueId, role, onBack }: { venueId: string; ro
     return () => { active = false }
   }, [venueId, role, refresh])
 
-  if (!canViewVenues(role)) return <p className="role-warning">{VENUE_ACCESS_NOTICE}</p>
+  if (!canViewVenues(role)) return <RoleWarning>{VENUE_ACCESS_NOTICE}</RoleWarning>
 
   return <div className="page-stack">
     <section className="intro">
-      <button className="button small" onClick={onBack}>← Back to venue catalogue</button>{' '}
-      <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh</button>
+      <button className="button small" onClick={onBack}><ArrowLeftIcon size={13} /> Back to venue catalogue</button>{' '}
+      <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}><RefreshIcon size={13} /> Refresh</button>
     </section>
-    {loading ? <p role="status">Loading venue details…</p> : error ? <p role="alert">{error}</p> : venue && <article className="panel event-card">
+    {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : venue && <article className="panel event-card">
       <header className="event-card-header">
-        <div><p className="eyebrow">VENUE</p><h2>{venue.name || 'Not specified'}</h2></div>
+        <h2>{venue.name || 'Not specified'}</h2>
         <span className={`venue-status ${statusClass(venue.status)}`}>{venue.status}</span>
       </header>
       <dl className="event-details">

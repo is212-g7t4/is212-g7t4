@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
+import { EventOverview } from '../features/event/EventOverview'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
-import { StatusBadge } from '../components/FormControls'
+import { RoleWarning, StatusBadge } from '../components/FormControls'
+import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
+import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
 
-export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId, currentCoordinatorName, backLabel, onBack }: { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; backLabel: string; onBack: () => void }) {
+export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -45,31 +48,21 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
     return () => { active = false }
   }, [eventId, role, event?.status, refresh])
 
-  if (role !== 'Event Coordinator') return <p className="role-warning">Event details are visible to Event Coordinators.</p>
+  if (role !== 'Event Coordinator') return <RoleWarning>Event details are visible to Event Coordinators.</RoleWarning>
 
   return <div className="page-stack">
     <section className="intro">
-      <button className="button small" onClick={onBack}>← Back to {backLabel}</button>{' '}
-      <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh</button>
+      <button className="button small" onClick={onBack}><ArrowLeftIcon size={13} /> Back to {backLabel}</button>{' '}
+      <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}><RefreshIcon size={13} /> Refresh</button>
     </section>
-    {loading ? <p role="status">Loading event details…</p> : error ? <p role="alert">{error}</p> : event && <article className="panel">
-      <h2>{event.eventName}</h2><StatusBadge status={event.status} />
-      <p>Submitted: {event.submittedAt ? new Date(event.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT' : 'Not recorded'}</p>
-      {event.decision?.decidedAt && <p>Decision: {event.decision.status} on {new Date(event.decision.decidedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT</p>}
-      <dl>{[
-        ['Description', event.description], ['Purpose', event.purpose],
-        ['Preferred start', event.preferredStartDate.replace('T', ' ')],
-        ['Preferred end', event.preferredEndDate.replace('T', ' ')],
-        ['Expected attendance', event.expectedAttendance],
-        ['Venue requirements', event.venueRequirements], ['Accessibility needs', event.accessibilityNeeds],
-        ['Equipment requirements', event.equipmentRequirements], ['Registration needs', event.registrationNeeds],
-        ['Assigned coordinator', event.coordinatorId || 'Not assigned'],
-      ].map(([label, value]) => <div key={label}><dt><strong>{label}</strong></dt><dd style={{ whiteSpace: 'pre-wrap' }}>{value || 'Not specified'}</dd></div>)}</dl>
-      <p className="muted">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
+    {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
+      <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
+      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
+      <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
 
-      {event.status === 'Approved' && <>
+      {event.status === 'Approved' && <div className="event-card-section">
         <h3>Registrations</h3>
-        {registrationsLoading ? <p role="status">Loading registrations…</p> : registrationsError ? <p role="alert">{registrationsError}</p> : <>
+        {registrationsLoading ? <TableSkeleton rows={3} columns={5} /> : registrationsError ? <p className="field-error" role="alert">{registrationsError}</p> : <>
           {(() => {
             const confirmedCount = registrations.filter((registration) => registration.status === 'Confirmed').length
             const capacity = Number(event.expectedAttendance)
@@ -93,7 +86,7 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
             </table>
           </div>}
         </>}
-      </>}
+      </div>}
     </article>}
   </div>
 }

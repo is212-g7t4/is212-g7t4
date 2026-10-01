@@ -219,3 +219,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ai stuff
+.agents/*
+.claude/*
+.codex/*
+.impeccable/*

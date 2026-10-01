@@ -1,15 +1,65 @@
+import type { ReactNode } from 'react'
 import type { Role, Route, User } from '../types'
 import { routeTitles } from '../types'
 import { canViewVenues } from '../features/venue/permissions'
+import { BuildingIcon, CheckIcon, EditIcon, HomeIcon, ListIcon, PlusIcon } from './Icon'
 
 export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role; onNavigate: (route: Route) => void }) {
-  return <aside className="sidebar"><div className="brand"><span className="brand-mark">C</span><span>ConnectSphere</span></div><p className="nav-label">Workspace</p><nav className="nav-list" aria-label="Main navigation"><NavButton active={route === 'dashboard'} onClick={() => onNavigate('dashboard')} icon="⌂">Overview</NavButton><NavButton active={route === 'submit'} onClick={() => onNavigate('submit')} icon="＋">Submit event</NavButton><NavButton active={route === 'manage'} onClick={() => onNavigate('manage')} icon="✎">Event details</NavButton><NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon="✓">Request review</NavButton><NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon="▤">My events</NavButton>{canViewVenues(role) && <NavButton active={route === 'venues' || route === 'venueDetail'} onClick={() => onNavigate('venues')} icon="▥">Venues</NavButton>}</nav><div className="sidebar-footer"><span className="status-dot" /> UI baseline · mock data</div></aside>
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <span className="brand-mark">C</span>
+        <span>ConnectSphere</span>
+      </div>
+
+      <p className="nav-label">Workspace</p>
+
+      <nav className="nav-list" aria-label="Main navigation">
+        <NavButton active={route === 'dashboard'} onClick={() => onNavigate('dashboard')} icon={<HomeIcon size={17} />}>Overview</NavButton>
+        <NavButton active={route === 'submit'} onClick={() => onNavigate('submit')} icon={<PlusIcon size={17} />}>Submit event</NavButton>
+        <NavButton active={route === 'manage'} onClick={() => onNavigate('manage')} icon={<EditIcon size={17} />}>Event details</NavButton>
+        <NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon={<CheckIcon size={17} />}>Request review</NavButton>
+        <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
+        {canViewVenues(role) && (
+          <NavButton active={route === 'venues' || route === 'venueDetail'} onClick={() => onNavigate('venues')} icon={<BuildingIcon size={17} />}>Venues</NavButton>
+        )}
+      </nav>
+
+      <div className="sidebar-footer">
+        <span className="status-dot" />
+        <span className="sidebar-footer-label">UI baseline · mock data</span>
+      </div>
+    </aside>
+  )
 }
 
-function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: string; children: string }) {
-  return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}><span>{icon}</span>{children}</button>
+function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: ReactNode; children: string }) {
+  return (
+    <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>
+      <span className="icon">{icon}</span>
+      <span className="nav-button-label">{children}</span>
+    </button>
+  )
 }
 
 export function Topbar({ route, users, activeUserId, onUserChange }: { route: Route; users: User[]; activeUserId: string; onUserChange: (userId: string) => void }) {
-  return <header className="topbar"><div><p className="eyebrow">EVENT OPERATIONS</p><h1>{routeTitles[route]}</h1></div><label className="role-switcher">Viewing as<select value={activeUserId} onChange={(change) => onUserChange(change.target.value)} aria-label="Select active user">{users.map((user) => <option key={user.id} value={user.id}>{user.username} — {user.role}</option>)}</select></label></header>
+  return (
+    <header className="topbar">
+      <h1>{routeTitles[route]}</h1>
+
+      <label className="role-switcher">
+        Viewing as
+        <select
+          value={activeUserId}
+          onChange={(change) => onUserChange(change.target.value)}
+          aria-label="Select active user"
+          disabled={users.length === 0}
+        >
+          {users.length === 0
+            ? <option value="">No users available</option>
+            : users.map((user) => <option key={user.id} value={user.id}>{user.username} — {user.role}</option>)}
+        </select>
+      </label>
+    </header>
+  )
 }

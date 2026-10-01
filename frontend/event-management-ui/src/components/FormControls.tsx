@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { RequestStatus } from '../types'
+import { AlertIcon, CheckIcon } from './Icon'
 
 export function FormSection({
   title,
@@ -74,6 +75,15 @@ export function Field({
   )
 }
 
+export function RoleWarning({ children }: { children: ReactNode }) {
+  return (
+    <p className="role-warning">
+      <AlertIcon size={15} />
+      {children}
+    </p>
+  )
+}
+
 export function StatusBadge({
   status,
 }: {
@@ -99,7 +109,7 @@ export function Impact({
     <div className="impact-row">
       <span>
         <span className={`impact-icon ${tone}`}>
-          {tone === 'success' ? '✓' : '!'}
+          {tone === 'success' ? <CheckIcon size={13} /> : <AlertIcon size={13} />}
         </span>
 
         {label}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchVenues } from './venues'
 import type { Venue } from './venues'
+import { InlineLoading } from '../../components/Loading'
 
 export function VenueSelect({
   value,
@@ -30,9 +31,9 @@ export function VenueSelect({
       <span>Venue</span>
 
       {loading ? (
-        <p className="muted">Loading venues…</p>
+        <InlineLoading label="Loading venues…" />
       ) : error ? (
-        <p role="alert">{error}</p>
+        <p className="field-error" role="alert">{error}</p>
       ) : (
         <select value={value} onChange={(event) => onChange(event.target.value)}>
           <option value="">Select a venue</option>

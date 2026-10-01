@@ -3,7 +3,8 @@ import type { FormEvent } from 'react'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { eventApi, SubmissionError, validateEvent } from '../features/event/submission'
 import type { EventData, Role } from '../types'
-import { Field, FormSection } from '../components/FormControls'
+import { Field, FormSection, RoleWarning } from '../components/FormControls'
+import { Spinner } from '../components/Loading'
 import { VenueSelect } from '../features/venue/VenueSelect'
 
 export function SubmissionPage({ role }: { role: Role }) {
@@ -55,7 +56,7 @@ export function SubmissionPage({ role }: { role: Role }) {
       setPending(false)
     }
   }
-  if (role !== 'Event Organiser') return <p className="role-warning">Only Event Organisers can submit event requests.</p>
+  if (role !== 'Event Organiser') return <RoleWarning>Only Event Organisers can submit event requests.</RoleWarning>
 
   return (
     <div className="page-stack">
@@ -207,6 +208,7 @@ export function SubmissionPage({ role }: { role: Role }) {
             type="submit"
             className="button primary"
           >
+            {pending && <Spinner size={13} />}
             {pending ? 'Submitting…' : submitted ? 'Submitted' : 'Submit Request'}
           </button>
         </div>
