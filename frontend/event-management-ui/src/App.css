@@ -1156,6 +1156,20 @@ td small {
   gap: 7px;
 }
 
+.chip-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.chip-row-label {
+  color: var(--color-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .venue-status.pending-request {
   background: var(--color-warning-soft);
   color: var(--color-warning);

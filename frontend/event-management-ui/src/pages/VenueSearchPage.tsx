@@ -222,15 +222,23 @@ export function VenueSearchPage({ role, onViewVenue }: { role: Role; onViewVenue
                   <span className="venue-card-line">{venue.location || 'Not specified'}</span>
                   <span className="venue-card-line">{venue.capacity === null ? 'Capacity not specified' : `${venue.capacity} people`}</span>
                   <span className="venue-card-line">{venue.accessibility || 'No accessibility information'}</span>
-                  <span className="chip-list">
-                    {venue.supportedLayouts.length === 0
-                      ? <span className="muted">No layouts listed</span>
-                      : venue.supportedLayouts.map((layout) => <span key={layout} className="chip">{layout}</span>)}
+                  {/* Labelled, because a bare chip row of layouts sits right
+                      above one of facilities and the two look identical. */}
+                  <span className="chip-row">
+                    <span className="chip-row-label">Layouts</span>
+                    <span className="chip-list">
+                      {venue.supportedLayouts.length === 0
+                        ? <span className="muted">None listed</span>
+                        : venue.supportedLayouts.map((layout) => <span key={layout} className="chip">{layout}</span>)}
+                    </span>
                   </span>
-                  <span className="chip-list">
-                    {venue.facilities.length === 0
-                      ? <span className="muted">No facilities listed</span>
-                      : venue.facilities.map((facility) => <span key={facility} className="chip">{facility}</span>)}
+                  <span className="chip-row">
+                    <span className="chip-row-label">Facilities</span>
+                    <span className="chip-list">
+                      {venue.facilities.length === 0
+                        ? <span className="muted">None listed</span>
+                        : venue.facilities.map((facility) => <span key={facility} className="chip">{facility}</span>)}
+                    </span>
                   </span>
                   <span className="venue-card-link">View details <ArrowRightIcon size={13} /></span>
                 </button>)}
