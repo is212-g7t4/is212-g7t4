@@ -127,6 +127,40 @@ def create_venue(database_url, details):
     return serialize(saved)
 
 
+def update_venue(database_url, venue_id, details):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """SELECT 1 FROM public.\"Venue\"
+                   WHERE venue_name = %s AND venue_id <> %s""",
+                [details["name"], venue_id],
+            )
+            if cursor.fetchone():
+                raise DuplicateVenueNameError
+            cursor.execute(
+                f"""UPDATE public.\"Venue\"
+                    SET venue_name = %s, location = %s, max_capacity = %s,
+                        facilities = %s, accessibility = %s,
+                        supported_layouts = %s, operational_status = %s
+                    WHERE venue_id = %s
+                    RETURNING {COLUMNS}""",
+                [
+                    details["name"],
+                    details["location"],
+                    details["capacity"],
+                    Json({name: True for name in details["facilities"]}),
+                    details["accessibility"],
+                    Json(details["supportedLayouts"]),
+                    details["status"],
+                    venue_id,
+                ],
+            )
+            saved = cursor.fetchone()
+    if not saved:
+        raise VenueNotFoundError
+    return serialize(saved)
+
+
 def get_venue(database_url, venue_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
