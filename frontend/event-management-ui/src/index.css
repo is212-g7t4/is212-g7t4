@@ -1,18 +1,25 @@
 :root {
-  --color-primary: #2458a6;
-  --color-primary-dark: #173b73;
-  --color-secondary: #e9eef7;
-  --color-ink: #172033;
-  --color-muted: #657084;
-  --color-border: #dce2ec;
+  --color-primary: #d1425a;
+  --color-primary-dark: #ab2f45;
+  --color-primary-soft: #fdeeea;
+  --color-accent: #f2545b;
+  --color-secondary: #fdeeea;
+  --color-ink: #1a1a1a;
+  --color-muted: #6f6f6f;
+  --color-faint: #9a9a9a;
+  --color-border: #e8e6e2;
+  --color-border-strong: #d6d3cd;
   --color-surface: #ffffff;
-  --color-background: #f5f7fb;
-  --color-success: #16805d;
-  --color-success-soft: #e4f5ee;
-  --color-warning: #a86711;
-  --color-warning-soft: #fff2d9;
-  --color-error: #b33d4d;
-  --color-error-soft: #fde9ed;
+  --color-background: #f7f6f3;
+  --color-sidebar: #fbfaf7;
+  --color-success: #0f7a4d;
+  --color-success-soft: #e7f6ee;
+  --color-warning: #92600a;
+  --color-warning-soft: #fdf1dc;
+  --color-error: #b3261e;
+  --color-error-soft: #fbe9e8;
+  --gradient-brand: linear-gradient(135deg, #ff8a3d 0%, #ff5f6d 50%, #e1306c 100%);
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -20,13 +27,24 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 40px;
+  --space-8: 56px;
+
+  --radius-sm: 6px;
   --radius: 8px;
-  --shadow: 0 8px 24px rgba(30, 48, 80, 0.06);
-  font-family: Georgia, 'Times New Roman', serif;
+  --radius-lg: 12px;
+
+  --shadow-sm: 0 1px 2px rgba(23, 24, 28, 0.05);
+  --shadow: 0 2px 8px rgba(23, 24, 28, 0.06), 0 1px 2px rgba(23, 24, 28, 0.05);
+  --shadow-lg: 0 16px 40px rgba(23, 24, 28, 0.12), 0 4px 12px rgba(23, 24, 28, 0.06);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: var(--color-ink);
   background: var(--color-background);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -43,8 +61,44 @@ body,
   min-height: 100vh;
 }
 
-body { margin: 0; background: var(--color-background); }
+body {
+  margin: 0;
+  background: var(--color-background);
+}
 
-button, input, textarea, select {
+button,
+input,
+textarea,
+select {
   font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-primary);
+  color: white;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border: 3px solid var(--color-background);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-faint);
 }

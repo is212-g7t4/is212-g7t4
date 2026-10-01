@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { AlertIcon } from './Icon'
 
 export function RejectionDialog({ eventName, reason, submitting, onReasonChange, onCancel, onConfirm }: {
   eventName: string
@@ -18,8 +19,8 @@ export function RejectionDialog({ eventName, reason, submitting, onReasonChange,
 
   return <dialog ref={dialog} className="rejection-dialog" aria-labelledby="rejection-dialog-title" onCancel={(event) => { event.preventDefault(); onCancel() }}>
     <div className="rejection-dialog-header">
-      <span className="rejection-icon" aria-hidden="true">!</span>
-      <div><p className="eyebrow">Decision required</p><h2 id="rejection-dialog-title">Reject event request?</h2></div>
+      <span className="rejection-icon"><AlertIcon size={18} /></span>
+      <h2 id="rejection-dialog-title">Reject event request?</h2>
     </div>
     <p className="rejection-dialog-copy">You are rejecting <strong>{eventName}</strong>. Add a clear reason so the requester understands what needs to change.</p>
     <label className="rejection-field" htmlFor="rejection-reason">Reason for rejection <span>Required</span>
