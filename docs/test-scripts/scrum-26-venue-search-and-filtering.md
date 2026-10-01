@@ -1,16 +1,22 @@
 # SCRUM-26 Venue Search and Filtering — manual test script
 
-The frontend has no test runner, so the UI acceptance criteria for this story
-are verified against `npm run dev`. The steps below are written to be
-followed by hand, and are also scripted with Playwright so the pass can be
-repeated — see the two `.mjs` files beside this one. Attach this file and
-`scrum-26-screenshots/` to SCRUM-26.
+These are the SCRUM-26 UI acceptance criteria checked against a running
+stack. The steps below are written to be followed by hand, and are also
+scripted with Playwright so the pass can be repeated — see the two `.mjs`
+files beside this one. Attach this file and `scrum-26-screenshots/` to
+SCRUM-26.
+
+Component-level behaviour is covered separately by vitest (added to the repo
+by SCRUM-25): `src/features/venue/venueSearch.test.ts` and
+`src/pages/VenueSearchPage.test.tsx`, run with `npm test`. This script is the
+end-to-end pass over the real services, which those cannot replace.
 
 **Tester:** Clarice Lim (driven with Playwright — see
 `scrum-26-venue-search.spec.mjs` beside this file)
 **Date:** 1 Oct 2026
-**Branch / commit:** `SCRUM-26-venue-search-and-filtering` @ `58645ad`+
-**Result: 14/14 passed**, against live Supabase data with all four services
+**Branch / commit:** `SCRUM-26-venue-search-and-filtering`, rebased onto
+`main` @ `a90bc10` (after SCRUM-25 merged)
+**Result: 14/14 passed** (re-run after the SCRUM-25 rebase), against live Supabase data with all four services
 and `npm run dev` running locally. Screenshots are in
 `scrum-26-screenshots/`.
 
@@ -42,14 +48,18 @@ node docs/test-scripts/scrum-26-venue-search-step13.spec.mjs
 ## Setup
 
 1. Start the three venue services, each with a `.env` copied from the
-   repository root (`cp .env services/<service>/.env`) and
-   `FRONTEND_ORIGIN=http://localhost:5174`:
+   repository root (`cp .env services/<service>/.env`):
 
    ```
    cd services/venue-service              && uv run --env-file .env flask --app app run --port 5006
    cd services/venue-booking-service      && uv run --env-file .env flask --app app run --port 5007
    cd services/venue-availability-service && uv run --env-file .env flask --app app run --port 5008
    ```
+
+   The venue search reads `GET /venue-bookings/window`, which is not behind
+   `CALENDAR_DEV_MODE` — so the search works without it. Set
+   `CALENDAR_DEV_MODE=true` only if you also want SCRUM-25's calendar page
+   alive while testing.
 
    Running `venue-booking-service` outside Docker needs the localhost
    downstream URLs from the comment in its `.env.example`:
@@ -78,7 +88,7 @@ Viewing as an **Event Coordinator** unless a step says otherwise.
 | 1 | Open **Find a venue** from the sidebar | All seven criteria are present; Date, Start time, End time and Expected attendance are marked with a red asterisk | AC1 | pass | All nine controls present; exactly four asterisks |
 | 2 | Click **Search** with every field empty | "Please fill in the required fields: Date, Start time, End time, Expected attendance"; **no** request to `/venue-search` in the Network tab | AC2 | pass | Message listed all four; 0 requests to `/venue-search` |
 | 3 | Fill only the date, click **Search** | The message now lists only Start time, End time and Expected attendance | AC2 | pass | Message dropped Date, kept the other three; 0 requests |
-| 4 | Date 10 Nov 2026, 09:00–12:00, attendance 120, click **Search** | Results appear. Record the `/venue-search` duration from the Network tab — it must be under 3000 ms | AC3 | pass | 3 results in **727 ms** |
+| 4 | Date 10 Nov 2026, 09:00–12:00, attendance 120, click **Search** | Results appear. Record the `/venue-search` duration from the Network tab — it must be under 3000 ms | AC3 | pass | 3 results in **1095 ms** |
 | 5 | Inspect each result card | Each shows name, location, capacity, accessibility, every supported layout, every facility, and an availability badge | AC4 | pass | Name, location, capacity, accessibility, labelled Layouts/Facilities chips, badge |
 | 6 | Look at the step 4 result list | Grand Ballroom (Approved booking on 10 Nov 09:00–17:00) and Auditorium (Under Maintenance) are **not** listed | AC3 | pass | Neither listed |
 | 7 | Search 22 Nov 2026, 10:00–16:00, attendance 100 | Rooftop Garden shows an amber **Pending request** badge; hovering it explains another request is waiting for review | AC4 | pass | Amber *Pending request* badge, sorted last; tooltip present |
@@ -114,4 +124,5 @@ In `scrum-26-screenshots/`, captured during the run recorded above:
 cd services/venue-service              && uv run pytest --cov=app --cov-report=term-missing
 cd services/venue-availability-service && uv run pytest --cov=app --cov-report=term-missing
 cd services/venue-booking-service      && uv run pytest --cov=app --cov-report=term-missing
+cd frontend/event-management-ui        && npm test
 ```
