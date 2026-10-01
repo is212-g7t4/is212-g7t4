@@ -312,6 +312,96 @@ textarea:disabled {
   min-width: 0;
 }
 
+.event-row-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out), transform 0.15s var(--ease-out);
+}
+
+.event-row-card:hover,
+.event-row-card:focus-visible {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.event-row-card .icon {
+  flex: none;
+  color: var(--color-faint);
+}
+
+.event-row-date {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius);
+  background: var(--color-primary-soft);
+  overflow: hidden;
+}
+
+.event-row-date-month {
+  padding: 2px 0;
+  width: 100%;
+  background: var(--color-accent);
+  color: white;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.event-row-date-day {
+  padding-top: 2px;
+  color: var(--color-ink);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.event-row-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.event-row-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.event-row-heading strong {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.event-row-schedule {
+  font-size: 12.5px;
+}
+
+.event-row-venue {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .action-card-body strong {
   display: block;
   margin-bottom: 2px;
