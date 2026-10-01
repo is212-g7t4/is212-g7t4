@@ -1,20 +1,22 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 
-load_dotenv()
-
+from app.calendar import parse_boundary
 from app.models import (
     BookingConflictError,
     BookingNotFoundError,
+    CalendarDataError,
     create_booking,
     decide_booking,
     list_bookings,
 )
+
+load_dotenv()
 
 
 def _parse_uuid(value):
@@ -38,6 +40,7 @@ def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
+        CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
     )
     app.config.update(config or {})
@@ -48,8 +51,14 @@ def create_app(config=None):
         if origin == app.config["FRONTEND_ORIGIN"]:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
+            if request.path == "/venue-bookings":
+                response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
+                response.headers["Access-Control-Allow-Headers"] = (
+                    "Content-Type, X-Dev-User-Id, X-Dev-Role"
+                )
         return response
 
+    @app.errorhandler(CalendarDataError)
     @app.errorhandler(psycopg2.Error)
     def database_failure(error):
         return jsonify(message="Unable to save or load venue bookings."), 503
@@ -60,17 +69,45 @@ def create_app(config=None):
 
     @app.get("/venue-bookings")
     def get_bookings():
-        venue_id = request.args.get("venueId")
+        if app.config["CALENDAR_DEV_MODE"] is not True:
+            return jsonify(message="Calendar DEV mode is disabled."), 503
+        role = request.headers.get("X-Dev-Role")
+        if not _parse_uuid(request.headers.get("X-Dev-User-Id")) or not role:
+            return jsonify(message="DEV user UUID and role headers are required."), 401
+        if role not in {
+            "Event Coordinator",
+            "Venue Staff",
+            "Technical Support",
+            "Technical Support Staff",
+        }:
+            return jsonify(message="Internal roles only."), 403
+        if any(
+            len(request.args.getlist(key)) != 1
+            for key in ("venueId", "dateFrom", "dateTo")
+        ):
+            return jsonify(
+                message="Provide each calendar query parameter exactly once."
+            ), 400
+        venue_id = _parse_uuid(request.args.get("venueId"))
         date_from = (
-            _parse_datetime(request.args["dateFrom"])
+            parse_boundary(request.args["dateFrom"])
             if request.args.get("dateFrom")
             else None
         )
         date_to = (
-            _parse_datetime(request.args["dateTo"])
+            parse_boundary(request.args["dateTo"])
             if request.args.get("dateTo")
             else None
         )
+        if (
+            not venue_id
+            or not date_from
+            or not date_to
+            or not timedelta(0) < date_to - date_from <= timedelta(days=42)
+        ):
+            return jsonify(
+                message="Require venueId UUID and dateFrom < dateTo, maximum 42 days."
+            ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."

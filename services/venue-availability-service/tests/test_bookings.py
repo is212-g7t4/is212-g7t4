@@ -1,26 +1,13 @@
 """Venue Availability: booking creation, approval/rejection, and conflict-checking."""
 
 from datetime import datetime
-from unittest.mock import MagicMock
 
-import pytest
 from app import create_app
 
 EVENT_ID = "00000000-0000-0000-0000-0000000000e1"
 VENUE_ID = "00000000-0000-0000-0000-0000000000f1"
 USER_ID = "00000000-0000-0000-0000-000000000001"
 BOOKING_ID = "00000000-0000-0000-0000-00000000000b"
-
-
-@pytest.fixture
-def setup(monkeypatch):
-    connection = MagicMock()
-    cursor = connection.cursor.return_value.__enter__.return_value
-    monkeypatch.setattr(
-        "app.models.psycopg2.connect", lambda *args, **kwargs: connection
-    )
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), cursor
 
 
 def booking_row(**overrides):
@@ -154,7 +141,11 @@ def test_get_bookings_lists_for_venue(setup):
     client, cursor = setup
     cursor.fetchall.return_value = [booking_row()]
 
-    response = client.get(f"/venue-bookings?venueId={VENUE_ID}")
+    client.application.config["CALENDAR_DEV_MODE"] = True
+    response = client.get(
+        f"/venue-bookings?venueId={VENUE_ID}&dateFrom=2026-10-01T00:00&dateTo=2026-10-02T00:00",
+        headers={"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"},
+    )
 
     assert response.status_code == 200
     assert len(response.json["bookings"]) == 1

@@ -45,9 +45,12 @@ requests made through a privileged backend connection.
 
 The existing backend pattern is `DATABASE_URL` with a Postgres driver.
 Keep that connection server-side. A privileged `postgres` connection can
-bypass RLS, so the availability API must independently verify authentication
+bypass RLS, so production availability access must independently verify identity
 and allow only Event Coordinators, Venue Staff and Technical Support Staff.
-Do not trust the frontend role switcher or a caller-supplied role.
+SCRUM-25 explicitly defers real authentication: its calendar GET is disabled by
+default and offers an opt-in `CALENDAR_DEV_MODE=true` user-switcher simulation
+using spoofable `X-Dev-User-Id` / `X-Dev-Role` headers. This is **not secure auth**;
+see the Venue Availability README for the exact development-only contract.
 Inspect live policies and grants before enabling direct browser data access.
 
 ## 4. Add a Postgres driver to your service
@@ -98,17 +101,18 @@ Venue Availability now owns both booking records and conflict checking.
 There is no separate Booking Conflict atomic service or duplicate booking
 table in the agreed design. Conflict is calculated from venue, time range
 and status; no stored `conflict` column is needed. Venue Service continues
-to own the catalogue. The older separation described in `INDEX.md`,
-`AGENTS.md`, and the architecture documents needs a coordinated follow-up
-update; it is not the current ownership decision.
+to own the catalogue. The checked-in `INDEX.md`, `AGENTS.md`, and architecture
+documents now reflect the merged Venue Availability ownership.
 
 `VenueBooking` supplies the fields needed for a booking-based day/week/month
 calendar and overlap detection. All three internal roles can inspect ranges
 and choose one venue from a simple selector. Venue search/filtering and
 booking submission are separate work, not prerequisites for this read UI.
 Approved bookings block selection; pending requests are displayed but do
-not block. Rejected/cancelled requests do not block. These are agreed rules,
-not verified existing database status values.
+not block. Rejected/cancelled requests are excluded from calendar reads.
+The SCRUM-25 read-only live smoke confirmed `Approved`, `Pending` and `Rejected`
+values; the existing write code emits `Pending Review`, which the reader also
+supports. Unknown/null relevant statuses fail closed. No live rows were changed.
 
 Scheduled maintenance/operational blocks (`venueBlock`) are **deferred to
 next sprint**. The current schema cannot represent those intervals.
@@ -122,13 +126,13 @@ do not claim the full Week 4 unavailability requirement is complete.
 | Check | Supplied schema | Required handling |
 |---|---|---|
 | Booking identity and relationships | UUID PK; FKs to Event, Venue and User | Existing references support the model; foreign-key columns remain nullable. |
-| Booking range | Both fields are `timestamp without time zone`, nullable | Agree/document a timezone convention. Prefer a reviewed migration to `TIMESTAMPTZ`; conversion must explicitly use the verified timezone of existing data. |
+| Booking range | Both fields are `timestamp without time zone`, nullable | SCRUM-25 interprets existing naive values as Singapore local; reads accept naive or offset ISO datetimes and output `+08:00`. No type migration was applied. |
 | Required values | Only `booking_id` is `NOT NULL` | Require venue, event, requester, start, end and status in write validation; audit/backfill before adding DB `NOT NULL` constraints. Never silently treat malformed rows as free time. |
 | Range validity | No end-after-start check shown | Validate end > start; add a DB CHECK after auditing existing data. |
 | Status | Unconstrained nullable varchar | Inspect distinct live values and agree one canonical enum/check before mapping approved/pending states. |
 | Concurrent approvals | No overlap exclusion constraint shown | Recheck and save under a transaction-safe per-venue lock or equivalent DB enforcement. Every blocking write must follow the same rule. |
 | Query performance | PKs shown; secondary indexes not supplied | Inspect live indexes; add a venue/time-range index if needed. |
-| Internal-only access | User role field exists; JWT linkage/policies not established by this export | Integrate real auth and enforce server-side roles; test direct external-user API denial. |
+| Internal-only access | User role field exists; JWT linkage/policies not established by this export | Production auth remains deferred. SCRUM-25 tests direct external-role denial only in opt-in, spoofable DEV header simulation; never claim real identity enforcement. |
 
 No new booking columns are required for basic conflict computation. However,
 the schema alone does not enforce valid intervals, canonical statuses or
@@ -155,12 +159,12 @@ ORDER BY requested_start_time, booking_id;
 
 ### Existing application compatibility
 
-The checked-out Event Service still queries `public.event_service`, and
-other source references may also use legacy names. If the exported renames
-are already applied and no compatibility views exist, those queries will
-fail. Coordinate a separate code update (or an explicitly agreed temporary
-compatibility migration) before claiming the running app matches this schema.
-This documentation update does not rename tables or modify application SQL.
+The checked-out Event Service now queries `public."Event"` (verified in
+`services/event-service/app/models.py`), not the earlier `public.event_service`.
+Venue Availability queries `public."VenueBooking"`; its SCRUM-25 live smoke
+verified the quoted table, UUID identity columns and naive timestamp columns,
+and exercised the actual GET through a Flask test client with read-only DB
+transactions. This does not verify every service, RLS policy or write workflow.
 
 There is **no Postgres-level schema wall** between services — all tables
 share `public`, so the database itself won't stop your service from
@@ -191,9 +195,11 @@ with get_connection() as conn:
 ## 7. If you need to change the schema (add columns, add a table)
 
 This requires the Supabase CLI, which is already scaffolded in this repo
-under `database/supabase/` (`config.toml` exists; no migration SQL is present
-in this checkout). Recover/version the existing schema baseline before
-applying new migrations. The CLI expects
+under `database/supabase/`. This checkout includes
+`20260927100000_add_venue_id_to_event.sql` and
+`20260927110000_create_venue_booking.sql`; their presence does not prove their
+application to the shared database. Confirm the baseline before applying new
+migrations. No migrations were applied for SCRUM-25. The CLI expects
 its `supabase/` folder to be in your current directory, so run these from
 `database/`, not the repo root:
 
