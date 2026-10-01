@@ -1,50 +1,146 @@
-# Venue availability
+# Venue Availability — SCRUM-25 backend
 
-Owns venue booking records **and** the double-booking conflict check
-together, in `public."VenueBooking"`. This merges what `INDEX.md`/
-`docs/microservices-catalog.md` originally split into two services —
-**Booking Conflict Service** (a stateless algorithm) and
-**Venue Availabilities Service** (the booking records) — into one atomic.
+Owns `public."VenueBooking"` and its overlap algorithm. Extends the existing
+atomic; there is no duplicate availability/conflict service. The calendar UI
+may read this atomic directly; existing writes come through Venue Booking
+Service. No calls to User/Venue/Event services or their tables are added.
+`GET /venues` remains owned by Venue Service.
 
-That split had a structural problem: Booking Conflict Service would need to
-check new requests against *existing bookings*, but those are owned by
-Venue Availabilities Service, and atomics never call another service (see
-`AGENTS.md`). Merging them avoids that, and matches how the equivalent
-Equipment domain is already documented (`Equipment Availability` owns both
-reservation records and the availability-checking algorithm together).
+## Local setup (from repository root)
 
-An atomic — only `venue-booking-service` (composite) calls this.
+Python 3.12+ and `uv` are required. Keep the real root `.env` git-ignored;
+it must contain the server-only `DATABASE_URL`. Never put it in a `VITE_` variable.
+If starting from scratch, copy root `.env.example` to root `.env` and privately
+fill its database password; do not overwrite an existing `.env`.
 
-## 1. Start the service
-
-```
-cp .env.example services/venue-availability-service/.env
+```sh
 cd services/venue-availability-service
-uv sync
-uv run --env-file .env flask --app app run --port 5008
+uv sync --locked
+CALENDAR_DEV_MODE=true uv run --env-file ../../.env flask --app app run --host 127.0.0.1 --port 5008
 ```
 
-Or `docker compose up --build venue-availability-service` / `npm run dev`.
+This explicitly loads the **root** `.env`, not an assumed service-local file.
+Alternatively create a service `.env` using this service's `.env.example` and
+use `--env-file .env`. `FRONTEND_ORIGIN` defaults to `http://localhost:5173`.
 
-## Endpoints
+From repository root, once the other existing Compose entries' service `.env`
+files are configured:
 
-- `GET /venue-bookings?venueId=&dateFrom=&dateTo=` — calendar read. Returns
-  `Pending Review` and `Approved` bookings in the given range (`Rejected`
-  bookings are excluded); only `Approved` bookings should be treated as
-  blocking by the caller.
-- `POST /venue-bookings` — creates a booking request as `Pending Review`.
-  Body: `{"eventId", "venueId", "requestedStartTime", "requestedEndTime", "requestedBy"}`.
-  `409` if it overlaps an `Approved` booking for the same venue.
-- `PATCH /venue-bookings/<id>/approve` / `PATCH /venue-bookings/<id>/reject`
-  — Venue Staff decision. Body: `{"reviewedBy": "<user id>"}`. Approving
-  re-checks for conflicts (another booking may have been approved since this
-  one was requested) and returns `409` if one now exists.
+```sh
+CALENDAR_DEV_MODE=true docker compose up --build venue-availability-service
+```
 
-Overlap is start-inclusive/end-exclusive: `existing_start < new_end AND
-existing_end > new_start` (see `docs/supabase-setup.md`).
+The new Compose entry uses root `.env` and binds `127.0.0.1:5008:5000`.
+It defaults to disabled DEV calendar mode. Do not expose this development
+service publicly. Full Compose validation can fail on other services' missing
+`.env` files even when starting only this service; local Flask avoids that.
 
-## Known limitation
+## DEV user-switcher header contract — NOT authentication
 
-No scheduled-maintenance/operational-block support (`Venue.operational_status`
-is not a substitute for a dated block) — deferred, per
-`docs/supabase-setup.md`.
+Calendar reads are disabled (`503`) unless environment **`CALENDAR_DEV_MODE=true`**
+is set exactly (lowercase). The Flask test/config equivalent is boolean `True`.
+This deliberate opt-in only simulates the existing user-switcher's identity.
+
+Every `GET /venue-bookings` needs both headers:
+
+| Header | Value |
+|---|---|
+| `X-Dev-User-Id` | Selected user's UUID; syntactically validated, **not** looked up |
+| `X-Dev-Role` | Exact selected role string |
+
+Allowed roles: `Event Coordinator`, `Venue Staff`, `Technical Support`, and the
+canonical alias `Technical Support Staff`. `Event Organiser`, `Attendee` and
+all other role strings receive `403`. Missing/invalid user UUID or missing role
+receives `401`. There is no user-table query, JWT verification or real auth.
+**Headers are caller-supplied and spoofable. This is not secure access control.**
+Production must replace this simulation with verified identity/role enforcement.
+Existing POST/PATCH endpoints are intentionally not gated or reworked here.
+
+CORS allows only the configured exact `FRONTEND_ORIGIN`, including on errors.
+`OPTIONS /venue-bookings` requires no identity and returns allowed headers
+`Content-Type, X-Dev-User-Id, X-Dev-Role` and methods `GET, OPTIONS, POST`.
+No wildcard origin or credentials support is enabled. CORS is not authentication.
+
+## Calendar read
+
+`GET /venue-bookings?venueId=<UUID>&dateFrom=<datetime>&dateTo=<datetime>`
+
+All three parameters are required exactly once. UUID must parse as a UUID.
+Both dates must be ISO 8601 datetimes containing `T`; date-only and malformed
+values are rejected, never silently ignored. Require `dateFrom < dateTo` and
+**at most 42 days**, covering a six-week month grid as well as day/week views.
+Missing, duplicate, invalid, reversed, empty or oversized ranges return `400`
+before a database query. The bound is a time-window limit, not a row-count cap.
+
+**Time convention:** existing DB timestamps are Singapore-local naive values.
+Naive input is interpreted as Singapore local; offset input (`Z`, `+08:00`, or
+another explicit offset) is converted to Singapore local before binding SQL.
+GET output always includes `+08:00`. URL-encode `+` as `%2B`, or use curl's
+`--data-urlencode`. No DB timezone conversion/migration is applied.
+
+```sh
+curl --get 'http://127.0.0.1:5008/venue-bookings' \
+  -H 'X-Dev-User-Id: 00000000-0000-0000-0000-000000000001' \
+  -H 'X-Dev-Role: Event Coordinator' \
+  --data-urlencode 'venueId=00000000-0000-0000-0000-0000000000f1' \
+  --data-urlencode 'dateFrom=2026-10-01T00:00:00+08:00' \
+  --data-urlencode 'dateTo=2026-11-01T00:00:00+08:00'
+```
+
+The UUIDs above are illustrative; use a venue selected from `GET /venues`.
+A syntactically valid but nonexistent venue returns an empty list, not `404`:
+this atomic does not verify another service's entity.
+
+Success envelope: `{"bookings": [...]}`. Each booking keeps `id`, `eventId`,
+`venueId`, `requestedBy`, `reviewedBy`, `status`, `requestedStartTime`,
+`requestedEndTime`, and adds boolean **`blocksSelection`**.
+
+| Stored status | In calendar | blocksSelection |
+|---|---|---|
+| Approved | yes | true |
+| Pending | yes (legacy DB value) | false |
+| Pending Review | yes (existing write value) | false |
+| Rejected / Cancelled | no | — |
+| Null / unknown status | fail relevant read with 503 | never infer free time |
+
+Overlap is half-open: `existing_start < dateTo AND existing_end > dateFrom`.
+Adjacent intervals do not overlap; an interval spanning the entire window does.
+Full original booking times are returned, not clipped to the visible window.
+Ordering is start time then booking ID. Invalid booking/event/venue IDs,
+non-local/non-finite times, null or inverted intervals on relevant non-excluded
+records fail the whole response with `503`, never a partial successful list.
+SQL explicitly retains null/inverted time candidates so SQL NULL comparisons
+cannot hide them. Such invalid intervals for the selected venue fail even
+outside the requested window. Null venue IDs are treated conservatively as
+potentially relevant to any venue when overlapping or time-invalid. Failures
+contain no database exception detail. Nullable requester/reviewer fields remain
+nullable; they do not determine overlap.
+
+**Clients must show an error/unknown state on any failed read, not a free calendar.**
+This read is a snapshot, not a reservation or a concurrency guarantee.
+
+## Existing write compatibility (unchanged)
+
+- `POST /venue-bookings`: body `{eventId, venueId, requestedStartTime,
+  requestedEndTime, requestedBy}`; creates `Pending Review`; returns `409` on
+  approved overlap. Continues to accept **naive** datetime input only and
+  returns naive times. Calendar offset handling does not change this contract.
+- `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy}`;
+  approval rechecks conflicts; existing `400/404/409/503` behavior remains.
+- `GET /health` remains available without DEV headers.
+
+## Tests and review
+
+```sh
+# In services/venue-availability-service
+uv run pytest --cov=app --cov-branch --cov-report=term-missing
+uvx ruff check --isolated --select E4,E7,E9,F,I app tests
+# Explicit opt-in: live DB SELECTs only, PostgreSQL read-only transactions;
+# prints counts/status codes, never identities or credentials.
+RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest tests/test_live_calendar.py -q -s
+```
+
+See [BACKEND_REVIEW.md](BACKEND_REVIEW.md) for flow, file map, acceptance mapping,
+actual verification results and remaining scope. Frontend/AC2 and operational
+`venueBlock` support are deferred. Real authentication, database constraints,
+index audits and concurrent-write locking improvements remain separate work.

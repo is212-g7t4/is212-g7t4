@@ -27,6 +27,17 @@ services:
     ports:
       - "5005:5000"
 
+  venue-availability-service:
+    build: ./services/venue-availability-service
+    env_file:
+      - ./.env
+      - ./services/venue-availability-service/.env
+    environment:
+      CALENDAR_DEV_MODE: "${CALENDAR_DEV_MODE:-false}"
+      FRONTEND_ORIGIN: "${FRONTEND_ORIGIN:-http://localhost:5174}"
+    ports:
+      - "127.0.0.1:5008:5000"
+
   venue-service:
     build: ./services/venue-service
     env_file:
@@ -40,10 +51,3 @@ services:
       - ./services/venue-booking-service/.env
     ports:
       - "5007:5000"
-
-  venue-availability-service:
-    build: ./services/venue-availability-service
-    env_file:
-      - ./services/venue-availability-service/.env
-    ports:
-      - "5008:5000"

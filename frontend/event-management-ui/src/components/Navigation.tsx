@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Role, Route, User } from '../types'
 import { routeTitles } from '../types'
+import { canViewCalendar } from '../features/calendar/permissions'
 import { canViewVenues } from '../features/venue/permissions'
 import { BuildingIcon, CheckIcon, EditIcon, HomeIcon, ListIcon, PlusIcon } from './Icon'
 
@@ -22,6 +23,9 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
         {canViewVenues(role) && (
           <NavButton active={route === 'venues' || route === 'venueDetail'} onClick={() => onNavigate('venues')} icon={<BuildingIcon size={17} />}>Venues</NavButton>
+        )}
+        {canViewCalendar(role) && (
+          <NavButton active={route === 'venueCalendar'} onClick={() => onNavigate('venueCalendar')} icon={<ListIcon size={17} />}>Venue availability calendar</NavButton>
         )}
       </nav>
 
