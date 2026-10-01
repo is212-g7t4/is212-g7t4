@@ -8,6 +8,7 @@ import { MyEventsPage } from './pages/MyEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
+import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
@@ -25,6 +26,7 @@ const paths: Record<Route, string> = {
   myEvents: '/my-events',
   venues: '/venues',
   venueDetail: '/venues',
+  venueCalendar: '/venue-availability',
 }
 
 function getRoute(): Route {
@@ -33,6 +35,7 @@ function getRoute(): Route {
   if (path.includes('/edit')) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
+  if (path === '/venue-availability') return 'venueCalendar'
   if (path === '/venues') return 'venues'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
   if (/^\/events\/[^/]+$/.test(path)) return 'detail'
@@ -76,6 +79,13 @@ function App() {
     registrationNeeds: '',
   })
   const [notice, setNotice] = useState<{ message: string; tone: 'success' | 'error' } | null>(null)
+
+  useEffect(() => {
+    if (route !== 'venueCalendar') return
+    const previousTitle = document.title
+    document.title = 'Venue availability calendar · ConnectSphere'
+    return () => { document.title = previousTitle }
+  }, [route])
 
   useEffect(() => {
     const handlePopState = () => {
@@ -138,7 +148,7 @@ function App() {
 
   return <div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
-    <main className="main-content">
+    <main className={`main-content${route === 'venueCalendar' ? ' calendar-route' : ''}`}>
       <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
@@ -146,6 +156,7 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
