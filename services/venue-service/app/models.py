@@ -1,7 +1,7 @@
 from contextlib import closing
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 
 COLUMNS = "venue_id, venue_name, location, max_capacity, facilities, accessibility, supported_layouts, operational_status"
 
@@ -45,6 +45,39 @@ def list_venues(database_url):
 
 class VenueNotFoundError(Exception):
     pass
+
+
+class DuplicateVenueNameError(Exception):
+    pass
+
+
+def create_venue(database_url, details):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """SELECT 1 FROM public."Venue" WHERE venue_name = %s""",
+                [details["name"]],
+            )
+            if cursor.fetchone():
+                raise DuplicateVenueNameError
+            cursor.execute(
+                f"""INSERT INTO public."Venue"
+                    (venue_name, location, max_capacity, facilities,
+                     accessibility, supported_layouts, operational_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING {COLUMNS}""",
+                [
+                    details["name"],
+                    details["location"],
+                    details["capacity"],
+                    Json({name: True for name in details["facilities"]}),
+                    details["accessibility"],
+                    Json(details["supportedLayouts"]),
+                    details["status"],
+                ],
+            )
+            saved = cursor.fetchone()
+    return serialize(saved)
 
 
 def get_venue(database_url, venue_id):
