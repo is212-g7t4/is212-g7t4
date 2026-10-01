@@ -30,7 +30,36 @@ Alternatively, after creating `services/venue-service/.env`, run
 ## Endpoints
 
 - `GET /venues` — the whole catalogue, ordered by name. Used by the venue
-  catalogue cards and by `VenueSelect` on the event request form.
+  catalogue cards and by `VenueSelect` on the event request form. Optional
+  filter parameters (SCRUM-26) narrow it to the venues meeting an event's
+  requirements — this service's suitability-check computation:
+
+  | Parameter | Repeatable | Matching rule |
+  | --- | --- | --- |
+  | `minCapacity` | no | `max_capacity >= minCapacity`. A venue with no capacity is excluded, since it can't be confirmed to fit |
+  | `location` | no | case-insensitive "contains", so `Main Tower` matches `Level 3, Main Tower` |
+  | `layout` | no | `supported_layouts` contains the value |
+  | `facility` | yes | the venue has **every** facility given |
+  | `accessibility` | yes | **every** key given matches the venue's accessibility text |
+
+  Blank values count as not set, so `GET /venues` with no parameters is
+  exactly the full catalogue as before. `400` if `minCapacity` is not a whole
+  number of at least 1, or if an `accessibility` key is unknown.
+
+  Accessibility is free text in the database, so each key maps to the phrases
+  the live rows use (matched case-insensitively; any one phrase is enough):
+
+  | Key | Label | Matches text containing |
+  | --- | --- | --- |
+  | `wheelchair` | Wheelchair accessible | "wheelchair" |
+  | `lift` | Lift or elevator access | "lift", "elevator" |
+  | `step_free` | Step-free entrance | "level entrance", "no stairs" |
+  | `hearing_loop` | Hearing loop | "hearing loop" |
+  | `accessible_washroom` | Accessible washroom | "accessible washroom" |
+
+  The filter runs in Python (`matches()` in `app/models.py`) rather than SQL:
+  the catalogue is small, and the rule stays readable and testable without a
+  database.
 - `GET /venues/<venueId>` — one venue's full profile (SCRUM-24 View Venue
   Details). `404` if the id doesn't match a row, or isn't a UUID; `503` if
   the database is unreachable or `DATABASE_URL` is unset.
@@ -75,7 +104,8 @@ uv run pytest --cov=app --cov-report=term-missing
 ```
 
 `tests/test_venue_details.py` covers AC1 and the failure cases with
-`psycopg2.connect` mocked; `tests/test_seed_data.py` checks that
+`psycopg2.connect` mocked; `tests/test_venue_search_filters.py` covers the
+SCRUM-26 filter parameters above; `tests/test_seed_data.py` checks that
 `scripts/seed_venues.py` writes rows in the shape above.
 
 ## Seeding

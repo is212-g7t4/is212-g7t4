@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+
+import httpx
 from flask import Blueprint, jsonify, request
 
 from app.clients import (
@@ -7,9 +10,12 @@ from app.clients import (
     EventNotFoundError,
     create_booking,
     decide_booking,
+    get_bookings_between,
     get_event,
     get_venues,
+    search_venues,
 )
+from app.search import SearchError, shortlist, validate_search
 
 bp = Blueprint("venue_booking_service", __name__)
 
@@ -17,6 +23,44 @@ bp = Blueprint("venue_booking_service", __name__)
 @bp.get("/health")
 def health():
     return jsonify(status="ok")
+
+
+@bp.get("/venue-search")
+def venue_search():
+    """
+    SCRUM-26: find the venues that fit an event's requirements and are free
+    at the requested time.
+
+    Required query parameters: `start`, `end` (naive local ISO date-times) and
+    `expectedAttendance`. Optional: `minCapacity`, `location`, `layout`, and
+    the repeatable `facility` and `accessibility`.
+
+    Venue Service filters the catalogue and Venue Availability Service returns
+    the bookings overlapping the window; neither can answer this alone, so the
+    merge happens here. Read-only: no booking is created.
+    """
+    try:
+        criteria = validate_search(request.args)
+    except SearchError as error:
+        return jsonify(message=error.message, missing=error.missing), 400
+
+    # Independent calls, so the search costs the slower one rather than both
+    # — what keeps AC3's 3-second budget realistic.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        venues_call = pool.submit(search_venues, criteria["filters"])
+        bookings_call = pool.submit(
+            get_bookings_between, criteria["start"], criteria["end"]
+        )
+        try:
+            venues, bookings = venues_call.result(), bookings_call.result()
+        except httpx.TimeoutException:
+            return jsonify(message="Venue search took too long. Please try again."), 504
+        except Exception:
+            # Don't leak the downstream URL or error text to the browser.
+            return jsonify(message="Unable to search venues right now."), 502
+
+    results = shortlist(venues, bookings)
+    return jsonify(venues=results, count=len(results))
 
 
 @bp.post("/booking-requests")
