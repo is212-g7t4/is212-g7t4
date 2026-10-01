@@ -25,7 +25,7 @@
 .calendar-route { background: #f7f9fc; }
 .calendar-route .topbar { min-height: 96px; padding: 20px 28px; }
 .calendar-route .topbar h1 { font-size: 23px; }
-.venue-calendar { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 12px; font-family: system-ui, -apple-system, sans-serif; color: #303743; }
+.venue-calendar { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 12px; font-family: inherit; color: #303743; }
 .venue-calendar button, .venue-calendar input, .venue-calendar select { font: inherit; font-size: 12px; padding: 8px 12px; border: 1px solid #d9dfe7; border-radius: 8px; background: white; color: inherit; }
 .venue-calendar button { cursor: pointer; }
 .venue-calendar button:hover { background: #edf2f8; }
