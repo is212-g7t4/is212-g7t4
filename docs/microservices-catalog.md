@@ -83,7 +83,7 @@ data store (Postgres unless noted).
 | **Event** | The Event entity: details, status, change-request records |
 | **Venue** | Venue catalogue — capacity, facilities, accessibility, layouts. Also runs the suitability-check computation (given an event's requirements as input) |
 | **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason) **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
-| **Equipment** | Equipment catalogue only — types, quantities owned, technical specs. Does **not** hold reservation data |
+| **Equipment** | Equipment catalogue only — types, quantities owned, location, operational status. Does **not** hold reservation data. Exposes `GET /equipment[?status=]` and `POST /equipment` (Technical Support only); the UI calls it directly |
 | **Equipment Availability** | The real reservation records and the availability-checking algorithm together: committed quantities per event/time window, and each request's status (pending_review → approved/rejected) |
 | **Registration** | Attendee registration records |
 | **Notification** | Notification records; consumes off the Message Broker and calls the Email/SMS Wrapper to deliver |
