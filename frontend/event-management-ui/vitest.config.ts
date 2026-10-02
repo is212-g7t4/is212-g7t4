@@ -9,6 +9,9 @@ export default defineConfig({
       include: [
         'src/features/calendar/**.{ts,tsx}',
         'src/pages/VenueCalendarPage.tsx',
+        'src/features/venue/venueSearch.ts',
+        'src/features/venue/permissions.ts',
+        'src/pages/VenueSearchPage.tsx',
       ],
       exclude: ['**/*.test.*'],
     },

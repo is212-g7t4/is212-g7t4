@@ -6,14 +6,64 @@ from flask import Flask, jsonify, request
 
 load_dotenv()
 
-from app.models import VenueNotFoundError, get_venue, list_venues
+from app.models import (
+    ACCESSIBILITY_KEYWORDS,
+    VenueNotFoundError,
+    get_venue,
+    list_venues,
+    matches,
+)
+
+
+class InvalidCriteriaError(Exception):
+    """A filter parameter on GET /venues was present but unusable."""
+
+
+def _nonblank(values):
+    return [value.strip() for value in values if value.strip()]
+
+
+def read_criteria(args):
+    """SCRUM-26: turn GET /venues query parameters into `matches` criteria.
+
+    Blank values count as not set, so an untouched form field is the same as
+    an absent one and the catalogue page's unfiltered request is unchanged.
+    """
+    raw_capacity = (args.get("minCapacity") or "").strip()
+    min_capacity = None
+    if raw_capacity:
+        try:
+            min_capacity = int(raw_capacity)
+        except ValueError:
+            raise InvalidCriteriaError(
+                "minCapacity must be a whole number of at least 1."
+            ) from None
+        if min_capacity < 1:
+            raise InvalidCriteriaError("minCapacity must be a whole number of at least 1.")
+
+    accessibility = _nonblank(args.getlist("accessibility"))
+    unknown = [key for key in accessibility if key not in ACCESSIBILITY_KEYWORDS]
+    if unknown:
+        raise InvalidCriteriaError(
+            f"accessibility must be one of: {', '.join(sorted(ACCESSIBILITY_KEYWORDS))}."
+        )
+
+    return {
+        "min_capacity": min_capacity,
+        "location": (args.get("location") or "").strip(),
+        "layout": (args.get("layout") or "").strip(),
+        "facilities": _nonblank(args.getlist("facility")),
+        "accessibility": accessibility,
+    }
 
 
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
-        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
+        # The Vite dev server is pinned to 5174 (strictPort in
+        # vite.config.ts), so that is the origin the browser sends.
+        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
     app.config.update(config or {})
 
@@ -45,9 +95,14 @@ def create_app(config=None):
 
     @app.get("/venues")
     def venues():
+        try:
+            criteria = read_criteria(request.args)
+        except InvalidCriteriaError as error:
+            return jsonify(message=str(error)), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Venue Service."), 503
-        return jsonify(venues=list_venues(app.config["DATABASE_URL"]))
+        catalogue = list_venues(app.config["DATABASE_URL"])
+        return jsonify(venues=[v for v in catalogue if matches(v, criteria)])
 
     @app.get("/venues/<uuid:venue_id>")
     def venue_details(venue_id):

@@ -101,7 +101,7 @@ The root `package.json` runs both halves at once with `concurrently`:
 
 ```
 npm run dev            # frontend (Vite) + backend (docker compose up)
-npm run dev:frontend   # frontend only — Vite on :5173
+npm run dev:frontend   # frontend only — Vite on :5174
 npm run dev:backend    # backend only — docker compose up
 ```
 
@@ -153,20 +153,20 @@ INDEX.md for the port each service uses. Containers started with
 ### `FRONTEND_ORIGIN` must match the port Vite actually used
 
 Every service does its own CORS check against a single `FRONTEND_ORIGIN`
-(plus its `127.0.0.1` twin), defaulting to `http://localhost:5173`. Vite
-does **not** insist on 5173 — if something else already holds the port it
-prints `Port 5173 is in use, trying another one...` and quietly moves to
-5174. The mismatch is easy to misread: the service returns `200` and the
+(plus its `127.0.0.1` twin), defaulting to `http://localhost:5174`. That is
+the port `vite.config.ts` pins, and it sets `strictPort: true`, so if
+something else already holds 5174 Vite **exits** rather than drifting to
+another port. A dev server that is running is therefore always on 5174.
+
+If you do override the port, every service's `FRONTEND_ORIGIN` has to follow
+it. The mismatch is easy to misread: the service returns `200` and the
 payload is fine, but with no `Access-Control-Allow-Origin` header the
 browser discards it, so the UI shows only a generic "unable to load" error
 while `curl` against the same endpoint looks perfectly healthy.
 
-Read the port out of the Vite banner, then either free 5173 and restart, or
-point the services at the port in use:
-
 ```
 # in every services/*/.env, then: docker compose up -d
-FRONTEND_ORIGIN=http://localhost:5174
+FRONTEND_ORIGIN=http://localhost:<the port Vite printed>
 ```
 
 To confirm it's CORS rather than the service, compare the two — only the

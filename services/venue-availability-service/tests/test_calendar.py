@@ -231,13 +231,13 @@ def test_ac4_cors_preflight(calendar):
     response = client.options(
         "/venue-bookings",
         headers={
-            "Origin": "http://localhost:5173",
+            "Origin": "http://localhost:5174",
             "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "X-Dev-User-Id,X-Dev-Role",
         },
     )
     assert response.status_code == 200
-    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert "GET" in response.headers["Access-Control-Allow-Methods"]
     for header in ["X-Dev-User-Id", "X-Dev-Role"]:
         assert header in response.headers["Access-Control-Allow-Headers"]
@@ -291,7 +291,7 @@ def test_cors_untrusted_origin(calendar, origin):
 
 def test_cors_health_no_custom_headers(calendar):
     _, client, _ = calendar
-    response = client.get("/health", headers={"Origin": "http://localhost:5173"})
+    response = client.get("/health", headers={"Origin": "http://localhost:5174"})
     assert "Access-Control-Allow-Methods" not in response.headers
 
 
@@ -348,10 +348,10 @@ def test_cors_headers_on_denial(calendar):
     response = client.get(
         "/venue-bookings",
         query_string=QUERY,
-        headers={"Origin": "http://localhost:5173"},
+        headers={"Origin": "http://localhost:5174"},
     )
     assert response.status_code == 401
-    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert response.headers["Vary"] == "Origin"
 
 
