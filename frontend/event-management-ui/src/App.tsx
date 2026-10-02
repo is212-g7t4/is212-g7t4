@@ -7,6 +7,7 @@ import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
+import { EquipmentPage } from './pages/EquipmentPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
@@ -31,6 +32,7 @@ const paths: Record<Route, string> = {
   // Not '/venues/search': getRoute() reads any /venues/<something> as a
   // venue detail page.
   venueSearch: '/venue-search',
+  equipment: '/equipment',
 }
 
 function getRoute(): Route {
@@ -40,6 +42,7 @@ function getRoute(): Route {
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
   if (path === '/venue-availability') return 'venueCalendar'
+  if (path === '/equipment') return 'equipment'
   if (path === '/venues') return 'venues'
   if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
@@ -162,6 +165,7 @@ function App() {
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
+      {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} />}

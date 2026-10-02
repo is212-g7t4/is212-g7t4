@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { Role, Route, User } from '../types'
 import { routeTitles } from '../types'
 import { canViewCalendar } from '../features/calendar/permissions'
+import { canManageEquipment } from '../features/equipment/permissions'
 import { canSearchVenues, canViewVenues } from '../features/venue/permissions'
 import { BuildingIcon, CheckIcon, EditIcon, HomeIcon, ListIcon, PlusIcon, SearchIcon } from './Icon'
 
@@ -31,6 +32,9 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         )}
         {canViewCalendar(role) && (
           <NavButton active={route === 'venueCalendar'} onClick={() => onNavigate('venueCalendar')} icon={<ListIcon size={17} />}>Venue availability calendar</NavButton>
+        )}
+        {canManageEquipment(role) && (
+          <NavButton active={route === 'equipment'} onClick={() => onNavigate('equipment')} icon={<ListIcon size={17} />}>Equipment</NavButton>
         )}
       </nav>
 
