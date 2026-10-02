@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
@@ -17,6 +18,11 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
   const [registrations, setRegistrations] = useState<Registration[]>([])
   const [registrationsError, setRegistrationsError] = useState('')
   const [registrationsLoading, setRegistrationsLoading] = useState(true)
+  const [draftStatus, setDraftStatus] = useState<'Submitted' | 'Approved' | 'Rejected'>('Submitted')
+  const [actionDetails, setActionDetails] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
   const currentCoordinator = {
     id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || '',
     name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || '',
@@ -27,7 +33,13 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
     if (isManager) params.set('isManager', 'true')
     eventApi(`/events/${eventId}?${params.toString()}`).then((body) => {
-      if (active) setEvent(body)
+      if (active) {
+        setEvent(body)
+        setDraftStatus(body.status)
+        setActionDetails(body.actionDetails || '')
+        setSaveError('')
+        setSaveMessage('')
+      }
     }).catch((cause: Error) => {
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
@@ -48,6 +60,41 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
     return () => { active = false }
   }, [eventId, role, event?.status, refresh])
 
+  const hasUnsavedChanges = Boolean(event) && (
+    draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
+  )
+  const canUpdate = Boolean(event && event.coordinatorId === currentCoordinator.id)
+  const availableStatuses = event?.status === 'Submitted'
+    ? ['Submitted', 'Approved', 'Rejected'] as const
+    : event ? [event.status] : []
+
+  const saveProgress = async (formEvent: FormEvent) => {
+    formEvent.preventDefault()
+    if (!event || !canUpdate || !hasUnsavedChanges || !actionDetails.trim()) return
+    setSaving(true)
+    setSaveError('')
+    setSaveMessage('')
+    try {
+      const updated = await eventApi(
+        `/events/${event.id}/progress`,
+        {
+          coordinatorId: currentCoordinator.id,
+          status: draftStatus,
+          actionDetails: actionDetails.trim(),
+        },
+        'PATCH',
+      )
+      setEvent(updated)
+      setDraftStatus(updated.status)
+      setActionDetails(updated.actionDetails || '')
+      setSaveMessage('Event progress updated successfully.')
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : 'Unable to update event progress.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (role !== 'Event Coordinator') return <RoleWarning>Event details are visible to Event Coordinators.</RoleWarning>
 
   return <div className="page-stack">
@@ -59,6 +106,43 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
+
+      <section className="event-card-section">
+        <h3>Event progress</h3>
+        {canUpdate ? <form onSubmit={saveProgress}>
+          <div className="field-row">
+            <label className="field"><span>Status</span>
+              <select value={draftStatus} onChange={(change) => {
+                setDraftStatus(change.target.value as typeof draftStatus)
+                setSaveMessage('')
+              }}>
+                {availableStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+            </label>
+            <label className="field"><span>Action details</span>
+              <textarea value={actionDetails} maxLength={1000} required onChange={(change) => {
+                setActionDetails(change.target.value)
+                setSaveMessage('')
+              }} placeholder="Describe the action completed or the latest progress." />
+            </label>
+          </div>
+          {hasUnsavedChanges && <p className="muted" role="status">Unsaved changes</p>}
+          {saveError && <p className="field-error" role="alert">{saveError}</p>}
+          {saveMessage && <p role="status">{saveMessage}</p>}
+          <button className="button primary" type="submit" disabled={!hasUnsavedChanges || !actionDetails.trim() || saving}>
+            {saving ? 'Saving…' : 'Save progress'}
+          </button>
+        </form> : <p className="muted">Only the assigned Event Coordinator can update this event.</p>}
+
+        <h3>Action history</h3>
+        {event.actionHistory.length === 0 ? <p className="muted">No actions recorded yet.</p> :
+          <dl className="event-details">
+            {event.actionHistory.map((action, index) => <div className="event-detail full" key={`${action.recordedAt}-${index}`}>
+              <dt>{action.status} · {new Date(action.recordedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT</dt>
+              <dd>{action.details}</dd>
+            </div>)}
+          </dl>}
+      </section>
 
       {event.status === 'Approved' && <div className="event-card-section">
         <h3>Registrations</h3>

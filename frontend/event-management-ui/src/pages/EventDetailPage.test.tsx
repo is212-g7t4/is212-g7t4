@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
@@ -32,6 +32,13 @@ const event: SubmittedEvent = {
     reason: 'Date unavailable',
   },
   decisionHistory: [],
+  actionDetails: 'Venue availability checked.',
+  actionHistory: [{
+    status: 'Rejected',
+    details: 'Venue availability checked.',
+    coordinatorId,
+    recordedAt: '2026-10-02T10:00:00+08:00',
+  }],
 }
 
 beforeEach(() => {
@@ -44,16 +51,68 @@ test('shows the selected event status and full recorded details', async () => {
   render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
 
   expect(await screen.findByRole('heading', { name: 'Community Workshop' })).toBeInTheDocument()
-  expect(screen.getByText('Rejected')).toBeInTheDocument()
+  expect(screen.getByText('Rejected', { selector: '.status-badge' })).toBeInTheDocument()
   expect(screen.getByText('A practical workshop')).toBeInTheDocument()
   expect(screen.getByText('Learning')).toBeInTheDocument()
   expect(screen.getByText('Seminar room')).toBeInTheDocument()
   expect(screen.getByText('Wheelchair access')).toBeInTheDocument()
   expect(screen.getByText('Projector')).toBeInTheDocument()
   expect(screen.getByText('Online registration')).toBeInTheDocument()
+  expect(screen.getByDisplayValue('Venue availability checked.')).toBeInTheDocument()
+  expect(screen.getByText('Venue availability checked.', { selector: 'dd' })).toBeInTheDocument()
   expect(screen.getByText(/Assigned to/)).toHaveTextContent('Alicia Tan')
   expect(eventApi).toHaveBeenCalledWith(`/events/${event.id}?coordinatorId=${coordinatorId}`)
   expect(fetchRegistrations).not.toHaveBeenCalled()
+})
+
+test('assigned coordinator updates the status and action details', async () => {
+  const submittedEvent: SubmittedEvent = {
+    ...event,
+    status: 'Submitted',
+    decision: null,
+    actionDetails: 'Initial review completed.',
+    actionHistory: [],
+  }
+  vi.mocked(eventApi).mockResolvedValueOnce(submittedEvent).mockResolvedValueOnce({
+    ...submittedEvent,
+    status: 'Approved',
+    actionDetails: 'Venue and equipment confirmed.',
+    actionHistory: [{
+      status: 'Approved',
+      details: 'Venue and equipment confirmed.',
+      coordinatorId,
+      recordedAt: '2026-10-03T10:00:00+08:00',
+    }],
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'Approved' } })
+  fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Venue and equipment confirmed.' } })
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Save progress' }))
+
+  await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
+    `/events/${event.id}/progress`,
+    { coordinatorId, status: 'Approved', actionDetails: 'Venue and equipment confirmed.' },
+    'PATCH',
+  ))
+  expect(await screen.findByText('Event progress updated successfully.')).toBeInTheDocument()
+  expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+})
+
+test('final event status cannot be changed while action details remain editable', async () => {
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  const status = screen.getByLabelText('Status')
+  expect(status).toHaveValue('Rejected')
+  expect(status.querySelectorAll('option')).toHaveLength(1)
+  expect(status).toHaveTextContent('Rejected')
+
+  fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Follow-up recorded.' } })
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Save progress' })).toBeEnabled()
 })
 
 test('does not load event details for another role', () => {

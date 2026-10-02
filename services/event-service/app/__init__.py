@@ -13,6 +13,7 @@ from app.models import (
     EventNotAssignedError,
     EventNotFoundError,
     EventNotSubmittedError,
+    InvalidStatusTransitionError,
     RejectionReasonError,
     approve_event,
     get_event,
@@ -21,6 +22,7 @@ from app.models import (
     reject_event,
     submit_event,
     update_event_coordinator,
+    update_event_progress,
 )
 from app.validation import validate
 
@@ -186,6 +188,45 @@ def create_app(config=None):
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
         return jsonify(assigned), 200
+
+    @app.patch("/events/<uuid:event_id>/progress")
+    def update_progress(event_id):
+        data = request.get_json(silent=True)
+        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
+        status = data.get("status", "") if isinstance(data, dict) else ""
+        action_details = data.get("actionDetails", "") if isinstance(data, dict) else ""
+        try:
+            coordinator_id = str(UUID(coordinator_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+        if status not in ("Submitted", "Approved", "Rejected"):
+            return jsonify(message="Status must be Submitted, Approved, or Rejected."), 400
+        if not isinstance(action_details, str) or not action_details.strip():
+            return jsonify(message="Action details are required."), 400
+        action_details = action_details.strip()
+        if len(action_details) > 1000:
+            return jsonify(message="Action details must be 1000 characters or fewer."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = update_event_progress(
+                app.config["DATABASE_URL"],
+                str(event_id),
+                coordinator_id,
+                status,
+                action_details,
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(
+                message="This event request is not assigned to the current coordinator."
+            ), 403
+        except InvalidStatusTransitionError:
+            return jsonify(
+                message="Approved and rejected events have a final status that cannot be changed."
+            ), 409
+        return jsonify(updated), 200
 
     @app.patch("/events/<uuid:event_id>/approve")
     def approve(event_id):

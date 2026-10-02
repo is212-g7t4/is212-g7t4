@@ -25,6 +25,8 @@ const submittedEvent: SubmittedEvent = {
   coordinatorId,
   decision: null,
   decisionHistory: [],
+  actionDetails: '',
+  actionHistory: [],
 }
 const approvedEvent: SubmittedEvent = {
   ...submittedEvent,
