@@ -28,6 +28,13 @@ export const HomeIcon = (props: IconProps) => (
   </Base>
 )
 
+export const SearchIcon = (props: IconProps) => (
+  <Base {...props}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4 4" />
+  </Base>
+)
+
 export const PlusIcon = (props: IconProps) => (
   <Base {...props}>
     <path d="M12 5v14M5 12h14" />

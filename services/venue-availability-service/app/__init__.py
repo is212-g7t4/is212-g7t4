@@ -14,7 +14,12 @@ from app.models import (
     create_booking,
     decide_booking,
     list_bookings,
+    list_window_bookings,
 )
+
+# SCRUM-26: the longest window the venue search will answer for. Same spirit
+# as the calendar's 42-day bound — an unbounded range is an unbounded read.
+MAX_WINDOW = timedelta(days=42)
 
 load_dotenv()
 
@@ -41,7 +46,9 @@ def create_app(config=None):
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
-        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
+        # The Vite dev server is pinned to 5174 (strictPort in
+        # vite.config.ts), so that is the origin the browser sends.
+        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
     app.config.update(config or {})
 
@@ -116,6 +123,41 @@ def create_app(config=None):
             bookings=list_bookings(
                 app.config["DATABASE_URL"], venue_id, date_from, date_to
             )
+        )
+
+    @app.get("/venue-bookings/window")
+    def get_window_bookings():
+        """SCRUM-26: every venue's bookings overlapping one window.
+
+        A service-to-service read for Venue Booking Service's venue search,
+        which needs the whole catalogue's bookings at once; `GET
+        /venue-bookings` answers for a single venue, as a calendar grid needs.
+
+        Deliberately not behind CALENDAR_DEV_MODE or the X-Dev-* headers:
+        those simulate the browser's user switcher, and this caller is a
+        composite, not a browser. It exposes no more than the calendar read
+        does, and the composite does its own role check.
+        """
+        if any(len(request.args.getlist(key)) != 1 for key in ("dateFrom", "dateTo")):
+            return jsonify(
+                message="Provide dateFrom and dateTo exactly once."
+            ), 400
+        date_from = parse_boundary(request.args["dateFrom"])
+        date_to = parse_boundary(request.args["dateTo"])
+        if (
+            not date_from
+            or not date_to
+            or not timedelta(0) < date_to - date_from <= MAX_WINDOW
+        ):
+            return jsonify(
+                message="Require dateFrom < dateTo as ISO date-times, maximum 42 days."
+            ), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        return jsonify(
+            bookings=list_window_bookings(app.config["DATABASE_URL"], date_from, date_to)
         )
 
     @app.post("/venue-bookings")

@@ -182,3 +182,40 @@ def decide_booking(database_url, booking_id, reviewed_by, status):
             )
             decided = cursor.fetchone()
     return serialize(decided)
+
+
+def list_window_bookings(database_url, date_from, date_to):
+    """SCRUM-26: every venue's bookings overlapping [date_from, date_to).
+
+    The calendar read above answers for one venue at a time, which is what a
+    calendar grid needs. Venue search asks the opposite question — "across the
+    whole catalogue, what is taken in this window?" — and doing that as one
+    call per venue would be N round trips inside a 3-second budget.
+
+    Same conservative stance as the calendar: a row this service cannot read
+    raises CalendarDataError rather than being dropped, because a dropped
+    booking would show a taken venue as free. Rejected and Cancelled bookings
+    never block, so they are excluded; the caller decides what the remaining
+    statuses mean.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                    WHERE (status IS NULL OR status NOT IN ('Rejected', 'Cancelled'))
+                      AND ((requested_start_time < %s AND requested_end_time > %s)
+                        OR requested_start_time IS NULL
+                        OR requested_end_time IS NULL
+                        OR requested_end_time <= requested_start_time)
+                    ORDER BY requested_start_time ASC, booking_id ASC""",
+                [date_to, date_from],
+            )
+            bookings = []
+            for row in cursor.fetchall():
+                validate_calendar_row(row)
+                if (
+                    row["requested_start_time"] < date_to
+                    and row["requested_end_time"] > date_from
+                ):
+                    bookings.append(serialize(row))
+            return bookings

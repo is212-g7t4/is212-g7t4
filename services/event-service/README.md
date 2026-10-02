@@ -29,7 +29,7 @@ In a second terminal, from the repository root:
 npm run dev:frontend
 ```
 
-Open http://localhost:5173. The frontend calls http://localhost:5003 by default.
+Open http://localhost:5174. The frontend calls http://localhost:5003 by default.
 For a different API address, set VITE_EVENT_SERVICE_URL in the frontend .env.
 If Vite uses a different port, set FRONTEND_ORIGIN in the service .env to that origin.
 

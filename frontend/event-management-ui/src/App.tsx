@@ -10,6 +10,7 @@ import { SubmissionPage } from './pages/SubmissionPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
+import { VenueSearchPage } from './pages/VenueSearchPage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Route, User } from './types'
@@ -27,6 +28,9 @@ const paths: Record<Route, string> = {
   venues: '/venues',
   venueDetail: '/venues',
   venueCalendar: '/venue-availability',
+  // Not '/venues/search': getRoute() reads any /venues/<something> as a
+  // venue detail page.
+  venueSearch: '/venue-search',
 }
 
 function getRoute(): Route {
@@ -37,6 +41,7 @@ function getRoute(): Route {
   if (path === '/my-events') return 'myEvents'
   if (path === '/venue-availability') return 'venueCalendar'
   if (path === '/venues') return 'venues'
+  if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
   if (/^\/events\/[^/]+$/.test(path)) return 'detail'
   return 'dashboard'
@@ -158,6 +163,7 @@ function App() {
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} />}
+      {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
