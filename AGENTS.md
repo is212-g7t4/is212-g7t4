@@ -36,7 +36,9 @@ is212-g7t4/
 │   └── ...
 ├── docs/                            # architecture notes, diagrams, rationale
 ├── docker-compose.yml                # local orchestration of all services
-├── .github/workflows/                # per-service CI
+├── .github/
+│   ├── workflows/ci.yml             # the single CI workflow (see CI below)
+│   └── .gitleaksignore              # known Gitleaks false positives
 ├── AGENTS.md                        # this file
 ├── INDEX.md                         # service directory / map
 └── README.md
@@ -186,12 +188,39 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   capacity venues, insufficient equipment, rejected approvals).
 - Tests should be traceable back to a user story / acceptance criterion —
   favor test names and docstrings that make that link obvious.
+- **Frontend** (`frontend/event-management-ui`): Vitest unit/component tests
+  live next to the code in `src/` (`npm test`, `npm run test:coverage`).
+  Playwright e2e smoke tests live in `e2e/` (`npm run test:e2e`) and mock every
+  backend call with `page.route()`, so they need no running services, database
+  or secrets. A request a test hasn't mocked fails the test. Add new mocks via
+  `mock()` in `e2e/fixtures.ts`. First run needs `npx playwright install chromium`.
 
 ## CI
 
-- One GitHub Actions workflow per service (or a single workflow with path
-  filters on `services/<name>-service/**`), running lint + `pytest` for the
-  service(s) that changed. Don't build every service on every PR.
+A single workflow, `.github/workflows/ci.yml`, runs on every pull request and
+on pushes to `main`. A `changes` job (`dorny/paths-filter`) decides what to run,
+so only the services or frontend a PR touches are built and tested; editing
+`ci.yml` itself re-runs everything. No secrets are needed.
+
+| Job | What it checks |
+|---|---|
+| `backend` (matrix, one per service) | `uv sync --frozen`, `pytest --cov=app`, `pip-audit` on the locked deps |
+| `frontend` | `npm audit --audit-level=high`, oxlint, Vitest with coverage, `tsc -b` + Vite build |
+| `e2e` | Playwright smoke tests (mocked APIs); uploads the report if it fails |
+| `docker-build` | `docker compose build` using each service's `.env.example` |
+| `gitleaks` | Secret scan of the full git history (always runs) |
+| `ci-passed` | Summary check — require this one in branch protection |
+
+- **Adding a service:** CI does *not* discover services automatically. Add it
+  to the `changes` filters **and** the `backend` matrix in `ci.yml`, commit its
+  `uv.lock`, and add it to `docker-compose.yml`. Otherwise its tests silently
+  never run.
+- **Gitleaks:** known false positives (the public Supabase key in the root
+  `.env.example`) are listed in `.github/.gitleaksignore`. Run it locally with
+  `gitleaks detect --gitleaks-ignore-path .github/.gitleaksignore`.
+- **Not covered:** Python lint/format, frontend formatting, real-database or
+  full-stack e2e, and the opt-in live Supabase test
+  (`venue-availability-service/tests/test_live_calendar.py`).
 
 ## Secrets & environment
 
