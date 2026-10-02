@@ -199,8 +199,10 @@ def create_app(config=None):
             coordinator_id = str(UUID(coordinator_id))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
-        if status not in ("Submitted", "Approved", "Rejected"):
-            return jsonify(message="Status must be Submitted, Approved, or Rejected."), 400
+        if status not in ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected"):
+            return jsonify(
+                message="Status must be Submitted, Under Review, Approved, Confirmed, or Rejected."
+            ), 400
         if not isinstance(action_details, str) or not action_details.strip():
             return jsonify(message="Action details are required."), 400
         action_details = action_details.strip()
@@ -224,7 +226,7 @@ def create_app(config=None):
             ), 403
         except InvalidStatusTransitionError:
             return jsonify(
-                message="Approved and rejected events have a final status that cannot be changed."
+                message="This status change is not allowed for the event's current stage."
             ), 409
         return jsonify(updated), 200
 
@@ -252,7 +254,7 @@ def create_app(config=None):
             ), 403
         except EventNotSubmittedError:
             return jsonify(
-                message="Only submitted event requests can be approved."
+                message="Only submitted or under-review event requests can be approved."
             ), 409
         return jsonify(approved), 200
 
@@ -285,7 +287,7 @@ def create_app(config=None):
             ), 403
         except EventNotSubmittedError:
             return jsonify(
-                message="Only submitted event requests can be rejected."
+                message="Only submitted or under-review event requests can be rejected."
             ), 409
         except RejectionReasonError:
             return jsonify(

@@ -69,7 +69,7 @@ def test_assigned_coordinator_updates_status_and_records_action(setup):
         "recordedAt": "2026-10-02T02:00:00+00:00",
     }]
     updated["description"] = json.dumps(updated_metadata)
-    cursor.fetchone.side_effect = [event_row(), updated]
+    cursor.fetchone.side_effect = [event_row("Under Review"), updated]
 
     response = client.patch(
         f"/events/{EVENT_ID}/progress",
@@ -130,10 +130,12 @@ def test_same_status_updates_action_details_without_duplicate_decision(setup):
 
 @pytest.mark.parametrize(
     ("current_status", "requested_status"),
-    [("Approved", "Submitted"), ("Approved", "Rejected"),
+    [("Submitted", "Approved"), ("Submitted", "Rejected"),
+     ("Under Review", "Confirmed"), ("Approved", "Submitted"),
+     ("Approved", "Rejected"), ("Confirmed", "Approved"),
      ("Rejected", "Submitted"), ("Rejected", "Approved")],
 )
-def test_final_status_cannot_transition(current_status, requested_status, setup):
+def test_invalid_status_transition_is_rejected(current_status, requested_status, setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(current_status)
 
@@ -148,9 +150,27 @@ def test_final_status_cannot_transition(current_status, requested_status, setup)
 
     assert response.status_code == 409
     assert response.json["message"] == (
-        "Approved and rejected events have a final status that cannot be changed."
+        "This status change is not allowed for the event's current stage."
     )
     assert cursor.execute.call_count == 1
+
+
+def test_approved_event_can_be_confirmed(setup):
+    client, _, cursor = setup
+    cursor.fetchone.side_effect = [event_row("Approved"), event_row("Confirmed")]
+
+    response = client.patch(
+        f"/events/{EVENT_ID}/progress",
+        json={
+            "coordinatorId": COORDINATOR_ID,
+            "status": "Confirmed",
+            "actionDetails": "All arrangements confirmed.",
+        },
+    )
+
+    assert response.status_code == 200
+    stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
+    assert stored["actionHistory"][-1]["status"] == "Confirmed"
 
 
 def test_progress_update_is_forbidden_for_another_coordinators_event(setup):
@@ -170,7 +190,7 @@ def test_progress_update_is_forbidden_for_another_coordinators_event(setup):
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize("status", ["", "Pending", "approved", None])
+@pytest.mark.parametrize("status", ["", "Pending", "approved", "Cancelled", None])
 def test_progress_update_requires_supported_status(status, setup):
     response = setup[0].patch(
         f"/events/{EVENT_ID}/progress",

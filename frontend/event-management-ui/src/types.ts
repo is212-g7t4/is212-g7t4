@@ -25,7 +25,9 @@ export interface User {
 export type RequestStatus =
   | 'Pending'
   | 'Submitted'
+  | 'Under Review'
   | 'Approved'
+  | 'Confirmed'
   | 'Rejected'
 
 export interface EventData {
