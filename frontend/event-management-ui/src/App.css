@@ -785,9 +785,19 @@ textarea:disabled {
   color: var(--color-primary);
 }
 
+.status-badge.under-review {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
 .status-badge.approved {
   background: var(--color-success-soft);
   color: var(--color-success);
+}
+
+.status-badge.confirmed {
+  background: #dff7f1;
+  color: #087563;
 }
 
 .status-badge.rejected {

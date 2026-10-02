@@ -90,7 +90,7 @@ export function StatusBadge({
   status: RequestStatus | string
 }) {
   return (
-    <span className={`status-badge ${status.toLowerCase()}`}>
+    <span className={`status-badge ${status.toLowerCase().replace(/\s+/g, '-')}`}>
       {status}
     </span>
   )

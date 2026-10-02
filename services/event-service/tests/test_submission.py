@@ -165,7 +165,7 @@ def test_submitted_queue_loads_all_persisted_events_without_coordinator_filter(s
     assert response.status_code == 200
     assert response.json["events"][0]["eventName"] == "Community Workshop"
     query, params = cursor.execute.call_args.args
-    assert "WHERE status = 'Submitted'" in query
+    assert "WHERE status IN ('Submitted', 'Under Review')" in query
     assert "coordinator_id = %s" not in query
     assert "ORDER BY submission_date ASC NULLS LAST" in query
     assert params == []
@@ -212,6 +212,7 @@ def test_assign_coordinator_updates_event(setup):
     client, _, cursor = setup
     assigned = saved_row()
     assigned["coordinator_id"] = COORDINATOR_ID
+    assigned["status"] = "Under Review"
     cursor.fetchone.return_value = assigned
 
     response = client.patch(
@@ -221,8 +222,10 @@ def test_assign_coordinator_updates_event(setup):
 
     assert response.status_code == 200
     assert response.json["coordinatorId"] == COORDINATOR_ID
+    assert response.json["status"] == "Under Review"
     query, parameters = cursor.execute.call_args.args
     assert "SET coordinator_id = %s" in query
+    assert "status = CASE WHEN status = 'Submitted' THEN 'Under Review'" in query
     assert parameters == [COORDINATOR_ID, "00000000-0000-0000-0000-000000000001"]
 
 
