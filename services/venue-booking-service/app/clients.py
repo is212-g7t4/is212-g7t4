@@ -14,6 +14,11 @@ VENUE_AVAILABILITY_SERVICE_URL = (
 )
 
 
+# SCRUM-26 AC3 gives the whole search a 3-second budget. The two downstream
+# calls run in parallel, so each gets most of it rather than half.
+SEARCH_TIMEOUT = 2.5
+
+
 class EventNotFoundError(Exception):
     pass
 
@@ -49,6 +54,36 @@ def get_venues() -> list:
     response = httpx.get(f"{VENUE_SERVICE_URL}/venues")
     response.raise_for_status()
     return response.json()["venues"]
+
+
+def search_venues(filters: list) -> list:
+    """Venues from Venue Service that meet the event's requirements.
+
+    `filters` is a list of (name, value) pairs so repeatable parameters
+    (facility, accessibility) survive the trip.
+    """
+    response = httpx.get(
+        f"{VENUE_SERVICE_URL}/venues", params=filters, timeout=SEARCH_TIMEOUT
+    )
+    response.raise_for_status()
+    return response.json()["venues"]
+
+
+def get_bookings_between(start: str, end: str) -> list:
+    """Non-rejected bookings overlapping [start, end) for every venue.
+
+    Uses the window read, not `GET /venue-bookings`: that one answers for a
+    single venue (what SCRUM-25's calendar grid needs) and is behind the
+    calendar's DEV-mode/user-switcher simulation, which a composite has no
+    business impersonating.
+    """
+    response = httpx.get(
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/window",
+        params={"dateFrom": start, "dateTo": end},
+        timeout=SEARCH_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json()["bookings"]
 
 
 def create_booking(

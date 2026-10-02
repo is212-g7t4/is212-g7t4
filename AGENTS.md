@@ -36,7 +36,9 @@ is212-g7t4/
 │   └── ...
 ├── docs/                            # architecture notes, diagrams, rationale
 ├── docker-compose.yml                # local orchestration of all services
-├── .github/workflows/                # per-service CI
+├── .github/
+│   ├── workflows/ci.yml             # the single CI workflow (see CI below)
+│   └── .gitleaksignore              # known Gitleaks false positives
 ├── AGENTS.md                        # this file
 ├── INDEX.md                         # service directory / map
 └── README.md
@@ -101,7 +103,7 @@ The root `package.json` runs both halves at once with `concurrently`:
 
 ```
 npm run dev            # frontend (Vite) + backend (docker compose up)
-npm run dev:frontend   # frontend only — Vite on :5173
+npm run dev:frontend   # frontend only — Vite on :5174
 npm run dev:backend    # backend only — docker compose up
 ```
 
@@ -153,20 +155,20 @@ INDEX.md for the port each service uses. Containers started with
 ### `FRONTEND_ORIGIN` must match the port Vite actually used
 
 Every service does its own CORS check against a single `FRONTEND_ORIGIN`
-(plus its `127.0.0.1` twin), defaulting to `http://localhost:5173`. Vite
-does **not** insist on 5173 — if something else already holds the port it
-prints `Port 5173 is in use, trying another one...` and quietly moves to
-5174. The mismatch is easy to misread: the service returns `200` and the
+(plus its `127.0.0.1` twin), defaulting to `http://localhost:5174`. That is
+the port `vite.config.ts` pins, and it sets `strictPort: true`, so if
+something else already holds 5174 Vite **exits** rather than drifting to
+another port. A dev server that is running is therefore always on 5174.
+
+If you do override the port, every service's `FRONTEND_ORIGIN` has to follow
+it. The mismatch is easy to misread: the service returns `200` and the
 payload is fine, but with no `Access-Control-Allow-Origin` header the
 browser discards it, so the UI shows only a generic "unable to load" error
 while `curl` against the same endpoint looks perfectly healthy.
 
-Read the port out of the Vite banner, then either free 5173 and restart, or
-point the services at the port in use:
-
 ```
 # in every services/*/.env, then: docker compose up -d
-FRONTEND_ORIGIN=http://localhost:5174
+FRONTEND_ORIGIN=http://localhost:<the port Vite printed>
 ```
 
 To confirm it's CORS rather than the service, compare the two — only the
@@ -186,12 +188,39 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   capacity venues, insufficient equipment, rejected approvals).
 - Tests should be traceable back to a user story / acceptance criterion —
   favor test names and docstrings that make that link obvious.
+- **Frontend** (`frontend/event-management-ui`): Vitest unit/component tests
+  live next to the code in `src/` (`npm test`, `npm run test:coverage`).
+  Playwright e2e smoke tests live in `e2e/` (`npm run test:e2e`) and mock every
+  backend call with `page.route()`, so they need no running services, database
+  or secrets. A request a test hasn't mocked fails the test. Add new mocks via
+  `mock()` in `e2e/fixtures.ts`. First run needs `npx playwright install chromium`.
 
 ## CI
 
-- One GitHub Actions workflow per service (or a single workflow with path
-  filters on `services/<name>-service/**`), running lint + `pytest` for the
-  service(s) that changed. Don't build every service on every PR.
+A single workflow, `.github/workflows/ci.yml`, runs on every pull request and
+on pushes to `main`. A `changes` job (`dorny/paths-filter`) decides what to run,
+so only the services or frontend a PR touches are built and tested; editing
+`ci.yml` itself re-runs everything. No secrets are needed.
+
+| Job | What it checks |
+|---|---|
+| `backend` (matrix, one per service) | `uv sync --frozen`, `pytest --cov=app`, `pip-audit` on the locked deps |
+| `frontend` | `npm audit --audit-level=high`, oxlint, Vitest with coverage, `tsc -b` + Vite build |
+| `e2e` | Playwright smoke tests (mocked APIs); uploads the report if it fails |
+| `docker-build` | `docker compose build` using each service's `.env.example` |
+| `gitleaks` | Secret scan of the full git history (always runs) |
+| `ci-passed` | Summary check — require this one in branch protection |
+
+- **Adding a service:** CI does *not* discover services automatically. Add it
+  to the `changes` filters **and** the `backend` matrix in `ci.yml`, commit its
+  `uv.lock`, and add it to `docker-compose.yml`. Otherwise its tests silently
+  never run.
+- **Gitleaks:** known false positives (the public Supabase key in the root
+  `.env.example`) are listed in `.github/.gitleaksignore`. Run it locally with
+  `gitleaks detect --gitleaks-ignore-path .github/.gitleaksignore`.
+- **Not covered:** Python lint/format, frontend formatting, real-database or
+  full-stack e2e, and the opt-in live Supabase test
+  (`venue-availability-service/tests/test_live_calendar.py`).
 
 ## Secrets & environment
 
