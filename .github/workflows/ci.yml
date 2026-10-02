@@ -95,6 +95,11 @@ jobs:
       - name: Run tests
         if: steps.gate.outputs.run == 'true'
         run: uv run pytest --cov=app --cov-report=term-missing
+      - name: Audit dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          uv export --frozen --no-hashes --no-emit-project > requirements.txt
+          uvx pip-audit -r requirements.txt --no-deps --disable-pip
 
   frontend:
     needs: changes
@@ -111,9 +116,35 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/event-management-ui/package-lock.json
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run test:coverage
       - run: npm run build
+
+  e2e:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.changes), 'frontend')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/event-management-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/event-management-ui/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Backends are mocked in the tests, so no services or secrets are needed.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/event-management-ui/playwright-report/
+          retention-days: 7
 
   docker-build:
     needs: changes
@@ -131,10 +162,26 @@ jobs:
           done
       - run: docker compose build
 
+  # Scans the full git history for committed secrets. Runs on every PR/push
+  # (not path-filtered). Known false positives live in .github/.gitleaksignore.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+      - name: Scan for secrets
+        run: gitleaks detect --redact -v --gitleaks-ignore-path .github/.gitleaksignore
+
   # Single required status check for branch protection.
   ci-passed:
     if: always()
-    needs: [changes, backend, frontend, docker-build]
+    needs: [changes, backend, frontend, e2e, docker-build, gitleaks]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed or was cancelled
