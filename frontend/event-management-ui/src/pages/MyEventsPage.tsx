@@ -7,10 +7,21 @@ import { Field, RoleWarning, StatusBadge } from '../components/FormControls'
 import { ArrowRightIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
+import { OrganiserEventsPage } from './OrganiserEventsPage'
 
 const STATUS_OPTIONS = ['', 'Submitted', 'Under Review', 'Approved', 'Confirmed', 'Rejected']
 
-export function MyEventsPage({ role, isManager, currentCoordinatorId, currentCoordinatorName, onViewDetails }: { role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }) {
+type MyEventsProps = { role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }
+
+// `currentCoordinatorId` / `currentCoordinatorName` carry the active user, whatever their role.
+export function MyEventsPage(props: MyEventsProps) {
+  if (props.role === 'Event Organiser') {
+    return <OrganiserEventsPage organiserId={props.currentCoordinatorId} organiserName={props.currentCoordinatorName} onViewDetails={props.onViewDetails} />
+  }
+  return <CoordinatorMyEvents {...props} />
+}
+
+function CoordinatorMyEvents({ role, isManager, currentCoordinatorId, currentCoordinatorName, onViewDetails }: MyEventsProps) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -48,7 +59,7 @@ export function MyEventsPage({ role, isManager, currentCoordinatorId, currentCoo
     setQuery({ status, venue, dateFrom, dateTo })
   }
 
-  if (role !== 'Event Coordinator') return <RoleWarning>My events is visible to Event Coordinators.</RoleWarning>
+  if (role !== 'Event Coordinator') return <RoleWarning>My events is visible to Event Coordinators and Event Organisers.</RoleWarning>
 
   return <div className="page-stack">
     <section className="intro"><h1>My events</h1><p className="muted">Signed in for this prototype as {currentCoordinator.name}.</p></section>

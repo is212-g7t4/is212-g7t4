@@ -51,11 +51,18 @@ beforeEach(() => {
 })
 
 describe('event request venue capacity check', () => {
-  test('allows an Event Coordinator to open the request form', async () => {
-    render(<SubmissionPage role="Event Coordinator" />)
+  test('allows an Event Organiser to open the request form', async () => {
+    render(<SubmissionPage role="Event Organiser" />)
 
     expect(screen.getByRole('heading', { name: 'Create Event Request' })).toBeVisible()
     expect(await screen.findByRole('option', { name: venue.name })).toBeInTheDocument()
+  })
+
+  test.each(['Event Coordinator', 'Venue Staff'] as const)('does not let %s submit event requests', (role) => {
+    render(<SubmissionPage role={role} />)
+
+    expect(screen.getByText('Only Event Organisers can submit event requests.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Create Event Request' })).not.toBeInTheDocument()
   })
 
   test.each([

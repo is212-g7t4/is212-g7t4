@@ -28,3 +28,28 @@ def list_registrations(database_url, event_id):
                 [event_id],
             )
             return [serialize(row) for row in cursor.fetchall()]
+
+
+def count_registrations(database_url, event_ids):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                """SELECT event_id,
+                          COUNT(*) AS total,
+                          COUNT(*) FILTER (WHERE status = 'Confirmed') AS confirmed
+                   FROM public."Registration" WHERE event_id = ANY(%s::uuid[])
+                   GROUP BY event_id""",
+                [event_ids],
+            )
+            found = {
+                str(row["event_id"]): {
+                    "total": row["total"],
+                    "confirmed": row["confirmed"],
+                }
+                for row in cursor.fetchall()
+            }
+    # Events with no registrations have no rows; report zeros so callers needn't guess.
+    return {
+        event_id: found.get(event_id, {"total": 0, "confirmed": 0})
+        for event_id in event_ids
+    }

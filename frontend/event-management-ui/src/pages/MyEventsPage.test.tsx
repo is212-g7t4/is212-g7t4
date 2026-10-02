@@ -80,8 +80,8 @@ test('opens the selected event details', async () => {
 })
 
 test('does not load coordinator events for another role', () => {
-  render(<MyEventsPage role="Event Organiser" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+  render(<MyEventsPage role="Venue Staff" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
-  expect(screen.getByText('My events is visible to Event Coordinators.')).toBeInTheDocument()
+  expect(screen.getByText('My events is visible to Event Coordinators and Event Organisers.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
 })

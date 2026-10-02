@@ -66,12 +66,12 @@ def test_ac1_ac2_ac3_submit_existing_columns_and_return_confirmation_data(setup)
     query, parameters = cursor.execute.call_args.args
     assert 'INSERT INTO public."Event"' in query
     assert "timezone('UTC', CURRENT_TIMESTAMP)" in query
-    assert "organiser_id" not in query and "purpose" not in query
+    assert "purpose" not in query
     assert "'Submitted'" in query
     assert UUID(parameters[0])
     assert parameters[5] == 25
     assert json.loads(parameters[2])["purpose"] == "Learning"
-    assert parameters[6:] == [None, "", "", "", ""]
+    assert parameters[6:] == [None, "", "", "", "", None]  # last: organiser_id (not supplied)
     connection.__exit__.assert_called_once()
     connection.close.assert_called_once()
 
@@ -85,7 +85,7 @@ def test_optional_details_roundtrip(setup):
         "/events", json={**VALID, "equipmentRequirements": "Projector"}
     )
     assert response.json["equipmentRequirements"] == "Projector"
-    assert cursor.execute.call_args.args[1][-2] == "Projector"
+    assert cursor.execute.call_args.args[1][-3] == "Projector"
 
 
 @pytest.mark.parametrize(
@@ -509,3 +509,25 @@ def test_rejection_is_rejected_when_event_is_not_submitted(setup):
 
     assert response.status_code == 409
     assert cursor.execute.call_count == 1
+
+
+ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
+
+
+def test_submit_persists_organiser_id(setup):
+    """Organiser registration view: the creator is recorded so ownership can be checked."""
+    client, _, cursor = setup
+    row = saved_row()
+    row["organiser_id"] = ORGANISER_ID
+    cursor.fetchone.return_value = row
+    response = client.post("/events", json={**VALID, "organiserId": ORGANISER_ID})
+    assert response.status_code == 201
+    assert response.json["organiserId"] == ORGANISER_ID
+    assert cursor.execute.call_args.args[1][-1] == ORGANISER_ID
+
+
+def test_submit_rejects_invalid_organiser_id(setup):
+    client, _, cursor = setup
+    response = client.post("/events", json={**VALID, "organiserId": "not-a-uuid"})
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()

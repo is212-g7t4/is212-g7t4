@@ -157,7 +157,7 @@ function App() {
       <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
-      {route === 'submit' && <SubmissionPage role={role} />}
+      {route === 'submit' && <SubmissionPage role={role} currentOrganiserId={activeUser?.id} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
