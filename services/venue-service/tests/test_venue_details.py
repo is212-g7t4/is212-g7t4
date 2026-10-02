@@ -213,9 +213,9 @@ def test_health_and_browser_cors(setup):
     client = setup[0]
 
     assert client.get("/health").json == {"status": "ok"}
-    response = client.options(f"/venues/{VENUE_ID}", headers={"Origin": "http://127.0.0.1:5173"})
+    response = client.options(f"/venues/{VENUE_ID}", headers={"Origin": "http://127.0.0.1:5174"})
     assert response.status_code == 200
-    assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5173"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5174"
     assert response.headers["Access-Control-Allow-Methods"] == "GET, OPTIONS"
     assert (
         "Access-Control-Allow-Origin"

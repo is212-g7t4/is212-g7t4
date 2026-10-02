@@ -293,9 +293,9 @@ def test_missing_database_configuration():
 def test_health_and_browser_cors(setup):
     client = setup[0]
     assert client.get("/health").json == {"status": "ok"}
-    response = client.options("/events", headers={"Origin": "http://localhost:5173"})
+    response = client.options("/events", headers={"Origin": "http://localhost:5174"})
     assert response.status_code == 200
-    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert (
         "Access-Control-Allow-Origin"
         not in client.options(
@@ -309,13 +309,13 @@ def test_reject_preflight_is_allowed(setup):
     response = client.options(
         "/events/00000000-0000-0000-0000-000000000001/reject",
         headers={
-            "Origin": "http://localhost:5173",
+            "Origin": "http://localhost:5174",
             "Access-Control-Request-Method": "PATCH",
             "Access-Control-Request-Headers": "content-type",
         },
     )
     assert response.status_code == 200
-    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert "PATCH" in response.headers["Access-Control-Allow-Methods"]
 
 

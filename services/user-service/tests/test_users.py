@@ -108,9 +108,9 @@ def test_get_user_missing_database_configuration():
 def test_health_and_browser_cors(setup):
     client = setup[0]
     assert client.get("/health").json == {"status": "ok"}
-    response = client.options("/users", headers={"Origin": "http://localhost:5173"})
+    response = client.options("/users", headers={"Origin": "http://localhost:5174"})
     assert response.status_code == 200
-    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert (
         "Access-Control-Allow-Origin"
         not in client.options("/users", headers={"Origin": "https://other.example"}).headers

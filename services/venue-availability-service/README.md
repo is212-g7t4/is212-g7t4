@@ -21,7 +21,8 @@ CALENDAR_DEV_MODE=true uv run --env-file ../../.env flask --app app run --host 1
 
 This explicitly loads the **root** `.env`, not an assumed service-local file.
 Alternatively create a service `.env` using this service's `.env.example` and
-use `--env-file .env`. `FRONTEND_ORIGIN` defaults to `http://localhost:5173`.
+use `--env-file .env`. `FRONTEND_ORIGIN` defaults to `http://localhost:5174`, the port
+`vite.config.ts` pins with `strictPort`.
 
 From repository root, once the other existing Compose entries' service `.env`
 files are configured:
@@ -118,6 +119,40 @@ nullable; they do not determine overlap.
 
 **Clients must show an error/unknown state on any failed read, not a free calendar.**
 This read is a snapshot, not a reservation or a concurrency guarantee.
+
+## Window read — `GET /venue-bookings/window` (SCRUM-26)
+
+`GET /venue-bookings/window?dateFrom=<datetime>&dateTo=<datetime>`
+
+Every venue's bookings overlapping one window, in a single call. The calendar
+read above answers for one venue at a time, which is what a calendar grid
+needs; Venue Booking Service's venue search asks the opposite question —
+"across the whole catalogue, what is taken in this window?" — and doing that
+one venue at a time would be N round trips inside a 3-second budget.
+
+Both parameters are required exactly once, must contain `T`, must satisfy
+`dateFrom < dateTo`, and must span at most 42 days; anything else is `400`
+before a database query. Offset input is converted to Singapore local, as in
+the calendar read. **Output times are naive local**, not `+08:00`, and carry
+no `blocksSelection`: this is the existing write-side shape, because the
+caller matches on `venueId` and `status` only.
+
+Rejected and Cancelled bookings are excluded — they cannot take a venue. A row
+this service cannot read raises `503` rather than being dropped, for the same
+reason as the calendar: a dropped booking would show a taken venue as free.
+
+**Not behind `CALENDAR_DEV_MODE` or the `X-Dev-*` headers.** Those simulate
+the browser's user switcher, and this caller is a composite, not a browser —
+it has no user identity to forward and should not invent one. The endpoint
+exposes no more than the calendar read does, and Venue Booking Service applies
+its own role rule. If the DEV simulation is ever replaced by real
+service-to-service auth, this endpoint is a caller to cover.
+
+```sh
+curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
+  --data-urlencode 'dateFrom=2026-11-10T09:00:00' \
+  --data-urlencode 'dateTo=2026-11-10T12:00:00'
+```
 
 ## Existing write compatibility (unchanged)
 

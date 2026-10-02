@@ -1,0 +1,4 @@
+# Supabase publishable key and project URL in .env.example. Both are public by
+# design (access is enforced by RLS), flagged by the generic-api-key rule.
+8677a61644e52d3c6785b2dfcedf6fec2ae0e78c:.env.example:generic-api-key:7
+1671361f9103b3fa1ea4a89ef515cb9b556a78f5:.env.example:generic-api-key:7
