@@ -9,7 +9,7 @@ import { VenueSelect } from '../features/venue/VenueSelect'
 import { venueCapacityMessage } from '../features/venue/capacity'
 import type { Venue } from '../features/venue/venues'
 
-export function SubmissionPage({ role }: { role: Role }) {
+export function SubmissionPage({ role, currentOrganiserId }: { role: Role; currentOrganiserId?: string }) {
   const [pending, setPending] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
@@ -53,7 +53,7 @@ export function SubmissionPage({ role }: { role: Role }) {
       const capacityMessage = selectedVenue
         ? venueCapacityMessage(selectedVenue, Number(event.expectedAttendance))
         : null
-      const saved = await eventApi('/events', event)
+      const saved = await eventApi('/events', currentOrganiserId ? { ...event, organiserId: currentOrganiserId } : event)
       setSubmitted(true)
       setPopup({ title: 'Event Submitted', messages: [
         `${saved.eventName} was submitted on ${new Date(saved.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT.`,
@@ -68,9 +68,7 @@ export function SubmissionPage({ role }: { role: Role }) {
       setPending(false)
     }
   }
-  if (role !== 'Event Organiser' && role !== 'Event Coordinator') {
-    return <RoleWarning>Only Event Organisers and Event Coordinators can submit event requests.</RoleWarning>
-  }
+  if (role !== 'Event Organiser') return <RoleWarning>Only Event Organisers can submit event requests.</RoleWarning>
 
   return (
     <div className="page-stack">

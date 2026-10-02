@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request
 
 load_dotenv()
 
-from app.models import list_registrations
+from app.models import count_registrations, list_registrations
 
 
 def create_app(config=None):
@@ -47,6 +47,17 @@ def create_app(config=None):
     @app.get("/health")
     def health():
         return jsonify(status="ok")
+
+    @app.get("/registrations/counts")
+    def registration_counts():
+        raw = request.args.get("eventIds", "")
+        try:
+            event_ids = list(dict.fromkeys(str(UUID(part)) for part in raw.split(",")))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="eventIds must be a comma-separated list of valid event IDs."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
+        return jsonify(counts=count_registrations(app.config["DATABASE_URL"], event_ids))
 
     @app.get("/registrations")
     def registrations():
