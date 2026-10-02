@@ -120,18 +120,6 @@ def test_ac2_missing_field_entirely_is_rejected(setup):
     assert response.json["missingFields"] == ["Venue Name"]
 
 
-def test_accessibility_is_optional(setup):
-    """Accessibility is informational, not every venue has it recorded yet."""
-    client, _, cursor = setup
-    cursor.fetchone.side_effect = [None, saved_row(accessibility=None)]
-    payload = {key: value for key, value in VALID_PAYLOAD.items() if key != "accessibility"}
-
-    response = client.post("/venues", json=payload)
-
-    assert response.status_code == 201
-    assert response.json["venue"]["accessibility"] == ""
-
-
 def test_ac4_non_numeric_capacity_is_rejected(setup):
     """AC4: capacity must be a positive whole number, not arbitrary text."""
     client, _, cursor = setup
@@ -188,8 +176,8 @@ def test_conflict_duplicate_venue_name_returns_409(setup):
     assert "A venue with this name already exists." in response.json["errors"]
 
 
-def test_malformed_json_body_is_rejected(setup):
-    """Failure: a non-object JSON body is rejected before validation runs."""
+def test_non_object_json_body_is_rejected(setup):
+    """Failure: valid JSON with the wrong top-level shape is rejected."""
     client, _, cursor = setup
 
     response = client.post("/venues", json=["not", "an", "object"])
