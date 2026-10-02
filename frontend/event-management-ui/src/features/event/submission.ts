@@ -7,8 +7,6 @@ export interface SubmittedEvent extends EventData {
   coordinatorId: string | null
   decision: EventDecision | null
   decisionHistory: EventDecision[]
-  actionDetails: string
-  actionHistory: EventAction[]
 }
 
 export interface EventDecision {
@@ -16,19 +14,6 @@ export interface EventDecision {
   coordinatorId: string
   decidedAt: string
   reason: string | null
-}
-
-export interface EventAction {
-  status: 'Submitted' | 'Approved' | 'Rejected'
-  details: string
-  coordinatorId: string
-  recordedAt: string
-}
-
-export interface EventProgressUpdate {
-  coordinatorId: string
-  status: 'Submitted' | 'Approved' | 'Rejected'
-  actionDetails: string
 }
 
 export interface Coordinator {
@@ -74,7 +59,7 @@ export class SubmissionError extends Error {
 
 export async function eventApi(
   path: string,
-  data?: EventData | EventProgressUpdate | { coordinatorId: string; reason?: string },
+  data?: EventData | { coordinatorId: string; reason?: string },
   method?: 'POST' | 'PATCH',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}

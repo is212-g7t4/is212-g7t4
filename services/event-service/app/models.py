@@ -28,15 +28,10 @@ def unpack_description(value):
 
 
 def unpack_decision(value):
-    description, purpose, decision, history, _, _ = unpack_metadata(value)
-    return description, purpose, decision, history
-
-
-def unpack_metadata(value):
     try:
         details = json.loads(value or "")
     except (ValueError, TypeError):
-        return value or "", "", None, [], "", []
+        return value or "", "", None, []
     if (
         isinstance(details, dict)
         and details.get("_connectsphere") == "event-submission-v1"
@@ -56,33 +51,15 @@ def unpack_metadata(value):
         history = details.get("decisionHistory")
         if not isinstance(history, list):
             history = [decision] if decision else []
-        action_details = details.get("actionDetails")
-        if not isinstance(action_details, str):
-            action_details = ""
-        action_history = details.get("actionHistory")
-        if not isinstance(action_history, list):
-            action_history = []
-        return (
-            details["description"],
-            details["purpose"],
-            decision,
-            history,
-            action_details,
-            action_history,
-        )
-    return value or "", "", None, [], "", []
+        return details["description"], details["purpose"], decision, history
+    return value or "", "", None, []
 
 
 def serialize(row):
     result = {key: row[column] or "" for key, column in FIELDS.items()}
-    (
-        result["description"],
-        result["purpose"],
-        decision,
-        history,
-        action_details,
-        action_history,
-    ) = unpack_metadata(row["description"])
+    result["description"], result["purpose"], decision, history = unpack_decision(
+        row["description"]
+    )
     for key in ("preferredStartDate", "preferredEndDate"):
         result[key] = result[key].isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
@@ -96,8 +73,6 @@ def serialize(row):
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         decision=decision,
         decisionHistory=history,
-        actionDetails=action_details,
-        actionHistory=action_history,
     )
     return result
 
@@ -164,10 +139,6 @@ class EventNotSubmittedError(Exception):
 
 
 class RejectionReasonError(Exception):
-    pass
-
-
-class InvalidStatusTransitionError(Exception):
     pass
 
 
@@ -247,76 +218,6 @@ def get_event(database_url, event_id, coordinator_id, is_manager=False):
     return serialize(event)
 
 
-def update_event_progress(database_url, event_id, coordinator_id, status, action_details):
-    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
-        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(
-                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public."Event"
-                    WHERE event_id = %s
-                    FOR UPDATE""",
-                [event_id],
-            )
-            event = cursor.fetchone()
-            if not event:
-                raise EventNotFoundError
-            if (
-                not event["coordinator_id"]
-                or str(event["coordinator_id"]) != coordinator_id
-            ):
-                raise EventNotAssignedError
-            if event["status"] in ("Approved", "Rejected") and status != event["status"]:
-                raise InvalidStatusTransitionError
-
-            (
-                description,
-                purpose,
-                decision,
-                decision_history,
-                _,
-                action_history,
-            ) = unpack_metadata(event["description"])
-            recorded_at = datetime.now(UTC).isoformat()
-            action = {
-                "status": status,
-                "details": action_details,
-                "coordinatorId": coordinator_id,
-                "recordedAt": recorded_at,
-            }
-            action_history = [*action_history, action]
-
-            if status != event["status"]:
-                if status in ("Approved", "Rejected"):
-                    decision = {
-                        "status": status,
-                        "coordinatorId": coordinator_id,
-                        "decidedAt": recorded_at,
-                        "reason": action_details if status == "Rejected" else None,
-                    }
-                    decision_history = [*decision_history, decision]
-                else:
-                    decision = None
-
-            metadata = {
-                "_connectsphere": "event-submission-v1",
-                "description": description,
-                "purpose": purpose,
-                "decision": decision,
-                "decisionHistory": decision_history,
-                "actionDetails": action_details,
-                "actionHistory": action_history,
-            }
-            cursor.execute(
-                f"""UPDATE public."Event"
-                    SET status = %s, description = %s
-                    WHERE event_id = %s
-                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
-                [status, json.dumps(metadata, ensure_ascii=False), event_id],
-            )
-            updated = cursor.fetchone()
-    return serialize(updated)
-
-
 def decide_event(database_url, event_id, coordinator_id, status, reason=None):
     if status == "Rejected" and not isinstance(reason, str):
         raise RejectionReasonError
@@ -344,14 +245,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             if status == "Rejected" and not reason_text:
                 raise RejectionReasonError
 
-            (
-                description,
-                purpose,
-                _,
-                history,
-                action_details,
-                action_history,
-            ) = unpack_metadata(event["description"])
+            description, purpose, _, history = unpack_decision(event["description"])
             decided_at = datetime.now(UTC).isoformat()
             decision = {
                 "status": status,
@@ -373,9 +267,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                                 'decidedAt', %s,
                                 'reason', %s
                             ),
-                            'decisionHistory', %s::jsonb,
-                            'actionDetails', %s,
-                            'actionHistory', %s::jsonb
+                            'decisionHistory', %s::jsonb
                         )::text
                     WHERE event_id = %s
                     RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
@@ -388,8 +280,6 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                     decided_at,
                     reason_text,
                     json.dumps(decision_history),
-                    action_details,
-                    json.dumps(action_history),
                     event_id,
                 ],
             )
