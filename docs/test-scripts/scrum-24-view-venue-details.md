@@ -1,7 +1,8 @@
 # SCRUM-24 View Venue Details — manual test script
 
-The frontend has no test runner, so the UI acceptance criteria for this story
-are verified by hand against `npm run dev`. Fill in the Result and Notes
+This script predates the frontend test setup (Vitest and Playwright e2e now
+exist), so the UI acceptance criteria for this story are verified by hand
+against `npm run dev`. Fill in the Result and Notes
 columns, then attach this file and the screenshots to SCRUM-24.
 
 **Tester:** _______________  **Date:** _______________
