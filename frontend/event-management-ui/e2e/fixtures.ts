@@ -8,6 +8,7 @@ export const users = {
   manager: { user_id: 'u-manager', username: 'Alice Tan', email: 'alice@example.com', role: 'Event Coordinator', organization: 'Org A', manager_id: null },
   coordinator: { user_id: 'u-coord', username: 'Carl Ng', email: 'carl@example.com', role: 'Event Coordinator', organization: 'Org A', manager_id: 'u-manager' },
   venueStaff: { user_id: '00000000-0000-0000-0000-0000000000aa', username: 'Vera Koh', email: 'vera@example.com', role: 'Venue Staff', organization: 'Org A', manager_id: null },
+  techSupport: { user_id: '00000000-0000-0000-0000-0000000000bb', username: 'Wei Chen', email: 'wei@example.com', role: 'Technical Support', organization: 'Org A', manager_id: null },
   attendee: { user_id: 'u-attendee', username: 'Adam Yeo', email: 'adam@example.com', role: 'Attendee', organization: 'Org B', manager_id: null },
 }
 export const allUsers = Object.values(users)
