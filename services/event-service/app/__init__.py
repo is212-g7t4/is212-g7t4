@@ -12,12 +12,15 @@ from app.models import (
     FIELDS,
     EventNotAssignedError,
     EventNotFoundError,
+    EventNotOwnedError,
     EventNotSubmittedError,
     InvalidStatusTransitionError,
     RejectionReasonError,
     approve_event,
     get_event,
+    get_organiser_event,
     list_events,
+    list_organiser_events,
     list_submitted,
     reject_event,
     submit_event,
@@ -87,6 +90,12 @@ def create_app(config=None):
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         details = {key: data.get(key, "").strip() for key in (*FIELDS, "purpose")}
+        organiser_id = data.get("organiserId")
+        if organiser_id not in (None, ""):
+            try:
+                details["organiserId"] = str(UUID(organiser_id))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="A valid organiser ID is required."), 400
         return jsonify(submit_event(app.config["DATABASE_URL"], details)), 201
 
     @app.get("/events/submitted")
@@ -108,6 +117,18 @@ def create_app(config=None):
 
     @app.get("/events")
     def list_events_route():
+        if request.args.get("organiserId") and not request.args.get("coordinatorId"):
+            try:
+                organiser_id = str(UUID(request.args["organiserId"]))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="A valid current organiser ID is required."), 400
+            if not app.config["DATABASE_URL"]:
+                return jsonify(
+                    message="DATABASE_URL is not configured for Event Service."
+                ), 503
+            return jsonify(
+                events=list_organiser_events(app.config["DATABASE_URL"], organiser_id)
+            )
         try:
             coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
         except (ValueError, TypeError, AttributeError):
@@ -154,6 +175,26 @@ def create_app(config=None):
 
     @app.get("/events/<uuid:event_id>")
     def get_event_details(event_id):
+        if request.args.get("organiserId") and not request.args.get("coordinatorId"):
+            try:
+                organiser_id = str(UUID(request.args["organiserId"]))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="A valid current organiser ID is required."), 400
+            if not app.config["DATABASE_URL"]:
+                return jsonify(
+                    message="DATABASE_URL is not configured for Event Service."
+                ), 503
+            try:
+                event = get_organiser_event(
+                    app.config["DATABASE_URL"], str(event_id), organiser_id
+                )
+            except EventNotFoundError:
+                return jsonify(message="Event not found."), 404
+            except EventNotOwnedError:
+                return jsonify(
+                    message="You can only view registrations for events you created."
+                ), 403
+            return jsonify(event), 200
         try:
             coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
         except (ValueError, TypeError, AttributeError):

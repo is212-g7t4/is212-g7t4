@@ -20,6 +20,9 @@ FIELDS = {
     "registrationNeeds": "registration_needs",
 }
 COLUMNS = ", ".join(FIELDS.values())
+ROW_COLUMNS = (
+    f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id"
+)
 
 
 def unpack_description(value):
@@ -94,6 +97,7 @@ def serialize(row):
         if row["submission_date"]
         else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
+        organiserId=str(row["organiser_id"]) if row.get("organiser_id") else None,
         decision=decision,
         decisionHistory=history,
         actionDetails=action_details,
@@ -123,11 +127,11 @@ def submit_event(database_url, data):
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""INSERT INTO public."Event"
-                    (event_id, {COLUMNS}, status, submission_date)
+                    (event_id, {COLUMNS}, status, submission_date, organiser_id)
                     VALUES (%s, {", ".join(["%s"] * len(FIELDS))},
-                            'Submitted', timezone('UTC', CURRENT_TIMESTAMP))
-                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
-                [event_id, *values],
+                            'Submitted', timezone('UTC', CURRENT_TIMESTAMP), %s)
+                    RETURNING {ROW_COLUMNS}""",
+                [event_id, *values, data.get("organiserId") or None],
             )
             saved = cursor.fetchone()
     return serialize(saved)
@@ -135,12 +139,12 @@ def submit_event(database_url, data):
 
 def list_submitted(database_url, coordinator_id=None, is_manager=False):
     if is_manager or coordinator_id is None:
-        query = f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+        query = f"""SELECT {ROW_COLUMNS}
                     FROM public."Event" WHERE status IN ('Submitted', 'Under Review')
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
         params = []
     else:
-        query = f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+        query = f"""SELECT {ROW_COLUMNS}
                     FROM public."Event"
                     WHERE status IN ('Submitted', 'Under Review') AND coordinator_id = %s
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
@@ -157,6 +161,10 @@ class EventNotFoundError(Exception):
 
 
 class EventNotAssignedError(Exception):
+    pass
+
+
+class EventNotOwnedError(Exception):
     pass
 
 
@@ -180,7 +188,7 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
                     SET coordinator_id = %s,
                         status = CASE WHEN status = 'Submitted' THEN 'Under Review' ELSE status END
                     WHERE event_id = %s
-                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                    RETURNING {ROW_COLUMNS}""",
                 [coordinator_id, event_id],
             )
             assigned = cursor.fetchone()
@@ -221,7 +229,7 @@ def list_events(
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                f"""SELECT {ROW_COLUMNS}
                     FROM public."Event"
                     {where_clause}
                     ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC""",
@@ -230,11 +238,41 @@ def list_events(
             return [serialize(row) for row in cursor.fetchall()]
 
 
+def list_organiser_events(database_url, organiser_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE organiser_id = %s
+                    ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC""",
+                [organiser_id],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def get_organiser_event(database_url, event_id, organiser_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+    if not event:
+        raise EventNotFoundError
+    if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
+        raise EventNotOwnedError
+    return serialize(event)
+
+
 def get_event(database_url, event_id, coordinator_id, is_manager=False):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                f"""SELECT {ROW_COLUMNS}
                     FROM public."Event"
                     WHERE event_id = %s""",
                 [event_id],
@@ -253,7 +291,7 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                f"""SELECT {ROW_COLUMNS}
                     FROM public."Event"
                     WHERE event_id = %s
                     FOR UPDATE""",
@@ -319,7 +357,7 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 f"""UPDATE public."Event"
                     SET status = %s, description = %s
                     WHERE event_id = %s
-                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                    RETURNING {ROW_COLUMNS}""",
                 [status, json.dumps(metadata, ensure_ascii=False), event_id],
             )
             updated = cursor.fetchone()
@@ -334,7 +372,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
+                f"""SELECT {ROW_COLUMNS}
                     FROM public."Event"
                     WHERE event_id = %s
                     FOR UPDATE""",
@@ -387,7 +425,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                             'actionHistory', %s::jsonb
                         )::text
                     WHERE event_id = %s
-                    RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
+                    RETURNING {ROW_COLUMNS}""",
                 [
                     status,
                     description,

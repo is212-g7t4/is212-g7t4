@@ -140,7 +140,7 @@ test('approved event can move to confirmed', async () => {
 })
 
 test('does not load event details for another role', () => {
-  render(<EventDetailPage eventId={event.id} role="Event Organiser" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Venue Staff" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
 
   expect(screen.getByText('Event details are visible to Event Coordinators.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
