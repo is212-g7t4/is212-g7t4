@@ -8,7 +8,7 @@ import { ArrowRightIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 
-const STATUS_OPTIONS = ['', 'Submitted', 'Approved', 'Rejected']
+const STATUS_OPTIONS = ['', 'Submitted', 'Under Review', 'Approved', 'Confirmed', 'Rejected']
 
 export function MyEventsPage({ role, isManager, currentCoordinatorId, currentCoordinatorName, onViewDetails }: { role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])

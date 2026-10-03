@@ -34,11 +34,19 @@ const approvedEvent: SubmittedEvent = {
   eventName: 'Approved Conference',
   status: 'Approved',
 }
+const confirmedEvent: SubmittedEvent = {
+  ...submittedEvent,
+  id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  eventName: 'Confirmed Summit',
+  status: 'Confirmed',
+}
 
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(eventApi).mockImplementation(async (path) => ({
-    events: path.includes('status=Approved') ? [approvedEvent] : [submittedEvent, approvedEvent],
+    events: path.includes('status=Approved') ? [approvedEvent]
+      : path.includes('status=Confirmed') ? [confirmedEvent]
+        : [submittedEvent, approvedEvent, confirmedEvent],
   }))
 })
 
@@ -55,6 +63,11 @@ test('shows the coordinator events and filters them by status', async () => {
   await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(`/events?coordinatorId=${coordinatorId}&status=Approved`))
   expect(await screen.findByText('Approved Conference')).toBeInTheDocument()
   expect(screen.queryByText('Community Workshop')).not.toBeInTheDocument()
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'Confirmed' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+  await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(`/events?coordinatorId=${coordinatorId}&status=Confirmed`))
+  expect(await screen.findByText('Confirmed Summit')).toBeInTheDocument()
 })
 
 test('opens the selected event details', async () => {

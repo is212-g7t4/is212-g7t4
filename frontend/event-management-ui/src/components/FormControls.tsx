@@ -35,6 +35,7 @@ type FieldProps = {
   type?: 'text' | 'number' | 'datetime-local' | 'date' | 'time'
   placeholder?: string
   min?: string
+  error?: string
 }
 
 export function Field({
@@ -46,6 +47,7 @@ export function Field({
   type = 'text',
   placeholder,
   min,
+  error,
 }: FieldProps) {
   return (
     <label className="field">
@@ -71,6 +73,7 @@ export function Field({
           min={min}
         />
       )}
+      {error && <span className="field-error" role="alert">{error}</span>}
     </label>
   )
 }
@@ -90,7 +93,7 @@ export function StatusBadge({
   status: RequestStatus | string
 }) {
   return (
-    <span className={`status-badge ${status.toLowerCase()}`}>
+    <span className={`status-badge ${status.toLowerCase().replace(/\s+/g, '-')}`}>
       {status}
     </span>
   )

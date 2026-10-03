@@ -68,7 +68,7 @@ test('shows the selected event status and full recorded details', async () => {
 test('assigned coordinator updates the status and action details', async () => {
   const submittedEvent: SubmittedEvent = {
     ...event,
-    status: 'Submitted',
+    status: 'Under Review',
     decision: null,
     actionDetails: 'Initial review completed.',
     actionHistory: [],
@@ -101,7 +101,7 @@ test('assigned coordinator updates the status and action details', async () => {
   expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
 })
 
-test('final event status cannot be changed while action details remain editable', async () => {
+test('rejected event status cannot be changed while action details remain editable', async () => {
   render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
 
   await screen.findByRole('heading', { name: 'Community Workshop' })
@@ -113,6 +113,30 @@ test('final event status cannot be changed while action details remain editable'
   fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Follow-up recorded.' } })
   expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Save progress' })).toBeEnabled()
+})
+
+test('approved event can move to confirmed', async () => {
+  const approvedEvent: SubmittedEvent = { ...event, status: 'Approved' }
+  vi.mocked(eventApi).mockResolvedValueOnce(approvedEvent).mockResolvedValueOnce({
+    ...approvedEvent,
+    status: 'Confirmed',
+    actionDetails: 'Event arrangements confirmed.',
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  const status = screen.getByLabelText('Status')
+  expect(status).toHaveTextContent('Approved')
+  expect(status).toHaveTextContent('Confirmed')
+  fireEvent.change(status, { target: { value: 'Confirmed' } })
+  fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Event arrangements confirmed.' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save progress' }))
+
+  await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
+    `/events/${event.id}/progress`,
+    { coordinatorId, status: 'Confirmed', actionDetails: 'Event arrangements confirmed.' },
+    'PATCH',
+  ))
 })
 
 test('does not load event details for another role', () => {

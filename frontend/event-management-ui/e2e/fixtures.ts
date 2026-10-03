@@ -23,8 +23,8 @@ export function makeEvent(overrides: Record<string, unknown> = {}) {
     preferredStartDate: '2026-12-01T09:00', preferredEndDate: '2026-12-01T17:00', expectedAttendance: '100',
     venueId: venues[0].id, venueRequirements: 'Stage', accessibilityNeeds: 'Ramp', equipmentRequirements: 'Mics',
     registrationNeeds: 'Open', status: 'Submitted', submittedAt: '2026-11-01T02:00:00+00:00',
-    coordinatorId: users.coordinator.user_id, organiserId: users.organiser.user_id,
-    decision: null, decisionHistory: [], actionDetails: '', actionHistory: [], ...overrides,
+    coordinatorId: users.coordinator.user_id, decision: null, decisionHistory: [],
+    actionDetails: '', actionHistory: [], ...overrides,
   }
 }
 
