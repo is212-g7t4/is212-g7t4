@@ -61,7 +61,7 @@ export function SubmittedRequestsPage({ role, isManager, currentCoordinatorId, c
       const result = await assignmentApi(`/events/${event.id}/assign-coordinator/${coordinatorId}`, 'POST', { actingUserId: currentCoordinator.id })
       const assignedId = result.assignedCoordinatorId || coordinatorId
       setEvents((current) => current.map((item) => item.id === event.id
-        ? { ...item, coordinatorId: assignedId }
+        ? { ...item, ...result, coordinatorId: assignedId }
         : item))
       setReassigning((current) => ({ ...current, [event.id]: false }))
     } catch (cause) {

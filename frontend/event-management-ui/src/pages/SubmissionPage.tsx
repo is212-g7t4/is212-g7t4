@@ -6,11 +6,15 @@ import type { EventData, Role } from '../types'
 import { Field, FormSection, RoleWarning } from '../components/FormControls'
 import { Spinner } from '../components/Loading'
 import { VenueSelect } from '../features/venue/VenueSelect'
+import { venueCapacityMessage } from '../features/venue/capacity'
+import type { Venue } from '../features/venue/venues'
 
 export function SubmissionPage({ role }: { role: Role }) {
   const [pending, setPending] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
+  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null)
+  const [attendanceError, setAttendanceError] = useState('')
   const [event, setEvent] = useState<EventData>({
     eventName: '',
     description: '',
@@ -36,16 +40,24 @@ export function SubmissionPage({ role }: { role: Role }) {
     submitEvent.preventDefault()
     if (pending || submitted) return
     const { missingFields, errors } = validateEvent(event)
+    const attendanceValidationError = missingFields.includes('Expected Attendance')
+      ? 'Expected Attendance is required.'
+      : errors.find((error) => error.startsWith('Expected Attendance')) || ''
+    setAttendanceError(attendanceValidationError)
     if (missingFields.length || errors.length) {
       setPopup({ title: missingFields.length ? 'Missing Required Fields' : 'Check Event Details', messages: [...missingFields, ...errors] })
       return
     }
     setPending(true)
     try {
+      const capacityMessage = selectedVenue
+        ? venueCapacityMessage(selectedVenue, Number(event.expectedAttendance))
+        : null
       const saved = await eventApi('/events', event)
       setSubmitted(true)
       setPopup({ title: 'Event Submitted', messages: [
         `${saved.eventName} was submitted on ${new Date(saved.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT.`,
+        ...(capacityMessage ? [capacityMessage] : []),
       ] })
     } catch (cause) {
       setPopup(cause instanceof SubmissionError ? {
@@ -56,7 +68,9 @@ export function SubmissionPage({ role }: { role: Role }) {
       setPending(false)
     }
   }
-  if (role !== 'Event Organiser') return <RoleWarning>Only Event Organisers can submit event requests.</RoleWarning>
+  if (role !== 'Event Organiser' && role !== 'Event Coordinator') {
+    return <RoleWarning>Only Event Organisers and Event Coordinators can submit event requests.</RoleWarning>
+  }
 
   return (
     <div className="page-stack">
@@ -146,10 +160,11 @@ export function SubmissionPage({ role }: { role: Role }) {
             min="1"
             value={event.expectedAttendance}
             onChange={(value) =>
-              updateEvent('expectedAttendance', value)
+              { updateEvent('expectedAttendance', value); setAttendanceError('') }
             }
             placeholder="e.g. 150"
             required
+            error={attendanceError}
           />
         </FormSection>
 
@@ -159,7 +174,10 @@ export function SubmissionPage({ role }: { role: Role }) {
         >
           <VenueSelect
             value={event.venueId}
-            onChange={(value) => updateEvent('venueId', value)}
+            onChange={(value, venue) => {
+              updateEvent('venueId', value)
+              setSelectedVenue(venue)
+            }}
           />
 
           <Field

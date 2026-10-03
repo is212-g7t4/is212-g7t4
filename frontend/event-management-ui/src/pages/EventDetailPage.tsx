@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
-import type { SubmittedEvent } from '../features/event/submission'
+import type { EventStatus, SubmittedEvent } from '../features/event/submission'
 import { EventOverview } from '../features/event/EventOverview'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
@@ -18,7 +18,7 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
   const [registrations, setRegistrations] = useState<Registration[]>([])
   const [registrationsError, setRegistrationsError] = useState('')
   const [registrationsLoading, setRegistrationsLoading] = useState(true)
-  const [draftStatus, setDraftStatus] = useState<'Submitted' | 'Approved' | 'Rejected'>('Submitted')
+  const [draftStatus, setDraftStatus] = useState<EventStatus>('Submitted')
   const [actionDetails, setActionDetails] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -64,9 +64,14 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
     draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
   )
   const canUpdate = Boolean(event && event.coordinatorId === currentCoordinator.id)
-  const availableStatuses = event?.status === 'Submitted'
-    ? ['Submitted', 'Approved', 'Rejected'] as const
-    : event ? [event.status] : []
+  const transitions: Record<EventStatus, EventStatus[]> = {
+    Submitted: ['Submitted', 'Under Review'],
+    'Under Review': ['Under Review', 'Approved', 'Rejected'],
+    Approved: ['Approved', 'Confirmed'],
+    Confirmed: ['Confirmed'],
+    Rejected: ['Rejected'],
+  }
+  const availableStatuses = event ? transitions[event.status] : []
 
   const saveProgress = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
