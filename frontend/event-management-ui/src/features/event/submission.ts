@@ -2,7 +2,7 @@ import type { EventData } from '../../types'
 
 export interface SubmittedEvent extends EventData {
   id: string
-  status: 'Submitted' | 'Approved' | 'Rejected'
+  status: EventStatus
   submittedAt: string | null
   coordinatorId: string | null
   decision: EventDecision | null
@@ -19,7 +19,7 @@ export interface EventDecision {
 }
 
 export interface EventAction {
-  status: 'Submitted' | 'Approved' | 'Rejected'
+  status: EventStatus
   details: string
   coordinatorId: string
   recordedAt: string
@@ -27,9 +27,11 @@ export interface EventAction {
 
 export interface EventProgressUpdate {
   coordinatorId: string
-  status: 'Submitted' | 'Approved' | 'Rejected'
+  status: EventStatus
   actionDetails: string
 }
+
+export type EventStatus = 'Submitted' | 'Under Review' | 'Approved' | 'Confirmed' | 'Rejected'
 
 export interface Coordinator {
   user_id: string
