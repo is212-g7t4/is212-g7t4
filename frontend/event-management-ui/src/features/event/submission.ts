@@ -5,6 +5,7 @@ export interface SubmittedEvent extends EventData {
   status: EventStatus
   submittedAt: string | null
   coordinatorId: string | null
+  organiserId?: string | null
   decision: EventDecision | null
   decisionHistory: EventDecision[]
   actionDetails: string
@@ -76,7 +77,7 @@ export class SubmissionError extends Error {
 
 export async function eventApi(
   path: string,
-  data?: EventData | EventProgressUpdate | { coordinatorId: string; reason?: string },
+  data?: (EventData & { organiserId?: string }) | EventProgressUpdate | { coordinatorId: string; reason?: string },
   method?: 'POST' | 'PATCH',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}

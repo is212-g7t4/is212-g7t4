@@ -106,3 +106,34 @@ def test_health_and_browser_cors(setup):
         "Access-Control-Allow-Origin"
         not in client.options("/registrations", headers={"Origin": "https://other.example"}).headers
     )
+
+
+OTHER_EVENT_ID = "11111111-1111-4111-8111-111111111111"
+
+
+def test_counts_returns_total_and_confirmed_per_event_with_zeros_for_empty(setup):
+    """Organiser registration view AC2: total registrations per event."""
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [{"event_id": EVENT_ID, "total": 5, "confirmed": 3}]
+
+    response = client.get(f"/registrations/counts?eventIds={EVENT_ID},{OTHER_EVENT_ID},{EVENT_ID}")
+
+    assert response.status_code == 200
+    assert response.json["counts"] == {
+        EVENT_ID: {"total": 5, "confirmed": 3},
+        OTHER_EVENT_ID: {"total": 0, "confirmed": 0},
+    }
+    assert cursor.execute.call_args.args[1] == [[EVENT_ID, OTHER_EVENT_ID]]
+
+
+@pytest.mark.parametrize("value", ["", "nope", f"{EVENT_ID},nope"])
+def test_counts_rejects_missing_or_invalid_event_ids(setup, value):
+    client, _, cursor = setup
+    assert client.get(f"/registrations/counts?eventIds={value}").status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_counts_reports_missing_database_url(setup):
+    client, _, _ = setup
+    client.application.config["DATABASE_URL"] = None
+    assert client.get(f"/registrations/counts?eventIds={EVENT_ID}").status_code == 503

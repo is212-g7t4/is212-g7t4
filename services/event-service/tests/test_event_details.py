@@ -128,3 +128,59 @@ def test_manager_can_view_unassigned_event(setup):
     response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
 
     assert response.status_code == 200
+
+
+ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
+OTHER_ORGANISER_ID = "44444444-4444-4444-8444-444444444444"
+
+
+def test_organiser_can_view_event_they_created(setup):
+    """Organiser registration view: creator may open their event."""
+    client, _, cursor = setup
+    row = saved_row()
+    row.update(status="Approved", organiser_id=ORGANISER_ID)
+    cursor.fetchone.return_value = row
+
+    response = client.get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}")
+
+    assert response.status_code == 200
+    assert response.json["organiserId"] == ORGANISER_ID
+
+
+def test_organiser_cannot_view_event_they_did_not_create(setup):
+    """Organiser registration view: non-creators are refused."""
+    client, _, cursor = setup
+    row = saved_row()
+    row.update(status="Approved", organiser_id=ORGANISER_ID)
+    cursor.fetchone.return_value = row
+
+    response = client.get(f"/events/{EVENT_ID}?organiserId={OTHER_ORGANISER_ID}")
+
+    assert response.status_code == 403
+
+
+def test_organiser_cannot_view_event_with_no_recorded_organiser(setup):
+    client, _, cursor = setup
+    row = saved_row()
+    row["organiser_id"] = None
+    cursor.fetchone.return_value = row
+    assert client.get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}").status_code == 403
+
+
+def test_organiser_event_not_found(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = None
+    assert client.get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}").status_code == 404
+
+
+def test_organiser_event_rejects_invalid_id(setup):
+    client, _, cursor = setup
+    response = client.get(f"/events/{EVENT_ID}?organiserId=nope")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_organiser_event_reports_missing_database_url(setup):
+    client, _, _ = setup
+    client.application.config["DATABASE_URL"] = None
+    assert client.get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}").status_code == 503

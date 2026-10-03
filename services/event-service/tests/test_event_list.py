@@ -199,3 +199,38 @@ def test_ac2_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
     response = client.get(f"/events?coordinatorId={COORDINATOR_ID}")
     assert response.status_code == 503
+
+
+ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
+
+
+def test_organiser_lists_only_their_own_events_in_all_statuses(setup):
+    """Organiser registration view AC1: organiser sees the events they created."""
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [
+        saved_row(organiser_id=ORGANISER_ID, status="Approved"),
+        saved_row(organiser_id=ORGANISER_ID, status="Rejected",
+                  event_id="00000000-0000-0000-0000-000000000002"),
+    ]
+
+    response = client.get(f"/events?organiserId={ORGANISER_ID}")
+
+    assert response.status_code == 200
+    assert [e["status"] for e in response.json["events"]] == ["Approved", "Rejected"]
+    assert response.json["events"][0]["organiserId"] == ORGANISER_ID
+    query, params = cursor.execute.call_args.args
+    assert "organiser_id = %s" in query and "status" not in query.split("WHERE")[1]
+    assert params == [ORGANISER_ID]
+
+
+def test_organiser_list_rejects_invalid_id(setup):
+    client, _, cursor = setup
+    response = client.get("/events?organiserId=nope")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_organiser_list_reports_missing_database_url(setup):
+    client, _, _ = setup
+    client.application.config["DATABASE_URL"] = None
+    assert client.get(f"/events?organiserId={ORGANISER_ID}").status_code == 503

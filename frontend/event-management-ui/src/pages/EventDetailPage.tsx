@@ -6,11 +6,23 @@ import type { EventStatus, SubmittedEvent } from '../features/event/submission'
 import { EventOverview } from '../features/event/EventOverview'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
+import { RegistrationTable } from '../features/registration/RegistrationTable'
 import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
 import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
+import { OrganiserEventDetailPage } from './OrganiserEventDetailPage'
 
-export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }) {
+type EventDetailProps = { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
+
+// `currentCoordinatorId` carries the active user, whatever their role.
+export function EventDetailPage(props: EventDetailProps) {
+  if (props.role === 'Event Organiser') {
+    return <OrganiserEventDetailPage eventId={props.eventId} organiserId={props.currentCoordinatorId} resolveUserName={props.resolveUserName} backLabel={props.backLabel} onBack={props.onBack} />
+  }
+  return <CoordinatorEventDetail {...props} />
+}
+
+function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: EventDetailProps) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -162,18 +174,7 @@ export function EventDetailPage({ eventId, role, isManager, currentCoordinatorId
               <div className="event-detail"><dt>Remaining spots</dt><dd>{hasCapacity ? capacity - confirmedCount : 'Not set'}</dd></div>
             </dl>
           })()}
-          {registrations.length === 0 ? <p>No registrations yet.</p> : <div className="table-scroll">
-            <table>
-              <thead><tr><th>Name</th><th>Email</th><th>Organisation</th><th>Registered</th><th>Status</th></tr></thead>
-              <tbody>{registrations.map((registration) => <tr key={registration.id}>
-                <td>{registration.attendeeName}</td>
-                <td>{registration.attendeeEmail}</td>
-                <td>{registration.attendeeOrganization || '—'}</td>
-                <td>{registration.registrationDate ? new Date(registration.registrationDate).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) : 'Not recorded'}</td>
-                <td>{registration.status}</td>
-              </tr>)}</tbody>
-            </table>
-          </div>}
+          <RegistrationTable registrations={registrations} />
         </>}
       </div>}
     </article>}

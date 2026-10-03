@@ -29,9 +29,24 @@ function toRegistration(apiRegistration: ApiRegistration): Registration {
   }
 }
 
+export interface RegistrationCount {
+  total: number
+  confirmed: number
+}
+
+const registrationApi = () => import.meta.env.VITE_REGISTRATION_SERVICE_URL || 'http://localhost:5005'
+
+export async function fetchRegistrationCounts(eventIds: string[]): Promise<Record<string, RegistrationCount>> {
+  if (eventIds.length === 0) return {}
+  const response = await fetch(`${registrationApi()}/registrations/counts?eventIds=${eventIds.join(',')}`)
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.message || 'Unable to load registration counts.')
+  return body.counts as Record<string, RegistrationCount>
+}
+
 export async function fetchRegistrations(eventId: string): Promise<Registration[]> {
   const response = await fetch(
-    `${import.meta.env.VITE_REGISTRATION_SERVICE_URL || 'http://localhost:5005'}/registrations?eventId=${eventId}`,
+    `${registrationApi()}/registrations?eventId=${eventId}`,
   )
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load registrations.')
