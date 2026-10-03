@@ -40,6 +40,9 @@ jobs:
             registration-service:
               - 'services/registration-service/**'
               - '.github/workflows/ci.yml'
+            equipment-service:
+              - 'services/equipment-service/**'
+              - '.github/workflows/ci.yml'
             venue-service:
               - 'services/venue-service/**'
               - '.github/workflows/ci.yml'
@@ -68,6 +71,7 @@ jobs:
           - event-service
           - coordinator-assignment-service
           - registration-service
+          - equipment-service
           - venue-service
           - venue-booking-service
           - venue-availability-service

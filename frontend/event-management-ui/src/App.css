@@ -1193,6 +1193,44 @@ td small {
   color: var(--color-warning);
 }
 
+/* Equipment status badge */
+
+.equipment-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--color-background);
+  color: var(--color-muted);
+}
+
+.equipment-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.equipment-status.available {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.equipment-status.reserved {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.equipment-status.unavailable {
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
 /* Dialogs */
 
 .submission-fields {

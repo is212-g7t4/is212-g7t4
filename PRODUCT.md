@@ -13,7 +13,7 @@ Four roles, each with a distinct job in the same event lifecycle:
 - **Event Organiser** — submits event requests (name, purpose, dates, expected attendance, venue/equipment/accessibility/registration requirements), tracks their own submissions ("My events"), views resulting event records.
 - **Event Coordinator** — manages events assigned to them; can view the venue catalogue and venue details read-only to plan around them.
 - **Venue Staff** — owns the venue catalogue (capacity, facilities, accessibility, layouts); reviews and approves/rejects venue booking requests, checking for scheduling conflicts.
-- **Technical Support** — reviews and approves/rejects equipment reservation requests (planned; equipment services not yet built).
+- **Technical Support** — owns the equipment catalogue: adds equipment records and views the list of available equipment (built, via Equipment Service). Reviewing and approving/rejecting equipment reservation requests is planned; the reservation services are not yet built.
 
 ## Product Purpose
 
@@ -27,8 +27,8 @@ None — this is an academic project (IS212, Software Project Management) built 
 
 - Monorepo: Flask microservices (`services/`, one per bounded concern, no shared library) + a React/TypeScript SPA (`frontend/event-management-ui/`), no API gateway — the UI calls composite/atomic services directly.
 - Composites orchestrate atomics; atomics never call out. Notifications are the only async path (RabbitMQ), everything else synchronous REST/JSON.
-- Currently built and visible in the UI: submitting an event request, viewing/managing submitted requests, reviewing requests, an event detail/record view, and a venue catalogue + venue detail view (read-only, gated to Event Coordinator and Venue Staff per SCRUM-24).
-- Planned, not yet built: equipment reservation flow, notifications, forum/communication (clarifications and decision reasons), real authentication (Supabase Auth JWT issuance is not wired up yet — User Service is currently read-only).
+- Currently built and visible in the UI: submitting an event request, viewing/managing submitted requests, reviewing requests, an event detail/record view, and a venue catalogue + venue detail view (read-only, gated to Event Coordinator and Venue Staff per SCRUM-24), and an equipment catalogue page where Technical Support can list equipment (filter by status, default Available) and add new records, including types not in the predefined list.
+- Planned, not yet built: equipment reservation flow (the catalogue itself is built), notifications, forum/communication (clarifications and decision reasons), real authentication (Supabase Auth JWT issuance is not wired up yet — User Service is currently read-only).
 
 ## Capabilities and Constraints
 
