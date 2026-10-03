@@ -38,6 +38,13 @@ services:
     ports:
       - "127.0.0.1:5008:5000"
 
+  equipment-service:
+    build: ./services/equipment-service
+    env_file:
+      - ./services/equipment-service/.env
+    ports:
+      - "5002:5000"
+
   venue-service:
     build: ./services/venue-service
     env_file:

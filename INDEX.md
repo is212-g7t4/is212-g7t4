@@ -36,7 +36,7 @@ is212-g7t4/
 │   ├── event-service/                  # atomic (built)
 │   ├── venue-service/                   # atomic (built, read-only)
 │   ├── venue-availability-service/     # atomic (built) — owns booking records + conflict-checking
-│   ├── equipment-service/              # atomic (planned)
+│   ├── equipment-service/              # atomic (built)
 │   ├── equipment-availability-service/ # atomic (planned)
 │   ├── registration-service/           # atomic (built, read-only)
 │   ├── notification-service/           # atomic (planned)
@@ -91,7 +91,7 @@ call another service, Forum, or the broker.
 | Event | `services/event-service/` | Supabase Postgres | Event entity: details, status, change-request records | built |
 | Venue | `services/venue-service/` | Supabase Postgres | Venue catalogue (capacity, facilities, accessibility, layouts) + suitability-check computation. Read-only: `GET /venues` (catalogue, with SCRUM-26's optional `minCapacity`/`location`/`layout`/`facility`/`accessibility` filters — the suitability check) and `GET /venues/:id` (one venue's full profile, SCRUM-24) | built (read-only; no add/edit yet) |
 | Venue Availability | `services/venue-availability-service/` | Supabase Postgres | Venue booking records (`public."VenueBooking"`) **and** the overlap/conflict-checking algorithm together — merged design, see the service's README. Replaces the previously separate Booking Conflict Service. Two reads: `GET /venue-bookings` (one venue, SCRUM-25's calendar) and `GET /venue-bookings/window` (all venues in a window, for SCRUM-26's search). | built |
-| Equipment | `services/equipment-service/` | Supabase Postgres | Equipment catalogue only (types, quantities owned, technical specs) — no reservation data | planned |
+| Equipment | `services/equipment-service/` | Supabase Postgres | Equipment catalogue only (types, quantities owned, technical specs) — no reservation data. `GET /equipment[?status=]` and `POST /equipment` (Technical Support only, DEV headers) | built (list + add; no edit/delete yet) |
 | Equipment Availability | `services/equipment-availability-service/` | Supabase Postgres | Reservation records + availability-checking algorithm | planned |
 | Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Read-only (`GET /registrations?eventId=`) — no registration/withdrawal endpoints yet; called directly by the frontend (a "simple read," no composite needed) | built (read-only) |
 | Notification | `services/notification-service/` | Supabase Postgres | Notification records; consumes the broker queue, calls the Email/SMS Wrapper | planned |

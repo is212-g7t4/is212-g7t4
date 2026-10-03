@@ -4,6 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
 // .env cannot change where the app sends requests, which e2e/fixtures.ts mocks.
 export const SERVICE_PORTS = {
   user: 5001,
+  equipment: 5002,
   event: 5003,
   assignment: 5004,
   registration: 5005,
@@ -32,6 +33,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     env: {
       VITE_USER_SERVICE_URL: url(SERVICE_PORTS.user),
+      VITE_EQUIPMENT_SERVICE_URL: url(SERVICE_PORTS.equipment),
       VITE_EVENT_SERVICE_URL: url(SERVICE_PORTS.event),
       VITE_COORDINATOR_ASSIGNMENT_SERVICE_URL: url(SERVICE_PORTS.assignment),
       VITE_REGISTRATION_SERVICE_URL: url(SERVICE_PORTS.registration),

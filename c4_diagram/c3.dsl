@@ -53,6 +53,7 @@ workspace "ConnectSphere" "C3 — API Application Components" {
         # Front-End App -> entry-point modules
         connectSphere.frontEndApp -> connectSphere.apiApplication.eventModule "Creates/edits/cancels events, and assigns coordinators, using" "HTTPS/JSON"
         connectSphere.frontEndApp -> connectSphere.apiApplication.venueAvailabilitiesModule "Submits & manages venue bookings using" "HTTPS/JSON"
+        connectSphere.frontEndApp -> connectSphere.apiApplication.equipmentModule "Lists and adds equipment catalogue records using" "HTTPS/JSON"
         connectSphere.frontEndApp -> connectSphere.apiApplication.equipmentAvailabilityModule "Submits & manages equipment requests using" "HTTPS/JSON"
         connectSphere.frontEndApp -> connectSphere.apiApplication.registrationModule "Registers/withdraws attendees using" "HTTPS/JSON"
 

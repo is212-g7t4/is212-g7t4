@@ -91,7 +91,10 @@ numbered separately.
   (checked/held at submission, committed or released on approval/rejection).
   Equipment Service is a separate atomic that owns the equipment catalogue
   only (types, quantities owned, technical specs) and holds no reservation
-  data — this composite's flow never needs to call it. This now mirrors the
+  data — this composite's flow never needs to call it. The UI calls Equipment
+  Service directly (a simple catalogue read/write, no composite needed) so
+  Technical Support can list equipment (`GET /equipment[?status=]`) and add
+  records (`POST /equipment`). This now mirrors the
   Venue Booking Service / Venue Availability Service pattern exactly (one
   atomic owning both records and the algorithm). It also now logs to Forum
   Service, but only on the approval/rejection sub-flow.

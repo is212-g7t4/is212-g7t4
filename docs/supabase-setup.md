@@ -88,7 +88,7 @@ ORDER BY table_name;
 |---|---|---|
 | `public."Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`, `coordinator_id` |
 | `public."EventChangeReq"` | Event | `change_id` (PK), `event_id`, `requested_changes` (jsonb), `reviewed_by` |
-| `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity` |
+| `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `description`, `total_quantity`, `location`, `operational_status` |
 | `public."User"` | User | `user_id` (PK), `username`, `email`, `role`, `manager_id` (self-reference) |
 | `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `status`, `requested_by`, `reviewed_by` |
 | `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `supported_layouts` (jsonb), `operational_status` |
@@ -217,3 +217,20 @@ Don't make schema changes directly in the Supabase dashboard SQL editor —
 migrations should be committed so everyone's local history matches the
 remote project. Coordinate with the team before changing a table another
 service's code already depends on.
+
+## Equipment table conventions
+
+Equipment Service (`services/equipment-service/`) expects these values in
+`public."Equipment"`; migration
+`20261002120000_normalize_equipment_catalogue.sql` converted the original rows
+to match.
+
+- `equipment_type` — a class name from the Equipment OO model:
+  `Microphone`, `LightingKit`, `Projector`, `Laptop`, `Furniture`, `Table`,
+  `Chair`, `Speaker`. Technical Support can also add other types through the
+  UI ("Add new…"); those are stored as typed (max 100 characters) and use the
+  base `Equipment` class.
+- `operational_status` — `Available`, `Reserved` or `Unavailable`.
+- There are no check constraints; the service validates `POST /equipment`.
+- Mock rows: `cd services/equipment-service && uv run python scripts/seed_equipment.py`
+  (idempotent; run the migration first).
