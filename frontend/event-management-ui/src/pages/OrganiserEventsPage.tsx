@@ -37,7 +37,7 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails 
   }, [organiserId])
 
   return <div className="page-stack">
-    <section className="intro"><h1>My events</h1><p className="muted">Events created by {organiserName || 'you'}. Open an approved event to see who has registered.</p></section>
+    <section className="intro"><h1>My events</h1><p className="muted">Events created by {organiserName || 'you'}. Open an event to see its details; registrations are shown for approved events.</p></section>
     {loading ? <EventCardSkeletonList /> : error ? <p className="field-error" role="alert">{error}</p> :
       events.length === 0 ? <p>You have not created any events yet.</p> : <>
       {countsError && <p className="field-error" role="alert">Unable to load registration counts.</p>}
@@ -63,11 +63,9 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails 
                   : 'Registrations are available once the event is approved'}
             </span>
           </span>
-          {approved && <ArrowRightIcon size={16} className="icon" />}
+          <ArrowRightIcon size={16} className="icon" />
         </>
-        return approved
-          ? <button key={event.id} type="button" className="panel event-row-card" onClick={() => onViewDetails(event.id)}>{content}</button>
-          : <div key={event.id} className="panel event-row-card">{content}</div>
+        return <button key={event.id} type="button" className="panel event-row-card" onClick={() => onViewDetails(event.id)}>{content}</button>
       })}
     </>}
   </div>
