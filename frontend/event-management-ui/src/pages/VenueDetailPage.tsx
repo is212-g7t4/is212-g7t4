@@ -3,7 +3,7 @@ import type { Role } from '../types'
 import { fetchVenue } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
 import { VENUE_ACCESS_NOTICE, canViewVenues } from '../features/venue/permissions'
-import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
+import { ArrowLeftIcon, EditIcon, RefreshIcon } from '../components/Icon'
 import { RoleWarning } from '../components/FormControls'
 import { DetailPanelSkeleton } from '../components/Loading'
 
@@ -16,7 +16,7 @@ function Chips({ values }: { values: string[] }) {
   return <span className="chip-list">{values.map((value) => <span key={value} className="chip">{value}</span>)}</span>
 }
 
-export function VenueDetailPage({ venueId, role, onBack }: { venueId: string; role: Role; onBack: () => void }) {
+export function VenueDetailPage({ venueId, role, onBack, onEdit }: { venueId: string; role: Role; onBack: () => void; onEdit: () => void }) {
   const [venue, setVenue] = useState<Venue | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -61,6 +61,9 @@ export function VenueDetailPage({ venueId, role, onBack }: { venueId: string; ro
         <div className="event-detail"><dt>Facilities</dt><dd><Chips values={venue.facilities} /></dd></div>
         <div className="event-detail"><dt>Supported layouts</dt><dd><Chips values={venue.supportedLayouts} /></dd></div>
       </dl>
+      {role === 'Venue Staff' && <footer className="venue-detail-actions">
+        <button className="button primary" onClick={onEdit}><EditIcon size={14} /> Edit Venue</button>
+      </footer>}
     </article>}
   </div>
 }

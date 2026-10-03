@@ -13,6 +13,7 @@ export function VenueSelect({
   const [venues, setVenues] = useState<Venue[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const availableVenues = venues.filter((venue) => venue.status === 'Available')
 
   useEffect(() => {
     let active = true
@@ -40,11 +41,9 @@ export function VenueSelect({
           onChange(venueId, venues.find((venue) => venue.id === venueId) || null)
         }}>
           <option value="">Select a venue</option>
-          {venues.map((venue) => (
-            <option key={venue.id} value={venue.id} disabled={venue.status !== 'Available'}>
-              {venue.name}{venue.status !== 'Available' ? ` (${venue.status})` : ''}
-            </option>
-          ))}
+          {availableVenues.length === 0
+            ? <option value="" disabled>No available venues</option>
+            : availableVenues.map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}
         </select>
       )}
     </label>
