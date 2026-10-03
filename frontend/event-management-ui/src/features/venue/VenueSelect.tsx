@@ -8,7 +8,7 @@ export function VenueSelect({
   onChange,
 }: {
   value: string
-  onChange: (value: string) => void
+  onChange: (value: string, venue: Venue | null) => void
 }) {
   const [venues, setVenues] = useState<Venue[]>([])
   const [error, setError] = useState('')
@@ -36,7 +36,10 @@ export function VenueSelect({
       ) : error ? (
         <p className="field-error" role="alert">{error}</p>
       ) : (
-        <select value={value} onChange={(event) => onChange(event.target.value)}>
+        <select value={value} onChange={(event) => {
+          const venueId = event.target.value
+          onChange(venueId, venues.find((venue) => venue.id === venueId) || null)
+        }}>
           <option value="">Select a venue</option>
           {availableVenues.length === 0
             ? <option value="" disabled>No available venues</option>

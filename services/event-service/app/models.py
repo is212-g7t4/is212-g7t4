@@ -136,12 +136,13 @@ def submit_event(database_url, data):
 def list_submitted(database_url, coordinator_id=None, is_manager=False):
     if is_manager or coordinator_id is None:
         query = f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public."Event" WHERE status = 'Submitted'
+                    FROM public."Event" WHERE status IN ('Submitted', 'Under Review')
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
         params = []
     else:
         query = f"""SELECT event_id, {COLUMNS}, status, submission_date, coordinator_id
-                    FROM public."Event" WHERE status = 'Submitted' AND coordinator_id = %s
+                    FROM public."Event"
+                    WHERE status IN ('Submitted', 'Under Review') AND coordinator_id = %s
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
         params = [coordinator_id]
 
@@ -176,7 +177,8 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""UPDATE public."Event"
-                    SET coordinator_id = %s
+                    SET coordinator_id = %s,
+                        status = CASE WHEN status = 'Submitted' THEN 'Under Review' ELSE status END
                     WHERE event_id = %s
                     RETURNING event_id, {COLUMNS}, status, submission_date, coordinator_id""",
                 [coordinator_id, event_id],
@@ -265,7 +267,14 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 or str(event["coordinator_id"]) != coordinator_id
             ):
                 raise EventNotAssignedError
-            if event["status"] in ("Approved", "Rejected") and status != event["status"]:
+            allowed_transitions = {
+                "Submitted": {"Submitted", "Under Review"},
+                "Under Review": {"Under Review", "Approved", "Rejected"},
+                "Approved": {"Approved", "Confirmed"},
+                "Confirmed": {"Confirmed"},
+                "Rejected": {"Rejected"},
+            }
+            if status not in allowed_transitions.get(event["status"], {event["status"]}):
                 raise InvalidStatusTransitionError
 
             (
@@ -294,7 +303,7 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                         "reason": action_details if status == "Rejected" else None,
                     }
                     decision_history = [*decision_history, decision]
-                else:
+                elif status in ("Submitted", "Under Review"):
                     decision = None
 
             metadata = {
@@ -339,7 +348,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                 or str(event["coordinator_id"]) != coordinator_id
             ):
                 raise EventNotAssignedError
-            if event["status"] != "Submitted":
+            if event["status"] not in ("Submitted", "Under Review"):
                 raise EventNotSubmittedError
             if status == "Rejected" and not reason_text:
                 raise RejectionReasonError
