@@ -26,7 +26,7 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
           <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
         )}
         {canViewVenues(role) && (
-          <NavButton active={route === 'venues' || route === 'venueDetail'} onClick={() => onNavigate('venues')} icon={<BuildingIcon size={17} />}>Venues</NavButton>
+          <NavButton active={route === 'venues' || route === 'venueDetail' || route === 'editVenue'} onClick={() => onNavigate('venues')} icon={<BuildingIcon size={17} />}>Venues</NavButton>
         )}
         {canSearchVenues(role) && (
           <NavButton active={route === 'venueSearch'} onClick={() => onNavigate('venueSearch')} icon={<SearchIcon size={17} />}>Find a venue</NavButton>

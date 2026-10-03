@@ -39,7 +39,11 @@ def setup(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
+    app = create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "FRONTEND_ORIGIN": "http://localhost:5174",
+    })
     return app.test_client(), connection, cursor
 
 
@@ -177,11 +181,12 @@ def test_missing_database_url_returns_503():
     assert client.get("/venues").status_code == 503
 
 
-def test_ac1_detail_endpoint_is_read_only(setup):
-    """AC1: viewing venue details offers no write path."""
+def test_detail_endpoint_only_allows_the_intended_update_method(setup):
+    """Only PUT is accepted for edits; unrelated write methods stay disallowed."""
     client, _, _ = setup
 
-    for method in (client.put, client.patch, client.delete, client.post):
+    assert client.put(f"/venues/{VENUE_ID}").status_code == 400
+    for method in (client.patch, client.delete, client.post):
         assert method(f"/venues/{VENUE_ID}").status_code == 405
 
 
@@ -216,7 +221,7 @@ def test_health_and_browser_cors(setup):
     response = client.options(f"/venues/{VENUE_ID}", headers={"Origin": "http://127.0.0.1:5174"})
     assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5174"
-    assert response.headers["Access-Control-Allow-Methods"] == "GET, OPTIONS"
+    assert response.headers["Access-Control-Allow-Methods"] == "GET, POST, PUT, OPTIONS"
     assert (
         "Access-Control-Allow-Origin"
         not in client.get("/venues", headers={"Origin": "https://other.example"}).headers
