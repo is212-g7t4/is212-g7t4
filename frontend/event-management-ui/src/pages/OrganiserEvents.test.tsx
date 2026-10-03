@@ -32,7 +32,7 @@ function renderList(onViewDetails = vi.fn()) {
   return onViewDetails
 }
 
-test('organiser list shows every event they created; only approved ones show a count and open', async () => {
+test('organiser list shows every event they created; every event opens; only approved ones show a registration count', async () => {
   vi.mocked(eventApi).mockResolvedValue({ events })
   vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'approved-1': { total: 3, confirmed: 2 } })
   const onViewDetails = renderList()
@@ -45,10 +45,14 @@ test('organiser list shows every event they created; only approved ones show a c
   expect(screen.getByText('Rejected Fair')).toBeInTheDocument()
   expect(screen.getByText('The event has been rejected. Submit a new request.')).toBeInTheDocument()
   expect(screen.getByText('Registrations are available once the event is approved')).toBeInTheDocument()
-  expect(screen.getAllByRole('button')).toHaveLength(1)
+  expect(screen.getAllByRole('button')).toHaveLength(3)
 
-  fireEvent.click(screen.getByRole('button'))
+  fireEvent.click(screen.getByRole('button', { name: /Approved Fair/ }))
   expect(onViewDetails).toHaveBeenCalledWith('approved-1')
+  fireEvent.click(screen.getByRole('button', { name: /Pending Fair/ }))
+  expect(onViewDetails).toHaveBeenCalledWith('submitted-1')
+  fireEvent.click(screen.getByRole('button', { name: /Rejected Fair/ }))
+  expect(onViewDetails).toHaveBeenCalledWith('rejected-1')
 })
 
 test('organiser list still shows events when counts cannot be loaded', async () => {
