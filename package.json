@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "concurrently -n frontend,backend -c blue,green \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "npm --prefix frontend/event-management-ui run dev",
-    "dev:backend": "docker compose up"
+    "dev:backend": "docker compose up",
+    "stop": "docker compose down --remove-orphans && (lsof -ti :5174 | xargs kill -9 2>/dev/null; true)"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
