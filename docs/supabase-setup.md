@@ -230,7 +230,7 @@ to match.
   `Chair`, `Speaker`. Technical Support can also add other types through the
   UI ("Add new…"); those are stored as typed (max 100 characters) and use the
   base `Equipment` class.
-- `operational_status` — `Available`, `Reserved` or `Unavailable`.
+- `operational_status` — `Available` or `Unavailable`.
 - There are no check constraints; the service validates `POST /equipment`.
 - Mock rows: `cd services/equipment-service && uv run python scripts/seed_equipment.py`
   (idempotent; run the migration first).

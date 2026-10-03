@@ -1,5 +1,5 @@
 export const EQUIPMENT_TYPES = ['Microphone', 'LightingKit', 'Projector', 'Laptop', 'Furniture', 'Table', 'Chair', 'Speaker'] as const
-export const EQUIPMENT_STATUSES = ['Available', 'Reserved', 'Unavailable'] as const
+export const EQUIPMENT_STATUSES = ['Available', 'Unavailable'] as const
 
 export type EquipmentType = (typeof EQUIPMENT_TYPES)[number]
 export type EquipmentStatus = (typeof EQUIPMENT_STATUSES)[number]

@@ -5,7 +5,7 @@ subclass that overrides `get_setup_requirements()`, so a caller holding any
 `Equipment` gets the version for the object's actual type (polymorphism).
 """
 
-STATUSES = ("Available", "Reserved", "Unavailable")
+STATUSES = ("Available", "Unavailable")
 
 
 class Equipment:
