@@ -1221,11 +1221,6 @@ td small {
   color: var(--color-success);
 }
 
-.equipment-status.reserved {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
 .equipment-status.unavailable {
   background: var(--color-error-soft);
   color: var(--color-error);

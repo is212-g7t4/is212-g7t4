@@ -4,11 +4,11 @@ Safe to run repeatedly: it upserts by (`equipment_type`, `description`)
 instead of inserting duplicates on every run.
 
 - `equipment_type` is one of the class names in `app/equipment.py`.
-- `operational_status` is one of `Available`, `Reserved`, `Unavailable`.
+- `operational_status` is one of `Available` or `Unavailable`.
 
 The first 7 rows are the live catalogue after migration
 20261002120000_normalize_equipment_catalogue.sql; the last 2 are extra mock rows
-(a Reserved item and a plain Furniture item). Run the migration before this
+(an Unavailable item and a plain Furniture item). Run the migration before this
 script, otherwise the old display-name rows will sit alongside these.
 
 Requires DATABASE_URL in the environment, loaded from
@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-STATUSES = ("Available", "Reserved", "Unavailable")
+STATUSES = ("Available", "Unavailable")
 
 EQUIPMENT = [
     {"equipment_type": "Table", "description": "6-foot folding table", "total_quantity": 50, "location": "Furniture Storage", "operational_status": "Available"},
@@ -36,7 +36,7 @@ EQUIPMENT = [
     {"equipment_type": "Chair", "description": "Standard stackable event chair", "total_quantity": 300, "location": "Furniture Storage", "operational_status": "Available"},
     {"equipment_type": "LightingKit", "description": "LED par can lighting kit", "total_quantity": 4, "location": "AV Storage Room", "operational_status": "Available"},
     {"equipment_type": "Microphone", "description": "Handheld wireless mic set with receiver", "total_quantity": 20, "location": "AV Storage Room", "operational_status": "Available"},
-    {"equipment_type": "Microphone", "description": "Lapel microphone set", "total_quantity": 6, "location": "AV Storage Room", "operational_status": "Reserved"},
+    {"equipment_type": "Microphone", "description": "Lapel microphone set", "total_quantity": 6, "location": "AV Storage Room", "operational_status": "Unavailable"},
     {"equipment_type": "Furniture", "description": "Standing lectern", "total_quantity": 5, "location": "Furniture Storage", "operational_status": "Available"},
 ]
 
