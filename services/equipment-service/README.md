@@ -26,7 +26,7 @@ Or `docker compose up --build equipment-service` (port 5002).
 
 ## Endpoints
 
-- `GET /equipment[?status=Available|Reserved|Unavailable]` — catalogue
+- `GET /equipment[?status=Available|Unavailable]` — catalogue
   ordered by type, then description. `400` for an unknown status.
 - `POST /equipment` — add a record. Body:
   `{"equipmentType", "description", "totalQuantity", "location", "status"?}`
