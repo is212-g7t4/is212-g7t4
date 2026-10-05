@@ -36,7 +36,6 @@ workspace "ConnectSphere" "C3 — API Application Components" {
                 userModule                  = component "User Module" "Owns user accounts, roles, and login/JWT issuance." "Python module" "Atomic Module"
                 eventModule                 = component "Event Module" "Owns the Event entity and coordinates the coordinator-assignment and change/cancellation workflows." "Python module" "Atomic Module"
                 venueModule                 = component "Venue Module" "Owns the venue catalogue and the suitability-check computation." "Python module" "Atomic Module"
-                bookingConflictModule       = component "Booking Conflict Module" "Owns the conflict-detection algorithm for a venue and time window." "Python module" "Atomic Module"
                 venueAvailabilitiesModule   = component "Venue Availabilities Module" "Owns venue booking records and coordinates the venue-booking workflow." "Python module" "Atomic Module"
                 equipmentModule             = component "Equipment Module" "Owns the equipment catalogue only — no reservation data." "Python module" "Atomic Module"
                 equipmentAvailabilityModule = component "Equipment Availability Module" "Owns equipment reservation records and coordinates the equipment-reservation workflow." "Python module" "Atomic Module"
@@ -59,7 +58,6 @@ workspace "ConnectSphere" "C3 — API Application Components" {
 
         # Event Module — owns coordinator-assignment + change/cancellation workflows
         connectSphere.apiApplication.eventModule -> connectSphere.apiApplication.userModule "Looks up eligible coordinators from (coordinator assignment)"
-        connectSphere.apiApplication.eventModule -> connectSphere.apiApplication.bookingConflictModule "Re-checks venue conflicts via (event change)"
         connectSphere.apiApplication.eventModule -> connectSphere.apiApplication.equipmentAvailabilityModule "Re-checks equipment commitments via (event change)"
         connectSphere.apiApplication.eventModule -> connectSphere.apiApplication.forumModule "Logs assignment/change/cancellation reasons to"
         connectSphere.apiApplication.eventModule -> connectSphere.messageBroker "Publishes coordinator-assigned & event-changed notifications to" "AMQP (async)"
@@ -67,7 +65,6 @@ workspace "ConnectSphere" "C3 — API Application Components" {
         # Venue Availabilities Module — owns the venue-booking workflow
         connectSphere.apiApplication.venueAvailabilitiesModule -> connectSphere.apiApplication.eventModule "Reads event details from"
         connectSphere.apiApplication.venueAvailabilitiesModule -> connectSphere.apiApplication.venueModule "Checks venue suitability via"
-        connectSphere.apiApplication.venueAvailabilitiesModule -> connectSphere.apiApplication.bookingConflictModule "Checks for double-booking via"
         connectSphere.apiApplication.venueAvailabilitiesModule -> connectSphere.apiApplication.forumModule "Logs the approval/rejection reason to"
         connectSphere.apiApplication.venueAvailabilitiesModule -> connectSphere.messageBroker "Publishes booking-decision notifications to" "AMQP (async)"
 
@@ -88,7 +85,6 @@ workspace "ConnectSphere" "C3 — API Application Components" {
         connectSphere.apiApplication.userModule -> supabase "Authenticates users & reads/writes accounts in" "HTTPS/SQL"
         connectSphere.apiApplication.eventModule -> supabase "Reads/writes event records in" "HTTPS/SQL"
         connectSphere.apiApplication.venueModule -> supabase "Reads/writes venue catalogue in" "HTTPS/SQL"
-        connectSphere.apiApplication.bookingConflictModule -> supabase "Reads booking windows from" "HTTPS/SQL"
         connectSphere.apiApplication.venueAvailabilitiesModule -> supabase "Reads/writes booking records in" "HTTPS/SQL"
         connectSphere.apiApplication.equipmentModule -> supabase "Reads/writes equipment catalogue in" "HTTPS/SQL"
         connectSphere.apiApplication.equipmentAvailabilityModule -> supabase "Reads/writes reservation records in" "HTTPS/SQL"
