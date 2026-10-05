@@ -225,3 +225,8 @@ __marimo__/
 .claude/*
 .codex/*
 .impeccable/*
+
+# generated reports
+/frontend/event-management-ui/coverage/
+
+.DS_Store
