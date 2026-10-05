@@ -11,17 +11,20 @@ workspace "ConnectSphere" "Event Planning and Venue Booking System" {
         ec = person "Event Coordinator" "Internal staff who coordinates the event lifecycle." {
             tags "Internal Actor"
         }
+        lead = person "Event Coordinator Lead" "Internal staff who oversees incoming event requests and assigns coordinators." {
+            tags "Internal Actor"
+        }
         vs = person "Venue Staff" "Internal staff who manages spaces and approves bookings." {
             tags "Internal Actor"
         }
-        ts = person "Technical Staff" "Internal staff who manages equipment requests." {
+        ts = person "Technical Support Staff" "Internal staff who manages equipment requests." {
+            tags "Internal Actor"
+        }
+        so = person "Safety Officer" "Internal staff who reviews the operational safety of planned events." {
             tags "Internal Actor"
         }
 
         // --- External Systems ---
-        email = softwareSystem "Notification Service" "External service for sending email/SMS alerts." {
-            tags "External System" "Database"
-        }
         supabase = softwareSystem "Supabase" "Stores user accounts and relational data for the backend." {
             tags "External System" "Database"
         }
@@ -39,14 +42,15 @@ workspace "ConnectSphere" "Event Planning and Venue Booking System" {
         // Actors connect directly to the main system
         eo -> connectsphere "Submits and manages event requests using" "HTTPS"
         attendee -> connectsphere "Registers for events using" "HTTPS"
-        ec -> connectsphere "Manages planning & venue searches using" "HTTPS"
-        vs -> connectsphere "Approves venue requests using" "HTTPS"
+        ec -> connectsphere "Plans events, books venues and equipment, and submits safety checks using" "HTTPS"
+        lead -> connectsphere "Views the unassigned queue, assigns and reassigns coordinators using" "HTTPS"
+        vs -> connectsphere "Manages venues and holds, and approves venue requests using" "HTTPS"
         ts -> connectsphere "Approves equipment requests using" "HTTPS"
+        so -> connectsphere "Reviews and decides safety checks using" "HTTPS"
 
         // Main system connects directly to the external systems
         connectsphere -> supabase "Authenticates users & reads/writes relational data in" "HTTPS/SQL"
         connectsphere -> mongodb "Reads/writes NoSQL communication entries in" "TCP"
-        connectsphere -> email "Dispatches notifications using" "HTTPS"
     }
 
     views {
