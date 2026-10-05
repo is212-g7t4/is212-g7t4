@@ -2,9 +2,11 @@
  * ConnectSphere — C2 Container diagram (Structurizr DSL)
  *
  * One Front-End App, one API Application wrapping every backend service,
- * and a Message Broker for asynchronous notifications,
- * and the two cloud-hosted databases kept OUTSIDE the system boundary
- * (external systems, not containers) — Supabase and MongoDB Atlas.
+ * a Hold Checker (a small scheduled job that only triggers the API once a
+ * minute; the API does the hold expiry and publishes the 3-day reminder),
+ * and a Message Broker for asynchronous in-app notifications, and the two
+ * cloud-hosted databases kept OUTSIDE the system boundary (external
+ * systems, not containers) — Supabase and MongoDB Atlas.
  */
 
 workspace "ConnectSphere" "C2 — Containers" {
@@ -23,46 +25,58 @@ workspace "ConnectSphere" "C2 — Containers" {
         ec = person "Event Coordinator" "Internal staff who coordinates the event lifecycle." {
             tags "Internal"
         }
+        lead = person "Event Coordinator Lead" "Internal staff who oversees incoming event requests and assigns coordinators." {
+            tags "Internal"
+        }
         vs = person "Venue Staff" "Internal staff who manages spaces and approves bookings." {
             tags "Internal"
         }
-        ts = person "Technical Staff" "Internal staff who manages equipment requests." {
+        ts = person "Technical Support Staff" "Internal staff who manages equipment requests." {
+            tags "Internal"
+        }
+        so = person "Safety Officer" "Internal staff who reviews the operational safety of planned events." {
             tags "Internal"
         }
 
         # ---- External systems — cloud-hosted, kept outside the system boundary ----
         supabase = softwareSystem "Supabase" "Stores user accounts and relational data for the backend." "External System"
         mongodb  = softwareSystem "MongoDB Atlas" "Stores unstructured forum/communication records." "External System"
-        emailProvider = softwareSystem "Notification Service" "External service for sending email/SMS alerts." "External System"
 
         # ---- ConnectSphere system boundary ----
         connectSphere = softwareSystem "ConnectSphere" "Event Planning and Venue Booking System." "ConnectSphere System" {
 
-            frontEndApp = container "Front-End App" "GUI for submitting, reviewing, and managing events, bookings, and registrations." "React, TypeScript, Vite" "Web Application"
+            frontEndApp = container "Front-End App" "GUI for submitting, reviewing, and managing events, bookings, registrations, and safety checks." "React, TypeScript, Vite" "Web Application"
 
-            apiApplication = container "API Application" "Backend REST API handling event, venue, equipment, and registration business logic." "Python, Flask" "Backend Application"
+            apiApplication = container "API Application" "Backend REST API handling event, venue, equipment, registration, and safety-check business logic." "Python, Flask" "Backend Application"
 
-            messageBroker = container "Message Broker" "Carries asynchronous notification events between backend modules." "RabbitMQ" "Message Broker"
+            holdChecker = container "Hold Checker" "Runs every minute and asks the API to expire holds that have run out and to send the 3-day reminder. Holds no logic or data of its own." "Python scheduled job" "Background Job"
+
+            messageBroker = container "Message Broker" "Carries asynchronous notification events from the backend modules to the Notification Module; messages are durable and de-duplicated." "RabbitMQ" "Message Broker"
         }
 
         # ================= Relationships =================
 
         eo       -> connectSphere.frontEndApp "Submits and manages event requests using" "HTTPS"
         attendee -> connectSphere.frontEndApp "Registers for events using" "HTTPS"
-        ec       -> connectSphere.frontEndApp "Manages planning & venue searches using" "HTTPS"
-        vs       -> connectSphere.frontEndApp "Approves venue requests using" "HTTPS"
+        ec       -> connectSphere.frontEndApp "Plans events, books venues and equipment, and submits safety checks using" "HTTPS"
+        lead     -> connectSphere.frontEndApp "Views the unassigned queue, assigns and reassigns coordinators using" "HTTPS"
+        vs       -> connectSphere.frontEndApp "Manages venues and holds, and approves venue requests using" "HTTPS"
         ts       -> connectSphere.frontEndApp "Approves equipment requests using" "HTTPS"
+        so       -> connectSphere.frontEndApp "Reviews and decides safety checks using" "HTTPS"
 
-        connectSphere.frontEndApp -> connectSphere.apiApplication "Makes API calls to" "HTTPS/JSON"
+        connectSphere.frontEndApp -> connectSphere.apiApplication "Makes API calls (including notification polling) to" "HTTPS/JSON"
 
         connectSphere.apiApplication -> supabase "Authenticates users & reads/writes relational data in" "HTTPS/SQL"
         connectSphere.apiApplication -> mongodb "Reads/writes NoSQL communication entries in" "TCP"
-        connectSphere.apiApplication -> emailProvider "Dispatches notifications using" "HTTPS"
 
-        # New asynchronous relationship
+        # Asynchronous relationships
         connectSphere.apiApplication -> connectSphere.messageBroker "Publishes and consumes notifications via" "AMQP" {
             tags "Async"
         }
+
+        # Hold Checker — only a timer: it triggers the API (never a database or the broker directly);
+        # the API expires the holds and publishes the reminders through the broker above
+        connectSphere.holdChecker -> connectSphere.apiApplication "Every minute, triggers hold expiry and the 3-day reminder check on" "HTTPS/JSON"
     }
 
     views {
@@ -109,6 +123,10 @@ workspace "ConnectSphere" "C2 — Containers" {
             element "Backend Application" {
                 background #438dd5
                 color #ffffff
+            }
+            element "Background Job" {
+                background #85bbf0
+                color #000000
             }
             element "Message Broker" {
                 background #dedaff
