@@ -813,6 +813,20 @@ textarea:disabled {
   color: var(--color-error);
 }
 
+/* Safety check and preparation stages (SCRUM-152). Both waiting states read as
+   pending; a safety cancellation reads as a rejection. */
+
+.status-badge.pending-safety-check,
+.status-badge.safety-changes-requested {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.status-badge.cancelled {
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
 /* Impact rows */
 
 .impact-row {
