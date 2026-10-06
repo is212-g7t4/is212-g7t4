@@ -9,7 +9,10 @@ import { EventCardSkeletonList } from '../components/Loading'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 import { OrganiserEventsPage } from './OrganiserEventsPage'
 
-const STATUS_OPTIONS = ['', 'Submitted', 'Under Review', 'Approved', 'Confirmed', 'Rejected']
+const STATUS_OPTIONS = [
+  '', 'Submitted', 'Under Review', 'Approved', 'Rejected',
+  'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled',
+]
 
 type MyEventsProps = { role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }
 

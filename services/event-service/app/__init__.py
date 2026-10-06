@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request
 load_dotenv()
 
 from app.models import (
+    ALL_STATUSES,
     FIELDS,
     EventNotAssignedError,
     EventNotFoundError,
@@ -16,6 +17,7 @@ from app.models import (
     EventNotSubmittedError,
     InvalidStatusTransitionError,
     RejectionReasonError,
+    SafetyApprovalRequiredError,
     approve_event,
     get_event,
     get_organiser_event,
@@ -242,9 +244,9 @@ def create_app(config=None):
             coordinator_id = str(UUID(coordinator_id))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
-        if status not in ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected"):
+        if status not in ALL_STATUSES:
             return jsonify(
-                message="Status must be Submitted, Under Review, Approved, Confirmed, or Rejected."
+                message=f"Status must be one of: {', '.join(ALL_STATUSES)}."
             ), 400
         if not isinstance(action_details, str) or not action_details.strip():
             return jsonify(message="Action details are required."), 400
@@ -267,6 +269,15 @@ def create_app(config=None):
             return jsonify(
                 message="This event request is not assigned to the current coordinator."
             ), 403
+        # SCRUM-152 AC1: more specific than InvalidStatusTransitionError, so it
+        # must be caught first.
+        except SafetyApprovalRequiredError as blocked:
+            return jsonify(
+                code="SAFETY_APPROVAL_REQUIRED",
+                message=blocked.message,
+                currentStatus=blocked.current_status,
+                requiredStatus="Confirmed",
+            ), 409
         except InvalidStatusTransitionError:
             return jsonify(
                 message="This status change is not allowed for the event's current stage."
