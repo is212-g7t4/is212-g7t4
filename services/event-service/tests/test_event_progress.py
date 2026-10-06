@@ -130,8 +130,10 @@ def test_same_status_updates_action_details_without_duplicate_decision(setup):
 
 @pytest.mark.parametrize(
     ("current_status", "requested_status"),
+    # ("Under Review", "Confirmed") moved to test_safety_gate.py — it now
+    # returns the safety reason instead of this generic message (SCRUM-152).
     [("Submitted", "Approved"), ("Submitted", "Rejected"),
-     ("Under Review", "Confirmed"), ("Approved", "Submitted"),
+     ("Approved", "Submitted"),
      ("Approved", "Rejected"), ("Confirmed", "Approved"),
      ("Rejected", "Submitted"), ("Rejected", "Approved")],
 )
@@ -155,9 +157,12 @@ def test_invalid_status_transition_is_rejected(current_status, requested_status,
     assert cursor.execute.call_count == 1
 
 
-def test_approved_event_can_be_confirmed(setup):
+def test_approved_event_cannot_be_confirmed_by_coordinator(setup):
+    """SCRUM-152: 'Confirmed' now means "passed the safety check", so only the
+    safety workflow sets it. This replaces test_approved_event_can_be_confirmed.
+    """
     client, _, cursor = setup
-    cursor.fetchone.side_effect = [event_row("Approved"), event_row("Confirmed")]
+    cursor.fetchone.return_value = event_row("Approved")
 
     response = client.patch(
         f"/events/{EVENT_ID}/progress",
@@ -168,9 +173,39 @@ def test_approved_event_can_be_confirmed(setup):
         },
     )
 
+    assert response.status_code == 409
+    assert response.json["code"] == "SAFETY_APPROVAL_REQUIRED"
+    assert response.json["currentStatus"] == "Approved"
+    assert response.json["requiredStatus"] == "Confirmed"
+    assert cursor.execute.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("current_status", "requested_status"),
+    [("Submitted", "Under Review"), ("Under Review", "Approved"),
+     ("Under Review", "Rejected")],
+)
+def test_pre_safety_transitions_still_work(current_status, requested_status, setup):
+    """SCRUM-152 AC2: transitions before the safety check are unchanged."""
+    client, _, cursor = setup
+    cursor.fetchone.side_effect = [
+        event_row(current_status),
+        event_row(requested_status, action_details="Reviewed."),
+    ]
+
+    response = client.patch(
+        f"/events/{EVENT_ID}/progress",
+        json={
+            "coordinatorId": COORDINATOR_ID,
+            "status": requested_status,
+            "actionDetails": "Reviewed.",
+        },
+    )
+
     assert response.status_code == 200
+    assert response.json["status"] == requested_status
     stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
-    assert stored["actionHistory"][-1]["status"] == "Confirmed"
+    assert stored["actionHistory"][-1]["status"] == requested_status
 
 
 def test_progress_update_is_forbidden_for_another_coordinators_event(setup):
@@ -190,7 +225,9 @@ def test_progress_update_is_forbidden_for_another_coordinators_event(setup):
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize("status", ["", "Pending", "approved", "Cancelled", None])
+# 'Cancelled' used to be unsupported; SCRUM-152 added it to the lifecycle, so
+# it is a valid value here now (the model still blocks the transition).
+@pytest.mark.parametrize("status", ["", "Pending", "approved", "Preparing", None])
 def test_progress_update_requires_supported_status(status, setup):
     response = setup[0].patch(
         f"/events/{EVENT_ID}/progress",

@@ -24,6 +24,74 @@ ROW_COLUMNS = (
     f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id"
 )
 
+# Event lifecycle, in order. Defined once here so the safety-check stories
+# (SCRUM-149/150/151/153) reuse these names instead of re-typing the strings.
+PRE_SAFETY_STATUSES = ("Submitted", "Under Review", "Approved", "Rejected")
+# Set only by the safety-check workflow (SCRUM-149/150/151), never by PATCH /progress.
+SAFETY_STATUSES = (
+    "Pending Safety Check",
+    "Confirmed",  # passed the Operational Safety Check — this is the preparation stage
+    "Safety Changes Requested",
+    "Cancelled",  # safety rejection
+)
+ALL_STATUSES = (*PRE_SAFETY_STATUSES, *SAFETY_STATUSES)
+
+# SCRUM-152: 'Confirmed' *is* "in preparation" — an event that has passed its
+# Operational Safety Check is the one that may proceed. So the gate is simply
+# that nothing here can move an event into 'Confirmed'; only the safety
+# workflow does that (SCRUM-150, and SCRUM-153 AC2).
+PREPARATION_STATUS = "Confirmed"
+
+# What PATCH /progress accepts, keyed by the event's current status. A "self"
+# transition is a save that keeps the status and updates the action details, so
+# every status lists itself. The frontend's src/features/event/eventStatus.ts
+# mirrors this table.
+ALLOWED_TRANSITIONS = {
+    "Submitted": {"Submitted", "Under Review"},
+    "Under Review": {"Under Review", "Approved", "Rejected"},
+    # SCRUM-152: `Approved -> Confirmed` was removed. The next step is
+    # SCRUM-149's submit-for-safety-check, not this endpoint.
+    "Approved": {"Approved"},
+    "Rejected": {"Rejected"},
+    "Pending Safety Check": {"Pending Safety Check"},
+    "Confirmed": {"Confirmed"},
+    "Safety Changes Requested": {"Safety Changes Requested"},
+    "Cancelled": {"Cancelled"},
+}
+
+# Why an event at each status can't progress to 'Confirmed' yet (SCRUM-152 AC1).
+# The UI shows these verbatim, so they are whole sentences; it only surfaces the
+# ones a coordinator can act on (see showsSafetyHint in eventStatus.ts).
+SAFETY_BLOCK_MESSAGES = {
+    "Submitted": (
+        "This event must be approved and pass its Operational Safety Check "
+        "before it can progress to Confirmed."
+    ),
+    "Under Review": (
+        "This event must be approved and pass its Operational Safety Check "
+        "before it can progress to Confirmed."
+    ),
+    "Approved": (
+        "Submit this event for safety check for it to progress to Confirmed."
+    ),
+    "Rejected": "This event was rejected, so it can't progress to Confirmed.",
+    "Pending Safety Check": "This event is waiting for the Safety Officer's decision.",
+    "Safety Changes Requested": (
+        "The Safety Officer has requested changes that must be made and resubmitted."
+    ),
+    "Cancelled": (
+        "This event was cancelled after its safety check, so it can't progress to Confirmed."
+    ),
+}
+DEFAULT_SAFETY_BLOCK_MESSAGE = (
+    "This event must pass its Operational Safety Check before it can progress to Confirmed."
+)
+
+
+def safety_block_message(current_status):
+    """Why an event at `current_status` can't progress to 'Confirmed' (SCRUM-152 AC1)."""
+    return SAFETY_BLOCK_MESSAGES.get(current_status, DEFAULT_SAFETY_BLOCK_MESSAGE)
+
 
 def unpack_description(value):
     description, purpose, decision, _ = unpack_decision(value)
@@ -180,9 +248,24 @@ class InvalidStatusTransitionError(Exception):
     pass
 
 
+class SafetyApprovalRequiredError(Exception):
+    """SCRUM-152 AC1: the event has not passed its Operational Safety Check."""
+
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+    @property
+    def message(self):
+        return safety_block_message(self.current_status)
+
+
 def update_event_coordinator(database_url, event_id, coordinator_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Only ever reaches 'Under Review'. Keep it that way: anything that
+            # can set 'Confirmed' or a later stage must go through the safety
+            # gate in update_event_progress (SCRUM-152).
             cursor.execute(
                 f"""UPDATE public."Event"
                     SET coordinator_id = %s,
@@ -305,14 +388,16 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 or str(event["coordinator_id"]) != coordinator_id
             ):
                 raise EventNotAssignedError
-            allowed_transitions = {
-                "Submitted": {"Submitted", "Under Review"},
-                "Under Review": {"Under Review", "Approved", "Rejected"},
-                "Approved": {"Approved", "Confirmed"},
-                "Confirmed": {"Confirmed"},
-                "Rejected": {"Rejected"},
-            }
-            if status not in allowed_transitions.get(event["status"], {event["status"]}):
+            # SCRUM-152 AC1: nothing here may move an event into 'Confirmed'
+            # (the preparation stage) — only the safety workflow can, by
+            # approving the Operational Safety Check. Runs after the assignment
+            # check, so a caller who isn't the assigned coordinator still gets
+            # 403 and learns nothing about the event's stage; and inside the
+            # FOR UPDATE lock, so a Safety Officer's decision landing at the
+            # same moment can't leave this acting on a stale status.
+            if status == PREPARATION_STATUS and event["status"] != PREPARATION_STATUS:
+                raise SafetyApprovalRequiredError(event["status"])
+            if status not in ALLOWED_TRANSITIONS.get(event["status"], {event["status"]}):
                 raise InvalidStatusTransitionError
 
             (
@@ -365,6 +450,9 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
 
 
 def decide_event(database_url, event_id, coordinator_id, status, reason=None):
+    # Only 'Approved'/'Rejected', only from 'Submitted'/'Under Review', so this
+    # can't reach 'Confirmed' or preparation. Don't widen it without adding the
+    # safety gate from update_event_progress (SCRUM-152).
     if status == "Rejected" and not isinstance(reason, str):
         raise RejectionReasonError
     reason_text = reason.strip() if isinstance(reason, str) else None

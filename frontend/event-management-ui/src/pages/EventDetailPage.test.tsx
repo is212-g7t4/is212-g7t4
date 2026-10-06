@@ -115,28 +115,82 @@ test('rejected event status cannot be changed while action details remain editab
   expect(screen.getByRole('button', { name: 'Save progress' })).toBeEnabled()
 })
 
-test('approved event can move to confirmed', async () => {
-  const approvedEvent: SubmittedEvent = { ...event, status: 'Approved' }
-  vi.mocked(eventApi).mockResolvedValueOnce(approvedEvent).mockResolvedValueOnce({
-    ...approvedEvent,
-    status: 'Confirmed',
-    actionDetails: 'Event arrangements confirmed.',
-  })
+// SCRUM-152 AC1: replaces "approved event can move to confirmed" — 'Confirmed'
+// is the preparation stage and only the safety workflow sets it, so the
+// coordinator is told what has to happen instead of being offered a dead option.
+test('approved event offers only Approved and says to submit for safety check', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved' })
   render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   const status = screen.getByLabelText('Status')
+  expect(status.querySelectorAll('option')).toHaveLength(1)
   expect(status).toHaveTextContent('Approved')
-  expect(status).toHaveTextContent('Confirmed')
-  fireEvent.change(status, { target: { value: 'Confirmed' } })
-  fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Event arrangements confirmed.' } })
+  // 'Confirmed' isn't offered at all, not even as a disabled option.
+  expect(screen.queryByRole('option', { name: 'Confirmed' })).not.toBeInTheDocument()
+  expect(screen.getByRole('note')).toHaveTextContent(
+    'Submit this event for safety check for it to progress to Confirmed.',
+  )
+})
+
+test('pending safety check event shows the waiting reason', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Pending Safety Check' })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByRole('note')).toHaveTextContent(
+    "This event is waiting for the Safety Officer's decision.",
+  )
+})
+
+test('safety changes requested event says what must happen', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Safety Changes Requested' })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByRole('note')).toHaveTextContent(
+    'The Safety Officer has requested changes that must be made and resubmitted.',
+  )
+})
+
+test('API block on confirming is shown to the coordinator', async () => {
+  const blocked = 'Submit this event for safety check for it to progress to Confirmed.'
+  vi.mocked(eventApi)
+    .mockResolvedValueOnce({ ...event, status: 'Approved' })
+    .mockRejectedValueOnce(new Error(blocked))
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  // The dropdown gives no way to ask for this, so drive the save the way a
+  // crafted request would and check the API's reason reaches the coordinator.
+  fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Starting preparation.' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save progress' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(blocked)
+})
+
+// Boundary: the gate must not over-block an event that already passed its check.
+test('a confirmed event has reached preparation and records progress', async () => {
+  const confirmedEvent: SubmittedEvent = { ...event, status: 'Confirmed' }
+  vi.mocked(eventApi).mockResolvedValueOnce(confirmedEvent).mockResolvedValueOnce({
+    ...confirmedEvent,
+    actionDetails: 'Preparation under way.',
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  // Already past the gate, so no hint — and nothing further to move to.
+  expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('Status')).toHaveValue('Confirmed')
+  fireEvent.change(screen.getByLabelText('Action details'), { target: { value: 'Preparation under way.' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save progress' }))
 
   await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
     `/events/${event.id}/progress`,
-    { coordinatorId, status: 'Confirmed', actionDetails: 'Event arrangements confirmed.' },
+    { coordinatorId, status: 'Confirmed', actionDetails: 'Preparation under way.' },
     'PATCH',
   ))
+  expect(await screen.findByText('Event progress updated successfully.')).toBeInTheDocument()
 })
 
 test('does not load event details for another role', () => {
