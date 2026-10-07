@@ -19,10 +19,17 @@ app/
 ├── routes.py     # blueprint(s) — currently just a /health stub
 └── clients.py    # thin HTTP wrappers for calling downstream services
 tests/
-└── test_health.py
+├── __init__.py
+└── unit/             # mocked tests; CI always runs these
+    ├── __init__.py
+    └── test_health.py
 ```
 
 Note there's no `models.py` — composites don't own a database.
+
+Add a `tests/integration/` package only if this service grows a test that needs
+another running service. Mark those `integration` so they stay out of CI — see
+[AGENTS.md](../../AGENTS.md#testing-expectations).
 
 ## Commands
 
@@ -31,3 +38,14 @@ uv sync
 uv run flask --app app run --debug
 uv run pytest
 ```
+
+`uv run pytest` takes no flags: every pytest and coverage setting is in
+`pyproject.toml`. Unit tests run with sockets blocked, so a `clients.py` call
+that isn't mocked fails loudly instead of reaching a real service.
+
+## After copying this template
+
+`fail_under` in `[tool.coverage.report]` is `61`, which is all the `/health`
+stub reaches with `clients.py` untested. Once this becomes a real service, set
+it to the coverage you have actually reached, then raise it in each PR that adds
+tests. CI fails any PR that drops a service below its floor.
