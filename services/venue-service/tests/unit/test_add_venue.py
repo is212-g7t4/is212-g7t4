@@ -16,33 +16,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-
-VENUE_ID = "8381b11e-aaae-4d58-bdba-2607e9e2bde2"
-
-VALID_PAYLOAD = {
-    "name": "Sky Lounge",
-    "location": "Level 20, Main Tower",
-    "capacity": "80",
-    "facilities": ["wifi", "projector"],
-    "accessibility": "Wheelchair accessible",
-    "supportedLayouts": ["theatre", "classroom"],
-    "status": "Available",
-}
-
-
-def saved_row(**overrides):
-    row = {
-        "venue_id": VENUE_ID,
-        "venue_name": "Sky Lounge",
-        "location": "Level 20, Main Tower",
-        "max_capacity": 80,
-        "facilities": {"wifi": True, "projector": True},
-        "accessibility": "Wheelchair accessible",
-        "supported_layouts": ["theatre", "classroom"],
-        "operational_status": "Available",
-    }
-    row.update(overrides)
-    return row
+from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row
 
 
 @pytest.fixture

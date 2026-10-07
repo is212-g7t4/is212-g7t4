@@ -49,6 +49,6 @@ is unset.
 ## Tests and seeding
 
 ```
-uv run pytest --cov=app --cov-report=term-missing
+uv run pytest                             # unit tests; coverage settings live in pyproject.toml
 uv run python scripts/seed_equipment.py   # idempotent mock catalogue
 ```

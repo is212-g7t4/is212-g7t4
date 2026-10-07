@@ -6,7 +6,7 @@ import pytest
 
 from app.equipment import EQUIPMENT_TYPES, STATUSES, from_row
 
-SEED_PATH = Path(__file__).resolve().parents[1] / "scripts" / "seed_equipment.py"
+SEED_PATH = Path(__file__).resolve().parents[2] / "scripts" / "seed_equipment.py"
 spec = importlib.util.spec_from_file_location("seed_equipment", SEED_PATH)
 seed_equipment = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(seed_equipment)
