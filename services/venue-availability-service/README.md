@@ -168,11 +168,14 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
 
 ```sh
 # In services/venue-availability-service
-uv run pytest --cov=app --cov-branch --cov-report=term-missing
+# Unit tests (tests/unit). All pytest and coverage settings, including the
+# coverage floor, live in pyproject.toml — no flags needed.
+uv run pytest
 uvx ruff check --isolated --select E4,E7,E9,F,I app tests
 # Explicit opt-in: live DB SELECTs only, PostgreSQL read-only transactions;
-# prints counts/status codes, never identities or credentials.
-RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest tests/test_live_calendar.py -q -s
+# prints counts/status codes, never identities or credentials. Marked
+# `integration`, so it is deselected by every default run.
+RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest -m integration --no-cov -q -s
 ```
 
 See [BACKEND_REVIEW.md](BACKEND_REVIEW.md) for flow, file map, acceptance mapping,

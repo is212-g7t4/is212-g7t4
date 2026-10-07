@@ -9,6 +9,11 @@ import pytest
 
 from app import create_app
 
+# Needs a real database, so it is deselected by default and must re-enable the
+# sockets that the unit-test run blocks. Run it with:
+#   RUN_LIVE_CALENDAR_SMOKE=true uv run pytest -m integration --no-cov
+pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
+
 
 @pytest.mark.skipif(
     os.getenv("RUN_LIVE_CALENDAR_SMOKE") != "true",

@@ -1,7 +1,7 @@
 """Characterization tests: SCRUM-25 must not change the existing write contract."""
 
 import pytest
-from test_bookings import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row
 
 PAYLOAD = dict(
     eventId=EVENT_ID,
