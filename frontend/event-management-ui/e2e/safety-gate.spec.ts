@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, test, expect, users } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, test, expect, users, venues } from './fixtures'
 
 // SCRUM-152: 'Confirmed' is the preparation stage, and only the safety workflow
 // sets it. A coordinator is never offered it — they are told what to do next.
@@ -10,6 +10,7 @@ test('AC1: an approved event is not offered Confirmed, and is told to submit for
   await mockApi(page)
   await asUser(page, users.coordinator.user_id)
   await mock(page, 'user', '/users', (route) => json(route, { users: allUsers }))
+  await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [approved] }))
   await mock(page, 'event', `/events/${approved.id}`, (route) => json(route, approved))
   // 'Approved' still shows the registrations panel, which is left alone by this story.
@@ -34,6 +35,7 @@ test('a confirmed event has reached preparation and can record progress', async 
   await mockApi(page)
   await asUser(page, users.coordinator.user_id)
   await mock(page, 'user', '/users', (route) => json(route, { users: allUsers }))
+  await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [confirmed] }))
   await mock(page, 'event', `/events/${confirmed.id}`, (route) => json(route, confirmed))
   await mock(page, 'event', `/events/${confirmed.id}/progress`, (route) => {
