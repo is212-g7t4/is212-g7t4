@@ -958,6 +958,44 @@ td small {
   gap: var(--space-2);
 }
 
+.table-actions.toolbar {
+  align-items: flex-end;
+  margin-top: var(--space-3);
+}
+
+.table-actions.toolbar .field {
+  margin-bottom: 0;
+}
+
+.equipment-request-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.equipment-request-table th,
+.equipment-request-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.equipment-request-item {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.equipment-request-table .table-actions {
+  flex-wrap: wrap;
+}
+
+.equipment-request-bulk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
 .reject-box {
   display: grid;
   gap: 7px;
