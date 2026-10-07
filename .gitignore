@@ -228,5 +228,8 @@ __marimo__/
 
 # generated reports
 /frontend/event-management-ui/coverage/
+# junit.xml and coverage.xml written by the CI unit-test job
+reports/
+junit.xml
 
 .DS_Store
