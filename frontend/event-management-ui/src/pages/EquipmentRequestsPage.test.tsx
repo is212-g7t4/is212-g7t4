@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { EquipmentRequestsPage } from './EquipmentRequestsPage'
+import { formatSchedule } from '../features/event/dateFormat'
 import { fetchEventReservations, reviewAllEventEquipmentRequests, reviewEquipmentRequest } from '../features/equipment/requests'
 import type { EquipmentRequest, EventReservation } from '../features/equipment/requests'
 import type { Role, User } from '../types'
@@ -14,6 +15,7 @@ vi.mock('../features/equipment/requests', async (importOriginal) => ({
 }))
 
 const user: User = { id: 'u1', username: 'Wei', email: 'w@x.com', role: 'Technical Support', organization: 'O', managerId: null }
+const coordinator: User = { ...user, id: 'coord-1', username: 'Alicia', role: 'Event Coordinator' }
 
 const line = (overrides: Partial<EquipmentRequest> = {}): EquipmentRequest => ({
   id: 'r1',
@@ -36,7 +38,7 @@ const chair = (overrides: Partial<EquipmentRequest> = {}) => line({
   ...overrides,
 })
 const event = (requests: EquipmentRequest[], overrides: Partial<EventReservation> = {}): EventReservation => ({
-  eventId: 'ev1', eventName: 'Hackday', eventStatus: 'Approved', startTime: '2026-10-01T09:00:00', endTime: '2026-10-01T17:00:00', requests, ...overrides,
+  eventId: 'ev1', eventName: 'Hackday', eventStatus: 'Under Review', coordinatorId: 'coord-1', startTime: '2026-10-01T09:00:00', endTime: '2026-10-01T17:00:00', requests, ...overrides,
 })
 const decided = (item: EquipmentRequest, status: 'Approved' | 'Rejected') => ({
   id: item.id, eventId: item.eventId, equipmentId: item.equipmentId, quantityRequested: item.quantityRequested,
@@ -49,16 +51,12 @@ beforeEach(() => {
   vi.mocked(reviewEquipmentRequest).mockReset().mockResolvedValue(decided(line(), 'Approved'))
 })
 
-const show = (role: Role = 'Technical Support') => render(<EquipmentRequestsPage role={role} user={user} />)
-const showAll = async () => {
-  await screen.findByText('Wireless mic')
-  await userEvent.selectOptions(screen.getByLabelText('Filter by status'), 'All')
-  await waitFor(() => expect(fetchEventReservations).toHaveBeenLastCalledWith(user, undefined))
-}
+const show = (role: Role = 'Technical Support') => render(<EquipmentRequestsPage role={role} user={role === 'Event Coordinator' ? coordinator : user} resolveUserName={(id) => id === 'coord-1' ? 'Alicia Tan' : null} />)
 
-test('AC1: shows equipment, type, quantity and technical requirements of pending requests', async () => {
+test('AC1: defaults to all requests and shows equipment details', async () => {
   show()
   expect(await screen.findByRole('heading', { name: 'Hackday' })).toBeInTheDocument()
+  expect(screen.getByLabelText('Filter by status')).toHaveValue('All')
   const row = screen.getByText('Wireless mic').closest('tr')!
   expect(within(row).getByText('Microphone')).toBeInTheDocument()
   expect(within(row).getByText('4')).toBeInTheDocument()
@@ -66,7 +64,114 @@ test('AC1: shows equipment, type, quantity and technical requirements of pending
   const equipmentCell = within(row).getByText('Wireless mic').closest('td')!
   expect(within(equipmentCell).getByText('Pending')).toHaveClass('status-badge')
   expect(screen.queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument()
-  expect(fetchEventReservations).toHaveBeenCalledWith(user, 'Pending')
+  expect(fetchEventReservations).toHaveBeenCalledWith(user, undefined)
+})
+
+test('status filter shows only requests matching the selected status', async () => {
+  const pending = line()
+  const approved = line({ id: 'r2', equipmentId: 'eq2', status: 'Approved', reviewedBy: 'u1', availability: null,
+    equipment: { description: 'Folding chair', type: 'Chair', totalQuantity: 60, status: 'Available' } })
+  vi.mocked(fetchEventReservations)
+    .mockResolvedValueOnce([event([pending, approved])])
+    .mockResolvedValueOnce([event([pending])])
+
+  show()
+  expect(await screen.findByText('Folding chair')).toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByLabelText('Filter by status'), 'Pending')
+
+  expect(await screen.findByText('Wireless mic')).toBeInTheDocument()
+  expect(screen.queryByText('Folding chair')).not.toBeInTheDocument()
+  expect(fetchEventReservations).toHaveBeenLastCalledWith(user, 'Pending')
+})
+
+test('shows the coordinator name on the right side of the event card heading', async () => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus: 'Approved' })])
+  show()
+  const status = await screen.findByText('Approved', { selector: '.event-card-title .status-badge' })
+  expect(status).toHaveClass('approved')
+  const name = await screen.findByText('Coordinator: Alicia Tan')
+  expect(name).toHaveClass('equipment-request-coordinator')
+  expect(name.closest('header')?.querySelector('h2')).toHaveTextContent('Hackday')
+  expect(status.parentElement?.querySelector('h2')).toHaveTextContent('Hackday')
+})
+
+test('shows the event date and time in its card', async () => {
+  const startTime = '2026-10-01T09:00:00'
+  const endTime = '2026-10-01T17:00:00'
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { startTime, endTime })])
+  show()
+  const schedule = await screen.findByText(formatSchedule(startTime, endTime))
+  expect(schedule).toHaveClass('event-card-date')
+})
+
+test('Confirmed events use the same success badge style as Approved events', async () => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus: 'Confirmed' })])
+  show()
+  expect(await screen.findByText('Confirmed', { selector: '.event-card-title .status-badge' })).toHaveClass('confirmed')
+})
+
+test.each([
+  ['Submitted', true],
+  ['Under Review', true],
+  ['Approved', false],
+  ['Confirmed', false],
+  ['Rejected', false],
+] as const)('%s events allow equipment review actions: %s', async (eventStatus, canAct) => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus })])
+  show()
+  await screen.findByRole('heading', { name: 'Hackday' })
+
+  if (canAct) {
+    expect(screen.getByRole('columnheader', { name: 'Available' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Action' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve All' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reject All' })).toBeInTheDocument()
+  } else {
+    expect(screen.queryByRole('columnheader', { name: 'Available' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Action' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
+  }
+})
+
+test('assigned Event Coordinators can view requests but cannot review them', async () => {
+  show('Event Coordinator')
+  expect(await screen.findByRole('heading', { name: 'Hackday' })).toBeInTheDocument()
+  expect(fetchEventReservations).toHaveBeenCalledWith(coordinator, undefined)
+  expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
+})
+
+test('assigned coordinator sees an updated request status after refreshing', async () => {
+  const pendingEvent = event([line()])
+  const approvedEvent = event([line({ status: 'Approved', reviewedBy: user.id, availability: null })])
+  vi.mocked(fetchEventReservations)
+    .mockResolvedValueOnce([pendingEvent])
+    .mockResolvedValueOnce([approvedEvent])
+
+  show('Event Coordinator')
+  const pendingRow = (await screen.findByText('Wireless mic')).closest('tr')!
+  expect(within(pendingRow).getByText('Pending')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: /Refresh requests/ }))
+
+  const updatedRow = (await screen.findByText('Wireless mic')).closest('tr')!
+  expect(within(updatedRow).getByText('Approved')).toBeInTheDocument()
+  expect(fetchEventReservations).toHaveBeenLastCalledWith(coordinator, undefined)
+  expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+})
+
+test('shows Unassigned when the event has no coordinator', async () => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { coordinatorId: null })])
+  show()
+  expect(await screen.findByText('Coordinator: Unassigned')).toBeInTheDocument()
 })
 
 test('groups every requested item of one event under a single event card', async () => {
@@ -115,7 +220,7 @@ test('hides the Available and Action columns once nothing in an event is pending
 })
 
 test('other roles see the access notice and no request is made', () => {
-  show('Event Coordinator')
+  show('Event Organiser')
   expect(screen.getByText(/visible to Technical Support/)).toBeInTheDocument()
   expect(fetchEventReservations).not.toHaveBeenCalled()
 })
@@ -150,11 +255,12 @@ test('batch Approve is enabled again once the insufficient line has been rejecte
   await screen.findByText('Folding chair')
   expect(screen.getByRole('button', { name: 'Approve All' })).toBeDisabled()
   await userEvent.click(within(screen.getByText('Folding chair').closest('tr')!).getByRole('button', { name: 'Reject' }))
-  await waitFor(() => expect(screen.queryByText('Folding chair')).not.toBeInTheDocument())
+  expect(await screen.findByText('Folding chair')).toBeInTheDocument()
+  expect(within(screen.getByText('Folding chair').closest('tr')!).getByText('Rejected')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Approve All' })).toBeEnabled()
 })
 
-test('a physically unavailable item shows zero available and is insufficient', async () => {
+test('a physically unavailable item shows zero available and an Unavailable badge', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line({
     equipment: { description: 'Laptop', type: 'Laptop', totalQuantity: 8, status: 'Unavailable' },
     availability: { reservedQuantity: 0, availableStock: 0, isInsufficient: true },
@@ -162,13 +268,15 @@ test('a physically unavailable item shows zero available and is insufficient', a
   show()
   const row = (await screen.findByText('Laptop', { selector: 'span' })).closest('tr')!
   expect(within(row).getByText('0')).toBeInTheDocument()
-  expect(within(row).getByText('Insufficient')).toBeInTheDocument()
+  expect(within(row).getByText('Unavailable')).toHaveClass('status-badge')
+  expect(within(row).queryByText('Insufficient')).not.toBeInTheDocument()
+  expect(within(row).getByRole('button', { name: 'Approve' })).toBeDisabled()
   expect(screen.getByRole('button', { name: 'Approve All' })).toBeDisabled()
 })
 
 // --- decisions -------------------------------------------------------------
 
-test('AC2: Approve acts on one equipment row only and the other stays pending', async () => {
+test('AC2: Approve updates one equipment row and the other stays pending under All requests', async () => {
   const second = line({ id: 'r2', equipmentId: 'eq2', equipment: { description: 'Folding chair', type: 'Chair', totalQuantity: 60, status: 'Available' } })
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
   show()
@@ -176,7 +284,7 @@ test('AC2: Approve acts on one equipment row only and the other stays pending', 
   expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(2)
   await userEvent.click(screen.getAllByRole('button', { name: 'Approve' })[0])
   await waitFor(() => expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Approved', user))
-  await waitFor(() => expect(screen.queryByText('Wireless mic')).not.toBeInTheDocument())
+  expect(within(screen.getByText('Wireless mic').closest('tr')!).getByText('Approved')).toBeInTheDocument()
   expect(screen.getByText('Folding chair')).toBeInTheDocument()
   expect(reviewEquipmentRequest).toHaveBeenCalledTimes(1)
 })
@@ -186,7 +294,7 @@ test('AC2: rejecting one row under the All filter updates only that row and remo
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
   vi.mocked(reviewEquipmentRequest).mockResolvedValue(decided(line(), 'Rejected'))
   show()
-  await showAll()
+  await screen.findByText('Folding chair')
   await userEvent.click((await screen.findAllByRole('button', { name: 'Reject' }))[0])
   await waitFor(() => expect(document.querySelectorAll('.status-badge.rejected')).toHaveLength(1))
   expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Rejected', user)
@@ -204,7 +312,8 @@ test('Approve All approves every pending request in the event', async () => {
   expect(button.closest('footer')).toHaveClass('equipment-request-bulk-actions')
   await userEvent.click(button)
   await waitFor(() => expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Approved', user))
-  expect(await screen.findByText('No equipment requests found.')).toBeInTheDocument()
+  await waitFor(() => expect(document.querySelectorAll('tbody .status-badge.approved')).toHaveLength(2))
+  expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
 })
 
 test('Reject All works even when a line is insufficient and updates all rows under the All filter', async () => {
@@ -212,7 +321,7 @@ test('Reject All works even when a line is insufficient and updates all rows und
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
   vi.mocked(reviewAllEventEquipmentRequests).mockResolvedValue([decided(line(), 'Rejected'), decided(second, 'Rejected')])
   show()
-  await showAll()
+  await screen.findByText('Folding chair')
   await userEvent.click(await screen.findByRole('button', { name: 'Reject All' }))
   await waitFor(() => expect(document.querySelectorAll('.status-badge.rejected')).toHaveLength(2))
   expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Rejected', user)

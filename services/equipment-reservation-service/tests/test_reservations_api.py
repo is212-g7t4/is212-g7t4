@@ -34,6 +34,7 @@ class World:
         self.requests = []
         self.events = {TARGET: {"id": TARGET, "eventName": "Hackday", "status": "Under Review", "coordinatorId": None,
                                 "startTime": START, "endTime": END}}
+        self.coordinator_assignments = {}
         self.overlapping = []
         self.catalogue = [equipment(MIC, "Wireless mic", 10), equipment(TABLE, "Table", 50), equipment(LAPTOP, "Laptop", 8, "Unavailable")]
         self.calls = []
@@ -56,6 +57,10 @@ class World:
     def get_event_summaries(self, ids):
         return [self.events[i] for i in ids if i in self.events]
 
+    def list_assigned_event_ids(self, coordinator_id):
+        self.calls.append(("assigned_events", coordinator_id))
+        return [event_id for event_id, assigned_id in self.coordinator_assignments.items() if assigned_id == coordinator_id]
+
     def get_overlapping_events(self, start, end, statuses, exclude_event_id):
         self.calls.append(("overlapping", start, end, tuple(statuses), exclude_event_id))
         return self.overlapping
@@ -68,7 +73,7 @@ class World:
 def world(monkeypatch):
     fake = World()
     for name in ("list_requests", "get_request", "review_request", "review_event_requests",
-                 "get_event_summaries", "get_overlapping_events", "list_equipment"):
+                 "get_event_summaries", "list_assigned_event_ids", "get_overlapping_events", "list_equipment"):
         monkeypatch.setattr(f"app.clients.{name}", getattr(fake, name))
     return fake
 
@@ -88,6 +93,14 @@ def test_health(client):
     assert client.get("/health").json == {"status": "ok"}
 
 
+def test_full_stock_is_available_when_no_other_event_overlaps(world, client):
+    world.requests = [line("r1", TARGET, MIC, 10)]
+
+    request = rows(client)[0]["requests"][0]
+
+    assert request["availability"] == {"reservedQuantity": 0, "availableStock": 10, "isInsufficient": False}
+
+
 def test_partial_allocation_only_subtracts_what_overlapping_events_hold(world, client):
     # Another confirmed event holds 4 of 10 mics in the same window; a third holds 3 more.
     world.overlapping = [{"id": OTHER}, {"id": THIRD}]
@@ -103,6 +116,35 @@ def test_partial_allocation_only_subtracts_what_overlapping_events_hold(world, c
     assert event["requests"][0]["availability"] == {"reservedQuantity": 7, "availableStock": 3, "isInsufficient": False}
     assert ("overlapping", START, END, ("Approved", "Confirmed", "Submitted", "Under Review"), TARGET) in world.calls
     assert ("list_requests", "Approved", [OTHER, THIRD]) in world.calls
+
+
+def test_only_approved_requests_from_overlapping_events_reduce_available_stock(world, client):
+    outside_window = "00000000-0000-4000-8000-0000000000d4"
+    world.overlapping = [{"id": OTHER}]
+    world.requests = [
+        line("r1", TARGET, MIC, 6),
+        line("held", OTHER, MIC, 4, "Approved"),
+        line("pending", OTHER, MIC, 3, "Pending"),
+        line("outside", outside_window, MIC, 5, "Approved"),
+    ]
+
+    request = rows(client)[0]["requests"][0]
+
+    assert request["availability"] == {"reservedQuantity": 4, "availableStock": 6, "isInsufficient": False}
+    assert ("list_requests", "Approved", [OTHER]) in world.calls
+
+
+def test_rejected_request_from_an_overlapping_event_does_not_reserve_stock(world, client):
+    world.overlapping = [{"id": OTHER}]
+    world.requests = [
+        line("r1", TARGET, MIC, 8),
+        line("rejected", OTHER, MIC, 10, "Rejected"),
+    ]
+
+    request = rows(client)[0]["requests"][0]
+
+    assert request["availability"] == {"reservedQuantity": 0, "availableStock": 10, "isInsufficient": False}
+    assert ("list_requests", "Approved", [OTHER]) in world.calls
 
 
 def test_a_request_one_above_the_remaining_balance_is_insufficient(world, client):
@@ -133,6 +175,17 @@ def test_equipment_missing_from_the_catalogue_has_no_stock(world, client):
     assert request["equipment"] is None and request["availability"]["isInsufficient"] is True
 
 
+@pytest.mark.parametrize("equipment_id", [LAPTOP, "00000000-0000-4000-8000-00000000ffff"])
+def test_approval_is_blocked_for_unavailable_or_unknown_equipment(world, client, equipment_id):
+    request_id = "00000000-0000-4000-8000-0000000000d5"
+    world.requests = [line(request_id, TARGET, equipment_id, 1)]
+
+    response = client.patch(f"/equipment-reservations/requests/{request_id}", headers=TS, json={"status": "Approved"})
+
+    assert response.status_code == 409
+    assert not any(call[0] == "review_request" for call in world.calls)
+
+
 def test_decided_lines_carry_no_availability_and_trigger_no_window_lookup(world, client):
     world.requests = [line("r1", TARGET, MIC, 3, "Approved"), line("r2", TARGET, TABLE, 3, "Rejected")]
 
@@ -156,6 +209,14 @@ def test_unknown_event_is_labelled_and_has_no_window(world, client):
     assert event["eventName"] == "Unknown event" and event["startTime"] is None
 
 
+def test_event_view_includes_coordinator_id_for_frontend_name_resolution(world, client):
+    coordinator_id = "00000000-0000-4000-8000-00000000c001"
+    world.events[TARGET]["coordinatorId"] = coordinator_id
+    world.requests = [line("r1", TARGET, MIC, 1)]
+
+    assert rows(client)[0]["coordinatorId"] == coordinator_id
+
+
 def test_no_requests_returns_no_events(world, client):
     assert rows(client) == []
 
@@ -169,6 +230,42 @@ def test_event_coordinator_can_view_but_not_review(world, client):
     assert client.get("/equipment-reservations", headers=COORDINATOR).status_code == 200
     assert client.patch(f"/equipment-reservations/events/{TARGET}", headers=COORDINATOR, json={"status": "Rejected"}).status_code == 403
     assert client.patch("/equipment-reservations/requests/r1", headers=COORDINATOR, json={"status": "Rejected"}).status_code == 403
+
+
+def test_coordinator_sees_only_events_currently_assigned_to_them(world, client):
+    assigned_event = "00000000-0000-4000-8000-0000000000e1"
+    other_event = "00000000-0000-4000-8000-0000000000e2"
+    world.coordinator_assignments = {assigned_event: USER, other_event: THIRD}
+    world.requests = [line("assigned", assigned_event, MIC, 2), line("other", other_event, MIC, 2)]
+
+    response = client.get("/equipment-reservations", headers=COORDINATOR)
+
+    assert response.status_code == 200
+    assert [event["eventId"] for event in response.json["events"]] == [assigned_event]
+    assert ("assigned_events", USER) in world.calls
+    assert ("list_requests", None, [assigned_event]) in world.calls
+
+
+def test_coordinator_with_no_assigned_events_sees_no_requests(world, client):
+    world.requests = [line("unassigned", TARGET, MIC, 2)]
+
+    response = client.get("/equipment-reservations", headers=COORDINATOR)
+
+    assert response.status_code == 200
+    assert response.json["events"] == []
+    assert ("list_requests", None, []) in world.calls
+
+
+def test_reassigned_coordinator_loses_access_and_new_coordinator_gains_it(world, client):
+    event_id = "00000000-0000-4000-8000-0000000000e1"
+    world.requests = [line("assigned", event_id, MIC, 2)]
+    world.coordinator_assignments = {event_id: THIRD}
+
+    old_coordinator = client.get("/equipment-reservations", headers=COORDINATOR)
+    new_coordinator = client.get("/equipment-reservations", headers={"X-Dev-User-Id": THIRD, "X-Dev-Role": "Event Coordinator"})
+
+    assert old_coordinator.json["events"] == []
+    assert [event["eventId"] for event in new_coordinator.json["events"]] == [event_id]
 
 
 @pytest.mark.parametrize("headers,code", [({}, 401), ({"X-Dev-User-Id": "bad", "X-Dev-Role": "Technical Support"}, 401), ({"X-Dev-User-Id": USER, "X-Dev-Role": "Attendee"}, 403)])

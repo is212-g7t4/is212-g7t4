@@ -56,6 +56,7 @@ def build_event_views(requests, headers):
             "eventId": event_id,
             "eventName": event.get("eventName") or "Unknown event",
             "eventStatus": event.get("status"),
+            "coordinatorId": event.get("coordinatorId"),
             "startTime": event.get("startTime"),
             "endTime": event.get("endTime"),
             "requests": [
