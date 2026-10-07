@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, test, expect, users } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, test, expect, users, venues } from './fixtures'
 
 const approved = makeEvent({ id: 'evt-002', eventName: 'Hack Night', status: 'Approved', expectedAttendance: '50' })
 const registrations = [
@@ -11,6 +11,7 @@ test('coordinator filters events and opens one with registrations', async ({ pag
   await mockApi(page)
   await asUser(page, users.coordinator.user_id)
   await mock(page, 'user', '/users', (route) => json(route, { users: allUsers }))
+  await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'event', '/events', (route) => {
     const params = new URL(route.request().url()).searchParams
     queries.push(params)

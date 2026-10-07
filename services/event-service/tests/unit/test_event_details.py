@@ -130,6 +130,30 @@ def test_manager_can_view_unassigned_event(setup):
     assert response.status_code == 200
 
 
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support"])
+def test_internal_operational_staff_can_view_any_event_read_only(role, setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = saved_row()
+
+    response = client.get(
+        f"/events/{EVENT_ID}",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": role},
+    )
+
+    assert response.status_code == 200
+    assert response.json["id"] == EVENT_ID
+
+
+def test_unrecognised_role_cannot_request_internal_event_details(setup):
+    client, _, cursor = setup
+    response = client.get(
+        f"/events/{EVENT_ID}",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": "Attendee"},
+    )
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
+
+
 ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
 OTHER_ORGANISER_ID = "44444444-4444-4444-8444-444444444444"
 

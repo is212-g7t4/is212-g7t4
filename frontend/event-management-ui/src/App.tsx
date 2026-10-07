@@ -5,6 +5,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { EventDetailPage } from './pages/EventDetailPage'
 import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
+import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { EquipmentPage } from './pages/EquipmentPage'
@@ -27,6 +28,7 @@ const paths: Record<Route, string> = {
   review: '/requests/review',
   detail: '/events',
   myEvents: '/my-events',
+  browseEvents: '/events/browse',
   venues: '/venues',
   venueDetail: '/venues',
   venueCalendar: '/venue-availability',
@@ -44,6 +46,7 @@ function getRoute(): Route {
   if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
+  if (path === '/events/browse') return 'browseEvents'
   if (path === '/venue-availability') return 'venueCalendar'
   if (path === '/venues/new') return 'addVenue'
   if (/^\/venues\/[^/]+\/edit$/.test(path)) return 'editVenue'
@@ -176,6 +179,7 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}

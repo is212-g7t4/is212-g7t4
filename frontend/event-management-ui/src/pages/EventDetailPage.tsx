@@ -5,6 +5,7 @@ import { eventApi } from '../features/event/submission'
 import type { EventStatus, SubmittedEvent } from '../features/event/submission'
 import { ALLOWED_TRANSITIONS, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
+import { canViewAllInternalEvents, canViewInternalEvents, INTERNAL_EVENT_ACCESS_MESSAGE } from '../features/event/permissions'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
 import { RegistrationTable } from '../features/registration/RegistrationTable'
@@ -41,10 +42,11 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || '',
   }
   useEffect(() => {
-    if (role !== 'Event Coordinator' || !currentCoordinator.id) return
+    if (!canViewInternalEvents(role) || !currentCoordinator.id) return
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
-    if (isManager) params.set('isManager', 'true')
+    if (canViewAllInternalEvents(role, isManager)) params.set('isManager', 'true')
+    if (role === 'Venue Staff' || role === 'Technical Support') params.set('viewerRole', role)
     eventApi(`/events/${eventId}?${params.toString()}`).then((body) => {
       if (active) {
         setEvent(body)
@@ -76,7 +78,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
   const hasUnsavedChanges = Boolean(event) && (
     draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
   )
-  const canUpdate = Boolean(event && event.coordinatorId === currentCoordinator.id)
+  const canUpdate = Boolean(role === 'Event Coordinator' && event && event.coordinatorId === currentCoordinator.id)
   const availableStatuses = event ? ALLOWED_TRANSITIONS[event.status] : []
   // SCRUM-152 AC1: 'Confirmed' is never offered to a coordinator — only the
   // safety workflow sets it — so instead of a dead option the field explains
@@ -110,7 +112,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     }
   }
 
-  if (role !== 'Event Coordinator') return <RoleWarning>Event details are visible to Event Coordinators.</RoleWarning>
+  if (!canViewInternalEvents(role)) return <RoleWarning>{INTERNAL_EVENT_ACCESS_MESSAGE}</RoleWarning>
 
   return <div className="page-stack">
     <section className="intro">

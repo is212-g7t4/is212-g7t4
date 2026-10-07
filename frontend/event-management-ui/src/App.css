@@ -808,6 +808,17 @@ textarea:disabled {
   color: #087563;
 }
 
+.status-badge.open {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.status-badge.full,
+.status-badge.closed {
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
 .status-badge.rejected {
   background: var(--color-error-soft);
   color: var(--color-error);

@@ -22,6 +22,7 @@ from app.models import (
     get_event,
     get_organiser_event,
     list_events,
+    list_confirmed_events,
     list_organiser_events,
     list_submitted,
     reject_event,
@@ -136,9 +137,21 @@ def create_app(config=None):
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
 
+        viewer_role = request.args.get("viewerRole") or None
+        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support"):
+            return jsonify(message="This role cannot view all internal events."), 403
         status = request.args.get("status") or None
         venue = request.args.get("venue") or None
-        is_manager = request.args.get("isManager") in ("true", "1")
+        venue_id = request.args.get("venueId") or None
+        if venue_id:
+            try:
+                venue_id = str(UUID(venue_id))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="venueId must be a valid venue ID."), 400
+        is_manager = (
+            request.args.get("isManager") in ("true", "1")
+            or viewer_role in ("Venue Staff", "Technical Support")
+        )
 
         date_from = date_to = None
         try:
@@ -172,8 +185,15 @@ def create_app(config=None):
                 date_from,
                 date_to,
                 is_manager,
+                venue_id=venue_id,
             )
         )
+
+    @app.get("/events/registration")
+    def registration_events():
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_confirmed_events(app.config["DATABASE_URL"]))
 
     @app.get("/events/<uuid:event_id>")
     def get_event_details(event_id):
@@ -201,7 +221,13 @@ def create_app(config=None):
             coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
-        is_manager = request.args.get("isManager") in ("true", "1")
+        viewer_role = request.args.get("viewerRole") or None
+        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support"):
+            return jsonify(message="This role cannot view all internal events."), 403
+        is_manager = (
+            request.args.get("isManager") in ("true", "1")
+            or viewer_role in ("Venue Staff", "Technical Support")
+        )
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
