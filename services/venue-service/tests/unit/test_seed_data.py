@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-SEED_PATH = Path(__file__).resolve().parents[1] / "scripts" / "seed_venues.py"
+SEED_PATH = Path(__file__).resolve().parents[2] / "scripts" / "seed_venues.py"
 spec = importlib.util.spec_from_file_location("seed_venues", SEED_PATH)
 seed_venues = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(seed_venues)
