@@ -100,13 +100,17 @@ same either way:
 ## Tests
 
 ```
-uv run pytest --cov=app --cov-report=term-missing
+uv run pytest
 ```
 
-`tests/test_venue_details.py` covers AC1 and the failure cases with
-`psycopg2.connect` mocked; `tests/test_venue_search_filters.py` covers the
-SCRUM-26 filter parameters above; `tests/test_seed_data.py` checks that
-`scripts/seed_venues.py` writes rows in the shape above.
+All pytest and coverage settings, including the coverage floor, live in
+`pyproject.toml`, so this needs no flags.
+
+`tests/unit/test_venue_details.py` covers AC1 and the failure cases with
+`psycopg2.connect` mocked; `tests/unit/test_venue_search_filters.py` covers the
+SCRUM-26 filter parameters above; `tests/unit/test_seed_data.py` checks that
+`scripts/seed_venues.py` writes rows in the shape above. Shared payloads and row
+builders live in `tests/unit/factories.py`.
 
 ## Seeding
 
