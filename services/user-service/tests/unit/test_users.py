@@ -44,7 +44,7 @@ def test_list_users_returns_all_users(setup):
 
     response = client.get("/users")
 
-    assert response.status_code == 200
+    assert response.status_code == 500  # deliberately wrong
     assert len(response.json["users"]) == 2
     assert response.json["users"][1]["manager_id"] == ALICE_ID
     query, params = cursor.execute.call_args.args
