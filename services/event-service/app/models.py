@@ -228,6 +228,46 @@ class EventNotFoundError(Exception):
     pass
 
 
+SUMMARY_COLUMNS = "event_id, event_name, status, coordinator_id, preferred_start_date, preferred_end_date"
+
+
+def _summary(row):
+    return {
+        "id": str(row["event_id"]),
+        "eventName": row["event_name"],
+        "status": row["status"],
+        "coordinatorId": str(row["coordinator_id"]) if row["coordinator_id"] else None,
+        "startTime": row["preferred_start_date"].isoformat() if row["preferred_start_date"] else None,
+        "endTime": row["preferred_end_date"].isoformat() if row["preferred_end_date"] else None,
+    }
+
+
+def list_event_summaries(database_url, event_ids):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f'SELECT {SUMMARY_COLUMNS} FROM public."Event" WHERE event_id = ANY(%s::uuid[])',
+                [event_ids],
+            )
+            return [_summary(row) for row in cursor.fetchall()]
+
+
+def list_overlapping_events(database_url, start, end, statuses, exclude_event_id=None):
+    """Events in `statuses` whose window overlaps [start, end): other.start < end AND other.end > start."""
+    query = (
+        f'SELECT {SUMMARY_COLUMNS} FROM public."Event" '
+        "WHERE status = ANY(%s) AND preferred_start_date < %s AND preferred_end_date > %s"
+    )
+    params = [list(statuses), end, start]
+    if exclude_event_id:
+        query += " AND event_id <> %s"
+        params.append(exclude_event_id)
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query + " ORDER BY preferred_start_date ASC, event_id ASC", params)
+            return [_summary(row) for row in cursor.fetchall()]
+
+
 class EventNotAssignedError(Exception):
     pass
 

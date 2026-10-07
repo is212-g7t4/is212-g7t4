@@ -21,9 +21,11 @@ from app.models import (
     approve_event,
     get_event,
     get_organiser_event,
+    list_event_summaries,
     list_events,
     list_confirmed_events,
     list_organiser_events,
+    list_overlapping_events,
     list_submitted,
     reject_event,
     submit_event,
@@ -31,6 +33,8 @@ from app.models import (
     update_event_progress,
 )
 from app.validation import validate
+
+EVENT_STATUSES = ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected")
 
 
 def create_app(config=None):
@@ -194,6 +198,38 @@ def create_app(config=None):
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         return jsonify(events=list_confirmed_events(app.config["DATABASE_URL"]))
+
+    @app.get("/events/summaries")
+    def event_summaries():
+        # Name/status lookup for other screens (e.g. equipment review); no event body or ownership check.
+        raw_ids = [part for part in request.args.get("ids", "").split(",") if part]
+        if not raw_ids or len(raw_ids) > 100:
+            return jsonify(message="Provide between 1 and 100 comma-separated event IDs."), 400
+        try:
+            ids = [str(UUID(part)) for part in raw_ids]
+        except ValueError:
+            return jsonify(message="Every event ID must be a valid UUID."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_event_summaries(app.config["DATABASE_URL"], ids))
+
+    @app.get("/events/overlapping")
+    def overlapping_events():
+        # Time-window lookup for Equipment Reservation Service; summaries only, no event body.
+        statuses = [part for part in request.args.get("statuses", "").split(",") if part]
+        if not statuses or any(s not in EVENT_STATUSES for s in statuses):
+            return jsonify(message=f"statuses must list values from: {', '.join(EVENT_STATUSES)}."), 400
+        try:
+            start, end = (datetime.fromisoformat(request.args.get(key, "")) for key in ("start", "end"))
+            exclude = request.args.get("excludeEventId")
+            exclude = str(UUID(exclude)) if exclude else None
+        except ValueError:
+            return jsonify(message="start and end must be ISO date-times and excludeEventId a UUID."), 400
+        if end <= start:
+            return jsonify(message="end must be after start."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_overlapping_events(app.config["DATABASE_URL"], start, end, statuses, exclude))
 
     @app.get("/events/<uuid:event_id>")
     def get_event_details(event_id):
