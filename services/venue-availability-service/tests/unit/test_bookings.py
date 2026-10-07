@@ -1,28 +1,13 @@
 """Venue Availability: booking creation, approval/rejection, and conflict-checking."""
 
-from datetime import datetime
-
 from app import create_app
-
-EVENT_ID = "00000000-0000-0000-0000-0000000000e1"
-VENUE_ID = "00000000-0000-0000-0000-0000000000f1"
-USER_ID = "00000000-0000-0000-0000-000000000001"
-BOOKING_ID = "00000000-0000-0000-0000-00000000000b"
-
-
-def booking_row(**overrides):
-    row = {
-        "booking_id": BOOKING_ID,
-        "event_id": EVENT_ID,
-        "venue_id": VENUE_ID,
-        "requested_start_time": datetime(2026, 10, 1, 9),
-        "requested_end_time": datetime(2026, 10, 1, 12),
-        "status": "Pending Review",
-        "requested_by": USER_ID,
-        "reviewed_by": None,
-    }
-    row.update(overrides)
-    return row
+from tests.unit.factories import (
+    BOOKING_ID,
+    EVENT_ID,
+    USER_ID,
+    VENUE_ID,
+    booking_row,
+)
 
 
 def test_health():

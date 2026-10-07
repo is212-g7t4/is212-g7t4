@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import psycopg2
 import pytest
-from test_bookings import USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import USER_ID, VENUE_ID, booking_row
 
 from app import create_app
 from app.calendar import parse_boundary
