@@ -193,9 +193,20 @@ test('a confirmed event has reached preparation and records progress', async () 
   expect(await screen.findByText('Event progress updated successfully.')).toBeInTheDocument()
 })
 
-test('does not load event details for another role', () => {
-  render(<EventDetailPage eventId={event.id} role="Venue Staff" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
+test.each(['Venue Staff', 'Technical Support'] as const)('%s views event details without edit controls', async (role) => {
+  render(<EventDetailPage eventId={event.id} role={role} isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
 
-  expect(screen.getByText('Event details are visible to Event Coordinators.')).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Community Workshop' })).toBeInTheDocument()
+  expect(eventApi).toHaveBeenCalledWith(
+    `/events/${event.id}?coordinatorId=${coordinatorId}&isManager=true&viewerRole=${role.replace(' ', '+')}`,
+  )
+  expect(screen.getByText('Only the assigned Event Coordinator can update this event.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Save progress' })).not.toBeInTheDocument()
+})
+
+test('does not load event details for an attendee', () => {
+  render(<EventDetailPage eventId={event.id} role="Attendee" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
+
+  expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, and Technical Support.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
 })

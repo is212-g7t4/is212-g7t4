@@ -7,6 +7,7 @@ interface ApiUser {
   role: string
   organization: string
   manager_id: string | null
+  contact_details: string
 }
 
 function toUser(apiUser: ApiUser): User {
@@ -17,7 +18,15 @@ function toUser(apiUser: ApiUser): User {
     role: apiUser.role as Role,
     organization: apiUser.organization,
     managerId: apiUser.manager_id,
+    contactDetails: apiUser.contact_details,
   }
+}
+
+export async function fetchUser(id: string): Promise<User> {
+  const response = await fetch(`${import.meta.env.VITE_USER_SERVICE_URL || 'http://localhost:5001'}/users/${encodeURIComponent(id)}`)
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.message || 'Unable to load event organiser contact details.')
+  return toUser(body as ApiUser)
 }
 
 export async function fetchUsers(): Promise<User[]> {

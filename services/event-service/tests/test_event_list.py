@@ -18,6 +18,7 @@ VALID = {
 }
 
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
+VENUE_ID = "22222222-2222-4222-8222-222222222222"
 
 
 @pytest.fixture
@@ -78,6 +79,31 @@ def test_ac2_filters_by_venue_substring(setup):
     query, params = cursor.execute.call_args.args
     assert "venue_requirements ILIKE %s ESCAPE '\\'" in query
     assert params == [COORDINATOR_ID, "%Main Hall%"]
+
+
+def test_planning_view_filters_by_registered_venue_id(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [saved_row(venue_id=VENUE_ID)]
+
+    response = client.get(
+        "/events",
+        query_string={"coordinatorId": COORDINATOR_ID, "venueId": VENUE_ID},
+    )
+
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "venue_id = %s" in query
+    assert params == [COORDINATOR_ID, VENUE_ID]
+
+
+def test_planning_view_rejects_invalid_venue_id(setup):
+    client, _, cursor = setup
+    response = client.get(
+        "/events",
+        query_string={"coordinatorId": COORDINATOR_ID, "venueId": "not-a-uuid"},
+    )
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
 
 
 def test_ac2_venue_filter_escapes_percent_and_underscore(setup):
@@ -193,6 +219,37 @@ def test_manager_can_still_combine_with_optional_filters(setup):
     assert "coordinator_id = %s" not in query
     assert "status = %s" in query
     assert params == ["Approved"]
+
+
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support"])
+def test_internal_operational_staff_see_all_events_with_existing_filters(role, setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [saved_row()]
+
+    response = client.get(
+        "/events",
+        query_string={
+            "coordinatorId": COORDINATOR_ID,
+            "viewerRole": role,
+            "status": "Approved",
+        },
+    )
+
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" not in query
+    assert "status = %s" in query
+    assert params == ["Approved"]
+
+
+def test_unrecognised_role_cannot_request_all_internal_events(setup):
+    client, _, cursor = setup
+    response = client.get(
+        "/events",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": "Attendee"},
+    )
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
 
 
 def test_ac2_missing_database_configuration():
