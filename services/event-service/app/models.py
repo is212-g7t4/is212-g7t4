@@ -288,6 +288,7 @@ def list_events(
     date_from=None,
     date_to=None,
     is_manager=False,
+    venue_id=None,
 ):
     if is_manager:
         conditions = []
@@ -302,6 +303,9 @@ def list_events(
         escaped = venue.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         conditions.append("venue_requirements ILIKE %s ESCAPE '\\'")
         params.append(f"%{escaped}%")
+    if venue_id:
+        conditions.append("venue_id = %s")
+        params.append(venue_id)
     if date_to:
         conditions.append("preferred_start_date <= %s")
         params.append(date_to)
@@ -317,6 +321,19 @@ def list_events(
                     {where_clause}
                     ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC""",
                 params,
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def list_confirmed_events(database_url):
+    """Return confirmed events for the attendee registration catalogue."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE status = 'Confirmed'
+                    ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC"""
             )
             return [serialize(row) for row in cursor.fetchall()]
 
