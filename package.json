@@ -6,6 +6,7 @@
     "dev": "concurrently -n frontend,backend -c blue,green \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "npm --prefix frontend/event-management-ui run dev",
     "dev:backend": "docker compose up",
+    "test:backend": "for d in services/*/; do (cd \"$d\" && uv run pytest) || exit 1; done",
     "stop": "docker compose down --remove-orphans && (lsof -ti :5174 | xargs kill -9 2>/dev/null; true)"
   },
   "devDependencies": {
