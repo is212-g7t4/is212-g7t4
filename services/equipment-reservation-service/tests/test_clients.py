@@ -82,6 +82,15 @@ def test_event_summaries_are_fetched_in_chunks_of_100(sent):
     assert len(calls[1][2]["params"]["ids"].split(",")) == 50
 
 
+def test_list_assigned_event_ids_uses_coordinator_scoped_event_endpoint(sent):
+    calls, fake = sent
+    fake.response = FakeResponse(body={"events": [{"id": "event-1"}, {"id": "event-2"}]})
+
+    assert clients.list_assigned_event_ids("coordinator-1") == ["event-1", "event-2"]
+    assert calls[0][0:2] == ("GET", "http://localhost:5003/events")
+    assert calls[0][2]["params"] == {"coordinatorId": "coordinator-1"}
+
+
 def test_overlapping_events_and_equipment_calls(sent):
     calls, fake = sent
     fake.response = FakeResponse(body={"events": [], "equipment": [{"id": "e"}]})

@@ -60,7 +60,10 @@ def reservations_list():
     status = request.args.get("status")
     if status is not None and status not in STATUSES:
         return jsonify(message=f"status must be one of: {', '.join(STATUSES)}."), 400
-    requests = clients.list_requests(request.headers, status)
+    event_ids = None
+    if request.headers.get("X-Dev-Role") == "Event Coordinator":
+        event_ids = clients.list_assigned_event_ids(request.headers["X-Dev-User-Id"])
+    requests = clients.list_requests(request.headers, status, event_ids)
     return jsonify(events=reservations.build_event_views(requests, request.headers))
 
 

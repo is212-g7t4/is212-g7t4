@@ -185,7 +185,7 @@ function App() {
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
-      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
+      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}

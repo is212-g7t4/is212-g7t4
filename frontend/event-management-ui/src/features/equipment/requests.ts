@@ -26,6 +26,7 @@ export interface EventReservation {
   eventId: string
   eventName: string
   eventStatus: string | null
+  coordinatorId: string | null
   startTime: string | null
   endTime: string | null
   requests: EquipmentRequest[]

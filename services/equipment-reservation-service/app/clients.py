@@ -82,6 +82,15 @@ def get_event_summaries(event_ids):
     return summaries
 
 
+def list_assigned_event_ids(coordinator_id):
+    events = _call(
+        "GET",
+        _event_service("/events"),
+        params={"coordinatorId": coordinator_id},
+    )["events"]
+    return [event["id"] for event in events]
+
+
 def get_overlapping_events(start, end, statuses, exclude_event_id):
     params = {"start": start, "end": end, "statuses": ",".join(statuses), "excludeEventId": exclude_event_id}
     return _call("GET", _event_service("/events/overlapping"), params=params)["events"]

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Role, User } from '../types'
+import { formatSchedule } from '../features/event/dateFormat'
 import { REQUEST_STATUSES, fetchEventReservations, reviewAllEventEquipmentRequests, reviewEquipmentRequest } from '../features/equipment/requests'
 import type { EquipmentRequestStatus, EventReservation, ReviewedRequest } from '../features/equipment/requests'
 import { RoleWarning, StatusBadge } from '../components/FormControls'
@@ -8,18 +9,23 @@ import { RefreshIcon } from '../components/Icon'
 
 type StatusFilter = EquipmentRequestStatus | 'All'
 
-export const EQUIPMENT_REQUESTS_ACCESS_NOTICE = 'Equipment requests are visible to Technical Support staff.'
+export const EQUIPMENT_REQUESTS_ACCESS_NOTICE = 'Equipment requests are visible to Technical Support and assigned Event Coordinators.'
 const INSUFFICIENT_HINT = 'Not enough stock for this window. Reject it, or wait for stock to free up.'
 
-export function EquipmentRequestsPage({ role, user }: { role: Role; user: User | null }) {
+export function EquipmentRequestsPage({ role, user, resolveUserName }: {
+  role: Role
+  user: User | null
+  resolveUserName?: (userId: string | null | undefined) => string | null
+}) {
   const [events, setEvents] = useState<EventReservation[]>([])
-  const [filter, setFilter] = useState<StatusFilter>('Pending')
+  const [filter, setFilter] = useState<StatusFilter>('All')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
   const [reviewingId, setReviewingId] = useState<string | null>(null)
 
-  const allowed = role === 'Technical Support' && user !== null
+  const allowed = (role === 'Technical Support' || role === 'Event Coordinator') && user !== null
+  const canReview = role === 'Technical Support'
 
   const load = useCallback((activeFilter: StatusFilter, reviewer: User) => {
     return fetchEventReservations(reviewer, activeFilter === 'All' ? undefined : activeFilter)
@@ -76,7 +82,7 @@ export function EquipmentRequestsPage({ role, user }: { role: Role; user: User |
   return <div className="page-stack">
     <section className="intro">
       <h1>Equipment requests</h1>
-      <p className="muted">Review the equipment each event has asked for and approve or reject it. Event Coordinators see the new status straight away.</p>
+      <p className="muted">{canReview ? 'Review the equipment each event has asked for and approve or reject it. Event Coordinators see the new status straight away.' : 'Equipment requests for events currently assigned to you.'}</p>
       <div className="table-actions toolbar">
         <label className="field">
           <span>Show</span>
@@ -92,20 +98,30 @@ export function EquipmentRequestsPage({ role, user }: { role: Role; user: User |
 
     {loading ? <EventCardSkeletonList /> : error ? <p className="field-error" role="alert">{error}</p> :
       events.length === 0 ? <p>No equipment requests found.</p> :
-      events.map(({ eventId, eventName, requests: items }) => {
+      events.map(({ eventId, eventName, eventStatus, startTime, endTime, coordinatorId, requests: items }) => {
         // Availability and actions only matter while a decision is still open.
         const pendingItems = items.filter((request) => request.status === 'Pending')
-        const showStock = pendingItems.length > 0
+        const showStock = pendingItems.length > 0 && (eventStatus === 'Submitted' || eventStatus === 'Under Review')
+        const showActions = showStock && canReview && (eventStatus === 'Submitted' || eventStatus === 'Under Review')
         const anyInsufficient = pendingItems.some((request) => request.availability?.isInsufficient)
-        const widths = showStock ? [27, 13, 12, 14, 19, 15] : [29, 16, 15, 40]
+        const widths = showStock
+          ? showActions ? [27, 13, 12, 14, 19, 15] : [30, 15, 15, 18, 22]
+          : [29, 16, 15, 40]
         return <article key={eventId} className="panel event-card">
           <header className="event-card-header">
-            <h2>{eventName}</h2>
+            <div className="event-card-title">
+              <h2>{eventName}</h2>
+              {eventStatus && <StatusBadge status={eventStatus} />}
+              {startTime && endTime && <span className="event-card-date muted">{formatSchedule(startTime, endTime)}</span>}
+            </div>
+            <span className="equipment-request-coordinator">
+              Coordinator: {resolveUserName?.(coordinatorId) ?? (coordinatorId ? 'Unknown' : 'Unassigned')}
+            </span>
           </header>
           <div className="table-scroll">
             <table className="equipment-request-table">
               <colgroup>{widths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
-              <thead><tr><th>Equipment</th><th>Type</th><th>Requested</th>{showStock && <th>Available</th>}<th>Requirements</th>{showStock && <th>Action</th>}</tr></thead>
+              <thead><tr><th>Equipment</th><th>Type</th><th>Requested</th>{showStock && <th>Available</th>}<th>Requirements</th>{showActions && <th>Action</th>}</tr></thead>
               <tbody>
                 {items.map((request) => {
                   const insufficient = request.availability?.isInsufficient ?? false
@@ -119,10 +135,12 @@ export function EquipmentRequestsPage({ role, user }: { role: Role; user: User |
                     <td>{request.quantityRequested}</td>
                     {showStock && <td>{request.status !== 'Pending' ? <span className="muted">—</span> : <div className="equipment-request-item">
                       <span>{request.availability?.availableStock ?? '—'}</span>
-                      {insufficient && <span className="status-badge rejected">Insufficient</span>}
+                      {request.equipment?.status === 'Unavailable'
+                        ? <span className="status-badge rejected">Unavailable</span>
+                        : insufficient && <span className="status-badge rejected">Insufficient</span>}
                     </div>}</td>}
                     <td>{request.technicalRequirements || <span className="muted">None</span>}</td>
-                    {showStock && <td>{request.status === 'Pending'
+                    {showActions && <td>{request.status === 'Pending'
                       ? <div className="table-actions">
                         <button className="button small approve" disabled={busy || insufficient} title={insufficient ? INSUFFICIENT_HINT : undefined} onClick={() => review(request.id, 'Approved')}>{busy && <Spinner size={12} />}Approve</button>
                         <button className="button small reject" disabled={busy} onClick={() => review(request.id, 'Rejected')}>Reject</button>
@@ -133,7 +151,7 @@ export function EquipmentRequestsPage({ role, user }: { role: Role; user: User |
               </tbody>
             </table>
           </div>
-          {showStock && <footer className="equipment-request-bulk-actions">
+          {showActions && <footer className="equipment-request-bulk-actions">
             <button className="button small approve" disabled={reviewingId !== null || anyInsufficient} title={anyInsufficient ? INSUFFICIENT_HINT : undefined} onClick={() => reviewAll(eventId, 'Approved')}>
               {reviewingId === `all:${eventId}` && <Spinner size={12} />}Approve All
             </button>

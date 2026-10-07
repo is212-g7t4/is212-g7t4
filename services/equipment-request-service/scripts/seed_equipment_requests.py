@@ -1,9 +1,8 @@
-"""Seed Pending equipment requests, some above the stock owned, to demo the Insufficient flag.
+"""Refresh up to three eligible events with Pending equipment requests for the UI demo.
 
 Dev-only. Reads `Event` and `Equipment` ids directly (this is a script, not the
-service) and attaches the requests to the first two events it finds. Safe to
-re-run: a request is skipped when the same event, equipment and requirement
-text already exist.
+service), and does not change event records or unrelated requests. Each run
+refreshes only the demo requests listed below.
 
 Usage:
     cd services/equipment-request-service
@@ -18,23 +17,50 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # (equipment description, quantity requested, technical requirements); stock comes from seed_equipment.py.
-REQUESTS = [
-    [("6-foot folding table", 80, "Vendor booths (demo: exceeds stock of 50)"),
-     ("Standard stackable event chair", 120, "General seating (demo: within stock)"),
-     ("LED par can lighting kit", 6, "Stage wash (demo: exceeds stock of 4)")],
-    [("Portable PA speaker with stand", 2, "Outdoor closing ceremony (demo: within stock)"),
-     ("HD projector with HDMI/USB-C input", 12, "One per breakout room (demo: exceeds stock of 10)")],
+EVENT_REQUESTS = [
+    [("6-foot folding table", 60, "DEMO insufficiency: requested 60, catalogue stock is 50"),
+     ("Standard stackable event chair", 40, "DEMO sufficient: requested 40, catalogue stock is 300"),
+     ("LED par can lighting kit", 2, "DEMO sufficient: requested 2, catalogue stock is 4")],
+    [("Windows laptop for presentations", 1, "DEMO insufficiency: equipment is Unavailable, so available stock is 0"),
+     ("Portable PA speaker with stand", 3, "DEMO sufficient: requested 3, catalogue stock is 6"),
+     ("Handheld wireless mic set with receiver", 8, "DEMO sufficient: requested 8, catalogue stock is 20")],
+    [("HD projector with HDMI/USB-C input", 12, "DEMO insufficiency: requested 12, catalogue stock is 10"),
+     ("Standing lectern", 2, "DEMO sufficient: requested 2, catalogue stock is 5"),
+     ("Standard stackable event chair", 80, "DEMO sufficient: requested 80, catalogue stock is 300")],
 ]
+
+LEGACY_REQUIREMENTS = (
+    "Vendor booths (demo: exceeds stock of 50)",
+    "General seating (demo: within stock)",
+    "Stage wash (demo: exceeds stock of 4)",
+    "Outdoor closing ceremony (demo: within stock)",
+    "One per breakout room (demo: exceeds stock of 10)",
+)
 
 
 def seed(database_url):
     with psycopg2.connect(database_url, connect_timeout=10) as connection:
         with connection.cursor() as cursor:
-            cursor.execute('SELECT event_id FROM public."Event" ORDER BY submission_date ASC NULLS LAST, event_id ASC LIMIT %s', [len(REQUESTS)])
-            event_ids = [row[0] for row in cursor.fetchall()]
-            if not event_ids:
-                raise SystemExit("No events found — submit an event first.")
-            for event_id, items in zip(event_ids, REQUESTS):
+            demo_requirements = [
+                requirements
+                for items in EVENT_REQUESTS
+                for _, _, requirements in items
+            ]
+            cursor.execute(
+                'DELETE FROM public."EquipmentRequest" WHERE technical_requirements = ANY(%s)',
+                [list(LEGACY_REQUIREMENTS) + demo_requirements],
+            )
+            cursor.execute(
+                """SELECT event_id, status FROM public."Event"
+                   WHERE status IN (%s, %s)
+                   ORDER BY submission_date ASC NULLS LAST, event_id ASC
+                   LIMIT %s""",
+                ["Submitted", "Under Review", len(EVENT_REQUESTS)],
+            )
+            events = cursor.fetchall()
+            if not events:
+                raise SystemExit("No Submitted or Under Review events found — submit an event first.")
+            for (event_id, event_status), items in zip(events, EVENT_REQUESTS):
                 for description, quantity, requirements in items:
                     cursor.execute('SELECT equipment_id FROM public."Equipment" WHERE description = %s', [description])
                     equipment = cursor.fetchone()
@@ -53,7 +79,7 @@ def seed(database_url):
                            VALUES (%s, %s, %s, %s, 'Pending')""",
                         [event_id, equipment[0], quantity, requirements],
                     )
-                    print(f"added: {description} x{quantity} for event {event_id}")
+                    print(f"added: {description} x{quantity} for {event_status} event {event_id} ({requirements})")
 
 
 if __name__ == "__main__":
