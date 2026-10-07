@@ -6,7 +6,37 @@ requires-python = ">=3.12"
 dependencies = ["flask>=3.1.3", "psycopg2-binary>=2.9", "python-dotenv>=1.0.1"]
 
 [dependency-groups]
-dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0"]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "pytest-socket>=0.8.1",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]
+# Every setting lives here so `uv run pytest` behaves identically on a laptop
+# and in CI; CI only adds report file paths.
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not integration",
+    "--cov",
+    "--cov-report=term-missing",
+    "--disable-socket",
+]
+markers = [
+    "integration: needs a real external system (database, another service); opt-in, never run in CI",
+]
+xfail_strict = true
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+# Coverage floor (a ratchet): today's measured level, so a PR cannot lower it.
+# Raise this in the PR that adds the tests which push it higher.
+fail_under = 97
+show_missing = true

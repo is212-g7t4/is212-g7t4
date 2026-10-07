@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 import pytest
-from test_bookings import VENUE_ID, booking_row
+from tests.unit.factories import VENUE_ID, booking_row
 
 from app.models import COLUMNS, CalendarDataError, list_bookings
 

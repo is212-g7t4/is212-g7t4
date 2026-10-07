@@ -5,7 +5,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-from test_add_venue import saved_row, VALID_PAYLOAD, VENUE_ID
+from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row
 
 
 @pytest.fixture
