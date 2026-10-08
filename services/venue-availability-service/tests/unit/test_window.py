@@ -53,7 +53,12 @@ def test_returns_every_venues_bookings_in_one_call(setup):
     ]
     query, params = cursor.execute.call_args.args
     assert "venue_id = %s" not in query
-    assert params == [datetime(2026, 11, 10, 12, 0), datetime(2026, 11, 10, 9, 0)]
+    assert params == [
+        datetime(2026, 11, 10, 12, 0),
+        datetime(2026, 11, 10, 9, 0),
+        datetime(2026, 11, 10, 12, 0),
+        datetime(2026, 11, 10, 9, 0),
+    ]
 
 
 def test_needs_no_dev_mode_or_identity_headers(setup):
@@ -66,6 +71,16 @@ def test_needs_no_dev_mode_or_identity_headers(setup):
     assert response.status_code == 200
 
 
+def test_database_unconfigured_returns_503_before_read(setup):
+    client, cursor = setup
+    client.application.config["DATABASE_URL"] = None
+
+    response = client.get(f"/venue-bookings/window?{WINDOW}")
+
+    assert response.status_code == 503
+    cursor.execute.assert_not_called()
+
+
 def test_times_are_naive_local(setup):
     """The search compares against naive VenueBooking timestamps."""
     client, cursor = setup
@@ -75,6 +90,28 @@ def test_times_are_naive_local(setup):
 
     assert booking["requestedStartTime"] == "2026-11-10T09:00:00"
     assert "+08:00" not in booking["requestedEndTime"]
+
+
+def test_active_hold_is_returned_as_an_on_hold_interval(setup):
+    client, cursor = setup
+    cursor.fetchall.return_value = [
+        {
+            "booking_id": "00000000-0000-0000-0000-000000000010",
+            "event_id": None,
+            "venue_id": VENUE_ID,
+            "requested_start_time": datetime(2026, 11, 10, 9, 0),
+            "requested_end_time": datetime(2026, 11, 10, 12, 0),
+            "status": "On Hold",
+            "requested_by": "00000000-0000-0000-0000-00000000000c",
+            "reviewed_by": None,
+        }
+    ]
+
+    hold = client.get(f"/venue-bookings/window?{WINDOW}").json["bookings"][0]
+
+    assert hold["status"] == "On Hold"
+    assert hold["eventId"] is None
+    assert hold["venueId"] == VENUE_ID
 
 
 def test_rejected_and_cancelled_never_block(setup):
@@ -100,7 +137,12 @@ def test_offset_input_is_converted_to_singapore_local(setup):
 
     assert response.status_code == 200
     _, params = cursor.execute.call_args.args
-    assert params == [datetime(2026, 11, 10, 12, 0), datetime(2026, 11, 10, 9, 0)]
+    assert params == [
+        datetime(2026, 11, 10, 12, 0),
+        datetime(2026, 11, 10, 9, 0),
+        datetime(2026, 11, 10, 12, 0),
+        datetime(2026, 11, 10, 9, 0),
+    ]
 
 
 def test_booking_outside_the_window_is_filtered_out(setup):

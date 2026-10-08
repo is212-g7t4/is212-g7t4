@@ -487,6 +487,34 @@ textarea:disabled {
   background: var(--color-background);
 }
 
+.venue-detail-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.venue-hold-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.venue-hold-form label {
+  grid-column: 1 / -1;
+  margin-bottom: -8px;
+}
+
+.venue-hold-form input {
+  min-width: 0;
+}
+
+.venue-hold-form .field-error {
+  grid-column: 1 / -1;
+}
+
 .event-detail {
   min-width: 0;
   padding: var(--space-3) 0;
@@ -1182,6 +1210,20 @@ td small {
 .venue-status.booked {
   background: var(--color-warning-soft);
   color: var(--color-warning);
+}
+
+.venue-status.on-hold {
+  background: #eee5ff;
+  color: #673ab7;
+}
+
+.button.hold {
+  background: #1769aa;
+  color: #fff;
+}
+
+.button.hold:hover:not(:disabled) {
+  background: #0f558e;
 }
 
 .venue-status.unknown {

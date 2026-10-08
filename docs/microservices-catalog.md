@@ -86,7 +86,7 @@ data store (Postgres unless noted).
 | **User** | User accounts, roles, authentication |
 | **Event** | The Event entity: details, status, change-request records |
 | **Venue** | Venue catalogue — capacity, facilities, accessibility, layouts. Also runs the suitability-check computation (given an event's requirements as input) |
-| **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason) **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
+| **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason), timed venue holds with expiry, **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
 | **Equipment** | Equipment catalogue only — types, quantities owned, location, operational status. Does **not** hold reservation data. Exposes `GET /equipment[?status=]` and `POST /equipment` (Technical Support only); the UI calls it directly |
 | **Equipment Request** | The equipment request records (`public."EquipmentRequest"`) and each request's status (Pending → Approved/Rejected). No availability logic — that is computed on demand by the Equipment Reservation composite |
 | **Registration** | Attendee registration records |
