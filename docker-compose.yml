@@ -27,6 +27,18 @@ services:
     ports:
       - "5005:5000"
 
+  attendee-registration-service:
+    build: ./services/attendee-registration-service
+    environment:
+      FRONTEND_ORIGIN: "${FRONTEND_ORIGIN:-http://localhost:5174}"
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      REGISTRATION_SERVICE_URL: "http://registration-service:5000"
+    depends_on:
+      - event-service
+      - registration-service
+    ports:
+      - "5009:5000"
+
   venue-availability-service:
     build: ./services/venue-availability-service
     env_file:

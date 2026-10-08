@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { loadAttendeeEvents } from '../features/event/attendeeEvents'
 import type { AttendeeEvent } from '../features/event/attendeeEvents'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
-import { RoleWarning, StatusBadge } from '../components/FormControls'
+import { Field, RoleWarning, StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, ArrowRightIcon, RefreshIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
+import { registerForEvent, validateRegistrationForm } from '../features/registration/eventRegistration'
+import type { RegistrationValidation } from '../features/registration/eventRegistration'
 
 function optionalDate(value?: string) {
   if (!value) return ''
@@ -16,7 +19,7 @@ function optionalDate(value?: string) {
   })
 }
 
-export function AttendeeEventsPage({ role }: { role: Role }) {
+export function AttendeeEventsPage({ role, attendeeId }: { role: Role; attendeeId?: string }) {
   const [events, setEvents] = useState<AttendeeEvent[]>([])
   const [selected, setSelected] = useState<AttendeeEvent | null>(null)
   const [loading, setLoading] = useState(true)
@@ -38,7 +41,16 @@ export function AttendeeEventsPage({ role }: { role: Role }) {
 
   if (role !== 'Attendee') return <RoleWarning>Confirmed events open for registration are visible to Attendees.</RoleWarning>
 
-  if (selected) return <AttendeeEventDetail event={selected} onBack={() => setSelected(null)} />
+  const recordRegistration = () => {
+    if (!selected) return
+    const confirmedRegistrations = selected.confirmedRegistrations + 1
+    const registrationStatus = confirmedRegistrations >= Number(selected.expectedAttendance) ? 'Full' : 'Open'
+    const updated = { ...selected, confirmedRegistrations, registrationStatus } as AttendeeEvent
+    setSelected(updated)
+    setEvents((current) => current.map((event) => event.id === updated.id ? updated : event))
+  }
+
+  if (selected) return <AttendeeEventDetail event={selected} attendeeId={attendeeId} onRegistered={recordRegistration} onBack={() => setSelected(null)} />
 
   return <div className="page-stack">
     <section className="intro">
@@ -71,7 +83,52 @@ export function AttendeeEventsPage({ role }: { role: Role }) {
   </div>
 }
 
-function AttendeeEventDetail({ event, onBack }: { event: AttendeeEvent; onBack: () => void }) {
+function AttendeeEventDetail({
+  event, attendeeId, onRegistered, onBack,
+}: {
+  event: AttendeeEvent
+  attendeeId?: string
+  onRegistered: () => void
+  onBack: () => void
+}) {
+  const [showForm, setShowForm] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [organization, setOrganization] = useState('')
+  const [validation, setValidation] = useState<RegistrationValidation>({})
+  const [submissionError, setSubmissionError] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const submit = async (formEvent: FormEvent) => {
+    formEvent.preventDefault()
+    const errors = validateRegistrationForm({ fullName, email })
+    setValidation(errors)
+    setSubmissionError('')
+    if (Object.keys(errors).length > 0) return
+    if (!attendeeId) {
+      setSubmissionError('Select an attendee before registering.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const result = await registerForEvent({
+        eventId: event.id,
+        attendeeId,
+        fullName: fullName.trim(),
+        email: email.trim(),
+        organization: organization.trim(),
+      })
+      setConfirmation(result.message || `Registration confirmed for ${event.eventName}.`)
+      setShowForm(false)
+      onRegistered()
+    } catch (cause) {
+      setSubmissionError(cause instanceof Error ? cause.message : 'Unable to register for this event.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return <div className="page-stack">
     <section className="intro"><button className="button small" onClick={onBack}><ArrowLeftIcon size={13} /> Back to events</button></section>
     <article className="panel event-card">
@@ -104,6 +161,26 @@ function AttendeeEventDetail({ event, onBack }: { event: AttendeeEvent; onBack: 
           {event.registrationDeadline && <div className="event-detail"><dt>Deadline</dt><dd>{optionalDate(event.registrationDeadline)}</dd></div>}
           {event.registrationNeeds && <div className="event-detail full"><dt>Requirements and instructions</dt><dd>{event.registrationNeeds}</dd></div>}
         </dl>
+      </section>
+
+      <section className="event-card-section">
+        <h3>Register for this event</h3>
+        {confirmation && <p className="notice success" role="status">{confirmation}</p>}
+        {!confirmation && event.registrationStatus === 'Full' && <p className="field-error" role="alert">This event has reached maximum capacity.</p>}
+        {!confirmation && event.registrationStatus === 'Closed' && <p className="field-error" role="alert">Registration has closed for this event.</p>}
+        {!confirmation && event.registrationStatus === 'Open' && !showForm && <button className="button primary" type="button" onClick={() => setShowForm(true)}>Register</button>}
+        {showForm && <form className="page-stack" onSubmit={submit} noValidate>
+          <div className="field-row">
+            <Field label="Full name" value={fullName} onChange={setFullName} required error={validation.fullName} />
+            <Field label="Email address" value={email} onChange={setEmail} required type="email" error={validation.email} />
+          </div>
+          <Field label="Organisation / company" value={organization} onChange={setOrganization} />
+          {submissionError && <p className="field-error" role="alert">{submissionError}</p>}
+          <div className="button-row">
+            <button className="button primary" type="submit" disabled={submitting}>{submitting ? 'Registering…' : 'Submit registration'}</button>
+            <button className="button" type="button" disabled={submitting} onClick={() => { setShowForm(false); setValidation({}); setSubmissionError('') }}>Cancel</button>
+          </div>
+        </form>}
       </section>
 
       {event.organiser && (event.organiser.email || event.organiser.contactDetails) && <section className="event-card-section">

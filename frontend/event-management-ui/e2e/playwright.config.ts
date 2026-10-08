@@ -10,6 +10,7 @@ export const SERVICE_PORTS = {
   registration: 5005,
   venue: 5006,
   availability: 5008,
+  attendeeRegistration: 5009,
   equipmentReservation: 5010,
 } as const
 
@@ -40,6 +41,7 @@ export default defineConfig({
       VITE_REGISTRATION_SERVICE_URL: url(SERVICE_PORTS.registration),
       VITE_VENUE_SERVICE_URL: url(SERVICE_PORTS.venue),
       VITE_VENUE_AVAILABILITY_SERVICE_URL: url(SERVICE_PORTS.availability),
+      VITE_ATTENDEE_REGISTRATION_SERVICE_URL: url(SERVICE_PORTS.attendeeRegistration),
       VITE_EQUIPMENT_RESERVATION_SERVICE_URL: url(SERVICE_PORTS.equipmentReservation),
     },
   },

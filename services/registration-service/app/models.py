@@ -1,9 +1,19 @@
 from contextlib import closing
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 COLUMNS = "registration_id, event_id, attendee_id, registration_date, status, attendee_name, attendee_email, attendee_organization"
+
+
+class DuplicateRegistrationError(Exception):
+    pass
+
+
+class CapacityReachedError(Exception):
+    pass
 
 
 def serialize(row):
@@ -28,6 +38,54 @@ def list_registrations(database_url, event_id):
                 [event_id],
             )
             return [serialize(row) for row in cursor.fetchall()]
+
+
+def list_attendee_registrations(database_url, attendee_id):
+    """Return every registration belonging to one attendee, newest first."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."Registration" WHERE attendee_id = %s
+                    ORDER BY registration_date DESC NULLS LAST, registration_id ASC""",
+                [attendee_id],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def create_registration(database_url, event_id, attendee_id, capacity, name, email, organization):
+    """Insert a confirmed registration while serializing capacity checks per event."""
+    registration_id = str(uuid4())
+    registered_at = datetime.now(timezone.utc)
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Concurrent registrations for one event must check and claim the last
+            # place in sequence. The transaction-scoped lock is released on commit.
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [event_id])
+            cursor.execute(
+                """SELECT 1 FROM public."Registration"
+                   WHERE event_id = %s AND LOWER(attendee_email) = LOWER(%s)
+                     AND status <> 'Withdrawn'
+                   LIMIT 1""",
+                [event_id, email],
+            )
+            if cursor.fetchone():
+                raise DuplicateRegistrationError
+
+            cursor.execute(
+                """SELECT COUNT(*) AS confirmed FROM public."Registration"
+                   WHERE event_id = %s AND status = 'Confirmed'""",
+                [event_id],
+            )
+            if int(cursor.fetchone()["confirmed"]) >= capacity:
+                raise CapacityReachedError
+
+            cursor.execute(
+                f"""INSERT INTO public."Registration" ({COLUMNS})
+                    VALUES (%s, %s, %s, %s, 'Confirmed', %s, %s, %s)
+                    RETURNING {COLUMNS}""",
+                [registration_id, event_id, attendee_id, registered_at, name, email, organization],
+            )
+            return serialize(cursor.fetchone())
 
 
 def count_registrations(database_url, event_ids):
