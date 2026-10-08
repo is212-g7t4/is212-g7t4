@@ -9,7 +9,7 @@ this file is a directory, not a design rationale.
 > **Status:** two template services and the frontend's dependencies are
 > scaffolded (see below); User, Event, Coordinator Assignment, Registration,
 > Venue, Venue Booking, and Venue Availability are built (see their rows
-> below — User and Registration are deliberately minimal, read-only slices
+> below — User remains deliberately minimal and read-only
 > of their eventually-planned scope); the remaining real services in this
 > file are still **planned** — copy the matching template to create each
 > one. Update the status column as each service is actually created.
@@ -31,7 +31,7 @@ is212-g7t4/
 │   ├── coordinator-assignment-service/ # composite (built)
 │   ├── venue-booking-service/          # composite (built)
 │   ├── equipment-reservation-service/  # composite (planned)
-│   ├── attendee-registration-service/  # composite (planned)
+│   ├── attendee-registration-service/  # composite (built)
 │   ├── user-service/                   # atomic (built, read-only)
 │   ├── event-service/                  # atomic (built)
 │   ├── venue-service/                   # atomic (built, read-only)
@@ -78,7 +78,7 @@ composites are allowed to call other services.
 | Coordinator Assignment Service | `services/coordinator-assignment-service/` | User, Event, Forum, Broker | Assigns/reassigns the Event Coordinator on an event; only the Event Coordinator manager may do so. No Forum call yet. | built |
 | Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Venue Availability, Forum, Broker | Three sub-flows: booking request submission (`POST /booking-requests`), venue-staff approval/rejection (`PATCH /booking-requests/<id>/approve\|reject`), and venue search (`GET /venue-search`, SCRUM-26 — filters the catalogue via Venue Service and merges it with the window's bookings from Venue Availability Service, in parallel; read-only). Validates event + venue, then persists/conflict-checks via Venue Availability Service. No Forum call/notification yet. | built |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment Availability, Forum, Broker | Two sub-flows: request submission, and technical-support approval/rejection. | planned |
-| Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration, Broker | Register/withdraw an attendee for an event. No Forum call. | planned |
+| Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration | Registers an attendee after checking that the event is confirmed, open, and has capacity. No Forum call. | built (registration) |
 
 ## Atomic services
 
@@ -93,7 +93,7 @@ call another service, Forum, or the broker.
 | Venue Availability | `services/venue-availability-service/` | Supabase Postgres | Venue booking records (`public."VenueBooking"`) **and** the overlap/conflict-checking algorithm together — merged design, see the service's README. Replaces the previously separate Booking Conflict Service. Two reads: `GET /venue-bookings` (one venue, SCRUM-25's calendar) and `GET /venue-bookings/window` (all venues in a window, for SCRUM-26's search). | built |
 | Equipment | `services/equipment-service/` | Supabase Postgres | Equipment catalogue only (types, quantities owned, technical specs) — no reservation data. `GET /equipment[?status=]` and `POST /equipment` (Technical Support only, DEV headers) | built (list + add; no edit/delete yet) |
 | Equipment Availability | `services/equipment-availability-service/` | Supabase Postgres | Reservation records + availability-checking algorithm | planned |
-| Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Read-only (`GET /registrations?eventId=`) — no registration/withdrawal endpoints yet; called directly by the frontend (a "simple read," no composite needed) | built (read-only) |
+| Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Supports read lookups/counts and an internal write used by Attendee Registration Service with duplicate and capacity enforcement. | built |
 | Notification | `services/notification-service/` | Supabase Postgres | Notification records; consumes the broker queue, calls the Email/SMS Wrapper | planned |
 | Forum / Communication | `services/forum-service/` | **MongoDB (Atlas)** | All communication tied to a request — clarifications, approval/rejection reasons, comments — keyed by `entityType` + `entityId` | planned |
 

@@ -1,14 +1,13 @@
 # Attendee registrations
 
-Read-only lookups against `"Registration"` — no registration,
-withdrawal, or capacity-checking logic. Called directly by the frontend for
+Owns records in `"Registration"`. Read lookups are called directly by the frontend for
 a "simple read" (per `AGENTS.md`: the UI may call an owning atomic directly
 without a composite in between), the same way it already calls
 `event-service` and `user-service`.
 
-This is a deliberately minimal slice of the eventually-planned Registration
-Service — just enough to show registration counts and attendee lists on the
-event detail page.
+The internal `POST /registrations` endpoint is called by Attendee Registration
+Service after event validation. It serializes registrations per event and
+enforces duplicate-email and capacity rules before inserting a confirmed row.
 
 ## 1. Start the service
 
@@ -34,3 +33,5 @@ Alternatively, after creating `services/registration-service/.env`, run
 - `GET /registrations?eventId=<uuid>` — every registration row for that
   event, oldest first. No filtering by status — the caller (frontend)
   derives counts (e.g. "Confirmed" vs "Withdrawn") from the returned list.
+- `POST /registrations` — internal atomic write used by Attendee Registration
+  Service. Requires event and attendee IDs, capacity, full name and email.
