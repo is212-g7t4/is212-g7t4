@@ -33,5 +33,7 @@ Alternatively, after creating `services/registration-service/.env`, run
 - `GET /registrations?eventId=<uuid>` — every registration row for that
   event, oldest first. No filtering by status — the caller (frontend)
   derives counts (e.g. "Confirmed" vs "Withdrawn") from the returned list.
+- `GET /registrations?attendeeId=<uuid>` — every registration belonging to
+  one attendee, newest first.
 - `POST /registrations` — internal atomic write used by Attendee Registration
   Service. Requires event and attendee IDs, capacity, full name and email.

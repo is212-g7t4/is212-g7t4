@@ -57,6 +57,42 @@ def test_successful_registration_returns_confirmation(client, monkeypatch):
     }
 
 
+def test_attendee_lists_registration_status_with_event_details(client, monkeypatch):
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [{
+        "registration_id": "registration-1",
+        "event_id": EVENT_ID,
+        "attendee_id": attendee_id,
+        "registration_date": "2026-10-08T10:00:00",
+        "status": "Confirmed",
+        "attendee_name": "Adam Yeo",
+        "attendee_email": "adam@example.com",
+        "attendee_organization": "External",
+    }])
+    monkeypatch.setattr("app.routes.get_confirmed_events", lambda: [confirmed_event()])
+
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+
+    assert response.status_code == 200
+    assert response.json["registrations"][0]["registration"]["status"] == "Confirmed"
+    assert response.json["registrations"][0]["event"]["eventName"] == "Community Workshop"
+
+
+def test_attendee_with_no_registrations_receives_empty_list(client, monkeypatch):
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [])
+    monkeypatch.setattr("app.routes.get_confirmed_events", lambda: [])
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    assert response.status_code == 200
+    assert response.json == {"registrations": []}
+
+
+def test_attendee_registration_list_validates_id_and_handles_failure(client, monkeypatch):
+    assert client.get("/registrations?attendeeId=bad").status_code == 400
+    monkeypatch.setattr("app.routes.get_attendee_registrations", Mock(side_effect=RuntimeError("secret")))
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    assert response.status_code == 502
+    assert "secret" not in response.json["message"]
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [

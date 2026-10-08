@@ -70,6 +70,29 @@ def test_list_registrations_returns_empty_list_when_none_exist(setup):
     assert response.json == {"registrations": []}
 
 
+def test_lists_only_the_current_attendees_registrations(setup):
+    """View Registration Status AC1: registrations are scoped by attendee ID."""
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [registration_row(attendee_id=ATTENDEE_ID)]
+
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+
+    assert response.status_code == 200
+    assert response.json["registrations"][0]["attendee_id"] == ATTENDEE_ID
+    query, params = cursor.execute.call_args.args
+    assert "WHERE attendee_id = %s" in query
+    assert "ORDER BY registration_date DESC" in query
+    assert params == [ATTENDEE_ID]
+
+
+def test_attendee_registration_list_can_be_empty(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = []
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    assert response.status_code == 200
+    assert response.json == {"registrations": []}
+
+
 def test_registration_date_serializes_to_isoformat(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [registration_row()]
@@ -96,9 +119,30 @@ def test_requires_valid_event_id(query_string, setup):
     cursor.execute.assert_not_called()
 
 
+@pytest.mark.parametrize("value", ["", "not-a-uuid"])
+def test_requires_valid_attendee_id(value, setup):
+    client, _, cursor = setup
+    response = client.get(f"/registrations?attendeeId={value}")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_rejects_event_and_attendee_id_together(setup):
+    client, _, cursor = setup
+    response = client.get(f"/registrations?eventId={EVENT_ID}&attendeeId={ATTENDEE_ID}")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
 def test_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
     response = client.get(f"/registrations?eventId={EVENT_ID}")
+    assert response.status_code == 503
+
+
+def test_attendee_list_reports_missing_database_configuration():
+    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
     assert response.status_code == 503
 
 

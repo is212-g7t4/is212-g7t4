@@ -13,14 +13,28 @@ class RegistrationConflictError(Exception):
         self.message = message
 
 
-def get_confirmed_event(event_id: str):
-    """Find the requested event in Event Service's confirmed-event catalogue."""
+def get_confirmed_events() -> list:
     response = httpx.get(f"{EVENT_SERVICE_URL}/events/registration", timeout=5)
     response.raise_for_status()
+    return response.json().get("events", [])
+
+
+def get_confirmed_event(event_id: str):
+    """Find the requested event in Event Service's confirmed-event catalogue."""
     return next(
-        (event for event in response.json().get("events", []) if event.get("id") == event_id),
+        (event for event in get_confirmed_events() if event.get("id") == event_id),
         None,
     )
+
+
+def get_attendee_registrations(attendee_id: str) -> list:
+    response = httpx.get(
+        f"{REGISTRATION_SERVICE_URL}/registrations",
+        params={"attendeeId": attendee_id},
+        timeout=5,
+    )
+    response.raise_for_status()
+    return response.json().get("registrations", [])
 
 
 def save_registration(data: dict) -> dict:
