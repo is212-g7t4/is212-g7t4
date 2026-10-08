@@ -35,6 +35,39 @@ jobs:
         id: filter
         with:
           filters: |
+            user-service:
+              - 'services/user-service/**'
+              - '.github/workflows/ci.yml'
+            event-service:
+              - 'services/event-service/**'
+              - '.github/workflows/ci.yml'
+            coordinator-assignment-service:
+              - 'services/coordinator-assignment-service/**'
+              - '.github/workflows/ci.yml'
+            registration-service:
+              - 'services/registration-service/**'
+              - '.github/workflows/ci.yml'
+            equipment-service:
+              - 'services/equipment-service/**'
+              - '.github/workflows/ci.yml'
+            equipment-request-service:
+              - 'services/equipment-request-service/**'
+              - '.github/workflows/ci.yml'
+            equipment-reservation-service:
+              - 'services/equipment-reservation-service/**'
+              - '.github/workflows/ci.yml'
+            venue-service:
+              - 'services/venue-service/**'
+              - '.github/workflows/ci.yml'
+            venue-booking-service:
+              - 'services/venue-booking-service/**'
+              - '.github/workflows/ci.yml'
+            venue-availability-service:
+              - 'services/venue-availability-service/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
             docker:
               - 'services/**'
               - 'docker-compose.yml'

@@ -1,5 +1,5 @@
 export type Role = 'Event Organiser' | 'Event Coordinator' | 'Venue Staff' | 'Technical Support' | 'Attendee'
-export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'detail' | 'myEvents' | 'browseEvents' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment'
+export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'detail' | 'myEvents' | 'browseEvents' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests'
 
 export const routeTitles: Record<Route, string> = {
   dashboard: 'Overview',
@@ -16,6 +16,7 @@ export const routeTitles: Record<Route, string> = {
   addVenue: 'Add venue',
   editVenue: 'Edit venue',
   equipment: 'Equipment catalogue',
+  equipmentRequests: 'Equipment requests',
 }
 
 export interface User {
