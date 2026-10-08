@@ -42,6 +42,9 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         {canManageEquipment(role) && (
           <NavButton active={route === 'equipment'} onClick={() => onNavigate('equipment')} icon={<ListIcon size={17} />}>Equipment</NavButton>
         )}
+        {(canManageEquipment(role) || role === 'Event Coordinator') && (
+          <NavButton active={route === 'equipmentRequests'} onClick={() => onNavigate('equipmentRequests')} icon={<CheckIcon size={17} />}>Equipment requests</NavButton>
+        )}
       </nav>
 
       <div className="sidebar-footer">

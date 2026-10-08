@@ -9,6 +9,7 @@ import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { EquipmentPage } from './pages/EquipmentPage'
+import { EquipmentRequestsPage } from './pages/EquipmentRequestsPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
@@ -38,6 +39,7 @@ const paths: Record<Route, string> = {
   addVenue: '/venues/new',
   editVenue: '/venues',
   equipment: '/equipment',
+  equipmentRequests: '/equipment-requests',
 }
 
 function getRoute(): Route {
@@ -51,6 +53,7 @@ function getRoute(): Route {
   if (path === '/venues/new') return 'addVenue'
   if (/^\/venues\/[^/]+\/edit$/.test(path)) return 'editVenue'
   if (path === '/equipment') return 'equipment'
+  if (path === '/equipment-requests') return 'equipmentRequests'
   if (path === '/venues') return 'venues'
   if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
@@ -182,6 +185,7 @@ function App() {
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
+      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
