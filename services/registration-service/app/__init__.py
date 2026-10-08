@@ -12,6 +12,7 @@ from app.models import (
     DuplicateRegistrationError,
     count_registrations,
     create_registration,
+    list_attendee_registrations,
     list_registrations,
 )
 
@@ -67,8 +68,22 @@ def create_app(config=None):
 
     @app.get("/registrations")
     def registrations():
+        attendee_id = request.args.get("attendeeId")
+        event_id = request.args.get("eventId")
+        if attendee_id is not None and event_id is not None:
+            return jsonify(message="Provide either attendeeId or eventId, not both."), 400
+        if attendee_id is not None:
+            try:
+                attendee_id = str(UUID(attendee_id))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="A valid attendeeId is required."), 400
+            if not app.config["DATABASE_URL"]:
+                return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
+            return jsonify(
+                registrations=list_attendee_registrations(app.config["DATABASE_URL"], attendee_id)
+            )
         try:
-            event_id = str(UUID(request.args.get("eventId", "")))
+            event_id = str(UUID(event_id or ""))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid eventId is required."), 400
         if not app.config["DATABASE_URL"]:

@@ -9,6 +9,8 @@ registration.
 
 - `POST /registrations` with `eventId`, `attendeeId`, `fullName`, `email`, and
   optional `organization`.
+- `GET /registrations?attendeeId=<uuid>` returns that attendee's registration
+  records combined with their confirmed event details.
 
 No database is owned by this composite and no database schema changes are
 required.

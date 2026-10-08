@@ -24,6 +24,13 @@ def test_get_confirmed_event_propagates_service_failure(monkeypatch):
         clients.get_confirmed_event("event-1")
 
 
+def test_get_attendee_registrations(monkeypatch):
+    get = Mock(return_value=response(200, {"registrations": [{"registration_id": "r1"}]}))
+    monkeypatch.setattr(clients.httpx, "get", get)
+    assert clients.get_attendee_registrations("attendee-1") == [{"registration_id": "r1"}]
+    assert get.call_args.kwargs["params"] == {"attendeeId": "attendee-1"}
+
+
 def test_save_registration_returns_atomic_record(monkeypatch):
     post = Mock(return_value=response(201, {"registration": {"status": "Confirmed"}}))
     monkeypatch.setattr(clients.httpx, "post", post)

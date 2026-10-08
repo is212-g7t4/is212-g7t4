@@ -6,6 +6,7 @@ import { EventDetailPage } from './pages/EventDetailPage'
 import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
 import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
+import { AttendeeRegistrationsPage } from './pages/AttendeeRegistrationsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { EquipmentPage } from './pages/EquipmentPage'
@@ -30,6 +31,7 @@ const paths: Record<Route, string> = {
   detail: '/events',
   myEvents: '/my-events',
   browseEvents: '/events/browse',
+  myRegistrations: '/registrations',
   venues: '/venues',
   venueDetail: '/venues',
   venueCalendar: '/venue-availability',
@@ -49,6 +51,7 @@ function getRoute(): Route {
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
   if (path === '/events/browse') return 'browseEvents'
+  if (path === '/registrations') return 'myRegistrations'
   if (path === '/venue-availability') return 'venueCalendar'
   if (path === '/venues/new') return 'addVenue'
   if (/^\/venues\/[^/]+\/edit$/.test(path)) return 'editVenue'
@@ -183,6 +186,7 @@ function App() {
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
+      {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
       {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}

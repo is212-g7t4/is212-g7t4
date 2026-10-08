@@ -40,6 +40,18 @@ def list_registrations(database_url, event_id):
             return [serialize(row) for row in cursor.fetchall()]
 
 
+def list_attendee_registrations(database_url, attendee_id):
+    """Return every registration belonging to one attendee, newest first."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."Registration" WHERE attendee_id = %s
+                    ORDER BY registration_date DESC NULLS LAST, registration_id ASC""",
+                [attendee_id],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
 def create_registration(database_url, event_id, attendee_id, capacity, name, email, organization):
     """Insert a confirmed registration while serializing capacity checks per event."""
     registration_id = str(uuid4())

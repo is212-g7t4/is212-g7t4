@@ -2,7 +2,13 @@ from uuid import UUID
 
 from flask import Blueprint, jsonify, request
 
-from app.clients import RegistrationConflictError, get_confirmed_event, save_registration
+from app.clients import (
+    RegistrationConflictError,
+    get_attendee_registrations,
+    get_confirmed_event,
+    get_confirmed_events,
+    save_registration,
+)
 from app.validation import event_has_started, validate_registration
 
 bp = Blueprint("attendee_registration_service", __name__)
@@ -11,6 +17,26 @@ bp = Blueprint("attendee_registration_service", __name__)
 @bp.get("/health")
 def health():
     return jsonify(status="ok")
+
+
+@bp.get("/registrations")
+def attendee_registrations():
+    try:
+        attendee_id = str(UUID(request.args.get("attendeeId", "")))
+    except (ValueError, TypeError, AttributeError):
+        return jsonify(message="A valid attendeeId is required."), 400
+    try:
+        registrations = get_attendee_registrations(attendee_id)
+        events = {event["id"]: event for event in get_confirmed_events()}
+    except Exception:
+        return jsonify(message="Unable to load your registrations right now."), 502
+
+    items = [
+        {"registration": registration, "event": events[registration["event_id"]]}
+        for registration in registrations
+        if registration.get("event_id") in events
+    ]
+    return jsonify(registrations=items)
 
 
 @bp.post("/registrations")
