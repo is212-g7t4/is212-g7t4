@@ -8,8 +8,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
+from app.models import CapacityReachedError, DuplicateRegistrationError, create_registration
 
 EVENT_ID = "25c9fe40-c44d-4d79-8d5d-de66d40c1678"
+ATTENDEE_ID = "56b34ab1-92cd-4b35-83c7-f04e176e2bd0"
 
 
 def registration_row(**overrides):
@@ -32,7 +34,11 @@ def setup(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
+    app = create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "FRONTEND_ORIGIN": "http://localhost:5174",
+    })
     return app.test_client(), connection, cursor
 
 
@@ -64,6 +70,29 @@ def test_list_registrations_returns_empty_list_when_none_exist(setup):
     assert response.json == {"registrations": []}
 
 
+def test_lists_only_the_current_attendees_registrations(setup):
+    """View Registration Status AC1: registrations are scoped by attendee ID."""
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [registration_row(attendee_id=ATTENDEE_ID)]
+
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+
+    assert response.status_code == 200
+    assert response.json["registrations"][0]["attendee_id"] == ATTENDEE_ID
+    query, params = cursor.execute.call_args.args
+    assert "WHERE attendee_id = %s" in query
+    assert "ORDER BY registration_date DESC" in query
+    assert params == [ATTENDEE_ID]
+
+
+def test_attendee_registration_list_can_be_empty(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = []
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    assert response.status_code == 200
+    assert response.json == {"registrations": []}
+
+
 def test_registration_date_serializes_to_isoformat(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [registration_row()]
@@ -90,9 +119,30 @@ def test_requires_valid_event_id(query_string, setup):
     cursor.execute.assert_not_called()
 
 
+@pytest.mark.parametrize("value", ["", "not-a-uuid"])
+def test_requires_valid_attendee_id(value, setup):
+    client, _, cursor = setup
+    response = client.get(f"/registrations?attendeeId={value}")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_rejects_event_and_attendee_id_together(setup):
+    client, _, cursor = setup
+    response = client.get(f"/registrations?eventId={EVENT_ID}&attendeeId={ATTENDEE_ID}")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
 def test_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
     response = client.get(f"/registrations?eventId={EVENT_ID}")
+    assert response.status_code == 503
+
+
+def test_attendee_list_reports_missing_database_configuration():
+    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
     assert response.status_code == 503
 
 
@@ -137,3 +187,100 @@ def test_counts_reports_missing_database_url(setup):
     client, _, _ = setup
     client.application.config["DATABASE_URL"] = None
     assert client.get(f"/registrations/counts?eventIds={EVENT_ID}").status_code == 503
+
+
+def registration_payload(**overrides):
+    payload = {
+        "eventId": EVENT_ID,
+        "attendeeId": ATTENDEE_ID,
+        "capacity": 30,
+        "fullName": "Adam Yeo",
+        "email": "Adam@Example.com",
+        "organization": "External",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_create_registration_endpoint_returns_confirmed_record(setup, monkeypatch):
+    client = setup[0]
+    saved = registration_row(attendee_id=ATTENDEE_ID, attendee_email="adam@example.com")
+    monkeypatch.setattr("app.create_registration", lambda *args: {
+        "registration_id": saved["registration_id"],
+        "event_id": EVENT_ID,
+        "attendee_id": ATTENDEE_ID,
+        "status": "Confirmed",
+    })
+
+    response = client.post("/registrations", json=registration_payload())
+
+    assert response.status_code == 201
+    assert response.json["registration"]["status"] == "Confirmed"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [None, {}, registration_payload(eventId="bad"), registration_payload(capacity=0),
+     registration_payload(fullName=""), registration_payload(email="")],
+)
+def test_create_registration_endpoint_validates_required_values(setup, payload):
+    response = setup[0].post("/registrations", json=payload)
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [(DuplicateRegistrationError, "DUPLICATE_REGISTRATION"), (CapacityReachedError, "EVENT_FULL")],
+)
+def test_create_registration_endpoint_reports_business_conflicts(setup, monkeypatch, error, code):
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr("app.create_registration", fail)
+    response = setup[0].post("/registrations", json=registration_payload())
+    assert response.status_code == 409
+    assert response.json["code"] == code
+
+
+def test_create_registration_endpoint_requires_database(setup):
+    client = setup[0]
+    client.application.config["DATABASE_URL"] = None
+    assert client.post("/registrations", json=registration_payload()).status_code == 503
+
+
+def test_create_registration_locks_checks_capacity_and_inserts(setup):
+    _, _, cursor = setup
+    created = registration_row(attendee_id=ATTENDEE_ID, attendee_email="adam@example.com")
+    cursor.fetchone.side_effect = [None, {"confirmed": 2}, created]
+
+    result = create_registration(
+        "unused-test-url", EVENT_ID, ATTENDEE_ID, 3,
+        "Adam Yeo", "adam@example.com", "External",
+    )
+
+    assert result["status"] == "Confirmed"
+    assert cursor.execute.call_count == 4
+    assert "pg_advisory_xact_lock" in cursor.execute.call_args_list[0].args[0]
+    assert "INSERT INTO" in cursor.execute.call_args_list[3].args[0]
+
+
+def test_create_registration_rejects_duplicate_email(setup):
+    cursor = setup[2]
+    cursor.fetchone.return_value = {"exists": 1}
+    with pytest.raises(DuplicateRegistrationError):
+        create_registration(
+            "unused-test-url", EVENT_ID, ATTENDEE_ID, 3,
+            "Adam Yeo", "adam@example.com", "External",
+        )
+    assert cursor.execute.call_count == 2
+
+
+def test_create_registration_rejects_full_event(setup):
+    cursor = setup[2]
+    cursor.fetchone.side_effect = [None, {"confirmed": 3}]
+    with pytest.raises(CapacityReachedError):
+        create_registration(
+            "unused-test-url", EVENT_ID, ATTENDEE_ID, 3,
+            "Adam Yeo", "adam@example.com", "External",
+        )
+    assert cursor.execute.call_count == 3

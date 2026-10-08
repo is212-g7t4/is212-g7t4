@@ -25,9 +25,11 @@ test('hides My events from attendees', () => {
 test('shows Browse events only to attendees', () => {
   const view = render(<Sidebar route="browseEvents" role="Attendee" onNavigate={vi.fn()} />)
   expect(screen.getByRole('button', { name: 'Browse events' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'My registrations' })).toBeInTheDocument()
 
   view.rerender(<Sidebar route="dashboard" role="Event Coordinator" onNavigate={vi.fn()} />)
   expect(screen.queryByRole('button', { name: 'Browse events' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'My registrations' })).not.toBeInTheDocument()
 })
 
 test('Request review tab is hidden from Event Organisers', () => {

@@ -833,7 +833,8 @@ textarea:disabled {
   background: var(--color-error-soft);
   color: var(--color-error);
 }
-.status-badge.rejected {
+.status-badge.rejected,
+.status-badge.withdrawn {
   background: var(--color-error-soft);
   color: var(--color-error);
 }
