@@ -297,9 +297,10 @@ whether Venue Availabilities is a separate atomic from Booking Conflict.
 That's now resolved — **they're merged into one atomic, Venue Availability
 Service** (`services/venue-availability-service/`), which owns both the
 booking records and the overlap/conflict-checking algorithm. This matches
-`docs/supabase-setup.md`'s schema (`public."VenueBooking"`) and how the
-Equipment domain is already decomposed (`Equipment Availability` owns both
-reservation records and its availability-checking algorithm). It also
+`docs/supabase-setup.md`'s schema (`public."VenueBooking"`). (The Equipment
+domain is split differently: `Equipment Request` owns only the request
+records, and the availability check lives in the `Equipment Reservation`
+composite, which gathers event windows, stock and held quantities.) It also
 avoids a structural problem with the old split: a stateless Booking Conflict
 atomic would have needed to read bookings owned by Venue Availabilities,
 which atomics can't do. `INDEX.md`/`docs/microservices-catalog.md` reflect

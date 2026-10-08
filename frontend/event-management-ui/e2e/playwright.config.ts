@@ -10,6 +10,7 @@ export const SERVICE_PORTS = {
   registration: 5005,
   venue: 5006,
   availability: 5008,
+  equipmentReservation: 5010,
 } as const
 
 const url = (port: number) => `http://localhost:${port}`
@@ -39,6 +40,7 @@ export default defineConfig({
       VITE_REGISTRATION_SERVICE_URL: url(SERVICE_PORTS.registration),
       VITE_VENUE_SERVICE_URL: url(SERVICE_PORTS.venue),
       VITE_VENUE_AVAILABILITY_SERVICE_URL: url(SERVICE_PORTS.availability),
+      VITE_EQUIPMENT_RESERVATION_SERVICE_URL: url(SERVICE_PORTS.equipmentReservation),
     },
   },
 })
