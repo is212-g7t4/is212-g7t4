@@ -93,7 +93,7 @@ ORDER BY table_name;
 | `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `status`, `requested_by`, `reviewed_by` |
 | `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `supported_layouts` (jsonb), `operational_status` |
 | `public."Registration"` | Registration | `registration_id` (PK), `event_id`, `attendee_id` |
-| `public."EquipmentRequest"` | Equipment Availability | `equipment_request_id` (PK), `event_id`, `equipment_id`, `quantity_requested`, `reviewed_by` |
+| `public."EquipmentRequest"` | Equipment Request | `equipment_request_id` (PK), `event_id`, `equipment_id`, `quantity_requested`, `reviewed_by` |
 
 ### Venue Availability ownership and this sprint's scope
 

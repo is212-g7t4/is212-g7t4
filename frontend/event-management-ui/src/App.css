@@ -437,6 +437,25 @@ textarea:disabled {
   line-height: 1.3;
 }
 
+.event-card-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.event-card-date {
+  flex-basis: 100%;
+}
+
+.equipment-request-coordinator {
+  margin-left: auto;
+  color: var(--color-muted);
+  text-align: right;
+  flex: none;
+}
+
 .event-card-header-actions {
   display: flex;
   align-items: center;
@@ -798,14 +817,10 @@ textarea:disabled {
   color: var(--color-warning);
 }
 
-.status-badge.approved {
+.status-badge.approved,
+.status-badge.confirmed {
   background: var(--color-success-soft);
   color: var(--color-success);
-}
-
-.status-badge.confirmed {
-  background: #dff7f1;
-  color: #087563;
 }
 
 .status-badge.open {
@@ -818,7 +833,6 @@ textarea:disabled {
   background: var(--color-error-soft);
   color: var(--color-error);
 }
-
 .status-badge.rejected {
   background: var(--color-error-soft);
   color: var(--color-error);
@@ -956,6 +970,44 @@ td small {
 .table-actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.table-actions.toolbar {
+  align-items: flex-end;
+  margin-top: var(--space-3);
+}
+
+.table-actions.toolbar .field {
+  margin-bottom: 0;
+}
+
+.equipment-request-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.equipment-request-table th,
+.equipment-request-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.equipment-request-item {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.equipment-request-table .table-actions {
+  flex-wrap: wrap;
+}
+
+.equipment-request-bulk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
 }
 
 .reject-box {
