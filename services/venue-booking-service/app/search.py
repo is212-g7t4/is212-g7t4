@@ -134,6 +134,8 @@ def availability_for(venue, bookings):
     if venue.get("status") != "Available":
         return NOT_OPERATIONAL
     overlapping = [b for b in bookings if b.get("venueId") == venue.get("id")]
+    if any(booking.get("status") == "On Hold" for booking in overlapping):
+        return BOOKED
     if any(booking.get("status") == "Approved" for booking in overlapping):
         return BOOKED
     return PENDING if overlapping else AVAILABLE

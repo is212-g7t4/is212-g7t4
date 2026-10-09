@@ -99,6 +99,6 @@ test('other roles do not get the equipment page or nav item', async ({ page }) =
   await asUser(page, users.coordinator.user_id)
   await mock(page, 'venue', '/venues', (route) => json(route, { venues: [] }))
   await page.goto('/equipment')
-  await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Equipment' })).toHaveCount(0)
+  await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Equipment', exact: true })).toHaveCount(0)
   await expect(page.getByText('visible to Technical Support staff')).toBeVisible()
 })

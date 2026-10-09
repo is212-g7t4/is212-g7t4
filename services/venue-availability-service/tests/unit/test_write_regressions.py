@@ -76,5 +76,9 @@ def test_write_remains_naive_pending_without_dev_gate(setup):
         VENUE_ID,
         booking_row()["requested_end_time"],
         booking_row()["requested_start_time"],
+        VENUE_ID,
+        booking_row()["requested_end_time"],
+        booking_row()["requested_start_time"],
     ]
+    assert 'FROM public."VenueHold"' in sql
     assert "'Pending Review'" in cursor.execute.call_args.args[0]
