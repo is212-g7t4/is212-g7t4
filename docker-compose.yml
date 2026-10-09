@@ -27,6 +27,18 @@ services:
     ports:
       - "5005:5000"
 
+  attendee-registration-service:
+    build: ./services/attendee-registration-service
+    environment:
+      FRONTEND_ORIGIN: "${FRONTEND_ORIGIN:-http://localhost:5174}"
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      REGISTRATION_SERVICE_URL: "http://registration-service:5000"
+    depends_on:
+      - event-service
+      - registration-service
+    ports:
+      - "5009:5000"
+
   venue-availability-service:
     build: ./services/venue-availability-service
     env_file:
@@ -44,6 +56,29 @@ services:
       - ./services/equipment-service/.env
     ports:
       - "5002:5000"
+
+  equipment-request-service:
+    build: ./services/equipment-request-service
+    env_file:
+      - ./services/equipment-request-service/.env
+    ports:
+      - "5009:5000"
+
+  equipment-reservation-service:
+    build: ./services/equipment-reservation-service
+    env_file:
+      - ./services/equipment-reservation-service/.env
+    environment:
+      FRONTEND_ORIGIN: "${FRONTEND_ORIGIN:-http://localhost:5174}"
+      EQUIPMENT_REQUEST_SERVICE_URL: http://equipment-request-service:5000
+      EVENT_SERVICE_URL: http://event-service:5000
+      EQUIPMENT_SERVICE_URL: http://equipment-service:5000
+    ports:
+      - "5010:5000"
+    depends_on:
+      - equipment-request-service
+      - event-service
+      - equipment-service
 
   venue-service:
     build: ./services/venue-service

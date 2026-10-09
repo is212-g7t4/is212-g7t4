@@ -32,7 +32,13 @@ export interface EventProgressUpdate {
   actionDetails: string
 }
 
-export type EventStatus = 'Submitted' | 'Under Review' | 'Approved' | 'Confirmed' | 'Rejected'
+// The lifecycle, in order. `Confirmed` means the event passed its Operational
+// Safety Check and may proceed — it is the preparation stage — and only the
+// safety workflow sets it (SCRUM-152). Mirrors ALL_STATUSES in
+// services/event-service/app/models.py.
+export type EventStatus =
+  | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected'
+  | 'Pending Safety Check' | 'Confirmed' | 'Safety Changes Requested' | 'Cancelled'
 
 export interface Coordinator {
   user_id: string
@@ -68,10 +74,14 @@ export function validateEvent(event: EventData) {
 export class SubmissionError extends Error {
   missingFields: string[]
   errors: string[]
-  constructor(message: string, missingFields: string[] = [], errors: string[] = []) {
+  // Machine-readable error code where the backend sends one, e.g.
+  // 'SAFETY_APPROVAL_REQUIRED', so callers needn't match on the prose.
+  code?: string
+  constructor(message: string, missingFields: string[] = [], errors: string[] = [], code?: string) {
     super(message)
     this.missingFields = missingFields
     this.errors = errors
+    this.code = code
   }
 }
 
@@ -85,7 +95,7 @@ export async function eventApi(
     method: method || (data ? 'POST' : 'GET'), headers, ...(data ? { body: JSON.stringify(data) } : {}),
   })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new SubmissionError(body.message || 'Unable to complete the request.', body.missingFields, body.errors)
+  if (!response.ok) throw new SubmissionError(body.message || 'Unable to complete the request.', body.missingFields, body.errors, body.code)
   return body
 }
 

@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request
 load_dotenv()
 
 from app.models import (
+    ALL_STATUSES,
     FIELDS,
     EventNotAssignedError,
     EventNotFoundError,
@@ -16,11 +17,15 @@ from app.models import (
     EventNotSubmittedError,
     InvalidStatusTransitionError,
     RejectionReasonError,
+    SafetyApprovalRequiredError,
     approve_event,
     get_event,
     get_organiser_event,
+    list_event_summaries,
     list_events,
+    list_confirmed_events,
     list_organiser_events,
+    list_overlapping_events,
     list_submitted,
     reject_event,
     submit_event,
@@ -28,6 +33,8 @@ from app.models import (
     update_event_progress,
 )
 from app.validation import validate
+
+EVENT_STATUSES = ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected")
 
 
 def create_app(config=None):
@@ -134,9 +141,21 @@ def create_app(config=None):
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
 
+        viewer_role = request.args.get("viewerRole") or None
+        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support"):
+            return jsonify(message="This role cannot view all internal events."), 403
         status = request.args.get("status") or None
         venue = request.args.get("venue") or None
-        is_manager = request.args.get("isManager") in ("true", "1")
+        venue_id = request.args.get("venueId") or None
+        if venue_id:
+            try:
+                venue_id = str(UUID(venue_id))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="venueId must be a valid venue ID."), 400
+        is_manager = (
+            request.args.get("isManager") in ("true", "1")
+            or viewer_role in ("Venue Staff", "Technical Support")
+        )
 
         date_from = date_to = None
         try:
@@ -170,8 +189,47 @@ def create_app(config=None):
                 date_from,
                 date_to,
                 is_manager,
+                venue_id=venue_id,
             )
         )
+
+    @app.get("/events/registration")
+    def registration_events():
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_confirmed_events(app.config["DATABASE_URL"]))
+
+    @app.get("/events/summaries")
+    def event_summaries():
+        # Name/status lookup for other screens (e.g. equipment review); no event body or ownership check.
+        raw_ids = [part for part in request.args.get("ids", "").split(",") if part]
+        if not raw_ids or len(raw_ids) > 100:
+            return jsonify(message="Provide between 1 and 100 comma-separated event IDs."), 400
+        try:
+            ids = [str(UUID(part)) for part in raw_ids]
+        except ValueError:
+            return jsonify(message="Every event ID must be a valid UUID."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_event_summaries(app.config["DATABASE_URL"], ids))
+
+    @app.get("/events/overlapping")
+    def overlapping_events():
+        # Time-window lookup for Equipment Reservation Service; summaries only, no event body.
+        statuses = [part for part in request.args.get("statuses", "").split(",") if part]
+        if not statuses or any(s not in EVENT_STATUSES for s in statuses):
+            return jsonify(message=f"statuses must list values from: {', '.join(EVENT_STATUSES)}."), 400
+        try:
+            start, end = (datetime.fromisoformat(request.args.get(key, "")) for key in ("start", "end"))
+            exclude = request.args.get("excludeEventId")
+            exclude = str(UUID(exclude)) if exclude else None
+        except ValueError:
+            return jsonify(message="start and end must be ISO date-times and excludeEventId a UUID."), 400
+        if end <= start:
+            return jsonify(message="end must be after start."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_overlapping_events(app.config["DATABASE_URL"], start, end, statuses, exclude))
 
     @app.get("/events/<uuid:event_id>")
     def get_event_details(event_id):
@@ -199,7 +257,13 @@ def create_app(config=None):
             coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
-        is_manager = request.args.get("isManager") in ("true", "1")
+        viewer_role = request.args.get("viewerRole") or None
+        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support"):
+            return jsonify(message="This role cannot view all internal events."), 403
+        is_manager = (
+            request.args.get("isManager") in ("true", "1")
+            or viewer_role in ("Venue Staff", "Technical Support")
+        )
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
@@ -242,9 +306,9 @@ def create_app(config=None):
             coordinator_id = str(UUID(coordinator_id))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
-        if status not in ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected"):
+        if status not in ALL_STATUSES:
             return jsonify(
-                message="Status must be Submitted, Under Review, Approved, Confirmed, or Rejected."
+                message=f"Status must be one of: {', '.join(ALL_STATUSES)}."
             ), 400
         if not isinstance(action_details, str) or not action_details.strip():
             return jsonify(message="Action details are required."), 400
@@ -267,6 +331,15 @@ def create_app(config=None):
             return jsonify(
                 message="This event request is not assigned to the current coordinator."
             ), 403
+        # SCRUM-152 AC1: more specific than InvalidStatusTransitionError, so it
+        # must be caught first.
+        except SafetyApprovalRequiredError as blocked:
+            return jsonify(
+                code="SAFETY_APPROVAL_REQUIRED",
+                message=blocked.message,
+                currentStatus=blocked.current_status,
+                requiredStatus="Confirmed",
+            ), 409
         except InvalidStatusTransitionError:
             return jsonify(
                 message="This status change is not allowed for the event's current stage."

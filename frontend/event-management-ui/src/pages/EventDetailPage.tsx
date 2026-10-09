@@ -3,7 +3,9 @@ import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { EventStatus, SubmittedEvent } from '../features/event/submission'
+import { ALLOWED_TRANSITIONS, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
+import { canViewAllInternalEvents, canViewInternalEvents, INTERNAL_EVENT_ACCESS_MESSAGE } from '../features/event/permissions'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
 import { RegistrationTable } from '../features/registration/RegistrationTable'
@@ -40,10 +42,11 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || '',
   }
   useEffect(() => {
-    if (role !== 'Event Coordinator' || !currentCoordinator.id) return
+    if (!canViewInternalEvents(role) || !currentCoordinator.id) return
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
-    if (isManager) params.set('isManager', 'true')
+    if (canViewAllInternalEvents(role, isManager)) params.set('isManager', 'true')
+    if (role === 'Venue Staff' || role === 'Technical Support') params.set('viewerRole', role)
     eventApi(`/events/${eventId}?${params.toString()}`).then((body) => {
       if (active) {
         setEvent(body)
@@ -75,15 +78,12 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
   const hasUnsavedChanges = Boolean(event) && (
     draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
   )
-  const canUpdate = Boolean(event && event.coordinatorId === currentCoordinator.id)
-  const transitions: Record<EventStatus, EventStatus[]> = {
-    Submitted: ['Submitted', 'Under Review'],
-    'Under Review': ['Under Review', 'Approved', 'Rejected'],
-    Approved: ['Approved', 'Confirmed'],
-    Confirmed: ['Confirmed'],
-    Rejected: ['Rejected'],
-  }
-  const availableStatuses = event ? transitions[event.status] : []
+  const canUpdate = Boolean(role === 'Event Coordinator' && event && event.coordinatorId === currentCoordinator.id)
+  const availableStatuses = event ? ALLOWED_TRANSITIONS[event.status] : []
+  // SCRUM-152 AC1: 'Confirmed' is never offered to a coordinator — only the
+  // safety workflow sets it — so instead of a dead option the field explains
+  // what has to happen for the event to progress.
+  const safetyHint = event && showsSafetyHint(event.status) ? safetyBlockMessage(event.status) : ''
 
   const saveProgress = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
@@ -112,7 +112,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     }
   }
 
-  if (role !== 'Event Coordinator') return <RoleWarning>Event details are visible to Event Coordinators.</RoleWarning>
+  if (!canViewInternalEvents(role)) return <RoleWarning>{INTERNAL_EVENT_ACCESS_MESSAGE}</RoleWarning>
 
   return <div className="page-stack">
     <section className="intro">
@@ -128,14 +128,18 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
         <h3>Event progress</h3>
         {canUpdate ? <form onSubmit={saveProgress}>
           <div className="field-row">
-            <label className="field"><span>Status</span>
-              <select value={draftStatus} onChange={(change) => {
+            {/* Explicitly associated rather than wrapping, so the safety hint
+                below can live in the same field without becoming label text. */}
+            <div className="field">
+              <label htmlFor="event-progress-status">Status</label>
+              <select id="event-progress-status" value={draftStatus} onChange={(change) => {
                 setDraftStatus(change.target.value as typeof draftStatus)
                 setSaveMessage('')
               }}>
                 {availableStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
-            </label>
+              {safetyHint && <span className="muted" role="note">{safetyHint}</span>}
+            </div>
             <label className="field"><span>Action details</span>
               <textarea value={actionDetails} maxLength={1000} required onChange={(change) => {
                 setActionDetails(change.target.value)

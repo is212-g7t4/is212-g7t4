@@ -56,12 +56,16 @@ Service and notifies asynchronously.
 ### Equipment Reservation Service
 
 Processes equipment requests end-to-end. Two sub-flows in one frame:
-- **Request submission** (ends at step 7): checks availability and records
-  the request against Equipment Availability as `pending_review`.
+- **Request submission** (ends at step 7): checks availability (event window
+  from Event Service, stock from Equipment Service, quantities already held
+  by other non-rejected events from Equipment Request Service) and
+  records the request as `pending_review`.
 - **Approval/rejection** (continues from step 8): Technical Support Staff's
-  decision updates Equipment Availability (commits the quantity on
-  approval, releases the hold on rejection), logs to Forum Service, and
-  notifies asynchronously.
+  decision is validated against the same availability check (Approve is
+  blocked while any line is insufficient) and recorded in Equipment Request
+  Service, logs to Forum Service, and notifies asynchronously. Built so far:
+  the availability check and the review validation (see
+  `services/equipment-reservation-service/README.md`).
 
 ### Attendee Registration Service
 
@@ -82,9 +86,9 @@ data store (Postgres unless noted).
 | **User** | User accounts, roles, authentication |
 | **Event** | The Event entity: details, status, change-request records |
 | **Venue** | Venue catalogue — capacity, facilities, accessibility, layouts. Also runs the suitability-check computation (given an event's requirements as input) |
-| **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason) **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
+| **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason), timed venue holds with expiry, **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
 | **Equipment** | Equipment catalogue only — types, quantities owned, location, operational status. Does **not** hold reservation data. Exposes `GET /equipment[?status=]` and `POST /equipment` (Technical Support only); the UI calls it directly |
-| **Equipment Availability** | The real reservation records and the availability-checking algorithm together: committed quantities per event/time window, and each request's status (pending_review → approved/rejected) |
+| **Equipment Request** | The equipment request records (`public."EquipmentRequest"`) and each request's status (Pending → Approved/Rejected). No availability logic — that is computed on demand by the Equipment Reservation composite |
 | **Registration** | Attendee registration records |
 | **Notification** | Notification records; consumes off the Message Broker and calls the Email/SMS Wrapper to deliver |
 | **Forum / Communication** | **NoSQL (MongoDB).** All communication tied to a request — clarification requests, approval/rejection reasons, comments — keyed by entityType + entityId |
