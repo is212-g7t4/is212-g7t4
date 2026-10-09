@@ -1,9 +1,10 @@
 # Venue Availability — SCRUM-25 backend
 
-Owns `public."VenueBooking"` and its overlap algorithm. Extends the existing
+Owns `public."VenueBooking"`, timed venue holds, and their overlap algorithm. Extends the existing
 atomic; there is no duplicate availability/conflict service. The calendar UI
-may read this atomic directly; existing writes come through Venue Booking
-Service. No calls to User/Venue/Event services or their tables are added.
+may read this atomic directly; booking writes come through Venue Booking
+Service, and Venue Staff hold writes use the DEV identity simulation below.
+No calls to User/Venue/Event services or their tables are added.
 `GET /venues` remains owned by Venue Service.
 
 ## Local setup (from repository root)
@@ -56,6 +57,22 @@ receives `401`. There is no user-table query, JWT verification or real auth.
 **Headers are caller-supplied and spoofable. This is not secure access control.**
 Production must replace this simulation with verified identity/role enforcement.
 Existing POST/PATCH endpoints are intentionally not gated or reworked here.
+
+`POST /venue-holds` requires `CALENDAR_DEV_MODE=true`, a valid
+`X-Dev-User-Id`, and exact `X-Dev-Role: Venue Staff`. Its JSON body is
+`{"venueId": "<UUID>", "expiresAt": "2026-10-09T12:00"}`. Expiry is required,
+must be a future naive Singapore-local ISO datetime, and returns `400` if
+invalid. A hold conflicting with any non-rejected/non-cancelled booking or
+another active hold returns `409`; a missing venue returns `404`. Success is
+`201` with the hold ID, venue ID, creation time, expiry and staff ID.
+
+`GET /venue-holds` returns only unexpired holds; the catalogue overlays these
+as `On Hold` and naturally returns to the venue's operational status after
+expiry. `GET /venue-bookings/window` includes overlapping hold intervals as
+`status: "On Hold"`, allowing venue search to hide them. Booking creation and
+approval check active holds in the same venue-locked transaction, so a hold
+cannot be bypassed by a new or newly approved booking. Database setup must
+apply `database/supabase/migrations/20261008100000_create_venue_hold.sql`.
 
 CORS allows only the configured exact `FRONTEND_ORIGIN`, including on errors.
 `OPTIONS /venue-bookings` requires no identity and returns allowed headers

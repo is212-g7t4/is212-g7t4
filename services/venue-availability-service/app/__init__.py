@@ -11,8 +11,12 @@ from app.models import (
     BookingConflictError,
     BookingNotFoundError,
     CalendarDataError,
+    HoldConflictError,
+    HoldVenueNotFoundError,
     create_booking,
+    create_hold,
     decide_booking,
+    list_active_holds,
     list_bookings,
     list_window_bookings,
 )
@@ -58,7 +62,7 @@ def create_app(config=None):
         if origin == app.config["FRONTEND_ORIGIN"]:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            if request.path == "/venue-bookings":
+            if request.path in {"/venue-bookings", "/venue-holds"}:
                 response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
                 response.headers["Access-Control-Allow-Headers"] = (
                     "Content-Type, X-Dev-User-Id, X-Dev-Role"
@@ -157,8 +161,57 @@ def create_app(config=None):
                 message="DATABASE_URL is not configured for Venue Availability Service."
             ), 503
         return jsonify(
-            bookings=list_window_bookings(app.config["DATABASE_URL"], date_from, date_to)
+            bookings=list_window_bookings(
+                app.config["DATABASE_URL"], date_from, date_to
+            )
         )
+
+    @app.get("/venue-holds")
+    def get_holds():
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        return jsonify(holds=list_active_holds(app.config["DATABASE_URL"]))
+
+    @app.post("/venue-holds")
+    def place_hold():
+        if app.config["CALENDAR_DEV_MODE"] is not True:
+            return jsonify(message="Venue hold DEV mode is disabled."), 503
+        staff_id = _parse_uuid(request.headers.get("X-Dev-User-Id"))
+        if not staff_id or not request.headers.get("X-Dev-Role"):
+            return jsonify(message="DEV user UUID and role headers are required."), 401
+        if request.headers.get("X-Dev-Role") != "Venue Staff":
+            return jsonify(message="Venue Staff role is required to place a hold."), 403
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        venue_id = _parse_uuid(data.get("venueId"))
+        expires_at = _parse_datetime(data.get("expiresAt"))
+        if not venue_id or not expires_at:
+            return jsonify(
+                message="venueId must be a valid id and expiresAt a local ISO date-time."
+            ), 400
+        from app.calendar import SINGAPORE
+
+        now = datetime.now(SINGAPORE).replace(tzinfo=None)
+        if expires_at <= now:
+            return jsonify(message="Hold expiry must be in the future."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        try:
+            hold = create_hold(
+                app.config["DATABASE_URL"], venue_id, expires_at, staff_id
+            )
+        except HoldVenueNotFoundError:
+            return jsonify(message="Venue not found."), 404
+        except HoldConflictError:
+            return jsonify(
+                message="This hold overlaps an existing booking or active hold."
+            ), 409
+        return jsonify(hold=hold), 201
 
     @app.post("/venue-bookings")
     def create_booking_route():

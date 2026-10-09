@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Role } from '../types'
 import { fetchVenues } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
+import { fetchActiveVenueHolds, showVenueHoldStatus } from '../features/venue/venueHolds'
 import { VENUE_ACCESS_NOTICE, canManageVenues, canViewVenues } from '../features/venue/permissions'
 import { ArrowRightIcon, PlusIcon } from '../components/Icon'
 import { RoleWarning } from '../components/FormControls'
@@ -23,9 +24,9 @@ export function VenueCataloguePage({ role, onViewVenue, onAddVenue }: { role: Ro
     if (!canViewVenues(role)) return
     let active = true
     const load = () => {
-      fetchVenues().then((items) => {
+      Promise.all([fetchVenues(), fetchActiveVenueHolds()]).then(([items, holds]) => {
         if (active) {
-          setVenues(items)
+          setVenues(showVenueHoldStatus(items, holds))
           setError('')
           setLastUpdated(new Date())
         }

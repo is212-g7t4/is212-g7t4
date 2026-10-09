@@ -212,6 +212,18 @@ def test_ac3_approved_overlap_hides_venue(mock_search_venues, mock_get_bookings,
     assert [v["name"] for v in response.json["venues"]] == ["Rooftop Garden"]
 
 
+@patch("app.routes.get_bookings_between")
+@patch("app.routes.search_venues")
+def test_ac3_active_hold_hides_venue(mock_search_venues, mock_get_bookings, client):
+    """A venue hold blocks the window from new booking requests."""
+    mock_search_venues.return_value = [BALLROOM]
+    mock_get_bookings.return_value = [booking("ven-1", "On Hold")]
+
+    response = search(client)
+
+    assert response.json == {"venues": [], "count": 0}
+
+
 @pytest.mark.parametrize("status", ["Pending", "Pending Review"])
 @patch("app.routes.get_bookings_between")
 @patch("app.routes.search_venues")
