@@ -4,10 +4,15 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 18 * * *" # 02:00 Singapore time, nightly full run on main
+  workflow_dispatch: # "Run workflow" button for a manual full run
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Supersede outdated PR runs, but let every main run finish, so two quick
+  # merges cannot cancel the first main run and report it as a failure.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -15,6 +20,8 @@ permissions:
 jobs:
   # Decide which parts of the repo changed. Done inside a job (not with
   # workflow-level `paths:`) so the required `ci-passed` check always reports.
+  # Backend unit tests are deliberately NOT gated on this: every run runs every
+  # test, so a change can never skip the tests that guard earlier work.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -43,6 +50,12 @@ jobs:
             equipment-service:
               - 'services/equipment-service/**'
               - '.github/workflows/ci.yml'
+            equipment-request-service:
+              - 'services/equipment-request-service/**'
+              - '.github/workflows/ci.yml'
+            equipment-reservation-service:
+              - 'services/equipment-reservation-service/**'
+              - '.github/workflows/ci.yml'
             venue-service:
               - 'services/venue-service/**'
               - '.github/workflows/ci.yml'
@@ -60,54 +73,90 @@ jobs:
               - 'docker-compose.yml'
               - '.github/workflows/ci.yml'
 
-  backend:
-    needs: changes
+  # Lists every service folder so the test matrix never has to be maintained by
+  # hand. A forgotten entry used to mean a service's tests silently never ran.
+  discover-services:
     runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.list.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          # Any folder under services/ with a pyproject.toml is a service, so a
+          # new service is tested from its first PR without editing this file.
+          services=$(find services -mindepth 2 -maxdepth 2 -name pyproject.toml | cut -d/ -f2 | sort | jq -Rnc '[inputs]')
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "Testing: $services"
+          # A broken `find` must never turn into "no tests ran, all green".
+          if [ "$services" = "[]" ]; then
+            echo "::error::No services discovered under services/*/pyproject.toml"
+            exit 1
+          fi
+
+  unit-tests:
+    name: unit-tests (${{ matrix.service }})
+    needs: discover-services
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - user-service
-          - event-service
-          - coordinator-assignment-service
-          - registration-service
-          - equipment-service
-          - venue-service
-          - venue-booking-service
-          - venue-availability-service
+        service: ${{ fromJSON(needs.discover-services.outputs.services) }}
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
     steps:
-      - name: Check whether this service changed
-        id: gate
-        env:
-          RUN: ${{ contains(fromJSON(needs.changes.outputs.changes), matrix.service) }}
-        run: echo "run=$RUN" >> "$GITHUB_OUTPUT"
-        working-directory: .
       - uses: actions/checkout@v4
-        if: steps.gate.outputs.run == 'true'
+      # No python-version here: `uv sync` reads each service's .python-version.
       - uses: astral-sh/setup-uv@v5
-        if: steps.gate.outputs.run == 'true'
         with:
-          python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: services/${{ matrix.service }}/uv.lock
       - name: Install dependencies
-        if: steps.gate.outputs.run == 'true'
-        run: uv sync --frozen
-      - name: Run tests
-        if: steps.gate.outputs.run == 'true'
-        run: uv run pytest --cov=app --cov-report=term-missing
-      - name: Audit dependencies
-        if: steps.gate.outputs.run == 'true'
+        run: uv sync --locked # fails if uv.lock is out of date with pyproject.toml
+      # Every pytest and coverage setting lives in the service's pyproject.toml,
+      # so this differs from a local run only in where it writes its reports.
+      - name: Run unit tests
+        run: uv run pytest --junitxml=reports/junit.xml --cov-report=xml:reports/coverage.xml
+      - name: Add coverage to the run summary
+        if: always()
+        env:
+          SERVICE: ${{ matrix.service }}
         run: |
-          uv export --frozen --no-hashes --no-emit-project > requirements.txt
+          echo "### $SERVICE" >> "$GITHUB_STEP_SUMMARY"
+          uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports-${{ matrix.service }}
+          path: services/${{ matrix.service }}/reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Split out of the test job so that a vulnerable dependency reports as an
+  # audit failure rather than as a "test" failure.
+  dependency-audit:
+    name: dependency-audit (${{ matrix.service }})
+    needs: discover-services
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover-services.outputs.services) }}
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Audit locked dependencies
+        run: |
+          uv export --locked --no-hashes --no-emit-project > requirements.txt
           uvx pip-audit -r requirements.txt --no-deps --disable-pip
 
   frontend:
-    needs: changes
-    if: contains(fromJSON(needs.changes.outputs.changes), 'frontend')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -126,8 +175,6 @@ jobs:
       - run: npm run build
 
   e2e:
-    needs: changes
-    if: contains(fromJSON(needs.changes.outputs.changes), 'frontend')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -185,7 +232,17 @@ jobs:
   # Single required status check for branch protection.
   ci-passed:
     if: always()
-    needs: [changes, backend, frontend, e2e, docker-build, gitleaks]
+    needs:
+      [
+        changes,
+        discover-services,
+        unit-tests,
+        dependency-audit,
+        frontend,
+        e2e,
+        docker-build,
+        gitleaks,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed or was cancelled
@@ -194,3 +251,21 @@ jobs:
           if echo '${{ join(needs.*.result, ' ') }}' | grep -qE 'failure|cancelled'; then
             exit 1
           fi
+      # These two must actually have run. A skipped job reports neither failure
+      # nor cancellation, so without this a matrix that produced no jobs would
+      # count as a pass.
+      - name: Fail unless the backend jobs succeeded
+        env:
+          UNIT_TESTS: ${{ needs.unit-tests.result }}
+          DEPENDENCY_AUDIT: ${{ needs.dependency-audit.result }}
+        run: |
+          status=0
+          if [ "$UNIT_TESTS" != "success" ]; then
+            echo "::error::unit-tests did not succeed (result: $UNIT_TESTS)"
+            status=1
+          fi
+          if [ "$DEPENDENCY_AUDIT" != "success" ]; then
+            echo "::error::dependency-audit did not succeed (result: $DEPENDENCY_AUDIT)"
+            status=1
+          fi
+          exit $status

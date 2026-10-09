@@ -3,6 +3,7 @@ import type { Role, Route, User } from '../types'
 import { routeTitles } from '../types'
 import { canViewCalendar } from '../features/calendar/permissions'
 import { canManageEquipment } from '../features/equipment/permissions'
+import { canViewMyEvents } from '../features/event/permissions'
 import { canSearchVenues, canViewVenues } from '../features/venue/permissions'
 import { BuildingIcon, CheckIcon, EditIcon, HomeIcon, ListIcon, PlusIcon, SearchIcon } from './Icon'
 
@@ -23,8 +24,14 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         {role !== 'Event Organiser' && (
           <NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon={<CheckIcon size={17} />}>Request review</NavButton>
         )}
-        {(role === 'Event Coordinator' || role === 'Event Organiser') && (
+        {canViewMyEvents(role) && (
           <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
+        )}
+        {role === 'Attendee' && (
+          <>
+            <NavButton active={route === 'browseEvents'} onClick={() => onNavigate('browseEvents')} icon={<SearchIcon size={17} />}>Browse events</NavButton>
+            <NavButton active={route === 'myRegistrations'} onClick={() => onNavigate('myRegistrations')} icon={<ListIcon size={17} />}>My registrations</NavButton>
+          </>
         )}
         {canViewVenues(role) && (
           <NavButton active={route === 'venues' || route === 'venueDetail' || route === 'editVenue'} onClick={() => onNavigate('venues')} icon={<BuildingIcon size={17} />}>Venues</NavButton>
@@ -37,6 +44,9 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         )}
         {canManageEquipment(role) && (
           <NavButton active={route === 'equipment'} onClick={() => onNavigate('equipment')} icon={<ListIcon size={17} />}>Equipment</NavButton>
+        )}
+        {(canManageEquipment(role) || role === 'Event Coordinator') && (
+          <NavButton active={route === 'equipmentRequests'} onClick={() => onNavigate('equipmentRequests')} icon={<CheckIcon size={17} />}>Equipment requests</NavButton>
         )}
       </nav>
 

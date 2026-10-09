@@ -5,9 +5,12 @@ import { DashboardPage } from './pages/DashboardPage'
 import { EventDetailPage } from './pages/EventDetailPage'
 import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
+import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
+import { AttendeeRegistrationsPage } from './pages/AttendeeRegistrationsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { EquipmentPage } from './pages/EquipmentPage'
+import { EquipmentRequestsPage } from './pages/EquipmentRequestsPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
@@ -27,6 +30,8 @@ const paths: Record<Route, string> = {
   review: '/requests/review',
   detail: '/events',
   myEvents: '/my-events',
+  browseEvents: '/events/browse',
+  myRegistrations: '/registrations',
   venues: '/venues',
   venueDetail: '/venues',
   venueCalendar: '/venue-availability',
@@ -36,6 +41,7 @@ const paths: Record<Route, string> = {
   addVenue: '/venues/new',
   editVenue: '/venues',
   equipment: '/equipment',
+  equipmentRequests: '/equipment-requests',
 }
 
 function getRoute(): Route {
@@ -44,10 +50,13 @@ function getRoute(): Route {
   if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/my-events') return 'myEvents'
+  if (path === '/events/browse') return 'browseEvents'
+  if (path === '/registrations') return 'myRegistrations'
   if (path === '/venue-availability') return 'venueCalendar'
   if (path === '/venues/new') return 'addVenue'
   if (/^\/venues\/[^/]+\/edit$/.test(path)) return 'editVenue'
   if (path === '/equipment') return 'equipment'
+  if (path === '/equipment-requests') return 'equipmentRequests'
   if (path === '/venues') return 'venues'
   if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
@@ -176,11 +185,14 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
+      {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
+      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
-      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
+      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
       {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}

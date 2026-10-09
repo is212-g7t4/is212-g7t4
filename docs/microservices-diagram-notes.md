@@ -85,19 +85,17 @@ numbered separately.
   a stateless conflict-checker would have needed to read bookings owned by
   the other service, which atomics can't do (see AGENTS.md). There is no
   separate Booking Conflict service or table.
-- **Equipment Reservation Service** calls **Equipment Availability Service**
-  only — not Equipment Service. Equipment Availability Service owns both the
-  availability-checking algorithm *and* the actual reservation records
-  (checked/held at submission, committed or released on approval/rejection).
-  Equipment Service is a separate atomic that owns the equipment catalogue
-  only (types, quantities owned, technical specs) and holds no reservation
-  data — this composite's flow never needs to call it. The UI calls Equipment
-  Service directly (a simple catalogue read/write, no composite needed) so
-  Technical Support can list equipment (`GET /equipment[?status=]`) and add
-  records (`POST /equipment`). This now mirrors the
-  Venue Booking Service / Venue Availability Service pattern exactly (one
-  atomic owning both records and the algorithm). It also now logs to Forum
-  Service, but only on the approval/rejection sub-flow.
+- **Equipment Reservation Service** calls **Event Service** (event window),
+  **Equipment Service** (catalogue, total stock, physical status) and
+  **Equipment Request Service** (request records, decisions). It owns the
+  availability algorithm: Equipment Request Service owns only the request
+  records, so the composite gathers the inputs and computes the result on
+  demand (nothing stored or polled; `Equipment.operational_status` is never
+  changed by a booking). Equipment Service is a separate atomic that owns the
+  equipment catalogue only (types, quantities owned, technical specs). The UI
+  calls it directly for catalogue reads/writes (`GET /equipment[?status=]`,
+  `POST /equipment`). It also logs to Forum Service, but only on the
+  approval/rejection sub-flow.
 
 ## Full service catalog
 
@@ -108,8 +106,9 @@ Service.
 **Atomics (9, each own Postgres schema except Forum):** User, Event, Venue,
 Venue Availability (venue booking records — id, eventId, venueId, status,
 proposed date/time, decision reason — **and** the conflict-detection
-algorithm together, one atomic), Equipment, Equipment Availability (equipment
-reservation records + availability-checking algorithm), Registration,
+algorithm together, one atomic), Equipment, Equipment Request (equipment
+request records and status; availability is computed by the Equipment
+Reservation composite), Registration,
 Notification, Forum / Communication (MongoDB).
 
 **Infra:** Message Broker (RabbitMQ, async notifications only), Email/SMS

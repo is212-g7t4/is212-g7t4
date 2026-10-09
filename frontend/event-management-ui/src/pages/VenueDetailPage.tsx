@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { Role } from '../types'
+import type { Role, User } from '../types'
 import { fetchVenue } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
+import { fetchActiveVenueHolds, placeVenueHold, showVenueHoldStatus } from '../features/venue/venueHolds'
 import { VENUE_ACCESS_NOTICE, canViewVenues } from '../features/venue/permissions'
 import { ArrowLeftIcon, EditIcon, RefreshIcon } from '../components/Icon'
 import { RoleWarning } from '../components/FormControls'
@@ -16,18 +17,22 @@ function Chips({ values }: { values: string[] }) {
   return <span className="chip-list">{values.map((value) => <span key={value} className="chip">{value}</span>)}</span>
 }
 
-export function VenueDetailPage({ venueId, role, onBack, onEdit }: { venueId: string; role: Role; onBack: () => void; onEdit: () => void }) {
+export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; onBack: () => void; onEdit: () => void }) {
   const [venue, setVenue] = useState<Venue | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
+  const [holdFormOpen, setHoldFormOpen] = useState(false)
+  const [holdExpiry, setHoldExpiry] = useState('')
+  const [holdError, setHoldError] = useState('')
+  const [holdSaving, setHoldSaving] = useState(false)
 
   useEffect(() => {
     if (!canViewVenues(role)) return
     let active = true
-    fetchVenue(venueId).then((fetched) => {
+    Promise.all([fetchVenue(venueId), fetchActiveVenueHolds()]).then(([fetched, holds]) => {
       if (active) {
-        setVenue(fetched)
+        setVenue(showVenueHoldStatus([fetched], holds)[0])
         setError('')
       }
     }).catch((cause: Error) => {
@@ -39,7 +44,29 @@ export function VenueDetailPage({ venueId, role, onBack, onEdit }: { venueId: st
       if (active) setLoading(false)
     })
     return () => { active = false }
+    const interval = window.setInterval(() => setRefresh((value) => value + 1), 30_000)
+    return () => { active = false; window.clearInterval(interval) }
   }, [venueId, role, refresh])
+
+  async function submitHold(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!user) {
+      setHoldError('Unable to identify the selected Venue Staff user.')
+      return
+    }
+    setHoldSaving(true)
+    setHoldError('')
+    try {
+      await placeVenueHold(venueId, holdExpiry, user)
+      setVenue((current) => current ? { ...current, status: 'On Hold' } : current)
+      setHoldFormOpen(false)
+      setHoldExpiry('')
+    } catch (cause) {
+      setHoldError(cause instanceof Error ? cause.message : 'Unable to place a hold on this venue.')
+    } finally {
+      setHoldSaving(false)
+    }
+  }
 
   if (!canViewVenues(role)) return <RoleWarning>{VENUE_ACCESS_NOTICE}</RoleWarning>
 
@@ -62,8 +89,20 @@ export function VenueDetailPage({ venueId, role, onBack, onEdit }: { venueId: st
         <div className="event-detail"><dt>Supported layouts</dt><dd><Chips values={venue.supportedLayouts} /></dd></div>
       </dl>
       {role === 'Venue Staff' && <footer className="venue-detail-actions">
-        <button className="button primary" onClick={onEdit}><EditIcon size={14} /> Edit Venue</button>
+        <div className="venue-detail-action-buttons">
+          <button className="button hold" disabled={venue.status !== 'Available'} onClick={() => { setHoldFormOpen((open) => !open); setHoldError('') }}>Hold</button>
+          <button className="button primary" onClick={onEdit}><EditIcon size={14} /> Edit Venue</button>
+        </div>
       </footer>}
+      {role === 'Venue Staff' && holdFormOpen && <form className="venue-hold-form" onSubmit={submitHold}>
+        <label htmlFor="venue-hold-expiry">Hold expiry date and time</label>
+        <input id="venue-hold-expiry" type="datetime-local" required value={holdExpiry} onChange={(event) => setHoldExpiry(event.target.value)} />
+        <div className="venue-detail-action-buttons">
+          <button className="button" type="button" onClick={() => setHoldFormOpen(false)}>Cancel</button>
+          <button className="button hold" type="submit" disabled={holdSaving}>{holdSaving ? 'Placing hold…' : 'Confirm hold'}</button>
+        </div>
+        {holdError && <p className="field-error" role="alert">{holdError}</p>}
+      </form>}
     </article>}
   </div>
 }

@@ -12,9 +12,24 @@ test('shows My events to Event Organisers', () => {
   expect(screen.getByRole('button', { name: 'My events' })).toBeInTheDocument()
 })
 
-test('hides My events from other roles', () => {
-  render(<Sidebar route="dashboard" role="Venue Staff" onNavigate={vi.fn()} />)
+test.each(['Venue Staff', 'Technical Support'] as const)('shows My events to %s', (role) => {
+  render(<Sidebar route="dashboard" role={role} onNavigate={vi.fn()} />)
+  expect(screen.getByRole('button', { name: 'My events' })).toBeInTheDocument()
+})
+
+test('hides My events from attendees', () => {
+  render(<Sidebar route="dashboard" role="Attendee" onNavigate={vi.fn()} />)
   expect(screen.queryByRole('button', { name: 'My events' })).not.toBeInTheDocument()
+})
+
+test('shows Browse events only to attendees', () => {
+  const view = render(<Sidebar route="browseEvents" role="Attendee" onNavigate={vi.fn()} />)
+  expect(screen.getByRole('button', { name: 'Browse events' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'My registrations' })).toBeInTheDocument()
+
+  view.rerender(<Sidebar route="dashboard" role="Event Coordinator" onNavigate={vi.fn()} />)
+  expect(screen.queryByRole('button', { name: 'Browse events' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'My registrations' })).not.toBeInTheDocument()
 })
 
 test('Request review tab is hidden from Event Organisers', () => {
