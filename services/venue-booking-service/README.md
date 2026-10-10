@@ -92,18 +92,22 @@ every other service.
   ]}
   ```
 
-- `POST /booking-requests` — submits a venue booking request. Body must
-  include `{"eventId": "...", "venueId": "...", "coordinatorId": "..."}`;
-  the event's `preferredStartDate`/`preferredEndDate` are used as the
-  requested booking window.
+- `POST /booking-requests` — submits one independently evaluated venue booking
+  request. Body must include `eventId`, `venueId`, `coordinatorId`,
+  `requestedStartTime`, `requestedEndTime`, `requiredCapacity`, and
+  `venueRequirements`. More than one request may share an `eventId`.
   - `404` if the event doesn't exist, or if `venueId` isn't in Venue
     Service's catalogue.
   - `403` if the event isn't assigned to `coordinatorId`.
   - `409` if the venue exists but isn't `Available`, or if it's already
     booked (Approved) for that time window.
-  - `422` if the venue's capacity is below the event's expected attendance.
+  - `422` if the venue's capacity is below this booking's `requiredCapacity`.
+    The event's total attendance is deliberately not used for this check.
   - `201` with the persisted booking (`status: "Pending Review"`) once all
     checks pass.
+- `GET /events/<eventId>/booking-requests?coordinatorId=<id>` — lists every
+  venue booking for the assigned coordinator's event as a separate item,
+  enriched with the venue name.
 - `PATCH /booking-requests/<id>/approve` / `PATCH /booking-requests/<id>/reject`
   — Venue Staff decision. Body must include `{"reviewedBy": "<user id>"}`.
   - `404` if the booking doesn't exist.

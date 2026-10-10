@@ -25,7 +25,9 @@ class ReadConnection:
         )
         for row in rows:
             self.db.execute(
-                'INSERT INTO "VenueBooking" VALUES (?,?,?,?,?,?,?,?)',
+                'INSERT INTO "VenueBooking" VALUES ('
+                + ",".join("?" for _ in COLUMNS.split(","))
+                + ")",
                 [v.isoformat() if isinstance(v, datetime) else v for v in row.values()],
             )
 

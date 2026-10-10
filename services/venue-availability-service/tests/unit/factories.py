@@ -20,6 +20,8 @@ def booking_row(**overrides):
         "venue_id": VENUE_ID,
         "requested_start_time": datetime(2026, 10, 1, 9),
         "requested_end_time": datetime(2026, 10, 1, 12),
+        "required_capacity": 80,
+        "venue_requirements": "Projector and movable seating",
         "status": "Pending Review",
         "requested_by": USER_ID,
         "reviewed_by": None,

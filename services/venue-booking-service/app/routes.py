@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 import httpx
 from flask import Blueprint, jsonify, request
@@ -11,6 +12,7 @@ from app.clients import (
     create_booking,
     decide_booking,
     get_bookings_between,
+    get_event_bookings,
     get_event,
     get_venues,
     search_venues,
@@ -71,12 +73,15 @@ def create_booking_request():
     Service, which is also where the double-booking conflict check lives.
 
     Body:
-    - eventId: the event this booking is for — its preferredStartDate/
-      preferredEndDate are used as the requested booking window
+    - eventId: the event this booking is for
     - venueId: the venue being requested — must exist in Venue Service's
       catalogue, be Available, and have enough capacity
     - coordinatorId: the Event Coordinator making the request; must be the
       coordinator assigned to the event
+    - requestedStartTime/requestedEndTime: this booking's own window
+    - requiredCapacity: this booking's expected attendance, independent from
+      the event's total expected attendance
+    - venueRequirements: this booking's own free-text requirements
     """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -85,11 +90,49 @@ def create_booking_request():
     event_id = data.get("eventId")
     venue_id = data.get("venueId")
     coordinator_id = data.get("coordinatorId")
-    if not event_id or not venue_id or not coordinator_id:
-        return jsonify(message="eventId, venueId and coordinatorId are required."), 400
+    start = data.get("requestedStartTime")
+    end = data.get("requestedEndTime")
+    required_capacity = data.get("requiredCapacity")
+    venue_requirements = data.get("venueRequirements")
+    if not event_id or not venue_id or not coordinator_id or not start or not end:
+        return jsonify(
+            message=(
+                "eventId, venueId, coordinatorId, requestedStartTime and "
+                "requestedEndTime are required."
+            )
+        ), 400
+    if (
+        isinstance(required_capacity, bool)
+        or not isinstance(required_capacity, int)
+        or not 1 <= required_capacity <= 2147483647
+    ):
+        return jsonify(
+            message="requiredCapacity must be a positive whole number."
+        ), 400
+    if not isinstance(venue_requirements, str):
+        return jsonify(message="venueRequirements must be text."), 400
+    try:
+        if (
+            not isinstance(start, str)
+            or not isinstance(end, str)
+            or "T" not in start
+            or "T" not in end
+        ):
+            raise ValueError
+        parsed_start = datetime.fromisoformat(start)
+        parsed_end = datetime.fromisoformat(end)
+        if parsed_start.tzinfo or parsed_end.tzinfo or parsed_end <= parsed_start:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify(
+            message=(
+                "requestedStartTime and requestedEndTime must be local date-times, "
+                "with the end after the start."
+            )
+        ), 400
 
     try:
-        event = get_event(event_id, coordinator_id)
+        get_event(event_id, coordinator_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -110,32 +153,73 @@ def create_booking_request():
     if venue.get("status") != "Available":
         return jsonify(message=f"{venue['name']} is not currently available for booking."), 409
 
-    expected_attendance = event.get("expectedAttendance")
     capacity = venue.get("capacity")
-    if (
-        expected_attendance
-        and capacity is not None
-        and int(expected_attendance) > int(capacity)
-    ):
+    if capacity is None or required_capacity > int(capacity):
         return jsonify(
             message=(
                 f"{venue['name']} capacity ({capacity}) is below the expected "
-                f"attendance ({expected_attendance})."
+                f"attendance for this booking ({required_capacity})."
             )
         ), 422
 
-    start, end = event.get("preferredStartDate"), event.get("preferredEndDate")
-    if not start or not end:
-        return jsonify(message="Event is missing its preferred start/end dates."), 422
-
     try:
-        booking = create_booking(event_id, venue_id, start, end, coordinator_id)
+        booking = create_booking(
+            event_id,
+            venue_id,
+            start,
+            end,
+            required_capacity,
+            venue_requirements.strip(),
+            coordinator_id,
+        )
     except BookingConflictError:
         return jsonify(message=f"{venue['name']} is already booked for that time."), 409
     except Exception as e:
         return jsonify(message=f"Failed to save the booking request: {e}"), 502
 
     return jsonify(booking), 201
+
+
+@bp.get("/events/<event_id>/booking-requests")
+def list_booking_requests(event_id):
+    """Return each venue request for an event as a separate record."""
+    coordinator_id = request.args.get("coordinatorId")
+    if not coordinator_id:
+        return jsonify(message="coordinatorId is required."), 400
+    try:
+        get_event(event_id, coordinator_id)
+    except EventNotFoundError:
+        return jsonify(message="Event request not found."), 404
+    except EventNotAssignedError:
+        return jsonify(
+            message="This event request is not assigned to the given coordinator."
+        ), 403
+    except Exception as error:
+        return jsonify(message=f"Failed to look up the event: {error}"), 502
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        bookings_call = pool.submit(get_event_bookings, event_id)
+        venues_call = pool.submit(get_venues)
+        try:
+            bookings = bookings_call.result()
+            venues = venues_call.result()
+        except Exception:
+            return jsonify(message="Unable to load venue booking requests."), 502
+
+    venue_names = {
+        venue.get("id"): venue.get("name", "Unknown venue") for venue in venues
+    }
+    return jsonify(
+        bookings=[
+            {
+                **booking,
+                "venueName": venue_names.get(
+                    booking.get("venueId"), "Unknown venue"
+                ),
+            }
+            for booking in bookings
+        ]
+    )
 
 
 @bp.patch("/booking-requests/<booking_id>/approve")
