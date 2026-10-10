@@ -614,6 +614,12 @@ textarea:disabled {
   border-bottom: 1px solid var(--color-border);
 }
 
+.venue-booking-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
 .venue-booking-form {
   margin-top: var(--space-5);
   padding: var(--space-4);
