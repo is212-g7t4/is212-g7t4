@@ -11,7 +11,7 @@ from app.calendar import SINGAPORE
 # overlap/conflict computation over them (merged design — see AGENTS.md).
 COLUMNS = (
     "booking_id, event_id, venue_id, requested_start_time, requested_end_time, "
-    "status, requested_by, reviewed_by"
+    "required_capacity, venue_requirements, status, requested_by, reviewed_by"
 )
 HOLD_COLUMNS = "hold_id, venue_id, created_at, expires_at, held_by"
 
@@ -39,6 +39,8 @@ def serialize(row):
         "venueId": str(row["venue_id"]),
         "requestedStartTime": row["requested_start_time"].isoformat(),
         "requestedEndTime": row["requested_end_time"].isoformat(),
+        "requiredCapacity": row["required_capacity"],
+        "venueRequirements": row["venue_requirements"] or "",
         "status": row["status"],
         "requestedBy": str(row["requested_by"]) if row["requested_by"] else None,
         "reviewedBy": str(row["reviewed_by"]) if row["reviewed_by"] else None,
@@ -150,7 +152,7 @@ def _has_conflict(cursor, venue_id, start, end, exclude_booking_id=None):
     return cursor.fetchone() is not None
 
 
-def create_booking(database_url, event_id, venue_id, start, end, requested_by):
+def create_booking(database_url, event_id, venue_id, start, end, required_capacity, venue_requirements, requested_by):
     booking_id = str(uuid4())
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -165,13 +167,36 @@ def create_booking(database_url, event_id, venue_id, start, end, requested_by):
             cursor.execute(
                 f"""INSERT INTO public."VenueBooking"
                     (booking_id, event_id, venue_id, requested_start_time,
-                     requested_end_time, status, requested_by)
-                    VALUES (%s, %s, %s, %s, %s, 'Pending Review', %s)
+                     requested_end_time, required_capacity, venue_requirements,
+                     status, requested_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'Pending Review', %s)
                     RETURNING {COLUMNS}""",
-                [booking_id, event_id, venue_id, start, end, requested_by],
+                [
+                    booking_id,
+                    event_id,
+                    venue_id,
+                    start,
+                    end,
+                    required_capacity,
+                    venue_requirements,
+                    requested_by,
+                ],
             )
             saved = cursor.fetchone()
     return serialize(saved)
+
+
+def list_event_bookings(database_url, event_id):
+    """Return each independently managed booking linked to one event."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                    WHERE event_id = %s
+                    ORDER BY requested_start_time ASC, booking_id ASC""",
+                [event_id],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
 
 
 def create_hold(database_url, venue_id, expires_at, held_by):
@@ -284,7 +309,9 @@ def list_window_bookings(database_url, date_from, date_to):
                     UNION ALL
                     SELECT hold_id AS booking_id, NULL::uuid AS event_id,
                         venue_id, created_at AS requested_start_time,
-                        expires_at AS requested_end_time, 'On Hold' AS status,
+                        expires_at AS requested_end_time,
+                        NULL::integer AS required_capacity,
+                        ''::text AS venue_requirements, 'On Hold' AS status,
                         held_by AS requested_by, NULL::uuid AS reviewed_by
                     FROM public."VenueHold"
                     WHERE created_at < %s AND expires_at > %s

@@ -9,6 +9,8 @@ PAYLOAD = dict(
     requestedBy=USER_ID,
     requestedStartTime="2026-10-01T09:00",
     requestedEndTime="2026-10-01T12:00",
+    requiredCapacity=80,
+    venueRequirements="Projector",
 )
 
 
@@ -23,6 +25,9 @@ PAYLOAD = dict(
         PAYLOAD | {"requestedStartTime": None},
         PAYLOAD | {"requestedStartTime": "2026-10-01"},
         PAYLOAD | {"requestedStartTime": "2026-10-01T09:00+08:00"},
+        PAYLOAD | {"requiredCapacity": 0},
+        PAYLOAD | {"requiredCapacity": True},
+        PAYLOAD | {"venueRequirements": None},
     ],
 )
 def test_write_validation_unchanged(setup, payload):

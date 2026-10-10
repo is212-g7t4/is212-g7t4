@@ -35,9 +35,21 @@ BOOKING = {
     "venueId": "ven-2",
     "requestedStartTime": "2026-10-01T09:00:00",
     "requestedEndTime": "2026-10-01T12:00:00",
+    "requiredCapacity": 80,
+    "venueRequirements": "Projector",
     "status": "Pending Review",
     "requestedBy": "coord-1",
     "reviewedBy": None,
+}
+
+REQUEST = {
+    "eventId": "evt-1",
+    "venueId": "ven-2",
+    "coordinatorId": "coord-1",
+    "requestedStartTime": "2026-10-01T09:00",
+    "requestedEndTime": "2026-10-01T12:00",
+    "requiredCapacity": 80,
+    "venueRequirements": "Projector",
 }
 
 
@@ -62,20 +74,38 @@ def test_booking_request_succeeds_for_catalogued_available_venue(
     client = create_app().test_client()
     response = client.post(
         "/booking-requests",
-        json={"eventId": "evt-1", "venueId": "ven-2", "coordinatorId": "coord-1"},
+        json=REQUEST,
     )
 
     assert response.status_code == 201
     assert response.json == BOOKING
     mock_get_event.assert_called_once_with("evt-1", "coord-1")
     mock_create_booking.assert_called_once_with(
-        "evt-1", "ven-2", "2026-10-01T09:00", "2026-10-01T12:00", "coord-1"
+        "evt-1", "ven-2", "2026-10-01T09:00", "2026-10-01T12:00",
+        80, "Projector", "coord-1"
     )
 
 
 def test_booking_request_requires_all_fields():
     client = create_app().test_client()
     response = client.post("/booking-requests", json={"eventId": "evt-1"})
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"requestedStartTime": "2026-10-01"},
+        {"requestedEndTime": "2026-10-01T08:00"},
+        {"requiredCapacity": 0},
+        {"requiredCapacity": True},
+        {"venueRequirements": None},
+    ],
+)
+def test_booking_request_validates_booking_specific_details(change):
+    response = create_app().test_client().post(
+        "/booking-requests", json=REQUEST | change
+    )
     assert response.status_code == 400
 
 
@@ -86,7 +116,7 @@ def test_booking_request_rejects_unknown_event(mock_get_event):
     client = create_app().test_client()
     response = client.post(
         "/booking-requests",
-        json={"eventId": "missing", "venueId": "ven-1", "coordinatorId": "coord-1"},
+        json=REQUEST | {"eventId": "missing", "venueId": "ven-1"},
     )
     assert response.status_code == 404
 
@@ -98,7 +128,7 @@ def test_booking_request_rejects_coordinator_not_assigned_to_event(mock_get_even
     client = create_app().test_client()
     response = client.post(
         "/booking-requests",
-        json={"eventId": "evt-1", "venueId": "ven-1", "coordinatorId": "someone-else"},
+        json=REQUEST | {"venueId": "ven-1", "coordinatorId": "someone-else"},
     )
     assert response.status_code == 403
 
@@ -115,11 +145,7 @@ def test_booking_request_rejects_venue_not_in_catalogue(
     client = create_app().test_client()
     response = client.post(
         "/booking-requests",
-        json={
-            "eventId": "evt-1",
-            "venueId": "not-a-real-venue",
-            "coordinatorId": "coord-1",
-        },
+        json=REQUEST | {"venueId": "not-a-real-venue"},
     )
     assert response.status_code == 404
 
@@ -137,7 +163,7 @@ def test_booking_request_rejects_venue_that_is_not_available(
     client = create_app().test_client()
     response = client.post(
         "/booking-requests",
-        json={"eventId": "evt-1", "venueId": venue_id, "coordinatorId": "coord-1"},
+        json=REQUEST | {"venueId": venue_id},
     )
     assert response.status_code == 409
     assert "not currently available for booking" in response.json["message"]
@@ -145,15 +171,33 @@ def test_booking_request_rejects_venue_that_is_not_available(
 
 @patch("app.routes.get_venues")
 @patch("app.routes.get_event")
-def test_booking_request_rejects_insufficient_capacity(mock_get_event, mock_get_venues):
+def test_booking_request_uses_booking_capacity_not_event_total(mock_get_event, mock_get_venues):
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
 
     client = create_app().test_client()
-    response = client.post(
-        "/booking-requests",
-        json={"eventId": "evt-1", "venueId": "ven-1", "coordinatorId": "coord-1"},
+    with patch("app.routes.create_booking", return_value=BOOKING) as mock_create:
+        response = client.post(
+            "/booking-requests",
+            json=REQUEST | {"venueId": "ven-1", "requiredCapacity": 50},
+        )
+    assert response.status_code == 201
+    assert EVENT["expectedAttendance"] == "150"
+    assert mock_create.call_args.args[4] == 50
+
+
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_booking_request_rejects_booking_capacity_above_venue_capacity(
+    mock_get_event, mock_get_venues
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+
+    response = create_app().test_client().post(
+        "/booking-requests", json=REQUEST | {"venueId": "ven-1", "requiredCapacity": 61}
     )
+
     assert response.status_code == 422
 
 
@@ -171,9 +215,33 @@ def test_booking_request_rejects_double_booking(
     client = create_app().test_client()
     response = client.post(
         "/booking-requests",
-        json={"eventId": "evt-1", "venueId": "ven-2", "coordinatorId": "coord-1"},
+        json=REQUEST,
     )
     assert response.status_code == 409
+
+
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+@patch("app.routes.get_event_bookings")
+def test_lists_multiple_bookings_for_same_event_separately(
+    mock_get_event_bookings, mock_get_event, mock_get_venues
+):
+    mock_get_event.return_value = EVENT
+    mock_get_event_bookings.return_value = [
+        BOOKING,
+        BOOKING | {"id": "booking-2", "venueId": "ven-1", "requiredCapacity": 50},
+    ]
+    mock_get_venues.return_value = VENUES
+
+    response = create_app().test_client().get(
+        "/events/evt-1/booking-requests?coordinatorId=coord-1"
+    )
+
+    assert response.status_code == 200
+    assert [(item["id"], item["venueName"]) for item in response.json["bookings"]] == [
+        ("booking-1", "Grand Ballroom"),
+        ("booking-2", "Innovation Lab"),
+    ]
 
 
 @patch("app.routes.decide_booking")

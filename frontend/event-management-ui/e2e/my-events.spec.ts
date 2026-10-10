@@ -18,6 +18,7 @@ test('coordinator filters events and opens one with registrations', async ({ pag
     return json(route, { events: params.get('status') === 'Approved' ? [approved] : [makeEvent(), approved] })
   })
   await mock(page, 'event', '/events/evt-002', (route) => json(route, approved))
+  await mock(page, 'venueBooking', '/events/evt-002/booking-requests', (route) => json(route, { bookings: [] }))
   await mock(page, 'registration', '/registrations', (route) => {
     expect(new URL(route.request().url()).searchParams.get('eventId')).toBe('evt-002')
     return json(route, { registrations })

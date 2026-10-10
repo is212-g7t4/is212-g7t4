@@ -124,6 +124,7 @@ One row is one venue arrangement for one event. It starts either as a hold (plac
 | venueId | UUID (FK Venue) | | The venue being held or booked. |
 | requestedStartTime | TIMESTAMPTZ NOT NULL | | Advertised start of the booking, padded with setup time when checking for conflicts. |
 | requestedEndTime | TIMESTAMPTZ NOT NULL | | Advertised end of the booking, padded with turnaround time when checking for conflicts. |
+| requiredCapacity | INTEGER NOT NULL, positive | new | Expected attendance for this specific venue arrangement. Suitability compares this value—not the event total—with the venue capacity. |
 | venueRequirements | TEXT | | What this specific booking needs from the venue, read by Venue Staff when deciding. |
 | status | VARCHAR(50) | | The arrangement's current state (for example On Hold, Pending, Approved, Rejected, Expired). |
 | requestedBy | UUID (FK User), nullable | changed | The coordinator who submitted the request; empty while the row is only a hold. |

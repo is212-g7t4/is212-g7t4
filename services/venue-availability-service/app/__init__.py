@@ -18,6 +18,7 @@ from app.models import (
     decide_booking,
     list_active_holds,
     list_bookings,
+    list_event_bookings,
     list_window_bookings,
 )
 
@@ -52,7 +53,7 @@ def create_app(config=None):
         CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
         # The Vite dev server is pinned to 5174 (strictPort in
         # vite.config.ts), so that is the origin the browser sends.
-        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
+        FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN") or "http://localhost:5174",
     )
     app.config.update(config or {})
 
@@ -224,6 +225,8 @@ def create_app(config=None):
         requested_by = _parse_uuid(data.get("requestedBy"))
         start = _parse_datetime(data.get("requestedStartTime"))
         end = _parse_datetime(data.get("requestedEndTime"))
+        required_capacity = data.get("requiredCapacity")
+        venue_requirements = data.get("venueRequirements")
         if not event_id or not venue_id or not requested_by:
             return jsonify(
                 message="eventId, venueId and requestedBy must be valid ids."
@@ -236,6 +239,16 @@ def create_app(config=None):
             return jsonify(
                 message="requestedEndTime must be after requestedStartTime."
             ), 400
+        if (
+            isinstance(required_capacity, bool)
+            or not isinstance(required_capacity, int)
+            or not 1 <= required_capacity <= 2147483647
+        ):
+            return jsonify(
+                message="requiredCapacity must be a positive whole number."
+            ), 400
+        if not isinstance(venue_requirements, str):
+            return jsonify(message="venueRequirements must be text."), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
@@ -243,13 +256,30 @@ def create_app(config=None):
 
         try:
             booking = create_booking(
-                app.config["DATABASE_URL"], event_id, venue_id, start, end, requested_by
+                app.config["DATABASE_URL"],
+                event_id,
+                venue_id,
+                start,
+                end,
+                required_capacity,
+                venue_requirements.strip(),
+                requested_by,
             )
         except BookingConflictError:
             return jsonify(
                 message="This venue is already booked for the requested time."
             ), 409
         return jsonify(booking), 201
+
+    @app.get("/events/<uuid:event_id>/venue-bookings")
+    def get_event_bookings(event_id):
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        return jsonify(
+            bookings=list_event_bookings(app.config["DATABASE_URL"], str(event_id))
+        )
 
     @app.patch("/venue-bookings/<uuid:booking_id>/approve")
     def approve_booking(booking_id):
