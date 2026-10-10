@@ -24,6 +24,10 @@ class BookingConflictError(Exception):
     pass
 
 
+class BookingStateError(Exception):
+    pass
+
+
 class HoldConflictError(Exception):
     pass
 
@@ -186,6 +190,87 @@ def create_booking(database_url, event_id, venue_id, start, end, required_capaci
     return serialize(saved)
 
 
+def update_booking(
+    database_url,
+    booking_id,
+    event_id,
+    venue_id,
+    start,
+    end,
+    required_capacity,
+    venue_requirements,
+):
+    """Update one booking and resubmit only that row for review."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                    WHERE booking_id = %s AND event_id = %s FOR UPDATE""",
+                [booking_id, event_id],
+            )
+            booking = cursor.fetchone()
+            if not booking:
+                raise BookingNotFoundError
+            if booking["status"] == "Cancelled":
+                raise BookingStateError
+
+            cursor.execute(
+                'SELECT venue_id FROM public."Venue" WHERE venue_id = %s FOR UPDATE',
+                [venue_id],
+            )
+            if _has_conflict(
+                cursor, venue_id, start, end, exclude_booking_id=booking_id
+            ):
+                raise BookingConflictError
+
+            cursor.execute(
+                f"""UPDATE public."VenueBooking"
+                    SET venue_id = %s, requested_start_time = %s,
+                        requested_end_time = %s, required_capacity = %s,
+                        venue_requirements = %s, status = 'Pending Review',
+                        reviewed_by = NULL
+                    WHERE booking_id = %s AND event_id = %s
+                    RETURNING {COLUMNS}""",
+                [
+                    venue_id,
+                    start,
+                    end,
+                    required_capacity,
+                    venue_requirements,
+                    booking_id,
+                    event_id,
+                ],
+            )
+            saved = cursor.fetchone()
+    return serialize(saved)
+
+
+def cancel_booking(database_url, booking_id, event_id):
+    """Retain one booking as Cancelled without touching sibling bookings."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                    WHERE booking_id = %s AND event_id = %s FOR UPDATE""",
+                [booking_id, event_id],
+            )
+            booking = cursor.fetchone()
+            if not booking:
+                raise BookingNotFoundError
+            if booking["status"] == "Cancelled":
+                return serialize(booking)
+
+            cursor.execute(
+                f"""UPDATE public."VenueBooking"
+                    SET status = 'Cancelled'
+                    WHERE booking_id = %s AND event_id = %s
+                    RETURNING {COLUMNS}""",
+                [booking_id, event_id],
+            )
+            cancelled = cursor.fetchone()
+    return serialize(cancelled)
+
+
 def list_event_bookings(database_url, event_id):
     """Return each independently managed booking linked to one event."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -259,6 +344,8 @@ def decide_booking(database_url, booking_id, reviewed_by, status):
             booking = cursor.fetchone()
             if not booking:
                 raise BookingNotFoundError
+            if booking["status"] == "Cancelled":
+                raise BookingStateError
             if status == "Approved":
                 # Re-check — another booking may have been approved since this one was requested.
                 cursor.execute(

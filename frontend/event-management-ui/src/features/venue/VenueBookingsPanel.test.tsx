@@ -1,13 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetchVenues } from './venues'
-import { createVenueBooking, fetchVenueBookings } from './venueBookings'
+import { cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
 import { VenueBookingsPanel } from './VenueBookingsPanel'
 
 vi.mock('./venues', () => ({ fetchVenues: vi.fn() }))
 vi.mock('./venueBookings', () => ({
+  cancelVenueBooking: vi.fn(),
   createVenueBooking: vi.fn(),
   fetchVenueBookings: vi.fn(),
+  updateVenueBooking: vi.fn(),
 }))
 
 const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -42,6 +44,7 @@ const renderPanel = () => render(<VenueBookingsPanel
 
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(fetchVenues).mockResolvedValue(venues)
   vi.mocked(fetchVenueBookings).mockResolvedValue(bookings)
 })
@@ -97,4 +100,61 @@ test('one failed request leaves existing bookings intact and permits another sub
   fireEvent.click(screen.getByRole('button', { name: 'Submit venue booking' }))
   expect(await screen.findByText('Breakout Room B booking request submitted independently.')).toBeInTheDocument()
   expect(createVenueBooking).toHaveBeenCalledTimes(2)
+})
+
+test('editing one booking replaces only that booking and resets it to pending review', async () => {
+  vi.mocked(updateVenueBooking).mockResolvedValue({
+    ...bookings[0],
+    requiredCapacity: 450,
+    venueRequirements: 'Revised main stage',
+    status: 'Pending Review',
+    reviewedBy: null,
+  })
+  renderPanel()
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+
+  fireEvent.click(screen.getAllByRole('button', { name: 'Edit booking' })[0])
+  expect(screen.getByRole('heading', { name: 'Edit venue booking' })).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Expected attendance / required capacity *'), { target: { value: '450' } })
+  fireEvent.change(screen.getByLabelText('Venue requirements'), { target: { value: 'Revised main stage' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save venue booking' }))
+
+  await waitFor(() => expect(updateVenueBooking).toHaveBeenCalledWith('booking-a', {
+    eventId,
+    venueId: 'venue-a',
+    coordinatorId,
+    requestedStartTime: '2026-10-20T09:00',
+    requestedEndTime: '2026-10-20T12:00',
+    requiredCapacity: 450,
+    venueRequirements: 'Revised main stage',
+  }))
+  expect(await screen.findByText('Auditorium A booking updated and returned to pending review.')).toBeInTheDocument()
+  expect(screen.getByText('Breakout Room B', { selector: 'strong' })).toBeInTheDocument()
+  expect(screen.getByText('450', { selector: 'dd' })).toBeInTheDocument()
+  expect(screen.getByText('50', { selector: 'dd' })).toBeInTheDocument()
+})
+
+test('cancelling one booking retains it as cancelled and leaves its sibling unchanged', async () => {
+  vi.mocked(cancelVenueBooking).mockResolvedValue({ ...bookings[0], status: 'Cancelled' })
+  renderPanel()
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+
+  fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+
+  await waitFor(() => expect(cancelVenueBooking).toHaveBeenCalledWith('booking-a', eventId, coordinatorId))
+  expect(await screen.findByText('Auditorium A booking cancelled. Other venue bookings were not changed.')).toBeInTheDocument()
+  expect(screen.getByText('Cancelled')).toBeInTheDocument()
+  expect(screen.getByText('Pending Review')).toBeInTheDocument()
+  expect(screen.getAllByRole('button', { name: 'Edit booking' })).toHaveLength(1)
+})
+
+test('declining cancellation leaves the selected booking unchanged', async () => {
+  vi.mocked(window.confirm).mockReturnValue(false)
+  renderPanel()
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+
+  fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+
+  expect(cancelVenueBooking).not.toHaveBeenCalled()
+  expect(screen.getByText('Approved')).toBeInTheDocument()
 })

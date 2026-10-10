@@ -45,3 +45,23 @@ export async function createVenueBooking(details: CreateVenueBooking): Promise<V
     body: JSON.stringify(details),
   })
 }
+
+export async function updateVenueBooking(bookingId: string, details: CreateVenueBooking): Promise<VenueBooking> {
+  return request(`/booking-requests/${encodeURIComponent(bookingId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(details),
+  })
+}
+
+export async function cancelVenueBooking(
+  bookingId: string,
+  eventId: string,
+  coordinatorId: string,
+): Promise<VenueBooking> {
+  return request(`/booking-requests/${encodeURIComponent(bookingId)}/cancel`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId, coordinatorId }),
+  })
+}

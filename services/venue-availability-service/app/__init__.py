@@ -10,9 +10,11 @@ from app.calendar import parse_boundary
 from app.models import (
     BookingConflictError,
     BookingNotFoundError,
+    BookingStateError,
     CalendarDataError,
     HoldConflictError,
     HoldVenueNotFoundError,
+    cancel_booking,
     create_booking,
     create_hold,
     decide_booking,
@@ -20,6 +22,7 @@ from app.models import (
     list_bookings,
     list_event_bookings,
     list_window_bookings,
+    update_booking,
 )
 
 # SCRUM-26: the longest window the venue search will answer for. Same spirit
@@ -281,6 +284,78 @@ def create_app(config=None):
             bookings=list_event_bookings(app.config["DATABASE_URL"], str(event_id))
         )
 
+    @app.patch("/venue-bookings/<uuid:booking_id>")
+    def update_booking_route(booking_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+
+        event_id = _parse_uuid(data.get("eventId"))
+        venue_id = _parse_uuid(data.get("venueId"))
+        start = _parse_datetime(data.get("requestedStartTime"))
+        end = _parse_datetime(data.get("requestedEndTime"))
+        required_capacity = data.get("requiredCapacity")
+        venue_requirements = data.get("venueRequirements")
+        if not event_id or not venue_id:
+            return jsonify(message="eventId and venueId must be valid ids."), 400
+        if not start or not end or end <= start:
+            return jsonify(
+                message="Booking dates must be valid, with the end after the start."
+            ), 400
+        if (
+            isinstance(required_capacity, bool)
+            or not isinstance(required_capacity, int)
+            or not 1 <= required_capacity <= 2147483647
+        ):
+            return jsonify(
+                message="requiredCapacity must be a positive whole number."
+            ), 400
+        if not isinstance(venue_requirements, str):
+            return jsonify(message="venueRequirements must be text."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+
+        try:
+            booking = update_booking(
+                app.config["DATABASE_URL"],
+                str(booking_id),
+                event_id,
+                venue_id,
+                start,
+                end,
+                required_capacity,
+                venue_requirements.strip(),
+            )
+        except BookingNotFoundError:
+            return jsonify(message="Venue booking not found for this event."), 404
+        except BookingStateError:
+            return jsonify(message="Cancelled venue bookings cannot be modified."), 409
+        except BookingConflictError:
+            return jsonify(
+                message="This venue is already booked for the requested time."
+            ), 409
+        return jsonify(booking), 200
+
+    @app.patch("/venue-bookings/<uuid:booking_id>/cancel")
+    def cancel_booking_route(booking_id):
+        data = request.get_json(silent=True)
+        event_id = _parse_uuid(data.get("eventId")) if isinstance(data, dict) else None
+        if not event_id:
+            return jsonify(message="eventId must be a valid id."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        try:
+            booking = cancel_booking(
+                app.config["DATABASE_URL"], str(booking_id), event_id
+            )
+        except BookingNotFoundError:
+            return jsonify(message="Venue booking not found for this event."), 404
+        return jsonify(booking), 200
+
     @app.patch("/venue-bookings/<uuid:booking_id>/approve")
     def approve_booking(booking_id):
         return _decide(booking_id, "Approved")
@@ -306,6 +381,8 @@ def create_app(config=None):
             )
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found."), 404
+        except BookingStateError:
+            return jsonify(message="Cancelled venue bookings cannot be reviewed."), 409
         except BookingConflictError:
             return jsonify(
                 message="This venue is already booked for the requested time."
