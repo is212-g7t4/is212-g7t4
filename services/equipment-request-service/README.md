@@ -15,10 +15,10 @@ which calls this service.
 cp .env services/equipment-request-service/.env   # from the repo root
 cd services/equipment-request-service
 uv sync
-uv run --env-file .env flask --app app run --port 5009
+uv run --env-file .env flask --app app run --port 5011
 ```
 
-Or `docker compose up --build equipment-request-service` (port 5009).
+Or `docker compose up --build equipment-request-service` (port 5011).
 
 ## Endpoints
 

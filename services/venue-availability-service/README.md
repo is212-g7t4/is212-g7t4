@@ -171,12 +171,16 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
   --data-urlencode 'dateTo=2026-11-10T12:00:00'
 ```
 
-## Existing write compatibility (unchanged)
+## Venue booking writes and event grouping
 
 - `POST /venue-bookings`: body `{eventId, venueId, requestedStartTime,
-  requestedEndTime, requestedBy}`; creates `Pending Review`; returns `409` on
-  approved overlap. Continues to accept **naive** datetime input only and
-  returns naive times. Calendar offset handling does not change this contract.
+  requestedEndTime, requiredCapacity, venueRequirements, requestedBy}`;
+  creates `Pending Review`; returns `409` on an approved overlap for the same
+  venue. Conflict detection keys on venue and time, not event, so overlapping
+  requests for different venues in one event remain independent. The write
+  accepts **naive** datetime input only and returns naive times.
+- `GET /events/<eventId>/venue-bookings`: returns all booking rows linked to
+  one event, ordered independently by requested start time and booking ID.
 - `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy}`;
   approval rechecks conflicts; existing `400/404/409/503` behavior remains.
 - `GET /health` remains available without DEV headers.

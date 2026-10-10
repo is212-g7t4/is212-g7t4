@@ -44,8 +44,8 @@ assignments won't have a reason worth logging, only reassignments might.
 
 ### Venue Booking Service
 
-Processes venue booking requests end-to-end: checks suitability (capacity/
-facilities vs. the event's requirements) via Venue Service, then persists
+Processes venue booking requests end-to-end: checks each request's suitability
+(especially venue capacity vs. that booking's required capacity), then persists
 the booking request and checks for double-booking via Venue Availability
 Service (which owns both the records and the conflict check — see the
 Atomic services table below; this merges what used to be two separate

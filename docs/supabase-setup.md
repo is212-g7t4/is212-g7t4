@@ -90,7 +90,7 @@ ORDER BY table_name;
 | `public."EventChangeReq"` | Event | `change_id` (PK), `event_id`, `requested_changes` (jsonb), `reviewed_by` |
 | `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `description`, `total_quantity`, `location`, `operational_status` |
 | `public."User"` | User | `user_id` (PK), `username`, `email`, `role`, `manager_id` (self-reference) |
-| `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `status`, `requested_by`, `reviewed_by` |
+| `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `required_capacity`, `venue_requirements`, `status`, `requested_by`, `reviewed_by` |
 | `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `supported_layouts` (jsonb), `operational_status` |
 | `public."Registration"` | Registration | `registration_id` (PK), `event_id`, `attendee_id` |
 | `public."EquipmentRequest"` | Equipment Request | `equipment_request_id` (PK), `event_id`, `equipment_id`, `quantity_requested`, `reviewed_by` |
@@ -127,16 +127,18 @@ do not claim the full Week 4 unavailability requirement is complete.
 |---|---|---|
 | Booking identity and relationships | UUID PK; FKs to Event, Venue and User | Existing references support the model; foreign-key columns remain nullable. |
 | Booking range | Both fields are `timestamp without time zone`, nullable | SCRUM-25 interprets existing naive values as Singapore local; reads accept naive or offset ISO datetimes and output `+08:00`. No type migration was applied. |
-| Required values | Only `booking_id` is `NOT NULL` | Require venue, event, requester, start, end and status in write validation; audit/backfill before adding DB `NOT NULL` constraints. Never silently treat malformed rows as free time. |
+| Required values | The per-booking `required_capacity` and `venue_requirements` migration adds `NOT NULL`; older core columns may still reflect the live export | Require venue, event, requester, start, end and status in write validation. Never silently treat malformed rows as free time. |
 | Range validity | No end-after-start check shown | Validate end > start; add a DB CHECK after auditing existing data. |
 | Status | Unconstrained nullable varchar | Inspect distinct live values and agree one canonical enum/check before mapping approved/pending states. |
 | Concurrent approvals | No overlap exclusion constraint shown | Recheck and save under a transaction-safe per-venue lock or equivalent DB enforcement. Every blocking write must follow the same rule. |
 | Query performance | PKs shown; secondary indexes not supplied | Inspect live indexes; add a venue/time-range index if needed. |
 | Internal-only access | User role field exists; JWT linkage/policies not established by this export | Production auth remains deferred. SCRUM-25 tests direct external-role denial only in opt-in, spoofable DEV header simulation; never claim real identity enforcement. |
 
-No new booking columns are required for basic conflict computation. However,
-the schema alone does not enforce valid intervals, canonical statuses or
-no-double-booking, and it does not implement authentication or calendar APIs.
+Conflict computation itself needs no additional booking columns. The
+`required_capacity` and `venue_requirements` columns are instead required for
+per-booking suitability and display. The schema alone does not enforce
+canonical statuses or no-double-booking, and it does not implement
+authentication or calendar APIs.
 An approved event is not automatically an approved venue booking.
 
 Query intervals as start-inclusive, end-exclusive: an overlap exists when

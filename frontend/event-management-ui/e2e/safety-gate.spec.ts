@@ -13,6 +13,7 @@ test('AC1: an approved event is not offered Confirmed, and is told to submit for
   await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [approved] }))
   await mock(page, 'event', `/events/${approved.id}`, (route) => json(route, approved))
+  await mock(page, 'venueBooking', `/events/${approved.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   // 'Approved' still shows the registrations panel, which is left alone by this story.
   await mock(page, 'registration', '/registrations', (route) => json(route, { registrations: [] }))
   await page.goto('/my-events')
@@ -38,6 +39,7 @@ test('a confirmed event has reached preparation and can record progress', async 
   await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [confirmed] }))
   await mock(page, 'event', `/events/${confirmed.id}`, (route) => json(route, confirmed))
+  await mock(page, 'venueBooking', `/events/${confirmed.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   await mock(page, 'event', `/events/${confirmed.id}/progress`, (route) => {
     patched.push(route.request().postDataJSON())
     return json(route, { ...confirmed, actionDetails: 'Preparation under way.' })

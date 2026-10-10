@@ -118,14 +118,14 @@ Wrapper (called only by Notification Service).
 
 **Sub-flow A — booking request submission:**
 
-1. `HTTP POST /booking-requests {eventId, venueId, proposedDate, startTime, endTime, expectedAttendance}` — UI → Venue Booking Service
+1. `HTTP POST /booking-requests {eventId, venueId, requestedStartTime, requestedEndTime, requiredCapacity, venueRequirements}` — UI → Venue Booking Service. Each request is independent; several may share one event.
 2. `HTTP GET /events/{eventId}` — Venue Booking Service → Event Service
 3. `HTTP 200 Resp {expectedAttendance, date, startTime, endTime}` — Event Service → Venue Booking Service
 4. `HTTP GET /venues/{venueId}` — Venue Booking Service → Venue Service
 5. `HTTP 200 Resp {capacity, facilities, accessibility, layouts}` — Venue Service → Venue Booking Service
-6. `HTTP POST /venues/{venueId}/suitability-check {expectedAttendance, requiredFacilities}` — Venue Booking Service → Venue Service
+6. Venue Booking Service evaluates the selected catalogue venue against this booking's `requiredCapacity` and operational status. It does not use the event's total attendance for venue capacity.
 7. `HTTP 200 Resp {suitable, reasons}` — Venue Service → Venue Booking Service
-8. `HTTP POST /venue-bookings {eventId, venueId, requestedStartTime, requestedEndTime, requestedBy}` — Venue Booking Service → Venue Availability Service (persists the booking and checks for conflicts against existing Approved bookings there)
+8. `HTTP POST /venue-bookings {eventId, venueId, requestedStartTime, requestedEndTime, requiredCapacity, venueRequirements, requestedBy}` — Venue Booking Service → Venue Availability Service (persists the booking and checks that venue's conflicts against existing Approved bookings there)
 9. `HTTP 201 Resp {bookingId, status: Pending Review}` or `HTTP 409 Resp {message}` on conflict — Venue Availability Service → Venue Booking Service
 10. `HTTP 201 Resp {bookingId, status: Pending Review}` — Venue Booking Service → UI
 

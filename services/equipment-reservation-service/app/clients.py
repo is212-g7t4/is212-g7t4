@@ -36,7 +36,7 @@ def _call(method, url, **kwargs):
 
 
 def _request_service(path):
-    return f"{_base('EQUIPMENT_REQUEST_SERVICE_URL', 'http://localhost:5009')}{path}"
+    return f"{_base('EQUIPMENT_REQUEST_SERVICE_URL', 'http://localhost:5011')}{path}"
 
 
 def _identity(headers):

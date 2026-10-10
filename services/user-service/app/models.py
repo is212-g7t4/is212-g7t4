@@ -1,9 +1,13 @@
 from contextlib import closing
+from threading import BoundedSemaphore
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 COLUMNS = "user_id, username, email, role, organization, contact_details, manager_id"
+# The hosted database pool rejects short bursts of many new connections. Keep
+# this atomic service below that limit while still allowing concurrent reads.
+DATABASE_SLOTS = BoundedSemaphore(value=5)
 
 
 def serialize(row):
@@ -27,10 +31,11 @@ def list_users(database_url, role=None):
                     ORDER BY username ASC, user_id ASC"""
         params = [role]
 
-    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
-        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(query, params)
-            return [serialize(row) for row in cursor.fetchall()]
+    with DATABASE_SLOTS:
+        with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+            with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query, params)
+                return [serialize(row) for row in cursor.fetchall()]
 
 
 class UserNotFoundError(Exception):
@@ -38,13 +43,14 @@ class UserNotFoundError(Exception):
 
 
 def get_user(database_url, user_id):
-    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
-        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."User" WHERE user_id = %s""",
-                [user_id],
-            )
-            user = cursor.fetchone()
+    with DATABASE_SLOTS:
+        with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+            with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    f"""SELECT {COLUMNS} FROM public."User" WHERE user_id = %s""",
+                    [user_id],
+                )
+                user = cursor.fetchone()
     if not user:
         raise UserNotFoundError
     return serialize(user)
