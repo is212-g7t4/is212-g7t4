@@ -181,8 +181,14 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
   accepts **naive** datetime input only and returns naive times.
 - `GET /events/<eventId>/venue-bookings`: returns all booking rows linked to
   one event, ordered independently by requested start time and booking ID.
+- `PATCH /venue-bookings/<id>`: updates one row, scoped by `eventId`, rechecks
+  approved-booking/hold conflicts while excluding that row's old interval,
+  and resets the selected booking to `Pending Review` with no reviewer.
+- `PATCH /venue-bookings/<id>/cancel`: scopes by `eventId` and retains the
+  selected row as `Cancelled`; repeating the request is idempotent.
 - `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy}`;
-  approval rechecks conflicts; existing `400/404/409/503` behavior remains.
+  approval rechecks conflicts. `Cancelled` is terminal and cannot be edited,
+  approved, or rejected.
 - `GET /health` remains available without DEV headers.
 
 ## Tests and review

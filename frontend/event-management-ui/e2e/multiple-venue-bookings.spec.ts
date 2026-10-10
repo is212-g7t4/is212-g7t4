@@ -29,6 +29,22 @@ test('assigned coordinator creates and views independent venue bookings for one 
       reviewedBy: null,
     }, 201)
   })
+  await mock(page, 'venueBooking', '/booking-requests/booking-a', (route) => {
+    const body = route.request().postDataJSON()
+    return json(route, {
+      ...existing,
+      ...body,
+      status: 'Pending Review',
+      reviewedBy: null,
+    })
+  })
+  await mock(page, 'venueBooking', '/booking-requests/booking-b/cancel', (route) => json(route, {
+    ...submitted[0],
+    id: 'booking-b',
+    status: 'Cancelled',
+    requestedBy: users.coordinator.user_id,
+    reviewedBy: null,
+  }))
 
   await page.goto('/my-events')
   await page.getByRole('button', { name: /Tech Conference/ }).click()
@@ -47,4 +63,15 @@ test('assigned coordinator creates and views independent venue bookings for one 
     requiredCapacity: 10,
     venueRequirements: 'Breakout tables',
   })
+
+  await page.getByRole('button', { name: 'Edit booking' }).first().click()
+  await page.getByLabel('Expected attendance / required capacity *').fill('450')
+  await page.getByRole('button', { name: 'Save venue booking' }).click()
+  await expect(page.getByText('Grand Hall booking updated and returned to pending review.')).toBeVisible()
+  await expect(page.getByText('450', { exact: true })).toBeVisible()
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Cancel booking' }).last().click()
+  await expect(page.getByText('Meeting Room booking cancelled. Other venue bookings were not changed.')).toBeVisible()
+  await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
 })

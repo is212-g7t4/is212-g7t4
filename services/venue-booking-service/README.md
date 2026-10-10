@@ -108,11 +108,20 @@ every other service.
 - `GET /events/<eventId>/booking-requests?coordinatorId=<id>` — lists every
   venue booking for the assigned coordinator's event as a separate item,
   enriched with the venue name.
+- `PATCH /booking-requests/<id>` — modifies only the selected booking. The
+  body uses the same booking fields as creation. Event assignment, venue
+  operational status, booking-specific capacity, and conflicts are checked
+  again. Success resets that booking to `Pending Review` and clears its prior
+  reviewer; cancelled bookings cannot be modified.
+- `PATCH /booking-requests/<id>/cancel` — body `{eventId, coordinatorId}`;
+  retains only the selected booking with `status: "Cancelled"`. The operation
+  is idempotent and does not alter sibling bookings for the event.
 - `PATCH /booking-requests/<id>/approve` / `PATCH /booking-requests/<id>/reject`
   — Venue Staff decision. Body must include `{"reviewedBy": "<user id>"}`.
   - `404` if the booking doesn't exist.
   - `409` on approve if another booking was approved for an overlapping time
-    since this one was requested (re-checked at decision time).
+    since this one was requested (re-checked at decision time), or if the
+    booking was cancelled.
   - `200` with the updated booking otherwise.
 
 ## Known limitation
