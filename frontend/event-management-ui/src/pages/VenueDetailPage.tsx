@@ -3,6 +3,7 @@ import type { Role, User } from '../types'
 import { fetchVenue } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
 import { fetchActiveVenueHolds, placeVenueHold, showVenueHoldStatus } from '../features/venue/venueHolds'
+import type { VenueHold } from '../features/venue/venueHolds'
 import { VENUE_ACCESS_NOTICE, canViewVenues } from '../features/venue/permissions'
 import { ArrowLeftIcon, EditIcon, RefreshIcon } from '../components/Icon'
 import { RoleWarning } from '../components/FormControls'
@@ -12,6 +13,12 @@ function statusClass(status: string): string {
   return status.toLowerCase().replace(/\s+/g, '-')
 }
 
+// Service returns Singapore-local naive timestamps, so display them without timezone conversion.
+function formatExpiry(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 function Chips({ values }: { values: string[] }) {
   if (values.length === 0) return <>Not specified</>
   return <span className="chip-list">{values.map((value) => <span key={value} className="chip">{value}</span>)}</span>
@@ -19,6 +26,7 @@ function Chips({ values }: { values: string[] }) {
 
 export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; onBack: () => void; onEdit: () => void }) {
   const [venue, setVenue] = useState<Venue | null>(null)
+  const [hold, setHold] = useState<VenueHold | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
@@ -33,6 +41,7 @@ export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venue
     Promise.all([fetchVenue(venueId), fetchActiveVenueHolds()]).then(([fetched, holds]) => {
       if (active) {
         setVenue(showVenueHoldStatus([fetched], holds)[0])
+        setHold(holds.find((item) => item.venueId === venueId) ?? null)
         setError('')
       }
     }).catch((cause: Error) => {
@@ -57,7 +66,7 @@ export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venue
     setHoldSaving(true)
     setHoldError('')
     try {
-      await placeVenueHold(venueId, holdExpiry, user)
+      setHold(await placeVenueHold(venueId, holdExpiry, user))
       setVenue((current) => current ? { ...current, status: 'On Hold' } : current)
       setHoldFormOpen(false)
       setHoldExpiry('')
@@ -87,6 +96,7 @@ export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venue
         <div className="event-detail"><dt>Operating status</dt><dd>{venue.status || 'Not specified'}</dd></div>
         <div className="event-detail"><dt>Facilities</dt><dd><Chips values={venue.facilities} /></dd></div>
         <div className="event-detail"><dt>Supported layouts</dt><dd><Chips values={venue.supportedLayouts} /></dd></div>
+        {hold && <div className="event-detail"><dt>Hold expires</dt><dd>{formatExpiry(hold.expiresAt)}</dd></div>}
       </dl>
       {role === 'Venue Staff' && <footer className="venue-detail-actions">
         <div className="venue-detail-action-buttons">
