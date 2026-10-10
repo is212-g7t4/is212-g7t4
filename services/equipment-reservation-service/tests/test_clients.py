@@ -39,7 +39,7 @@ def test_list_requests_forwards_only_identity_headers_and_filters(sent):
     assert clients.list_requests(HEADERS, "Approved", ["a", "b"]) == [1]
 
     method, url, kwargs = calls[0]
-    assert (method, url) == ("GET", "http://localhost:5009/equipment-requests")
+    assert (method, url) == ("GET", "http://localhost:5011/equipment-requests")
     assert kwargs["params"] == {"status": "Approved", "eventIds": "a,b"}
     assert kwargs["headers"] == {"X-Dev-User-Id": "u", "X-Dev-Role": "Technical Support"}
 
@@ -66,9 +66,9 @@ def test_get_and_review_calls(sent):
     assert clients.review_event_requests(HEADERS, "ev", "Rejected") == [{"id": "r"}]
 
     assert [(c[0], c[1]) for c in calls] == [
-        ("GET", "http://localhost:5009/equipment-requests/r"),
-        ("PATCH", "http://localhost:5009/equipment-requests/r"),
-        ("PATCH", "http://localhost:5009/events/ev/equipment-requests"),
+        ("GET", "http://localhost:5011/equipment-requests/r"),
+        ("PATCH", "http://localhost:5011/equipment-requests/r"),
+        ("PATCH", "http://localhost:5011/events/ev/equipment-requests"),
     ]
     assert calls[1][2]["json"] == {"status": "Approved"}
 

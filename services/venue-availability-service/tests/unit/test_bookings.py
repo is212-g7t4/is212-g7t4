@@ -1,6 +1,9 @@
 """Venue Availability: booking creation, approval/rejection, and conflict-checking."""
 
+from datetime import datetime
+
 from app import create_app
+from app.models import _has_conflict
 from tests.unit.factories import (
     BOOKING_ID,
     EVENT_ID,
@@ -27,6 +30,8 @@ def test_create_booking_succeeds_when_no_conflict(setup):
             "venueId": VENUE_ID,
             "requestedStartTime": "2026-10-01T09:00",
             "requestedEndTime": "2026-10-01T12:00",
+            "requiredCapacity": 80,
+            "venueRequirements": "Projector and movable seating",
             "requestedBy": USER_ID,
         },
     )
@@ -34,6 +39,23 @@ def test_create_booking_succeeds_when_no_conflict(setup):
     assert response.status_code == 201
     assert response.json["status"] == "Pending Review"
     assert response.json["eventId"] == EVENT_ID
+    assert response.json["requiredCapacity"] == 80
+    assert response.json["venueRequirements"] == "Projector and movable seating"
+
+
+def test_conflicts_are_scoped_to_venue_and_time_not_event(setup):
+    """AC6: another venue may overlap even when both bookings share an event."""
+    _, cursor = setup
+    cursor.fetchone.return_value = None
+
+    assert not _has_conflict(
+        cursor, VENUE_ID, datetime(2026, 10, 1, 9), datetime(2026, 10, 1, 12)
+    )
+
+    query, params = cursor.execute.call_args.args
+    assert "WHERE venue_id = %s" in query
+    assert "event_id" not in query
+    assert params[0] == VENUE_ID
 
 
 def test_create_booking_rejects_overlap_with_approved_booking(setup):
@@ -47,6 +69,8 @@ def test_create_booking_rejects_overlap_with_approved_booking(setup):
             "venueId": VENUE_ID,
             "requestedStartTime": "2026-10-01T09:00",
             "requestedEndTime": "2026-10-01T12:00",
+            "requiredCapacity": 80,
+            "venueRequirements": "",
             "requestedBy": USER_ID,
         },
     )
@@ -63,6 +87,8 @@ def test_create_booking_requires_end_after_start(setup):
             "venueId": VENUE_ID,
             "requestedStartTime": "2026-10-01T12:00",
             "requestedEndTime": "2026-10-01T09:00",
+            "requiredCapacity": 80,
+            "venueRequirements": "",
             "requestedBy": USER_ID,
         },
     )
@@ -134,4 +160,25 @@ def test_get_bookings_lists_for_venue(setup):
 
     assert response.status_code == 200
     assert len(response.json["bookings"]) == 1
+
+
+def test_get_event_bookings_lists_each_booking_separately(setup):
+    client, cursor = setup
+    cursor.fetchall.return_value = [
+        booking_row(),
+        booking_row(
+            booking_id="00000000-0000-0000-0000-00000000000c",
+            venue_id="00000000-0000-0000-0000-0000000000f2",
+            required_capacity=50,
+            venue_requirements="Breakout layout",
+        ),
+    ]
+
+    response = client.get(f"/events/{EVENT_ID}/venue-bookings")
+
+    assert response.status_code == 200
+    assert [booking["requiredCapacity"] for booking in response.json["bookings"]] == [80, 50]
+    query, params = cursor.execute.call_args.args
+    assert "WHERE event_id = %s" in query
+    assert params == [EVENT_ID]
 

@@ -7,6 +7,9 @@ import { EventDetailPage } from './EventDetailPage'
 
 vi.mock('../features/event/submission', () => ({ eventApi: vi.fn() }))
 vi.mock('../features/registration/registrations', () => ({ fetchRegistrations: vi.fn() }))
+vi.mock('../features/venue/VenueBookingsPanel', () => ({
+  VenueBookingsPanel: () => <section aria-label="Venue bookings" />,
+}))
 
 const coordinatorId = '11111111-1111-4111-8111-111111111111'
 const event: SubmittedEvent = {

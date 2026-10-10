@@ -593,6 +593,39 @@ textarea:disabled {
   margin-bottom: 0;
 }
 
+.venue-booking-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.venue-booking-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+}
+
+.venue-booking-item header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.venue-booking-form {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+}
+
+.venue-booking-form h4 {
+  margin-bottom: var(--space-4);
+}
+
 .event-card-actions {
   display: flex;
   flex-direction: column;

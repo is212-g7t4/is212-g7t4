@@ -87,7 +87,13 @@ def get_bookings_between(start: str, end: str) -> list:
 
 
 def create_booking(
-    event_id: str, venue_id: str, start: str, end: str, requested_by: str
+    event_id: str,
+    venue_id: str,
+    start: str,
+    end: str,
+    required_capacity: int,
+    venue_requirements: str,
+    requested_by: str,
 ) -> dict:
     """Persist a booking request in Venue Availability Service (conflict-checked there)."""
     response = httpx.post(
@@ -97,6 +103,8 @@ def create_booking(
             "venueId": venue_id,
             "requestedStartTime": start,
             "requestedEndTime": end,
+            "requiredCapacity": required_capacity,
+            "venueRequirements": venue_requirements,
             "requestedBy": requested_by,
         },
     )
@@ -104,6 +112,15 @@ def create_booking(
         raise BookingConflictError
     response.raise_for_status()
     return response.json()
+
+
+def get_event_bookings(event_id: str) -> list:
+    """Load all independently managed venue bookings linked to an event."""
+    response = httpx.get(
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/events/{event_id}/venue-bookings"
+    )
+    response.raise_for_status()
+    return response.json()["bookings"]
 
 
 def decide_booking(booking_id: str, reviewed_by: str, status: str) -> dict:

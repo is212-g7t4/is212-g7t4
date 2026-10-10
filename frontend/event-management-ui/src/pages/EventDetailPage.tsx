@@ -13,6 +13,7 @@ import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
 import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
 import { OrganiserEventDetailPage } from './OrganiserEventDetailPage'
+import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
 
 type EventDetailProps = { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
@@ -123,6 +124,15 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
+
+      {canUpdate && <VenueBookingsPanel
+        eventId={event.id}
+        coordinatorId={currentCoordinator.id}
+        eventStart={event.preferredStartDate}
+        eventEnd={event.preferredEndDate}
+        eventExpectedAttendance={event.expectedAttendance}
+        eventVenueRequirements={event.venueRequirements}
+      />}
 
       <section className="event-card-section">
         <h3>Event progress</h3>
