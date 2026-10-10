@@ -26,6 +26,16 @@ beforeEach(() => {
   })
 })
 
+test('Event Coordinator sees the expiry of a venue on hold', async () => {
+  vi.mocked(fetchActiveVenueHolds).mockResolvedValue([
+    { id: 'hold-1', venueId: venue.id, createdAt: '2026-10-08T09:00:00', expiresAt: '2026-10-09T12:00:00', heldBy: 'staff-1' },
+  ])
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  expect(await screen.findByText('Hold expires')).toBeInTheDocument()
+  expect(screen.getByText(/9 Oct 2026/)).toHaveTextContent(/12:00\s?pm/i)
+})
+
 test('Venue Staff can submit a timed hold from venue details', async () => {
   render(<VenueDetailPage
     venueId={venue.id}
