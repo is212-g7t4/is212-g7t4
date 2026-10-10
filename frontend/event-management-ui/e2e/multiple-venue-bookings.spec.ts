@@ -73,5 +73,5 @@ test('assigned coordinator creates and views independent venue bookings for one 
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Cancel booking' }).last().click()
   await expect(page.getByText('Meeting Room booking cancelled. Other venue bookings were not changed.')).toBeVisible()
-  await expect(page.getByText('Cancelled')).toBeVisible()
+  await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
 })
