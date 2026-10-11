@@ -1,24 +1,8 @@
+// The attendee's name, email and organisation come from their User record,
+// so a registration needs only the event and the attendee.
 export interface EventRegistrationData {
   eventId: string
   attendeeId: string
-  fullName: string
-  email: string
-  organization: string
-}
-
-export interface RegistrationValidation {
-  fullName?: string
-  email?: string
-}
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-export function validateRegistrationForm(data: Pick<EventRegistrationData, 'fullName' | 'email'>): RegistrationValidation {
-  const errors: RegistrationValidation = {}
-  if (!data.fullName.trim()) errors.fullName = 'Full name is required.'
-  if (!data.email.trim()) errors.email = 'Email address is required.'
-  else if (!EMAIL_PATTERN.test(data.email.trim())) errors.email = 'Enter a valid email address.'
-  return errors
 }
 
 export class EventRegistrationError extends Error {

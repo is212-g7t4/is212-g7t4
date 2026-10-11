@@ -8,6 +8,9 @@ from app.clients import (
 
 bp = Blueprint("coordinator_assignment_service", __name__)
 
+# The Lead assigns coordinators; it is its own role (docs/db-structure.md).
+LEAD_ROLE = "Event Coordinator Lead"
+
 
 @bp.get("/health")
 def health():
@@ -45,8 +48,8 @@ def assign_coordinator(event_id, coordinator_id):
 
     Body:
     - actingUserId: the id of the user making the assignment. Only the
-      Event Coordinator manager (role Event Coordinator, no manager_id of
-      their own) may assign or reassign.
+      Event Coordinator Lead (role "Event Coordinator Lead") may assign or
+      reassign.
 
     Response (200):
     {
@@ -68,13 +71,9 @@ def assign_coordinator(event_id, coordinator_id):
         except Exception as e:
             return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
 
-        if (
-            not acting_user
-            or acting_user.get("role") != "Event Coordinator"
-            or acting_user.get("manager_id") is not None
-        ):
+        if not acting_user or acting_user.get("role") != LEAD_ROLE:
             return jsonify(
-                error="Only the Event Coordinator manager can assign or reassign coordinators"
+                error="Only the Event Coordinator Lead can assign or reassign coordinators"
             ), 403
 
         # Fetch available coordinators to validate the provided coordinator exists

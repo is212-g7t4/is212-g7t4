@@ -20,7 +20,6 @@ const event: SubmittedEvent = {
   preferredStartDate: '2026-10-10T09:00:00+08:00',
   preferredEndDate: '2026-10-10T12:00:00+08:00',
   expectedAttendance: '30',
-  venueId: '',
   venueRequirements: 'Seminar room',
   accessibilityNeeds: 'Wheelchair access',
   equipmentRequirements: 'Projector',

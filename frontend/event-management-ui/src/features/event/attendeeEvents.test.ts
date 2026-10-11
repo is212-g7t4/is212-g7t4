@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetchRegistrationCounts } from '../registration/registrations'
 import { fetchUser } from '../user/users'
+import { fetchApprovedVenueId } from '../venue/eventVenue'
 import { fetchVenue } from '../venue/venues'
 import { eventApi } from './submission'
 import type { SubmittedEvent } from './submission'
@@ -9,14 +10,16 @@ import { loadAttendeeEvents, registrationAvailability } from './attendeeEvents'
 vi.mock('./submission', () => ({ eventApi: vi.fn() }))
 vi.mock('../registration/registrations', () => ({ fetchRegistrationCounts: vi.fn() }))
 vi.mock('../venue/venues', () => ({ fetchVenue: vi.fn() }))
+vi.mock('../venue/eventVenue', () => ({ fetchApprovedVenueId: vi.fn() }))
 vi.mock('../user/users', () => ({ fetchUser: vi.fn() }))
 
+const VENUE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const now = new Date('2026-10-07T04:00:00Z')
 const base: SubmittedEvent = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', eventName: 'Community Workshop',
   description: 'A practical workshop', purpose: 'Learning',
   preferredStartDate: '2026-10-10T09:00:00+08:00', preferredEndDate: '2026-10-10T12:00:00+08:00',
-  expectedAttendance: '2', venueId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  expectedAttendance: '2',
   venueRequirements: '', accessibilityNeeds: '', equipmentRequirements: '', registrationNeeds: 'Bring photo ID.',
   status: 'Confirmed', submittedAt: null, coordinatorId: null,
   organiserId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', decision: null, decisionHistory: [],
@@ -25,13 +28,14 @@ const base: SubmittedEvent = {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(fetchApprovedVenueId).mockResolvedValue(VENUE_ID)
   vi.mocked(fetchVenue).mockResolvedValue({
-    id: base.venueId, name: 'Grand Hall', location: 'Level 1', capacity: 100,
+    id: VENUE_ID, name: 'Grand Hall', location: 'Level 1', capacity: 100,
     facilities: ['Projector'], accessibility: 'Wheelchair access', supportedLayouts: [], status: 'Available',
   })
   vi.mocked(fetchUser).mockResolvedValue({
     id: base.organiserId!, username: 'Olivia Tan', email: 'olivia@example.com', role: 'Event Organiser',
-    organization: 'ConnectSphere', managerId: null, contactDetails: '+65 8111 1111',
+    organization: 'ConnectSphere', contactDetails: '+65 8111 1111',
   })
 })
 
@@ -60,7 +64,10 @@ test('loads confirmed events and combines registration, venue and organiser data
   expect(events.map((event) => [event.eventName, event.registrationStatus])).toEqual([
     ['Community Workshop', 'Open'], ['Full Conference', 'Full'], ['Ongoing Event', 'Closed'],
   ])
+  // The venue is the one from the event's approved booking.
   expect(events[0].venue?.name).toBe('Grand Hall')
+  expect(fetchApprovedVenueId).toHaveBeenCalledWith(base.id)
+  expect(fetchVenue).toHaveBeenCalledOnce()
   expect(events[0].organiser?.contactDetails).toBe('+65 8111 1111')
   expect(fetchRegistrationCounts).toHaveBeenCalledWith([base.id, full.id, ongoing.id])
 })
@@ -70,5 +77,17 @@ test('returns an empty list without calling other services when no confirmed eve
   expect(await loadAttendeeEvents(now)).toEqual([])
   expect(fetchRegistrationCounts).not.toHaveBeenCalled()
   expect(fetchVenue).not.toHaveBeenCalled()
+  expect(fetchApprovedVenueId).not.toHaveBeenCalled()
   expect(fetchUser).not.toHaveBeenCalled()
+})
+
+test('an event without an approved booking has no venue', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ events: [base] })
+  vi.mocked(fetchRegistrationCounts).mockResolvedValue({ [base.id]: { total: 0, confirmed: 0 } })
+  vi.mocked(fetchApprovedVenueId).mockResolvedValue(null)
+
+  const [event] = await loadAttendeeEvents(now)
+
+  expect(event.venue).toBeNull()
+  expect(fetchVenue).not.toHaveBeenCalled()
 })

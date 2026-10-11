@@ -2,9 +2,10 @@
 
 Database calls are mocked; no live database writes.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
+import psycopg2.errors
 import pytest
 
 from app import create_app
@@ -19,11 +20,8 @@ def registration_row(**overrides):
         "registration_id": "9f725c7a-ac3d-4d4a-937a-84db7906be71",
         "event_id": EVENT_ID,
         "attendee_id": None,
-        "registration_date": datetime(2026, 9, 13, 9, 15),
+        "registration_date": datetime(2026, 9, 13, 1, 15, tzinfo=UTC),
         "status": "Confirmed",
-        "attendee_name": "Lena Ho",
-        "attendee_email": "lena.ho@example.com",
-        "attendee_organization": "Acme Studio",
     }
     row.update(overrides)
     return row
@@ -46,7 +44,7 @@ def test_list_registrations_returns_all_rows_for_event(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [
         registration_row(),
-        registration_row(registration_id="1eec36d7-3c51-4981-8f80-ae62f7f99b7f", status="Withdrawn", attendee_organization=""),
+        registration_row(registration_id="1eec36d7-3c51-4981-8f80-ae62f7f99b7f", status="Withdrawn"),
     ]
 
     response = client.get(f"/registrations?eventId={EVENT_ID}")
@@ -99,7 +97,21 @@ def test_registration_date_serializes_to_isoformat(setup):
 
     response = client.get(f"/registrations?eventId={EVENT_ID}")
 
-    assert response.json["registrations"][0]["registration_date"] == "2026-09-13T09:15:00"
+    assert response.json["registrations"][0]["registration_date"] == "2026-09-13T01:15:00+00:00"
+
+
+def test_registration_rows_carry_no_attendee_details(setup):
+    """Name, email and organisation live on User; the composite adds them."""
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [registration_row(attendee_id=ATTENDEE_ID)]
+
+    response = client.get(f"/registrations?eventId={EVENT_ID}")
+
+    assert set(response.json["registrations"][0]) == {
+        "registration_id", "event_id", "attendee_id", "registration_date", "status",
+    }
+    query = cursor.execute.call_args.args[0]
+    assert "attendee_email" not in query
 
 
 def test_null_registration_date_serializes_to_none(setup):
@@ -194,9 +206,6 @@ def registration_payload(**overrides):
         "eventId": EVENT_ID,
         "attendeeId": ATTENDEE_ID,
         "capacity": 30,
-        "fullName": "Adam Yeo",
-        "email": "Adam@Example.com",
-        "organization": "External",
     }
     payload.update(overrides)
     return payload
@@ -204,9 +213,33 @@ def registration_payload(**overrides):
 
 def test_create_registration_endpoint_returns_confirmed_record(setup, monkeypatch):
     client = setup[0]
-    saved = registration_row(attendee_id=ATTENDEE_ID, attendee_email="adam@example.com")
+    saved = registration_row(attendee_id=ATTENDEE_ID)
+    received = []
+
+    def fake_create(*args):
+        received.append(args)
+        return {
+            "registration_id": saved["registration_id"],
+            "event_id": EVENT_ID,
+            "attendee_id": ATTENDEE_ID,
+            "status": "Confirmed",
+        }
+
+    monkeypatch.setattr("app.create_registration", fake_create)
+    response = client.post(
+        "/registrations",
+        # Profile fields are ignored: they are no longer stored on Registration.
+        json=registration_payload(fullName="Ignored", email="ignored@example.com"),
+    )
+
+    assert response.status_code == 201
+    assert received == [("unused-test-url", EVENT_ID, ATTENDEE_ID, 30)]
+
+
+def test_create_registration_endpoint_needs_no_profile_fields(setup, monkeypatch):
+    client = setup[0]
     monkeypatch.setattr("app.create_registration", lambda *args: {
-        "registration_id": saved["registration_id"],
+        "registration_id": registration_row()["registration_id"],
         "event_id": EVENT_ID,
         "attendee_id": ATTENDEE_ID,
         "status": "Confirmed",
@@ -220,8 +253,8 @@ def test_create_registration_endpoint_returns_confirmed_record(setup, monkeypatc
 
 @pytest.mark.parametrize(
     "payload",
-    [None, {}, registration_payload(eventId="bad"), registration_payload(capacity=0),
-     registration_payload(fullName=""), registration_payload(email="")],
+    [None, {}, registration_payload(eventId="bad"), registration_payload(attendeeId="bad"),
+     registration_payload(capacity=0), registration_payload(capacity="many")],
 )
 def test_create_registration_endpoint_validates_required_values(setup, payload):
     response = setup[0].post("/registrations", json=payload)
@@ -250,37 +283,72 @@ def test_create_registration_endpoint_requires_database(setup):
 
 def test_create_registration_locks_checks_capacity_and_inserts(setup):
     _, _, cursor = setup
-    created = registration_row(attendee_id=ATTENDEE_ID, attendee_email="adam@example.com")
+    created = registration_row(attendee_id=ATTENDEE_ID)
     cursor.fetchone.side_effect = [None, {"confirmed": 2}, created]
 
-    result = create_registration(
-        "unused-test-url", EVENT_ID, ATTENDEE_ID, 3,
-        "Adam Yeo", "adam@example.com", "External",
-    )
+    result = create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
 
     assert result["status"] == "Confirmed"
     assert cursor.execute.call_count == 4
     assert "pg_advisory_xact_lock" in cursor.execute.call_args_list[0].args[0]
-    assert "INSERT INTO" in cursor.execute.call_args_list[3].args[0]
+    lookup, params = cursor.execute.call_args_list[1].args
+    assert "event_id = %s AND attendee_id = %s" in lookup
+    assert params == [EVENT_ID, ATTENDEE_ID]
+    insert, values = cursor.execute.call_args_list[3].args
+    assert "INSERT INTO" in insert
+    assert values[1:3] == [EVENT_ID, ATTENDEE_ID]
 
 
-def test_create_registration_rejects_duplicate_email(setup):
+def test_create_registration_rejects_attendee_already_registered(setup):
+    """One registration per attendee per event (UNIQUE (event_id, attendee_id))."""
     cursor = setup[2]
-    cursor.fetchone.return_value = {"exists": 1}
+    cursor.fetchone.return_value = {"registration_id": "existing", "status": "Confirmed"}
     with pytest.raises(DuplicateRegistrationError):
-        create_registration(
-            "unused-test-url", EVENT_ID, ATTENDEE_ID, 3,
-            "Adam Yeo", "adam@example.com", "External",
-        )
+        create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
     assert cursor.execute.call_count == 2
+
+
+def test_create_registration_reuses_withdrawn_row(setup):
+    """Re-registering after withdrawal reuses the row instead of inserting."""
+    cursor = setup[2]
+    reconfirmed = registration_row(attendee_id=ATTENDEE_ID)
+    cursor.fetchone.side_effect = [
+        {"registration_id": "withdrawn-row", "status": "Withdrawn"},
+        {"confirmed": 1},
+        reconfirmed,
+    ]
+
+    result = create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
+
+    assert result["status"] == "Confirmed"
+    update, values = cursor.execute.call_args_list[3].args
+    assert 'UPDATE public."Registration"' in update
+    assert "status = 'Confirmed'" in update
+    assert values[1] == "withdrawn-row"
+
+
+def test_create_registration_withdrawn_row_still_respects_capacity(setup):
+    cursor = setup[2]
+    cursor.fetchone.side_effect = [
+        {"registration_id": "withdrawn-row", "status": "Withdrawn"},
+        {"confirmed": 3},
+    ]
+    with pytest.raises(CapacityReachedError):
+        create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
+
+
+def test_create_registration_maps_unique_violation_to_duplicate(setup):
+    """Safety net if the database constraint fires despite the advisory lock."""
+    cursor = setup[2]
+    cursor.fetchone.side_effect = [None, {"confirmed": 0}]
+    cursor.execute.side_effect = [None, None, None, psycopg2.errors.UniqueViolation()]
+    with pytest.raises(DuplicateRegistrationError):
+        create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
 
 
 def test_create_registration_rejects_full_event(setup):
     cursor = setup[2]
     cursor.fetchone.side_effect = [None, {"confirmed": 3}]
     with pytest.raises(CapacityReachedError):
-        create_registration(
-            "unused-test-url", EVENT_ID, ATTENDEE_ID, 3,
-            "Adam Yeo", "adam@example.com", "External",
-        )
+        create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
     assert cursor.execute.call_count == 3

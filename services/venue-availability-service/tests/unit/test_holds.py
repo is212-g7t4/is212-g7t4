@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app import create_app
+from app.calendar import SINGAPORE
 from tests.unit.factories import USER_ID, VENUE_ID
 
 
@@ -87,7 +88,6 @@ def test_place_hold_succeeds(setup):
     cursor.fetchone.side_effect = [
         {"venue_id": VENUE_ID},
         None,
-        None,
         {
             "hold_id": "00000000-0000-0000-0000-000000000010",
             "venue_id": VENUE_ID,
@@ -104,6 +104,13 @@ def test_place_hold_succeeds(setup):
     )
 
     assert response.status_code == 201
+    sql, params = cursor.execute.call_args.args
+    assert 'INSERT INTO public."VenueBooking"' in sql
+    assert "'On Hold'" in sql
+    assert "VenueHold" not in sql
+    assert params[0] == VENUE_ID
+    assert params[3] == USER_ID
+    assert params[2] == params[5] == datetime(2099, 10, 1, 12, tzinfo=SINGAPORE)
     assert response.json["hold"]["venueId"] == VENUE_ID
     assert response.json["hold"]["expiresAt"] == "2099-10-01T12:00:00"
 
@@ -120,13 +127,17 @@ def test_place_hold_rejects_overlap_with_existing_booking(setup):
     )
 
     assert response.status_code == 409
-    assert "status NOT IN ('Rejected', 'Cancelled')" in cursor.execute.call_args_list[1].args[0]
+    assert (
+        "status NOT IN ('Rejected', 'Cancelled', 'Expired')"
+        in cursor.execute.call_args_list[1].args[0]
+    )
 
 
 def test_place_hold_rejects_overlap_with_another_active_hold(setup):
+    """Holds are 'On Hold' VenueBooking rows, so the same overlap check sees them."""
     client, cursor = setup
     client.application.config["CALENDAR_DEV_MODE"] = True
-    cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, None, {"hold_id": "active"}]
+    cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, {"booking_id": "active"}]
 
     response = client.post(
         "/venue-holds",
@@ -167,6 +178,18 @@ def test_list_active_holds(setup):
 
     assert response.status_code == 200
     assert response.json["holds"][0]["venueId"] == VENUE_ID
+
+
+def test_list_active_holds_reads_on_hold_rows(setup):
+    client, cursor = setup
+    cursor.fetchall.return_value = []
+
+    client.get("/venue-holds")
+
+    sql = cursor.execute.call_args.args[0]
+    assert "status = 'On Hold'" in sql
+    assert "hold_expires_at > now()" in sql
+    assert "VenueHold" not in sql
 
 
 def test_list_active_holds_database_unconfigured(setup):

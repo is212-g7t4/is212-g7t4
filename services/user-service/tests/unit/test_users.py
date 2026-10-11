@@ -20,7 +20,6 @@ def user_row(**overrides):
         "role": "Event Coordinator",
         "organization": "ConnectSphere",
         "contact_details": "+65 8111 1111",
-        "manager_id": None,
     }
     row.update(overrides)
     return row
@@ -39,14 +38,14 @@ def test_list_users_returns_all_users(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [
         user_row(),
-        user_row(user_id=MARCUS_ID, username="Marcus Lim", manager_id=ALICE_ID),
+        user_row(user_id=MARCUS_ID, username="Marcus Lim"),
     ]
 
     response = client.get("/users")
 
     assert response.status_code == 200
     assert len(response.json["users"]) == 2
-    assert response.json["users"][1]["manager_id"] == ALICE_ID
+    assert "manager_id" not in response.json["users"][1]
     query, params = cursor.execute.call_args.args
     assert "WHERE" not in query
     assert params == []
@@ -64,15 +63,16 @@ def test_list_users_filters_by_role(setup):
     assert params == ["Event Coordinator"]
 
 
-def test_get_user_returns_manager_with_null_manager_id(setup):
+def test_get_user_returns_the_coordinator_lead_by_role(setup):
+    """The Lead is identified by role (docs/db-structure.md), not a manager link."""
     client, _, cursor = setup
-    cursor.fetchone.return_value = user_row()
+    cursor.fetchone.return_value = user_row(role="Event Coordinator Lead")
 
     response = client.get(f"/users/{ALICE_ID}")
 
     assert response.status_code == 200
-    assert response.json["manager_id"] is None
-    assert response.json["role"] == "Event Coordinator"
+    assert response.json["role"] == "Event Coordinator Lead"
+    assert "manager_id" not in response.json
 
 
 def test_get_user_returns_404_when_not_found(setup):

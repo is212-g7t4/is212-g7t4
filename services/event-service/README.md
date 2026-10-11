@@ -46,8 +46,7 @@ the caller's id. Rejection requires a non-empty reason. The backend repeats the 
 check while locking the event row and only approves or rejects requests whose current
 status is `Submitted`.
 
-The Event Coordinator manager (role `Event Coordinator`, `manager_id` is
-`null`) can bypass the `coordinator_id` filter/ownership check on the read
+The Event Coordinator Lead (role `Event Coordinator Lead`) can bypass the `coordinator_id` filter/ownership check on the read
 endpoints (`/events`, `/events/submitted`, `/events/<id>`) by passing
 `isManager=true` — this lets them see every event, not just ones assigned to
 them. Approve/reject are **not** bypassed — the manager must be the assigned

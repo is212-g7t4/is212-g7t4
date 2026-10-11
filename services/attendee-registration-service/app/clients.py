@@ -4,6 +4,7 @@ import httpx
 
 EVENT_SERVICE_URL = os.getenv("EVENT_SERVICE_URL") or "http://localhost:5003"
 REGISTRATION_SERVICE_URL = os.getenv("REGISTRATION_SERVICE_URL") or "http://localhost:5005"
+USER_SERVICE_URL = os.getenv("USER_SERVICE_URL") or "http://localhost:5001"
 
 
 class RegistrationConflictError(Exception):
@@ -35,6 +36,25 @@ def get_attendee_registrations(attendee_id: str) -> list:
     )
     response.raise_for_status()
     return response.json().get("registrations", [])
+
+
+def get_event_registrations(event_id: str) -> list:
+    response = httpx.get(
+        f"{REGISTRATION_SERVICE_URL}/registrations",
+        params={"eventId": event_id},
+        timeout=5,
+    )
+    response.raise_for_status()
+    return response.json().get("registrations", [])
+
+
+def get_user(user_id: str) -> dict | None:
+    """Look up a single user from User Service, or None if they don't exist."""
+    response = httpx.get(f"{USER_SERVICE_URL}/users/{user_id}", timeout=5)
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
 
 
 def save_registration(data: dict) -> dict:

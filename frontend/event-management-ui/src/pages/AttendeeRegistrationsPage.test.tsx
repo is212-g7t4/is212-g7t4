@@ -14,7 +14,7 @@ const registration: AttendeeRegistration = {
     id: '25c9fe40-c44d-4d79-8d5d-de66d40c1678', eventName: 'Community Workshop',
     description: 'A full practical workshop description.', purpose: 'Community learning',
     preferredStartDate: '2026-11-10T09:00:00+08:00', preferredEndDate: '2026-11-10T12:00:00+08:00',
-    expectedAttendance: '30', venueId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', venueRequirements: '',
+    expectedAttendance: '30', venueRequirements: '',
     accessibilityNeeds: '', equipmentRequirements: '', registrationNeeds: '', status: 'Confirmed',
     submittedAt: null, coordinatorId: null, organiserId: null, decision: null, decisionHistory: [],
     actionDetails: '', actionHistory: [],

@@ -14,7 +14,7 @@ AC2 Given an event has not yet reached the safety check, then the existing
 Database calls are mocked; no live database writes.
 """
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -54,11 +54,10 @@ def event_row(status="Submitted", coordinator_id=COORDINATOR_ID, action_details=
         event_name="Community Workshop",
         status=status,
         coordinator_id=coordinator_id,
-        submission_date=datetime(2026, 10, 1, 8),
+        submission_date=datetime(2026, 10, 1, 8, tzinfo=UTC),
         preferred_start_date=datetime(2026, 10, 10, 9),
         preferred_end_date=datetime(2026, 10, 10, 12),
         expected_attendance=30,
-        venue_id=None,
     )
     row["description"] = json.dumps({
         "_connectsphere": "event-submission-v1",

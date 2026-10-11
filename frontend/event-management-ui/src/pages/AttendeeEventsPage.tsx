@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { Role } from '../types'
+import type { Role, User } from '../types'
 import { loadAttendeeEvents } from '../features/event/attendeeEvents'
 import type { AttendeeEvent } from '../features/event/attendeeEvents'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
-import { Field, RoleWarning, StatusBadge } from '../components/FormControls'
+import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, ArrowRightIcon, RefreshIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
-import { registerForEvent, validateRegistrationForm } from '../features/registration/eventRegistration'
-import type { RegistrationValidation } from '../features/registration/eventRegistration'
+import { registerForEvent } from '../features/registration/eventRegistration'
+import { fetchUser } from '../features/user/users'
 
 function optionalDate(value?: string) {
   if (!value) return ''
@@ -92,33 +92,32 @@ function AttendeeEventDetail({
   onBack: () => void
 }) {
   const [showForm, setShowForm] = useState(false)
-  const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
-  const [organization, setOrganization] = useState('')
-  const [validation, setValidation] = useState<RegistrationValidation>({})
+  const [attendee, setAttendee] = useState<User | null>(null)
+  const [attendeeError, setAttendeeError] = useState('')
   const [submissionError, setSubmissionError] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // The registration uses the attendee's account details, shown read-only.
+  useEffect(() => {
+    if (!showForm || !attendeeId) return
+    let active = true
+    fetchUser(attendeeId)
+      .then((user) => { if (active) setAttendee(user) })
+      .catch(() => { if (active) setAttendeeError('Unable to load your account details.') })
+    return () => { active = false }
+  }, [showForm, attendeeId])
+
   const submit = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
-    const errors = validateRegistrationForm({ fullName, email })
-    setValidation(errors)
     setSubmissionError('')
-    if (Object.keys(errors).length > 0) return
     if (!attendeeId) {
       setSubmissionError('Select an attendee before registering.')
       return
     }
     setSubmitting(true)
     try {
-      const result = await registerForEvent({
-        eventId: event.id,
-        attendeeId,
-        fullName: fullName.trim(),
-        email: email.trim(),
-        organization: organization.trim(),
-      })
+      const result = await registerForEvent({ eventId: event.id, attendeeId })
       setConfirmation(result.message || `Registration confirmed for ${event.eventName}.`)
       setShowForm(false)
       onRegistered()
@@ -168,17 +167,19 @@ function AttendeeEventDetail({
         {confirmation && <p className="notice success" role="status">{confirmation}</p>}
         {!confirmation && event.registrationStatus === 'Full' && <p className="field-error" role="alert">This event has reached maximum capacity.</p>}
         {!confirmation && event.registrationStatus === 'Closed' && <p className="field-error" role="alert">Registration has closed for this event.</p>}
-        {!confirmation && event.registrationStatus === 'Open' && !showForm && <button className="button primary" type="button" onClick={() => setShowForm(true)}>Register</button>}
+        {!confirmation && event.registrationStatus === 'Open' && !showForm && <button className="button primary" type="button" onClick={() => { setAttendeeError(''); setShowForm(true) }}>Register</button>}
         {showForm && <form className="page-stack" onSubmit={submit} noValidate>
-          <div className="field-row">
-            <Field label="Full name" value={fullName} onChange={setFullName} required error={validation.fullName} />
-            <Field label="Email address" value={email} onChange={setEmail} required type="email" error={validation.email} />
-          </div>
-          <Field label="Organisation / company" value={organization} onChange={setOrganization} />
+          <p className="muted">You will be registered with your account details.</p>
+          {attendeeError && <p className="field-error" role="alert">{attendeeError}</p>}
+          {attendee && <dl className="event-details" aria-label="Your details">
+            <div className="event-detail"><dt>Full name</dt><dd>{attendee.username}</dd></div>
+            <div className="event-detail"><dt>Email address</dt><dd>{attendee.email}</dd></div>
+            <div className="event-detail"><dt>Organisation / company</dt><dd>{attendee.organization || 'Not provided'}</dd></div>
+          </dl>}
           {submissionError && <p className="field-error" role="alert">{submissionError}</p>}
           <div className="button-row">
             <button className="button primary" type="submit" disabled={submitting}>{submitting ? 'Registering…' : 'Submit registration'}</button>
-            <button className="button" type="button" disabled={submitting} onClick={() => { setShowForm(false); setValidation({}); setSubmissionError('') }}>Cancel</button>
+            <button className="button" type="button" disabled={submitting} onClick={() => { setShowForm(false); setSubmissionError('') }}>Cancel</button>
           </div>
         </form>}
       </section>

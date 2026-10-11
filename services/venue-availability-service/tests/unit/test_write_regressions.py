@@ -1,6 +1,7 @@
 """Characterization tests: SCRUM-25 must not change the existing write contract."""
 
 import pytest
+from app.calendar import SINGAPORE
 from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row
 
 PAYLOAD = dict(
@@ -75,15 +76,12 @@ def test_write_remains_naive_pending_without_dev_gate(setup):
     assert response.json["status"] == "Pending Review"
     assert "blocksSelection" not in response.json
     sql, params = cursor.execute.call_args_list[1].args
-    assert "status = 'Approved'" in sql
+    assert "status IN ('Approved', 'On Hold')" in sql
     assert "requested_start_time < %s AND requested_end_time > %s" in sql
     assert params == [
         VENUE_ID,
-        booking_row()["requested_end_time"],
-        booking_row()["requested_start_time"],
-        VENUE_ID,
-        booking_row()["requested_end_time"],
-        booking_row()["requested_start_time"],
+        booking_row()["requested_end_time"].replace(tzinfo=SINGAPORE),
+        booking_row()["requested_start_time"].replace(tzinfo=SINGAPORE),
     ]
-    assert 'FROM public."VenueHold"' in sql
+    assert "VenueHold" not in sql
     assert "'Pending Review'" in cursor.execute.call_args.args[0]

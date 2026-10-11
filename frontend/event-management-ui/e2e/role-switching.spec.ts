@@ -14,7 +14,7 @@ test('sidebar and role pill follow the user being viewed', async ({ page }) => {
   await expect(nav.getByRole('button', { name: 'Venues', exact: true })).toHaveCount(0)
   await expect(nav.getByRole('button', { name: 'Venue availability calendar' })).toHaveCount(0)
 
-  await page.getByLabel('Select active user').selectOption({ label: 'Alice Tan — Event Coordinator' })
+  await page.getByLabel('Select active user').selectOption({ label: 'Alice Tan — Event Coordinator Lead' })
   await expect(page.getByRole('heading', { name: 'Hi Alice, any events for today?' })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Venues', exact: true })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Venue availability calendar' })).toBeVisible()

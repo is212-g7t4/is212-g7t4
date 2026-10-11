@@ -24,7 +24,6 @@ test.each([
       username: 'test',
       email: '',
       organization: '',
-      managerId: null,
       role,
     },
   ])

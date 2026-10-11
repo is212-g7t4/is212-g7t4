@@ -2,6 +2,7 @@ import json
 from contextlib import closing
 from datetime import UTC, datetime
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -13,7 +14,6 @@ FIELDS = {
     "preferredStartDate": "preferred_start_date",
     "preferredEndDate": "preferred_end_date",
     "expectedAttendance": "expected_attendance",
-    "venueId": "venue_id",
     "venueRequirements": "venue_requirements",
     "accessibilityNeeds": "accessibility_needs",
     "equipmentRequirements": "equipment_requirements",
@@ -23,6 +23,26 @@ COLUMNS = ", ".join(FIELDS.values())
 ROW_COLUMNS = (
     f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id"
 )
+
+SINGAPORE = ZoneInfo("Asia/Singapore")
+
+
+# The database stores TIMESTAMPTZ; the API works in naive Singapore local
+# time. Convert at the boundary so neither side depends on the connection's
+# session time zone.
+def _aware(value):
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=SINGAPORE)
+    return value
+
+
+def _local(value):
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone(SINGAPORE).replace(tzinfo=None)
+    return value
+
 
 # Event lifecycle, in order. Defined once here so the safety-check stories
 # (SCRUM-149/150/151/153) reuse these names instead of re-typing the strings.
@@ -155,13 +175,12 @@ def serialize(row):
         action_history,
     ) = unpack_metadata(row["description"])
     for key in ("preferredStartDate", "preferredEndDate"):
-        result[key] = result[key].isoformat() if result[key] else ""
+        result[key] = _local(result[key]).isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
-    result["venueId"] = str(row["venue_id"]) if row.get("venue_id") else ""
     result.update(
         id=str(row["event_id"]),
         status=row["status"],
-        submittedAt=row["submission_date"].replace(tzinfo=UTC).isoformat()
+        submittedAt=row["submission_date"].astimezone(UTC).isoformat()
         if row["submission_date"]
         else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
@@ -187,8 +206,8 @@ def submit_event(database_url, data):
             ensure_ascii=False,
         ),
         "expectedAttendance": int(data["expectedAttendance"]),
-        # Empty string means "no venue chosen yet" — must be NULL, not "", for the uuid column.
-        "venueId": data.get("venueId") or None,
+        "preferredStartDate": _aware(data["preferredStartDate"]),
+        "preferredEndDate": _aware(data["preferredEndDate"]),
     }
     values = [stored[key] for key in FIELDS]
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -197,7 +216,7 @@ def submit_event(database_url, data):
                 f"""INSERT INTO public."Event"
                     (event_id, {COLUMNS}, status, submission_date, organiser_id)
                     VALUES (%s, {", ".join(["%s"] * len(FIELDS))},
-                            'Submitted', timezone('UTC', CURRENT_TIMESTAMP), %s)
+                            'Submitted', now(), %s)
                     RETURNING {ROW_COLUMNS}""",
                 [event_id, *values, data.get("organiserId") or None],
             )
@@ -237,8 +256,8 @@ def _summary(row):
         "eventName": row["event_name"],
         "status": row["status"],
         "coordinatorId": str(row["coordinator_id"]) if row["coordinator_id"] else None,
-        "startTime": row["preferred_start_date"].isoformat() if row["preferred_start_date"] else None,
-        "endTime": row["preferred_end_date"].isoformat() if row["preferred_end_date"] else None,
+        "startTime": _local(row["preferred_start_date"]).isoformat() if row["preferred_start_date"] else None,
+        "endTime": _local(row["preferred_end_date"]).isoformat() if row["preferred_end_date"] else None,
     }
 
 
@@ -258,7 +277,7 @@ def list_overlapping_events(database_url, start, end, statuses, exclude_event_id
         f'SELECT {SUMMARY_COLUMNS} FROM public."Event" '
         "WHERE status = ANY(%s) AND preferred_start_date < %s AND preferred_end_date > %s"
     )
-    params = [list(statuses), end, start]
+    params = [list(statuses), _aware(end), _aware(start)]
     if exclude_event_id:
         query += " AND event_id <> %s"
         params.append(exclude_event_id)
@@ -328,7 +347,6 @@ def list_events(
     date_from=None,
     date_to=None,
     is_manager=False,
-    venue_id=None,
 ):
     if is_manager:
         conditions = []
@@ -343,15 +361,12 @@ def list_events(
         escaped = venue.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         conditions.append("venue_requirements ILIKE %s ESCAPE '\\'")
         params.append(f"%{escaped}%")
-    if venue_id:
-        conditions.append("venue_id = %s")
-        params.append(venue_id)
     if date_to:
         conditions.append("preferred_start_date <= %s")
-        params.append(date_to)
+        params.append(_aware(date_to))
     if date_from:
         conditions.append("preferred_end_date >= %s")
-        params.append(date_from)
+        params.append(_aware(date_from))
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
