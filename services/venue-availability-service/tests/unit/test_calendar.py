@@ -8,7 +8,7 @@ import pytest
 from tests.unit.factories import USER_ID, VENUE_ID, booking_row
 
 from app import create_app
-from app.calendar import parse_boundary
+from app.calendar import SINGAPORE, parse_boundary
 from app.models import CalendarDataError, validate_calendar_row
 
 QUERY = dict(venueId=VENUE_ID, dateFrom="2026-10-01T00:00", dateTo="2026-10-02T00:00")
@@ -121,8 +121,8 @@ def test_ac1_offset_inputs_bind_singapore_naive(calendar, start, end):
     assert response.status_code == 200
     assert cursor.execute.call_args.args[1] == [
         VENUE_ID,
-        datetime(2026, 10, 2),
-        datetime(2026, 10, 1),
+        datetime(2026, 10, 2, tzinfo=SINGAPORE),
+        datetime(2026, 10, 1, tzinfo=SINGAPORE),
     ]
 
 
@@ -223,7 +223,11 @@ def test_query_includes_invalid_rows_not_silently_lost(calendar):
         "venue_id IS NULL",
     ]:
         assert condition in normalized
-    assert params == [VENUE_ID, datetime(2026, 10, 2), datetime(2026, 10, 1)]
+    assert params == [
+        VENUE_ID,
+        datetime(2026, 10, 2, tzinfo=SINGAPORE),
+        datetime(2026, 10, 1, tzinfo=SINGAPORE),
+    ]
 
 
 def test_ac4_cors_preflight(calendar):
@@ -263,7 +267,6 @@ def test_invalid_boundary_parser(value):
 @pytest.mark.parametrize(
     "change",
     [
-        {"requested_start_time": datetime(2026, 10, 1, tzinfo=timezone.utc)},
         {"requested_end_time": datetime.max},
         {"requested_start_time": datetime.min},
     ],
@@ -275,6 +278,22 @@ def test_non_local_or_infinite_db_time_fails(calendar, change):
         client.get("/venue-bookings", query_string=QUERY, headers=HEADERS).status_code
         == 503
     )
+
+
+def test_timestamptz_values_are_converted_to_singapore_local(calendar):
+    """TIMESTAMPTZ columns come back aware (session zone); the API stays +08:00."""
+    _, client, cursor = calendar
+    cursor.fetchall.return_value = [
+        booking_row(
+            requested_start_time=datetime(2026, 10, 1, 1, tzinfo=timezone.utc),
+            requested_end_time=datetime(2026, 10, 1, 4, tzinfo=timezone.utc),
+        )
+    ]
+    response = client.get("/venue-bookings", query_string=QUERY, headers=HEADERS)
+    assert response.status_code == 200
+    booking = response.json["bookings"][0]
+    assert booking["requestedStartTime"] == "2026-10-01T09:00:00+08:00"
+    assert booking["requestedEndTime"] == "2026-10-01T12:00:00+08:00"
 
 
 def test_missing_row_fields_fail():

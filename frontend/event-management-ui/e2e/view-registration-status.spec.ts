@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, mockApprovedVenue, test, expect, users, venues } from './fixtures'
 
 test('attendee opens a registered event and views submitted registration details', async ({ page, mockApi }) => {
   const event = makeEvent({
@@ -20,7 +20,8 @@ test('attendee opens a registered event and views submitted registration details
       event,
     }] })
   })
-  await mock(page, 'venue', `/venues/${event.venueId}`, (route) => json(route, { venue: venues[0] }))
+  await mockApprovedVenue(page, event.id)
+  await mock(page, 'venue', `/venues/${venues[0].id}`, (route) => json(route, { venue: venues[0] }))
 
   await page.goto('/registrations')
   await expect(page.getByRole('button', { name: /Community Workshop/ })).toContainText('Confirmed')

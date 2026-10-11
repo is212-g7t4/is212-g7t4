@@ -1,5 +1,4 @@
 from datetime import datetime
-from uuid import UUID
 
 REQUIRED = {
     "eventName": "Event Name",
@@ -10,7 +9,6 @@ REQUIRED = {
     "expectedAttendance": "Expected Attendance",
 }
 OPTIONAL = (
-    "venueId",
     "venueRequirements",
     "accessibilityNeeds",
     "equipmentRequirements",
@@ -29,11 +27,6 @@ def validate(data):
     for key in (*REQUIRED, *OPTIONAL):
         if key in data and not isinstance(data[key], str):
             errors.append(f"{REQUIRED.get(key, key)} must be text.")
-    if isinstance(data.get("venueId"), str) and data["venueId"].strip():
-        try:
-            UUID(data["venueId"])
-        except ValueError:
-            errors.append("Venue must be a valid venue selected from the catalogue.")
     if missing or errors:
         return missing, errors
     attendance = data["expectedAttendance"].strip()

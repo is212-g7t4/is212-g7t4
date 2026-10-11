@@ -1,4 +1,5 @@
 from contextlib import closing
+from datetime import datetime
 from uuid import uuid4
 
 import psycopg2
@@ -13,7 +14,32 @@ COLUMNS = (
     "booking_id, event_id, venue_id, requested_start_time, requested_end_time, "
     "required_capacity, venue_requirements, status, requested_by, reviewed_by"
 )
-HOLD_COLUMNS = "hold_id, venue_id, created_at, expires_at, held_by"
+# A hold is an 'On Hold' VenueBooking row spanning held_at .. hold_expires_at.
+# The aliases keep serialize_hold's shape (and the HTTP API) unchanged.
+HOLD_COLUMNS = (
+    "booking_id AS hold_id, venue_id, held_at AS created_at, "
+    "hold_expires_at AS expires_at, held_by"
+)
+INACTIVE_STATUSES = "('Rejected', 'Cancelled', 'Expired')"
+
+
+# The database stores TIMESTAMPTZ; the rest of this service works in naive
+# Singapore local time. Convert at the boundary so neither side depends on the
+# connection's session time zone.
+def _aware(value):
+    if value.tzinfo is None:
+        return value.replace(tzinfo=SINGAPORE)
+    return value
+
+
+def _local(value):
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone(SINGAPORE).replace(tzinfo=None)
+    return value
+
+
+def _localize(row):
+    return {key: _local(value) for key, value in row.items()}
 
 
 class BookingNotFoundError(Exception):
@@ -78,7 +104,6 @@ class CalendarDataError(Exception):
 
 
 def validate_calendar_row(row):
-    from datetime import datetime
     from uuid import UUID
 
     try:
@@ -116,17 +141,17 @@ def list_bookings(database_url, venue_id, date_from, date_to):
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."VenueBooking"
                     WHERE (venue_id = %s OR venue_id IS NULL)
-                      AND (status IS NULL OR status NOT IN ('Rejected', 'Cancelled'))
+                      AND (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
                       AND ((requested_start_time < %s AND requested_end_time > %s)
                         OR requested_start_time IS NULL
                         OR requested_end_time IS NULL
                         OR requested_end_time <= requested_start_time)
                     ORDER BY requested_start_time ASC, booking_id ASC""",
-                [venue_id, date_to, date_from],
+                [venue_id, _aware(date_to), _aware(date_from)],
             )
             bookings = []
-            for row in cursor.fetchall():
-                if row.get("status") in {"Rejected", "Cancelled"}:
+            for row in map(_localize, cursor.fetchall()):
+                if row.get("status") in {"Rejected", "Cancelled", "Expired"}:
                     continue
                 validate_calendar_row(row)
                 if (
@@ -138,21 +163,16 @@ def list_bookings(database_url, venue_id, date_from, date_to):
 
 
 def _has_conflict(cursor, venue_id, start, end, exclude_booking_id=None):
-    # Start-inclusive, end-exclusive overlap check. Active holds are hard conflicts.
+    # Start-inclusive, end-exclusive overlap check. Approved bookings and
+    # active holds ('On Hold' rows) are hard conflicts.
     query = """SELECT 1 FROM public."VenueBooking"
-               WHERE venue_id = %s AND status = 'Approved'
+               WHERE venue_id = %s AND status IN ('Approved', 'On Hold')
                  AND requested_start_time < %s AND requested_end_time > %s"""
-    params = [venue_id, end, start]
+    params = [venue_id, _aware(end), _aware(start)]
     if exclude_booking_id:
         query += " AND booking_id <> %s"
         params.append(exclude_booking_id)
-    query = f"""{query}
-        UNION ALL
-        SELECT 1 FROM public."VenueHold"
-        WHERE venue_id = %s AND created_at < %s AND expires_at > %s
-        LIMIT 1"""
-    params.extend([venue_id, end, start])
-    cursor.execute(query, params)
+    cursor.execute(f"{query} LIMIT 1", params)
     return cursor.fetchone() is not None
 
 
@@ -179,14 +199,14 @@ def create_booking(database_url, event_id, venue_id, start, end, required_capaci
                     booking_id,
                     event_id,
                     venue_id,
-                    start,
-                    end,
+                    _aware(start),
+                    _aware(end),
                     required_capacity,
                     venue_requirements,
                     requested_by,
                 ],
             )
-            saved = cursor.fetchone()
+            saved = _localize(cursor.fetchone())
     return serialize(saved)
 
 
@@ -281,13 +301,12 @@ def list_event_bookings(database_url, event_id):
                     ORDER BY requested_start_time ASC, booking_id ASC""",
                 [event_id],
             )
-            return [serialize(row) for row in cursor.fetchall()]
+            return [serialize(_localize(row)) for row in cursor.fetchall()]
 
 
 def create_hold(database_url, venue_id, expires_at, held_by):
-    from datetime import datetime
-
-    hold_now = datetime.now(SINGAPORE).replace(tzinfo=None)
+    hold_now = datetime.now(SINGAPORE)
+    expires_at = _aware(expires_at)
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -296,29 +315,28 @@ def create_hold(database_url, venue_id, expires_at, held_by):
             )
             if not cursor.fetchone():
                 raise HoldVenueNotFoundError
+            # Bookings and other holds live in the same table, so one overlap
+            # check covers both.
             cursor.execute(
-                """SELECT 1 FROM public."VenueBooking"
-                   WHERE venue_id = %s AND status NOT IN ('Rejected', 'Cancelled')
-                     AND requested_start_time < %s AND requested_end_time > %s
-                   LIMIT 1""",
+                f"""SELECT 1 FROM public."VenueBooking"
+                    WHERE venue_id = %s AND status NOT IN {INACTIVE_STATUSES}
+                      AND requested_start_time < %s AND requested_end_time > %s
+                    LIMIT 1""",
                 [venue_id, expires_at, hold_now],
             )
             if cursor.fetchone():
                 raise HoldConflictError
+            # Not tied to an event yet; required_capacity is the minimum the
+            # table allows, since a hold reserves the venue, not a headcount.
             cursor.execute(
-                """SELECT 1 FROM public."VenueHold"
-                   WHERE venue_id = %s AND created_at < %s AND expires_at > %s
-                   LIMIT 1""",
-                [venue_id, expires_at, hold_now],
+                f"""INSERT INTO public."VenueBooking"
+                    (venue_id, requested_start_time, requested_end_time,
+                     required_capacity, status, held_by, held_at, hold_expires_at)
+                    VALUES (%s, %s, %s, 1, 'On Hold', %s, %s, %s)
+                    RETURNING {HOLD_COLUMNS}""",
+                [venue_id, hold_now, expires_at, held_by, hold_now, expires_at],
             )
-            if cursor.fetchone():
-                raise HoldConflictError
-            cursor.execute(
-                f"""INSERT INTO public."VenueHold" (venue_id, expires_at, held_by)
-                    VALUES (%s, %s, %s) RETURNING {HOLD_COLUMNS}""",
-                [venue_id, expires_at, held_by],
-            )
-            saved = cursor.fetchone()
+            saved = _localize(cursor.fetchone())
     return serialize_hold(saved)
 
 
@@ -326,11 +344,11 @@ def list_active_holds(database_url):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT {HOLD_COLUMNS} FROM public."VenueHold"
-                    WHERE expires_at > (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Singapore')
-                    ORDER BY expires_at ASC, hold_id ASC"""
+                f"""SELECT {HOLD_COLUMNS} FROM public."VenueBooking"
+                    WHERE status = 'On Hold' AND hold_expires_at > now()
+                    ORDER BY hold_expires_at ASC, booking_id ASC"""
             )
-            return [serialize_hold(row) for row in cursor.fetchall()]
+            return [serialize_hold(_localize(row)) for row in cursor.fetchall()]
 
 
 def decide_booking(database_url, booking_id, reviewed_by, status):
@@ -342,6 +360,7 @@ def decide_booking(database_url, booking_id, reviewed_by, status):
                 [booking_id],
             )
             booking = cursor.fetchone()
+            booking = _localize(booking) if booking else booking
             if not booking:
                 raise BookingNotFoundError
             if booking["status"] == "Cancelled":
@@ -367,7 +386,7 @@ def decide_booking(database_url, booking_id, reviewed_by, status):
                     RETURNING {COLUMNS}""",
                 [status, reviewed_by, booking_id],
             )
-            decided = cursor.fetchone()
+            decided = _localize(cursor.fetchone())
     return serialize(decided)
 
 
@@ -381,32 +400,23 @@ def list_window_bookings(database_url, date_from, date_to):
 
     Same conservative stance as the calendar: a row this service cannot read
     raises CalendarDataError rather than being dropped, because a dropped
-    booking would show a taken venue as free. Active holds are unioned into
-    this read so the caller needs no additional downstream call.
+    booking would show a taken venue as free. Active holds are 'On Hold' rows
+    in the same table, so one read returns bookings and holds together.
     """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."VenueBooking"
-                    WHERE (status IS NULL OR status NOT IN ('Rejected', 'Cancelled'))
+                    WHERE (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
                       AND ((requested_start_time < %s AND requested_end_time > %s)
                         OR requested_start_time IS NULL
                         OR requested_end_time IS NULL
                         OR requested_end_time <= requested_start_time)
-                    UNION ALL
-                    SELECT hold_id AS booking_id, NULL::uuid AS event_id,
-                        venue_id, created_at AS requested_start_time,
-                        expires_at AS requested_end_time,
-                        NULL::integer AS required_capacity,
-                        ''::text AS venue_requirements, 'On Hold' AS status,
-                        held_by AS requested_by, NULL::uuid AS reviewed_by
-                    FROM public."VenueHold"
-                    WHERE created_at < %s AND expires_at > %s
                     ORDER BY requested_start_time ASC, booking_id ASC""",
-                [date_to, date_from, date_to, date_from],
+                [_aware(date_to), _aware(date_from)],
             )
             bookings = []
-            for row in cursor.fetchall():
+            for row in map(_localize, cursor.fetchall()):
                 validate_calendar_row(row)
                 if (
                     row["requested_start_time"] < date_to

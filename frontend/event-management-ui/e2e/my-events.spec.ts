@@ -19,10 +19,7 @@ test('coordinator filters events and opens one with registrations', async ({ pag
   })
   await mock(page, 'event', '/events/evt-002', (route) => json(route, approved))
   await mock(page, 'venueBooking', '/events/evt-002/booking-requests', (route) => json(route, { bookings: [] }))
-  await mock(page, 'registration', '/registrations', (route) => {
-    expect(new URL(route.request().url()).searchParams.get('eventId')).toBe('evt-002')
-    return json(route, { registrations })
-  })
+  await mock(page, 'attendeeRegistration', '/events/evt-002/registrations', (route) => json(route, { registrations }))
   await page.goto('/my-events')
 
   await expect(page.getByRole('button', { name: /Tech Conference/ })).toBeVisible()

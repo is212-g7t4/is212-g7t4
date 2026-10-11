@@ -7,6 +7,8 @@ from app.clients import (
     get_attendee_registrations,
     get_confirmed_event,
     get_confirmed_events,
+    get_event_registrations,
+    get_user,
     save_registration,
 )
 from app.validation import event_has_started, validate_registration
@@ -19,6 +21,39 @@ def health():
     return jsonify(status="ok")
 
 
+def with_attendee_details(registrations):
+    """Add the attendee's name, email and organisation from User Service.
+
+    Registration stores only attendee_id; these fields keep the names the
+    frontend already reads. Each attendee is looked up once.
+    """
+    users = {
+        attendee_id: get_user(attendee_id)
+        for attendee_id in {r.get("attendee_id") for r in registrations}
+        if attendee_id
+    }
+    enriched = []
+    for registration in registrations:
+        user = users.get(registration.get("attendee_id")) or {}
+        enriched.append({
+            **registration,
+            "attendee_name": user.get("username", ""),
+            "attendee_email": user.get("email", ""),
+            "attendee_organization": user.get("organization", ""),
+        })
+    return enriched
+
+
+@bp.get("/events/<uuid:event_id>/registrations")
+def event_registrations(event_id):
+    """Coordinator registration list for one event, with attendee details."""
+    try:
+        registrations = with_attendee_details(get_event_registrations(str(event_id)))
+    except Exception:
+        return jsonify(message="Unable to load registrations right now."), 502
+    return jsonify(registrations=registrations)
+
+
 @bp.get("/registrations")
 def attendee_registrations():
     try:
@@ -26,7 +61,7 @@ def attendee_registrations():
     except (ValueError, TypeError, AttributeError):
         return jsonify(message="A valid attendeeId is required."), 400
     try:
-        registrations = get_attendee_registrations(attendee_id)
+        registrations = with_attendee_details(get_attendee_registrations(attendee_id))
         events = {event["id"]: event for event in get_confirmed_events()}
     except Exception:
         return jsonify(message="Unable to load your registrations right now."), 502
@@ -90,6 +125,5 @@ def register_for_event():
             "eventName": event["eventName"],
             "preferredStartDate": event.get("preferredStartDate"),
             "preferredEndDate": event.get("preferredEndDate"),
-            "venueId": event.get("venueId"),
         },
     ), 201

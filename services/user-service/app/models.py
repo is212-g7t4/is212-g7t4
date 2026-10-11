@@ -4,7 +4,7 @@ from threading import BoundedSemaphore
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-COLUMNS = "user_id, username, email, role, organization, contact_details, manager_id"
+COLUMNS = "user_id, username, email, role, organization, contact_details"
 # The hosted database pool rejects short bursts of many new connections. Keep
 # this atomic service below that limit while still allowing concurrent reads.
 DATABASE_SLOTS = BoundedSemaphore(value=5)
@@ -18,7 +18,6 @@ def serialize(row):
         "role": row["role"] or "",
         "organization": row["organization"] or "",
         "contact_details": row["contact_details"] or "",
-        "manager_id": str(row["manager_id"]) if row.get("manager_id") else None,
     }
 
 

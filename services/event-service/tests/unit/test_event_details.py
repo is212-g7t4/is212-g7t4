@@ -3,7 +3,7 @@
 Database calls are mocked; no live database writes.
 """
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,7 +34,7 @@ def setup(monkeypatch):
 def saved_row():
     row = {column: VALID.get(key, "") for key, column in FIELDS.items()}
     row.update(event_id=EVENT_ID, status="Submitted",
-               submission_date=datetime(2026, 9, 15, 1, 30),
+               submission_date=datetime(2026, 9, 15, 1, 30, tzinfo=UTC),
                preferred_start_date=datetime(2026, 10, 1, 9),
                preferred_end_date=datetime(2026, 10, 1, 17), expected_attendance=25,
                coordinator_id=None)

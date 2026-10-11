@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
+from app.models import SINGAPORE
 
 ID_A = "00000000-0000-4000-8000-000000000001"
 ID_B = "00000000-0000-4000-8000-000000000002"
@@ -69,7 +70,7 @@ def test_overlapping_events_use_strict_overlap_and_exclude_the_target(setup):
     assert response.json["events"][0]["id"] == ID_A
     sql, params = cursor.execute.call_args[0]
     assert "preferred_start_date < %s AND preferred_end_date > %s" in sql and "event_id <> %s" in sql
-    assert params == [["Approved", "Confirmed"], datetime(2026, 10, 1, 17), datetime(2026, 10, 1, 9), ID_B]
+    assert params == [["Approved", "Confirmed"], datetime(2026, 10, 1, 17, tzinfo=SINGAPORE), datetime(2026, 10, 1, 9, tzinfo=SINGAPORE), ID_B]
 
 
 def test_overlapping_events_without_exclusion(setup):

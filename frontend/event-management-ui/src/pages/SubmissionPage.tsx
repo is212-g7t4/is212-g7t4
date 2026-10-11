@@ -5,15 +5,11 @@ import { eventApi, SubmissionError, validateEvent } from '../features/event/subm
 import type { EventData, Role } from '../types'
 import { Field, FormSection, RoleWarning } from '../components/FormControls'
 import { Spinner } from '../components/Loading'
-import { VenueSelect } from '../features/venue/VenueSelect'
-import { venueCapacityMessage } from '../features/venue/capacity'
-import type { Venue } from '../features/venue/venues'
 
 export function SubmissionPage({ role, currentOrganiserId }: { role: Role; currentOrganiserId?: string }) {
   const [pending, setPending] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
-  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null)
   const [attendanceError, setAttendanceError] = useState('')
   const [event, setEvent] = useState<EventData>({
     eventName: '',
@@ -22,7 +18,6 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
     preferredStartDate: '',
     preferredEndDate: '',
     expectedAttendance: '',
-    venueId: '',
     venueRequirements: '',
     accessibilityNeeds: '',
     equipmentRequirements: '',
@@ -50,14 +45,10 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
     }
     setPending(true)
     try {
-      const capacityMessage = selectedVenue
-        ? venueCapacityMessage(selectedVenue, Number(event.expectedAttendance))
-        : null
       const saved = await eventApi('/events', currentOrganiserId ? { ...event, organiserId: currentOrganiserId } : event)
       setSubmitted(true)
       setPopup({ title: 'Event Submitted', messages: [
         `${saved.eventName} was submitted on ${new Date(saved.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT.`,
-        ...(capacityMessage ? [capacityMessage] : []),
       ] })
     } catch (cause) {
       setPopup(cause instanceof SubmissionError ? {
@@ -170,14 +161,6 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
           title="Event Requirements"
           hint="The following fields are optional. Provide any requirements that ConnectSphere should consider when reviewing your event."
         >
-          <VenueSelect
-            value={event.venueId}
-            onChange={(value, venue) => {
-              updateEvent('venueId', value)
-              setSelectedVenue(venue)
-            }}
-          />
-
           <Field
             label="Venue Requirements"
             value={event.venueRequirements}

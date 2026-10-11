@@ -1,7 +1,7 @@
 """Attendee catalogue: expose only confirmed events for registration discovery."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,9 +32,8 @@ def confirmed_row():
         preferred_start_date=datetime(2026, 11, 10, 9),
         preferred_end_date=datetime(2026, 11, 10, 12),
         expected_attendance=30,
-        venue_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         status="Confirmed",
-        submission_date=datetime(2026, 10, 1, 8),
+        submission_date=datetime(2026, 10, 1, 8, tzinfo=UTC),
         coordinator_id=None,
         organiser_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     )

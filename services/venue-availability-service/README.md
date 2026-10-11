@@ -71,8 +71,9 @@ as `On Hold` and naturally returns to the venue's operational status after
 expiry. `GET /venue-bookings/window` includes overlapping hold intervals as
 `status: "On Hold"`, allowing venue search to hide them. Booking creation and
 approval check active holds in the same venue-locked transaction, so a hold
-cannot be bypassed by a new or newly approved booking. Database setup must
-apply `database/supabase/migrations/20261008100000_create_venue_hold.sql`.
+cannot be bypassed by a new or newly approved booking. Holds are `On Hold` rows in
+`public."VenueBooking"` (see `docs/db-structure.md`); there is no separate hold
+table.
 
 CORS allows only the configured exact `FRONTEND_ORIGIN`, including on errors.
 `OPTIONS /venue-bookings` requires no identity and returns allowed headers
@@ -90,7 +91,8 @@ values are rejected, never silently ignored. Require `dateFrom < dateTo` and
 Missing, duplicate, invalid, reversed, empty or oversized ranges return `400`
 before a database query. The bound is a time-window limit, not a row-count cap.
 
-**Time convention:** existing DB timestamps are Singapore-local naive values.
+**Time convention:** the database stores `TIMESTAMPTZ`; this service converts
+at the database boundary so its API keeps working in Singapore-local time.
 Naive input is interpreted as Singapore local; offset input (`Z`, `+08:00`, or
 another explicit offset) is converted to Singapore local before binding SQL.
 GET output always includes `+08:00`. URL-encode `+` as `%2B`, or use curl's

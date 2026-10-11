@@ -14,7 +14,7 @@ vi.mock('../features/equipment/requests', async (importOriginal) => ({
   reviewEquipmentRequest: vi.fn(),
 }))
 
-const user: User = { id: 'u1', username: 'Wei', email: 'w@x.com', role: 'Technical Support', organization: 'O', managerId: null }
+const user: User = { id: 'u1', username: 'Wei', email: 'w@x.com', role: 'Technical Support', organization: 'O' }
 const coordinator: User = { ...user, id: 'coord-1', username: 'Alicia', role: 'Event Coordinator' }
 
 const line = (overrides: Partial<EquipmentRequest> = {}): EquipmentRequest => ({

@@ -146,12 +146,6 @@ def create_app(config=None):
             return jsonify(message="This role cannot view all internal events."), 403
         status = request.args.get("status") or None
         venue = request.args.get("venue") or None
-        venue_id = request.args.get("venueId") or None
-        if venue_id:
-            try:
-                venue_id = str(UUID(venue_id))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="venueId must be a valid venue ID."), 400
         is_manager = (
             request.args.get("isManager") in ("true", "1")
             or viewer_role in ("Venue Staff", "Technical Support")
@@ -189,7 +183,6 @@ def create_app(config=None):
                 date_from,
                 date_to,
                 is_manager,
-                venue_id=venue_id,
             )
         )
 
