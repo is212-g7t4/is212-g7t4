@@ -11,11 +11,20 @@ EVENT_SERVICE_URL = os.environ.get("EVENT_SERVICE_URL") or "http://localhost:500
 USER_SERVICE_URL = os.environ.get("USER_SERVICE_URL") or "http://localhost:5001"
 
 
+# Roles an event can be assigned to. The Lead assigns coordinators and can
+# also take an event on themselves (c4_diagram/c3.dsl: "eligible coordinators
+# (including the Lead)").
+ASSIGNABLE_ROLES = ("Event Coordinator Lead", "Event Coordinator")
+
+
 def get_available_coordinators() -> list:
-    """Return Event Coordinators from User Service."""
-    response = httpx.get(f"{USER_SERVICE_URL}/users", params={"role": "Event Coordinator"})
-    response.raise_for_status()
-    return response.json()["users"]
+    """Return everyone an event can be assigned to, Lead first, from User Service."""
+    coordinators = []
+    for role in ASSIGNABLE_ROLES:
+        response = httpx.get(f"{USER_SERVICE_URL}/users", params={"role": role})
+        response.raise_for_status()
+        coordinators.extend(response.json()["users"])
+    return coordinators
 
 
 def get_user(user_id: str) -> dict | None:

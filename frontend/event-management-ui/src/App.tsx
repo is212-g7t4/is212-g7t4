@@ -18,7 +18,7 @@ import { VenueSearchPage } from './pages/VenueSearchPage'
 import { AddVenuePage, EditVenuePage } from './pages/AddVenuePage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
-import type { EventData, Route, User } from './types'
+import type { EventData, Role, Route, User } from './types'
 import { AlertIcon, CheckIcon } from './components/Icon'
 
 const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
@@ -94,7 +94,6 @@ function App() {
     preferredStartDate: '',
     preferredEndDate: '',
     expectedAttendance: '',
-    venueId: '',
     venueRequirements: '',
     accessibilityNeeds: '',
     equipmentRequirements: '',
@@ -171,8 +170,9 @@ function App() {
     setEvent((current) => ({ ...current, [field]: value }))
   }
 
-  const role = activeUser?.role ?? 'Event Organiser'
-  const isManager = activeUser?.role === 'Event Coordinator' && activeUser?.managerId === null
+  // The Lead uses the coordinator screens, with the manager's extra rights.
+  const isManager = activeUser?.role === 'Event Coordinator Lead'
+  const role: Role = isManager ? 'Event Coordinator' : activeUser?.role ?? 'Event Organiser'
   const resolveUserName = (userId: string | null | undefined) => users.find((user) => user.id === userId)?.username ?? null
 
   return <div className="app-shell">

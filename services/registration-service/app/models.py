@@ -3,9 +3,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import psycopg2
+import psycopg2.errors
 from psycopg2.extras import RealDictCursor
 
-COLUMNS = "registration_id, event_id, attendee_id, registration_date, status, attendee_name, attendee_email, attendee_organization"
+# Only columns owned by Registration Service. The attendee's name, email and
+# organisation live on User; the Attendee Registration composite adds them.
+COLUMNS = "registration_id, event_id, attendee_id, registration_date, status"
 
 
 class DuplicateRegistrationError(Exception):
@@ -21,11 +24,9 @@ def serialize(row):
         "registration_id": str(row["registration_id"]),
         "event_id": str(row["event_id"]) if row.get("event_id") else None,
         "attendee_id": str(row["attendee_id"]) if row.get("attendee_id") else None,
+        # TIMESTAMPTZ comes back aware, so the string carries its offset.
         "registration_date": row["registration_date"].isoformat() if row["registration_date"] else None,
         "status": row["status"] or "",
-        "attendee_name": row["attendee_name"] or "",
-        "attendee_email": row["attendee_email"] or "",
-        "attendee_organization": row["attendee_organization"] or "",
     }
 
 
@@ -52,40 +53,56 @@ def list_attendee_registrations(database_url, attendee_id):
             return [serialize(row) for row in cursor.fetchall()]
 
 
-def create_registration(database_url, event_id, attendee_id, capacity, name, email, organization):
-    """Insert a confirmed registration while serializing capacity checks per event."""
-    registration_id = str(uuid4())
+def create_registration(database_url, event_id, attendee_id, capacity):
+    """Confirm one attendee for one event while serializing capacity checks.
+
+    One row per (event, attendee), enforced by a UNIQUE constraint. Registering
+    again after withdrawing reuses the withdrawn row.
+    """
     registered_at = datetime.now(timezone.utc)
-    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
-        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
-            # Concurrent registrations for one event must check and claim the last
-            # place in sequence. The transaction-scoped lock is released on commit.
-            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [event_id])
-            cursor.execute(
-                """SELECT 1 FROM public."Registration"
-                   WHERE event_id = %s AND LOWER(attendee_email) = LOWER(%s)
-                     AND status <> 'Withdrawn'
-                   LIMIT 1""",
-                [event_id, email],
-            )
-            if cursor.fetchone():
-                raise DuplicateRegistrationError
+    try:
+        with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+            with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Concurrent registrations for one event must check and claim the
+                # last place in sequence. The transaction-scoped lock is released
+                # on commit.
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [event_id])
+                cursor.execute(
+                    """SELECT registration_id, status FROM public."Registration"
+                       WHERE event_id = %s AND attendee_id = %s""",
+                    [event_id, attendee_id],
+                )
+                existing = cursor.fetchone()
+                if existing and existing["status"] != "Withdrawn":
+                    raise DuplicateRegistrationError
 
-            cursor.execute(
-                """SELECT COUNT(*) AS confirmed FROM public."Registration"
-                   WHERE event_id = %s AND status = 'Confirmed'""",
-                [event_id],
-            )
-            if int(cursor.fetchone()["confirmed"]) >= capacity:
-                raise CapacityReachedError
+                cursor.execute(
+                    """SELECT COUNT(*) AS confirmed FROM public."Registration"
+                       WHERE event_id = %s AND status = 'Confirmed'""",
+                    [event_id],
+                )
+                if int(cursor.fetchone()["confirmed"]) >= capacity:
+                    raise CapacityReachedError
 
-            cursor.execute(
-                f"""INSERT INTO public."Registration" ({COLUMNS})
-                    VALUES (%s, %s, %s, %s, 'Confirmed', %s, %s, %s)
-                    RETURNING {COLUMNS}""",
-                [registration_id, event_id, attendee_id, registered_at, name, email, organization],
-            )
-            return serialize(cursor.fetchone())
+                if existing:
+                    cursor.execute(
+                        f"""UPDATE public."Registration"
+                            SET status = 'Confirmed', registration_date = %s
+                            WHERE registration_id = %s
+                            RETURNING {COLUMNS}""",
+                        [registered_at, existing["registration_id"]],
+                    )
+                else:
+                    cursor.execute(
+                        f"""INSERT INTO public."Registration" ({COLUMNS})
+                            VALUES (%s, %s, %s, %s, 'Confirmed')
+                            RETURNING {COLUMNS}""",
+                        [str(uuid4()), event_id, attendee_id, registered_at],
+                    )
+                return serialize(cursor.fetchone())
+    except psycopg2.errors.UniqueViolation as error:
+        # Safety net: the advisory lock should already prevent this.
+        raise DuplicateRegistrationError from error
 
 
 def count_registrations(database_url, event_ids):

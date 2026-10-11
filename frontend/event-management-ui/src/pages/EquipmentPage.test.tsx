@@ -11,7 +11,7 @@ vi.mock('../features/equipment/equipment', async (importOriginal) => ({
   createEquipment: vi.fn(),
 }))
 
-const user: User = { id: 'u1', username: 'Wei', email: 'w@x.com', role: 'Technical Support', organization: 'O', managerId: null }
+const user: User = { id: 'u1', username: 'Wei', email: 'w@x.com', role: 'Technical Support', organization: 'O' }
 const projector = { id: 'e1', type: 'Projector', description: '4K projector', totalQuantity: 5, location: 'Store', status: 'Available', setupRequirements: 'Mount it.' }
 
 beforeEach(() => {

@@ -1,7 +1,7 @@
 # Supabase setup — for team members
 
 How to connect your service to the shared Supabase database and start
-reading/writing the 8 tables that already exist.
+reading/writing the 12 tables that exist. The full column-by-column structure is in [db-structure.md](db-structure.md).
 
 ## 1. Get the DB password
 
@@ -66,16 +66,12 @@ uv add sqlalchemy psycopg2-binary
 
 ## 5. The tables
 
-The eight tables below are documented from the user-supplied Supabase
-context-only schema export reviewed on 2026-09-23. This is **schema review,
-not a live database or application integration verification**. Do not execute
-that export as a migration. The previously linked migration
-`20260912150524_create_service_tables.sql` is absent from this checkout.
-
-The export spells table names in PascalCase. PostgreSQL folds unquoted
-identifiers to lowercase, so use double quotes for the intended mixed-case
-names (for example `public."VenueBooking"`). Because the context export omits
-those quotes, confirm the exact stored names before deploying:
+The tables below match [db-structure.md](db-structure.md), the final Week 7
+structure, which is created by migration
+`20261011140000_baseline_schema.sql`. Column names are `snake_case`.
+Table names are PascalCase, and PostgreSQL folds unquoted identifiers to
+lowercase, so use double quotes (for example `public."VenueBooking"`). To
+confirm the stored names:
 
 ```sql
 SELECT table_name
@@ -84,20 +80,37 @@ WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
 ORDER BY table_name;
 ```
 
-| Exported table name / intended SQL identifier | Owning service | Key columns |
+All time columns are `TIMESTAMPTZ`. Existing values were converted from naive
+Singapore local time as `Asia/Singapore`. psycopg2 returns them timezone-aware
+(in the session's zone, UTC on Supabase), so convert before treating them as
+Singapore local. Event Service and Venue Availability keep their HTTP APIs in
+naive Singapore-local time and convert at the database boundary: naive input
+is bound as `Asia/Singapore`, and values read back are turned into Singapore
+local time. Binding a naive value directly would be read as UTC, 8 hours off.
+`Event.submission_date` and `Registration.registration_date` are returned with
+their offset.
+
+| Table | Owning service | Key columns |
 |---|---|---|
-| `public."Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`, `coordinator_id` |
+| `public."Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`, `coordinator_id`, `registration_enabled` (an event's venue is its `VenueBooking` rows) |
 | `public."EventChangeReq"` | Event | `change_id` (PK), `event_id`, `requested_changes` (jsonb), `reviewed_by` |
-| `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `description`, `total_quantity`, `location`, `operational_status` |
-| `public."User"` | User | `user_id` (PK), `username`, `email`, `role`, `manager_id` (self-reference) |
-| `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `required_capacity`, `venue_requirements`, `status`, `requested_by`, `reviewed_by` |
-| `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `supported_layouts` (jsonb), `operational_status` |
-| `public."Registration"` | Registration | `registration_id` (PK), `event_id`, `attendee_id` |
-| `public."EquipmentRequest"` | Equipment Request | `equipment_request_id` (PK), `event_id`, `equipment_id`, `quantity_requested`, `reviewed_by` |
+| `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity`, `operational_status` |
+| `public."User"` | User | `user_id` (PK), `username`, `email` (unique), `role` (the Lead is role `Event Coordinator Lead`) |
+| `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `setup_time_minutes`, `turnaround_time_minutes`, `operational_status` |
+| `public."VenueBooking"` | **Venue Availability** | `booking_id` (PK), `event_id`, `venue_id`, `requested_start_time`, `requested_end_time`, `required_capacity`, `status`, `held_by`, `hold_expires_at`, `conflict_reason`, `closure_id` |
+| `public."VenueClosure"` | Venue Availability | `closure_id` (PK), `venue_id`, `start_date_time`, `end_date_time`, `reason` |
+| `public."EquipmentRequest"` | Equipment Request | `equipment_request_id` (PK), `event_id`, `equipment_id`, `quantity_requested`, `quantity_reserved`, `requested_by`, `reviewed_by` |
+| `public."Registration"` | Registration | `registration_id` (PK), `event_id`, `attendee_id`; unique on both |
+| `public."Notification"` | Notification | `notification_id` (PK), `recipient_id`, `event_id`, `dedupe_key`, `read_at` |
+| `public."SafetyCheck"` | Safety Check | `safety_check_id` (PK), `event_id`, `round_number`, `status`; unique on `(event_id, round_number)` |
+| `public."SafetyCheckFlag"` | Safety Check | `flag_id` (PK), `safety_check_id`, `booking_id`, `equip_request_id` |
+
+There is no `VenueHold` table any more. A hold is a `VenueBooking` row with
+status `On Hold` (see below).
 
 ### Venue Availability ownership and this sprint's scope
 
-Venue Availability now owns both booking records and conflict checking.
+Venue Availability now owns booking records, holds, venue closures and conflict checking.
 There is no separate Booking Conflict atomic service or duplicate booking
 table in the agreed design. Conflict is calculated from venue, time range
 and status; no stored `conflict` column is needed. Venue Service continues
@@ -115,7 +128,7 @@ values; the existing write code emits `Pending Review`, which the reader also
 supports. Unknown/null relevant statuses fail closed. No live rows were changed.
 
 Scheduled maintenance/operational blocks (`venueBlock`) are **deferred to
-next sprint**. The current schema cannot represent those intervals.
+next sprint**. The schema now has `VenueClosure` for dated blocks, but the calendar service does not read it yet.
 `Venue.operational_status` is not a substitute for a dated block. This sprint
 therefore covers booking-based availability only, not the original plan's
 recorded operational-block coverage. Record that scope reduction in Jira;
@@ -126,8 +139,8 @@ do not claim the full Week 4 unavailability requirement is complete.
 | Check | Supplied schema | Required handling |
 |---|---|---|
 | Booking identity and relationships | UUID PK; FKs to Event, Venue and User | Existing references support the model; foreign-key columns remain nullable. |
-| Booking range | Both fields are `timestamp without time zone`, nullable | SCRUM-25 interprets existing naive values as Singapore local; reads accept naive or offset ISO datetimes and output `+08:00`. No type migration was applied. |
-| Required values | The per-booking `required_capacity` and `venue_requirements` migration adds `NOT NULL`; older core columns may still reflect the live export | Require venue, event, requester, start, end and status in write validation. Never silently treat malformed rows as free time. |
+| Booking range | Both fields are `TIMESTAMPTZ NOT NULL` | Existing values were converted as Singapore local time. Reads accept naive or offset ISO datetimes and output `+08:00`. |
+| Required values | `requested_start_time`, `requested_end_time` and `required_capacity` are `NOT NULL`; every other column, including `event_id`, `venue_id` and `venue_requirements`, is nullable (a hold has no event) | Require venue, event, requester, start, end and status in write validation. Never silently treat malformed rows as free time. |
 | Range validity | No end-after-start check shown | Validate end > start; add a DB CHECK after auditing existing data. |
 | Status | Unconstrained nullable varchar | Inspect distinct live values and agree one canonical enum/check before mapping approved/pending states. |
 | Concurrent approvals | No overlap exclusion constraint shown | Recheck and save under a transaction-safe per-venue lock or equivalent DB enforcement. Every blocking write must follow the same rule. |
@@ -147,8 +160,8 @@ current booking ID when checking an edit. For calendar reads, return pending
 records as well as approved records; only approved records block selection.
 
 Example parameterized read (assuming the intended quoted table name has
-been confirmed). Bind timezone-naive boundaries using the agreed convention
-while the database retains `timestamp without time zone`:
+been confirmed). Bind timezone-aware boundaries (naive input is treated as Singapore local
+and given `+08:00` first):
 
 ```sql
 SELECT booking_id, venue_id, requested_start_time, requested_end_time, status
@@ -164,7 +177,7 @@ ORDER BY requested_start_time, booking_id;
 The checked-out Event Service now queries `public."Event"` (verified in
 `services/event-service/app/models.py`), not the earlier `public.event_service`.
 Venue Availability queries `public."VenueBooking"`; its SCRUM-25 live smoke
-verified the quoted table, UUID identity columns and naive timestamp columns,
+verified the quoted table and UUID identity columns (the timestamp columns have since become `TIMESTAMPTZ`),
 and exercised the actual GET through a Flask test client with read-only DB
 transactions. This does not verify every service, RLS policy or write workflow.
 
@@ -197,11 +210,12 @@ with get_connection() as conn:
 ## 7. If you need to change the schema (add columns, add a table)
 
 This requires the Supabase CLI, which is already scaffolded in this repo
-under `database/supabase/`. This checkout includes
-`20260927100000_add_venue_id_to_event.sql` and
-`20260927110000_create_venue_booking.sql`; their presence does not prove their
-application to the shared database. Confirm the baseline before applying new
-migrations. No migrations were applied for SCRUM-25. The CLI expects
+under `database/supabase/`. The whole schema is one baseline migration,
+`20261011140000_baseline_schema.sql`, generated from the shared project on
+11 Oct 2026; it replaced every earlier migration file. Add new migrations
+after it. If `supabase migration list` shows versions that exist on only one
+side, fix the history with `supabase migration repair` before running
+`supabase db push`, never by re-running old files. The CLI expects
 its `supabase/` folder to be in your current directory, so run these from
 `database/`, not the repo root:
 
@@ -220,12 +234,20 @@ migrations should be committed so everyone's local history matches the
 remote project. Coordinate with the team before changing a table another
 service's code already depends on.
 
+## Mock data
+
+`database/supabase/seed.sql` holds the shared project's mock data in the
+Week 7 structure. `supabase db reset` (local) runs it after the migrations.
+To reset the shared project's data to it, run
+`psql "$DATABASE_URL" -f database/supabase/seed.sql`. It **empties every
+public table first**, so check with the team before running it on the shared
+project.
+
 ## Equipment table conventions
 
 Equipment Service (`services/equipment-service/`) expects these values in
-`public."Equipment"`; migration
-`20261002120000_normalize_equipment_catalogue.sql` converted the original rows
-to match.
+`public."Equipment"`; the rows in `database/supabase/seed.sql` already
+match.
 
 - `equipment_type` — a class name from the Equipment OO model:
   `Microphone`, `LightingKit`, `Projector`, `Laptop`, `Furniture`, `Table`,

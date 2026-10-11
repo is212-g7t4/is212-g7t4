@@ -102,21 +102,17 @@ def create_app(config=None):
             capacity = int(data.get("capacity"))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="Valid eventId, attendeeId and capacity are required."), 400
-        name = str(data.get("fullName") or "").strip()
-        email = str(data.get("email") or "").strip().lower()
-        organization = str(data.get("organization") or "").strip()
-        if capacity < 1 or not name or not email:
-            return jsonify(message="Valid eventId, attendeeId, capacity, fullName and email are required."), 400
+        if capacity < 1:
+            return jsonify(message="Valid eventId, attendeeId and capacity are required."), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
 
         try:
             registration = create_registration(
-                app.config["DATABASE_URL"], event_id, attendee_id, capacity,
-                name, email, organization,
+                app.config["DATABASE_URL"], event_id, attendee_id, capacity
             )
         except DuplicateRegistrationError:
-            return jsonify(code="DUPLICATE_REGISTRATION", message="This email is already registered for the event."), 409
+            return jsonify(code="DUPLICATE_REGISTRATION", message="You are already registered for this event."), 409
         except CapacityReachedError:
             return jsonify(code="EVENT_FULL", message="This event has reached maximum capacity."), 409
         return jsonify(registration=registration), 201

@@ -1,14 +1,14 @@
 """Event submission AC1–AC4. Database calls are mocked; no live database writes."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 from uuid import UUID
 
 import psycopg2
 import pytest
 from app import create_app
-from app.models import FIELDS, serialize, unpack_description
+from app.models import FIELDS, SINGAPORE, serialize, unpack_description
 
 VALID = {
     "eventName": "Community Workshop",
@@ -36,7 +36,7 @@ def saved_row():
     row.update(
         event_id="00000000-0000-0000-0000-000000000001",
         status="Submitted",
-        submission_date=datetime(2026, 9, 15, 1, 30),
+        submission_date=datetime(2026, 9, 15, 1, 30, tzinfo=UTC),
         preferred_start_date=datetime(2026, 10, 1, 9),
         preferred_end_date=datetime(2026, 10, 1, 17),
         expected_attendance=25,
@@ -65,13 +65,16 @@ def test_ac1_ac2_ac3_submit_existing_columns_and_return_confirmation_data(setup)
     assert response.json["description"] == "A workshop"
     query, parameters = cursor.execute.call_args.args
     assert 'INSERT INTO public."Event"' in query
-    assert "timezone('UTC', CURRENT_TIMESTAMP)" in query
+    assert "'Submitted', now()" in query
     assert "purpose" not in query
     assert "'Submitted'" in query
     assert UUID(parameters[0])
+    # Naive local input is bound as an aware Singapore time for TIMESTAMPTZ.
+    assert parameters[3] == datetime(2026, 10, 1, 9, tzinfo=SINGAPORE)
+    assert parameters[4] == datetime(2026, 10, 1, 17, tzinfo=SINGAPORE)
     assert parameters[5] == 25
     assert json.loads(parameters[2])["purpose"] == "Learning"
-    assert parameters[6:] == [None, "", "", "", "", None]  # last: organiser_id (not supplied)
+    assert parameters[6:] == ["", "", "", "", None]  # last: organiser_id (not supplied)
     connection.__exit__.assert_called_once()
     connection.close.assert_called_once()
 
@@ -531,3 +534,16 @@ def test_submit_rejects_invalid_organiser_id(setup):
     response = client.post("/events", json={**VALID, "organiserId": "not-a-uuid"})
     assert response.status_code == 400
     cursor.execute.assert_not_called()
+
+
+def test_timestamptz_values_serialize_as_singapore_local():
+    """TIMESTAMPTZ columns come back aware in the session zone (UTC on Supabase);
+    the API keeps returning the naive Singapore-local strings it always has."""
+    row = saved_row()
+    row["preferred_start_date"] = datetime(2026, 10, 1, 1, tzinfo=UTC)
+    row["preferred_end_date"] = datetime(2026, 10, 1, 9, tzinfo=UTC)
+
+    serialized = serialize(row)
+
+    assert serialized["preferredStartDate"] == "2026-10-01T09:00:00"
+    assert serialized["preferredEndDate"] == "2026-10-01T17:00:00"

@@ -6,10 +6,8 @@ instead of inserting duplicates on every run.
 - `equipment_type` is one of the class names in `app/equipment.py`.
 - `operational_status` is one of `Available` or `Unavailable`.
 
-The first 7 rows are the live catalogue after migration
-20261002120000_normalize_equipment_catalogue.sql; the last 2 are extra mock rows
-(an Unavailable item and a plain Furniture item). Run the migration before this
-script, otherwise the old display-name rows will sit alongside these.
+The first 7 rows match the catalogue in database/supabase/seed.sql; the last 2
+are extra mock rows (an Unavailable item and a plain Furniture item).
 
 Requires DATABASE_URL in the environment, loaded from
 services/equipment-service/.env — see .env.example.

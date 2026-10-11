@@ -1,5 +1,6 @@
 import type { SubmittedEvent } from '../event/submission'
 import type { Venue } from '../venue/venues'
+import { fetchApprovedVenueId } from '../venue/eventVenue'
 import { fetchVenue } from '../venue/venues'
 
 interface ApiRegistration {
@@ -38,11 +39,14 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
 
   const items = body.registrations as ApiRegistrationItem[]
   if (items.length === 0) return []
-  const venueIds = Array.from(new Set(items.map(({ event }) => event.venueId).filter(Boolean)))
-  const venueResults = await Promise.all(
+  const eventIds = Array.from(new Set(items.map(({ event }) => event.id)))
+  const venueIdByEvent = new Map(await Promise.all(
+    eventIds.map(async (eventId) => [eventId, await fetchApprovedVenueId(eventId)] as const),
+  ))
+  const venueIds = Array.from(new Set([...venueIdByEvent.values()].filter((id): id is string => Boolean(id))))
+  const venues = new Map(await Promise.all(
     venueIds.map(async (venueId) => [venueId, await fetchVenue(venueId)] as const),
-  )
-  const venues = new Map(venueResults)
+  ))
 
   return items.map(({ registration, event }) => ({
     id: registration.registration_id,
@@ -53,6 +57,6 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
     attendeeEmail: registration.attendee_email,
     attendeeOrganization: registration.attendee_organization,
     event,
-    venue: venues.get(event.venueId) ?? null,
+    venue: venues.get(venueIdByEvent.get(event.id) ?? '') ?? null,
   }))
 }

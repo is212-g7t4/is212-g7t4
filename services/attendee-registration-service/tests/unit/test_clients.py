@@ -52,3 +52,23 @@ def test_save_registration_propagates_other_failures(monkeypatch):
     monkeypatch.setattr(clients.httpx, "post", Mock(return_value=response(503, {})))
     with pytest.raises(httpx.HTTPStatusError):
         clients.save_registration({"eventId": "event-1"})
+
+
+def test_get_event_registrations(monkeypatch):
+    get = Mock(return_value=response(200, {"registrations": [{"registration_id": "r1"}]}))
+    monkeypatch.setattr(clients.httpx, "get", get)
+    assert clients.get_event_registrations("event-1") == [{"registration_id": "r1"}]
+    assert get.call_args.kwargs["params"] == {"eventId": "event-1"}
+
+
+def test_get_user_returns_user_or_none(monkeypatch):
+    monkeypatch.setattr(clients.httpx, "get", Mock(return_value=response(200, {"username": "Adam"})))
+    assert clients.get_user("user-1") == {"username": "Adam"}
+    monkeypatch.setattr(clients.httpx, "get", Mock(return_value=response(404, {})))
+    assert clients.get_user("missing") is None
+
+
+def test_get_user_propagates_service_failure(monkeypatch):
+    monkeypatch.setattr(clients.httpx, "get", Mock(return_value=response(503, {})))
+    with pytest.raises(httpx.HTTPStatusError):
+        clients.get_user("user-1")

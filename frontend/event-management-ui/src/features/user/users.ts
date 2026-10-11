@@ -6,7 +6,6 @@ interface ApiUser {
   email: string
   role: string
   organization: string
-  manager_id: string | null
   contact_details: string
 }
 
@@ -17,7 +16,6 @@ function toUser(apiUser: ApiUser): User {
     email: apiUser.email,
     role: apiUser.role as Role,
     organization: apiUser.organization,
-    managerId: apiUser.manager_id,
     contactDetails: apiUser.contact_details,
   }
 }

@@ -75,6 +75,11 @@ registration record (Registration Service), and notifies asynchronously. No
 Forum Service call — registration doesn't have an approval/rejection
 reason the way venue and equipment requests do.
 
+Registration rows store only the attendee's ID, so this composite also adds
+the attendee's name, email and organisation from User Service when listing
+registrations: `GET /registrations?attendeeId=` (the attendee's own) and
+`GET /events/<eventId>/registrations` (the coordinator's list for one event).
+
 ## Atomic services
 
 Atomics never call each other or any other service — only a composite

@@ -3,12 +3,13 @@
 Database calls are mocked; no live database writes.
 """
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
 from app import create_app
+from app.models import SINGAPORE
 from app.models import FIELDS
 
 VALID = {
@@ -18,7 +19,6 @@ VALID = {
 }
 
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
-VENUE_ID = "22222222-2222-4222-8222-222222222222"
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def setup(monkeypatch):
 def saved_row(**overrides):
     row = {column: VALID.get(key, "") for key, column in FIELDS.items()}
     row.update(event_id="00000000-0000-0000-0000-000000000001", status="Submitted",
-               submission_date=datetime(2026, 9, 15, 1, 30),
+               submission_date=datetime(2026, 9, 15, 1, 30, tzinfo=UTC),
                preferred_start_date=datetime(2026, 10, 1, 9),
                preferred_end_date=datetime(2026, 10, 1, 17), expected_attendance=25,
                coordinator_id=COORDINATOR_ID)
@@ -81,31 +81,6 @@ def test_ac2_filters_by_venue_substring(setup):
     assert params == [COORDINATOR_ID, "%Main Hall%"]
 
 
-def test_planning_view_filters_by_registered_venue_id(setup):
-    client, _, cursor = setup
-    cursor.fetchall.return_value = [saved_row(venue_id=VENUE_ID)]
-
-    response = client.get(
-        "/events",
-        query_string={"coordinatorId": COORDINATOR_ID, "venueId": VENUE_ID},
-    )
-
-    assert response.status_code == 200
-    query, params = cursor.execute.call_args.args
-    assert "venue_id = %s" in query
-    assert params == [COORDINATOR_ID, VENUE_ID]
-
-
-def test_planning_view_rejects_invalid_venue_id(setup):
-    client, _, cursor = setup
-    response = client.get(
-        "/events",
-        query_string={"coordinatorId": COORDINATOR_ID, "venueId": "not-a-uuid"},
-    )
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
-
-
 def test_ac2_venue_filter_escapes_percent_and_underscore(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = []
@@ -128,8 +103,8 @@ def test_ac2_filters_by_date_range(setup):
     assert "preferred_start_date <= %s" in query
     assert "preferred_end_date >= %s" in query
     assert params[0] == COORDINATOR_ID
-    assert params[1] == datetime(2026, 10, 31, 23, 59, 59, 999999)
-    assert params[2] == datetime(2026, 9, 1)
+    assert params[1] == datetime(2026, 10, 31, 23, 59, 59, 999999, tzinfo=SINGAPORE)
+    assert params[2] == datetime(2026, 9, 1, tzinfo=SINGAPORE)
 
 
 def test_ac2_date_range_is_inclusive_of_end_date(setup):
@@ -140,7 +115,7 @@ def test_ac2_date_range_is_inclusive_of_end_date(setup):
 
     assert response.status_code == 200
     _, params = cursor.execute.call_args.args
-    assert params == [COORDINATOR_ID, datetime(2026, 10, 31, 23, 59, 59, 999999)]
+    assert params == [COORDINATOR_ID, datetime(2026, 10, 31, 23, 59, 59, 999999, tzinfo=SINGAPORE)]
 
 
 def test_ac2_combined_filters(setup):
@@ -157,7 +132,7 @@ def test_ac2_combined_filters(setup):
     assert "status = %s" in query
     assert "venue_requirements ILIKE" in query
     assert "preferred_end_date >= %s" in query
-    assert params == [COORDINATOR_ID, "Submitted", "%Hall%", datetime(2026, 1, 1)]
+    assert params == [COORDINATOR_ID, "Submitted", "%Hall%", datetime(2026, 1, 1, tzinfo=SINGAPORE)]
 
 
 def test_ac3_no_filters_still_requires_and_scopes_by_coordinator(setup):

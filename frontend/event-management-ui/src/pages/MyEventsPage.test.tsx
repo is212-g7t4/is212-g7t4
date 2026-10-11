@@ -2,21 +2,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
-import { fetchVenues } from '../features/venue/venues'
-import type { Venue } from '../features/venue/venues'
 import { MyEventsPage } from './MyEventsPage'
 
 vi.mock('../features/event/submission', () => ({ eventApi: vi.fn() }))
-vi.mock('../features/venue/venues', () => ({ fetchVenues: vi.fn() }))
 
 const coordinatorId = '11111111-1111-4111-8111-111111111111'
-const venue: Venue = {
-  id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', name: 'Grand Hall', location: 'Level 1',
-  capacity: 100, facilities: [], accessibility: '', supportedLayouts: [], status: 'Available',
-}
-const unrelatedVenue: Venue = {
-  ...venue, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', name: 'Unassigned Auditorium',
-}
 const submittedEvent: SubmittedEvent = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   eventName: 'Community Workshop',
@@ -25,7 +15,6 @@ const submittedEvent: SubmittedEvent = {
   preferredStartDate: '2026-10-10T09:00:00+08:00',
   preferredEndDate: '2026-10-10T12:00:00+08:00',
   expectedAttendance: '30',
-  venueId: venue.id,
   venueRequirements: 'Seminar room',
   accessibilityNeeds: '',
   equipmentRequirements: 'Projector',
@@ -53,7 +42,6 @@ const confirmedEvent: SubmittedEvent = {
 
 beforeEach(() => {
   vi.resetAllMocks()
-  vi.mocked(fetchVenues).mockResolvedValue([venue, unrelatedVenue])
   vi.mocked(eventApi).mockImplementation(async (path) => ({
     events: path.includes('status=Approved') ? [approvedEvent]
       : path.includes('status=Confirmed') ? [confirmedEvent]
@@ -107,16 +95,15 @@ test.each(['Venue Staff', 'Technical Support'] as const)('%s sees all events and
   ))
 })
 
-test('filters events using a registered venue dropdown', async () => {
+test('filters events by their venue requirements text', async () => {
   render(<MyEventsPage role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
-  await screen.findByRole('option', { name: 'Grand Hall' })
-  expect(screen.queryByRole('option', { name: 'Unassigned Auditorium' })).not.toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText('Venue'), { target: { value: venue.id } })
+  await screen.findByText('Community Workshop')
+  fireEvent.change(screen.getByLabelText('Venue'), { target: { value: ' Seminar room ' } })
   fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
 
   await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
-    `/events?coordinatorId=${coordinatorId}&venueId=${venue.id}`,
+    `/events?coordinatorId=${coordinatorId}&venue=Seminar+room`,
   ))
 })
 
