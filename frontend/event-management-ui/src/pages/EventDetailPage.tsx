@@ -14,6 +14,8 @@ import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
 import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
 import { OrganiserEventDetailPage } from './OrganiserEventDetailPage'
 import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
+import { SafetySubmitPanel } from '../features/safety/SafetySubmitPanel'
+import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 
 type EventDetailProps = { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
@@ -38,6 +40,9 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
+  // SCRUM-149: a venue booking change can make the event ready (or not), so
+  // the safety panel re-reads its readiness whenever one is saved or cancelled.
+  const [bookingsChanged, setBookingsChanged] = useState(0)
   const currentCoordinator = {
     id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || '',
     name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || '',
@@ -132,6 +137,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
         eventEnd={event.preferredEndDate}
         eventExpectedAttendance={event.expectedAttendance}
         eventVenueRequirements={event.venueRequirements}
+        onBookingsChanged={() => setBookingsChanged((value) => value + 1)}
       />}
 
       <section className="event-card-section">
@@ -164,6 +170,24 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
             {saving ? 'Saving…' : 'Save progress'}
           </button>
         </form> : <p className="muted">Only the assigned Event Coordinator can update this event.</p>}
+
+        {/* SCRUM-149: the next step the safety hint above points at. Only the
+            event's own assigned coordinator sees it (AC5), and only while the
+            event is Approved — once submitted it becomes the note below. */}
+        {canUpdate && event.status === 'Approved' && <SafetySubmitPanel
+          eventId={event.id}
+          coordinatorId={currentCoordinator.id}
+          refreshKey={bookingsChanged}
+          onSubmitted={() => { setLoading(true); setRefresh((value) => value + 1) }}
+        />}
+        {event.status === 'Pending Safety Check' && (() => {
+          const submittedAt = submittedForSafetyCheckAt(event)
+          return <p className="muted" role="status">
+            {submittedAt
+              ? `Submitted for safety check on ${new Date(submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT.`
+              : 'Submitted for safety check.'}
+          </p>
+        })()}
 
         <h3>Action history</h3>
         {event.actionHistory.length === 0 ? <p className="muted">No actions recorded yet.</p> :

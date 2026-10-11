@@ -15,6 +15,11 @@ type Props = {
   eventEnd: string
   eventExpectedAttendance: string
   eventVenueRequirements: string
+  /**
+   * SCRUM-149: a booking change can make the event ready for its safety check
+   * (or stop it being ready), so the page is told to re-read that.
+   */
+  onBookingsChanged?: () => void
 }
 
 const localDateTime = (value: string) => value ? value.slice(0, 16) : ''
@@ -26,6 +31,7 @@ export function VenueBookingsPanel({
   eventEnd,
   eventExpectedAttendance,
   eventVenueRequirements,
+  onBookingsChanged,
 }: Props) {
   const [bookings, setBookings] = useState<VenueBooking[]>([])
   const [venues, setVenues] = useState<Venue[]>([])
@@ -120,6 +126,7 @@ export function VenueBookingsPanel({
         ? `${selectedVenue?.name || 'Venue'} booking updated and returned to pending review.`
         : `${selectedVenue?.name || 'Venue'} booking request submitted independently.`)
       resetForm()
+      onBookingsChanged?.()
     } catch (cause) {
       setSubmitError(cause instanceof Error ? cause.message : 'Unable to save this venue booking.')
     } finally {
@@ -140,6 +147,7 @@ export function VenueBookingsPanel({
         : item))
       if (editingId === booking.id) resetForm()
       setSubmitMessage(`${booking.venueName} booking cancelled. Other venue bookings were not changed.`)
+      onBookingsChanged?.()
     } catch (cause) {
       setSubmitError(cause instanceof Error ? cause.message : 'Unable to cancel this venue booking.')
     } finally {

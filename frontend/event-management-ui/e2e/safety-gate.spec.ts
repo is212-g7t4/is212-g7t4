@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, mockSafetyReadiness, test, expect, users, venues } from './fixtures'
 
 // SCRUM-152: 'Confirmed' is the preparation stage, and only the safety workflow
 // sets it. A coordinator is never offered it — they are told what to do next.
@@ -16,6 +16,9 @@ test('AC1: an approved event is not offered Confirmed, and is told to submit for
   await mock(page, 'venueBooking', `/events/${approved.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   // 'Approved' still shows the registrations panel, which is left alone by this story.
   await mock(page, 'attendeeRegistration', `/events/${approved.id}/registrations`, (route) => json(route, { registrations: [] }))
+  // SCRUM-149 added the submit panel to an Approved event; its readiness read
+  // isn't what this story is about, so it just answers "ready".
+  await mockSafetyReadiness(page)
   await page.goto('/my-events')
 
   await page.getByRole('button', { name: /Safety Pending Expo/ }).click()

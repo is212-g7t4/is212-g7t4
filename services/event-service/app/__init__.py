@@ -11,6 +11,7 @@ load_dotenv()
 from app.models import (
     ALL_STATUSES,
     FIELDS,
+    SAFETY_STATUSES,
     EventNotAssignedError,
     EventNotFoundError,
     EventNotOwnedError,
@@ -18,6 +19,7 @@ from app.models import (
     InvalidStatusTransitionError,
     RejectionReasonError,
     SafetyApprovalRequiredError,
+    SafetyCheckAlreadyPendingError,
     approve_event,
     get_event,
     get_organiser_event,
@@ -31,6 +33,7 @@ from app.models import (
     submit_event,
     update_event_coordinator,
     update_event_progress,
+    update_event_safety_status,
 )
 from app.validation import validate
 
@@ -336,6 +339,72 @@ def create_app(config=None):
         except InvalidStatusTransitionError:
             return jsonify(
                 message="This status change is not allowed for the event's current stage."
+            ), 409
+        return jsonify(updated), 200
+
+    @app.patch("/events/<uuid:event_id>/safety-status")
+    def update_safety_status(event_id):
+        """Move an event along the safety-check workflow (SCRUM-149 AC1).
+
+        For Safety Check Service only: it is the service that has checked the
+        event's venue bookings and equipment requests first. Deliberately
+        separate from PATCH /progress, which still cannot reach any safety
+        status (SCRUM-152), so there is exactly one way into this part of the
+        lifecycle.
+        """
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        status = data.get("status", "")
+        try:
+            coordinator_id = str(UUID(data.get("coordinatorId", "")))
+            safety_check_id = str(UUID(data.get("safetyCheckId", "")))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(
+                message="A valid coordinator ID and safety check ID are required."
+            ), 400
+        if status not in SAFETY_STATUSES:
+            return jsonify(
+                message=f"Status must be one of: {', '.join(SAFETY_STATUSES)}."
+            ), 400
+        round_number = data.get("roundNumber")
+        if (
+            isinstance(round_number, bool)
+            or not isinstance(round_number, int)
+            or round_number < 1
+        ):
+            return jsonify(message="roundNumber must be a positive whole number."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = update_event_safety_status(
+                app.config["DATABASE_URL"],
+                str(event_id),
+                status,
+                coordinator_id,
+                safety_check_id,
+                round_number,
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(
+                message="This event request is not assigned to the current coordinator."
+            ), 403
+        # More specific than InvalidStatusTransitionError, so it comes first.
+        except SafetyCheckAlreadyPendingError:
+            return jsonify(
+                code="SAFETY_CHECK_ALREADY_PENDING",
+                message="This event is already waiting for its safety check.",
+            ), 409
+        except InvalidStatusTransitionError as blocked:
+            return jsonify(
+                code="INVALID_SAFETY_TRANSITION",
+                message=(
+                    f"This event can't move to '{status}' from "
+                    f"'{blocked.current_status}'."
+                ),
+                currentStatus=blocked.current_status,
             ), 409
         return jsonify(updated), 200
 
