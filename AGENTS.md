@@ -132,13 +132,24 @@ so role-gated nav items silently disappear and it reads as a permissions
 bug. Check the backend pane, or `docker compose ps`, before debugging the
 UI.
 
-Fix — one `.env` per service listed in `docker-compose.yml`:
+Fix — one `.env` per service with an `env_file` in `docker-compose.yml`. Read
+that list out of the compose file rather than keeping one by hand here, so a
+service added later can't quietly go missing from it:
 
 ```
-for s in user event coordinator-assignment registration venue; do
-  cp .env "services/$s-service/.env"
+for f in $(grep -oE '\./services/[a-z0-9-]+/\.env' docker-compose.yml | sort -u); do
+  [ -f "$f" ] || cp .env "$f"
 done
 ```
+
+Don't reach for `docker compose config` to discover these: it resolves
+`env_file` into `environment` and drops the key, so it reports none — and it
+refuses to parse at all while one is missing, which is exactly when you need
+the list.
+
+Composites that take all their configuration from `environment:` in
+`docker-compose.yml` need no `.env` at all — Attendee Registration and Safety
+Check are the two today, which is why no file is expected for them.
 
 Each service also ships a `.env.example` listing the variables it needs; the
 root `.env` is a superset and works for all of them today. `.env` files are
