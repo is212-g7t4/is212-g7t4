@@ -4,8 +4,10 @@ import { loadAttendeeEvents } from '../features/event/attendeeEvents'
 import type { AttendeeEvent } from '../features/event/attendeeEvents'
 import { AttendeeEventsPage } from './AttendeeEventsPage'
 import { EventRegistrationError, registerForEvent } from '../features/registration/eventRegistration'
+import { fetchUser } from '../features/user/users'
 
 vi.mock('../features/event/attendeeEvents', () => ({ loadAttendeeEvents: vi.fn() }))
+vi.mock('../features/user/users', () => ({ fetchUser: vi.fn() }))
 vi.mock('../features/registration/eventRegistration', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/registration/eventRegistration')>()
   return { ...actual, registerForEvent: vi.fn() }
@@ -15,8 +17,7 @@ const event: AttendeeEvent = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', eventName: 'Community Workshop',
   description: 'A full practical workshop description.', purpose: 'Community learning',
   preferredStartDate: '2026-10-10T09:00:00+08:00', preferredEndDate: '2026-10-10T12:00:00+08:00',
-  expectedAttendance: '30', venueId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-  venueRequirements: '', accessibilityNeeds: '', equipmentRequirements: '', registrationNeeds: 'Bring photo ID.',
+  expectedAttendance: '30', venueRequirements: '', accessibilityNeeds: '', equipmentRequirements: '', registrationNeeds: 'Bring photo ID.',
   status: 'Confirmed', submittedAt: null, coordinatorId: null,
   organiserId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', decision: null, decisionHistory: [],
   actionDetails: '', actionHistory: [], registrationStatus: 'Open', confirmedRegistrations: 12,
@@ -26,14 +27,21 @@ const event: AttendeeEvent = {
   },
   organiser: {
     id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', username: 'Olivia Tan', email: 'olivia@example.com',
-    role: 'Event Organiser', organization: 'ConnectSphere', managerId: null, contactDetails: '+65 8111 1111',
+    role: 'Event Organiser', organization: 'ConnectSphere', contactDetails: '+65 8111 1111',
   },
+}
+
+const ATTENDEE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const attendee = {
+  id: ATTENDEE_ID, username: 'Adam Yeo', email: 'adam@example.com', role: 'Attendee' as const,
+  organization: 'External', contactDetails: '',
 }
 
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(loadAttendeeEvents).mockResolvedValue([event])
   vi.mocked(registerForEvent).mockResolvedValue({ message: 'Registration confirmed for Community Workshop.' })
+  vi.mocked(fetchUser).mockResolvedValue(attendee)
 })
 
 test('attendee sees confirmed event summary and opens full details', async () => {
@@ -70,45 +78,44 @@ test('non-attendee cannot load the attendee event catalogue', () => {
   expect(loadAttendeeEvents).not.toHaveBeenCalled()
 })
 
-test('attendee validates and submits the registration form', async () => {
-  render(<AttendeeEventsPage role="Attendee" attendeeId="dddddddd-dddd-4ddd-8ddd-dddddddddddd" />)
+test('attendee registers with their account details shown read-only', async () => {
+  render(<AttendeeEventsPage role="Attendee" attendeeId={ATTENDEE_ID} />)
   fireEvent.click(await screen.findByRole('button', { name: /Community Workshop/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Register' }))
 
-  fireEvent.click(screen.getByRole('button', { name: 'Submit registration' }))
-  expect(screen.getByText('Full name is required.')).toBeInTheDocument()
-  expect(screen.getByText('Email address is required.')).toBeInTheDocument()
+  expect(await screen.findByText('Adam Yeo')).toBeInTheDocument()
+  expect(screen.getByText('adam@example.com')).toBeInTheDocument()
+  expect(screen.getByText('External')).toBeInTheDocument()
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  expect(fetchUser).toHaveBeenCalledWith(ATTENDEE_ID)
 
-  fireEvent.change(screen.getByLabelText(/Full name/), { target: { value: 'Adam Yeo' } })
-  fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: 'bad-email' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Submit registration' }))
-  expect(screen.getByText('Enter a valid email address.')).toBeInTheDocument()
-
-  fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: 'adam@example.com' } })
-  fireEvent.change(screen.getByLabelText('Organisation / company'), { target: { value: 'External' } })
   fireEvent.click(screen.getByRole('button', { name: 'Submit registration' }))
 
   await waitFor(() => expect(registerForEvent).toHaveBeenCalledWith({
     eventId: event.id,
-    attendeeId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-    fullName: 'Adam Yeo',
-    email: 'adam@example.com',
-    organization: 'External',
+    attendeeId: ATTENDEE_ID,
   }))
   expect(await screen.findByText('Registration confirmed for Community Workshop.')).toBeInTheDocument()
 })
 
-test('attendee sees duplicate-registration error from the server', async () => {
-  vi.mocked(registerForEvent).mockRejectedValue(
-    new EventRegistrationError('This email is already registered for the event.', 'DUPLICATE_REGISTRATION'),
-  )
-  render(<AttendeeEventsPage role="Attendee" attendeeId="dddddddd-dddd-4ddd-8ddd-dddddddddddd" />)
+test('attendee sees an error when their account details cannot load', async () => {
+  vi.mocked(fetchUser).mockRejectedValue(new Error('down'))
+  render(<AttendeeEventsPage role="Attendee" attendeeId={ATTENDEE_ID} />)
   fireEvent.click(await screen.findByRole('button', { name: /Community Workshop/ }))
   fireEvent.click(screen.getByRole('button', { name: 'Register' }))
-  fireEvent.change(screen.getByLabelText(/Full name/), { target: { value: 'Adam Yeo' } })
-  fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: 'adam@example.com' } })
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load your account details.')
+})
+
+test('attendee sees duplicate-registration error from the server', async () => {
+  vi.mocked(registerForEvent).mockRejectedValue(
+    new EventRegistrationError('You are already registered for this event.', 'DUPLICATE_REGISTRATION'),
+  )
+  render(<AttendeeEventsPage role="Attendee" attendeeId={ATTENDEE_ID} />)
+  fireEvent.click(await screen.findByRole('button', { name: /Community Workshop/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Register' }))
+  await screen.findByText('Adam Yeo')
   fireEvent.click(screen.getByRole('button', { name: 'Submit registration' }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('This email is already registered for the event.')
+  expect(await screen.findByRole('alert')).toHaveTextContent('You are already registered for this event.')
 })
 
 test.each([

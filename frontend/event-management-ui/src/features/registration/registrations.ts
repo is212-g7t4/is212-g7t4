@@ -44,9 +44,14 @@ export async function fetchRegistrationCounts(eventIds: string[]): Promise<Recor
   return body.counts as Record<string, RegistrationCount>
 }
 
+// Registration rows hold only the attendee's ID; the Attendee Registration
+// composite adds their name, email and organisation from User Service.
+const attendeeRegistrationApi = () =>
+  import.meta.env.VITE_ATTENDEE_REGISTRATION_SERVICE_URL || 'http://localhost:5009'
+
 export async function fetchRegistrations(eventId: string): Promise<Registration[]> {
   const response = await fetch(
-    `${registrationApi()}/registrations?eventId=${eventId}`,
+    `${attendeeRegistrationApi()}/events/${encodeURIComponent(eventId)}/registrations`,
   )
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load registrations.')

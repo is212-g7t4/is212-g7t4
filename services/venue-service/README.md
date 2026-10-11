@@ -30,7 +30,7 @@ Alternatively, after creating `services/venue-service/.env`, run
 ## Endpoints
 
 - `GET /venues` — the whole catalogue, ordered by name. Used by the venue
-  catalogue cards and by `VenueSelect` on the event request form. Optional
+  catalogue cards, the venue calendar and venue search. Optional
   filter parameters (SCRUM-26) narrow it to the venues meeting an event's
   requirements — this service's suitability-check computation:
 

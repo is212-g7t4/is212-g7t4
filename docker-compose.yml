@@ -44,9 +44,11 @@ services:
       <<: *frontend-environment
       EVENT_SERVICE_URL: "http://event-service:5000"
       REGISTRATION_SERVICE_URL: "http://registration-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
     depends_on:
       - event-service
       - registration-service
+      - user-service
     ports:
       - "5009:5000"
 

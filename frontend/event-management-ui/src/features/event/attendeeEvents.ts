@@ -1,6 +1,7 @@
 import type { User } from '../../types'
 import { fetchRegistrationCounts } from '../registration/registrations'
 import { fetchUser } from '../user/users'
+import { fetchApprovedVenueId } from '../venue/eventVenue'
 import { fetchVenue } from '../venue/venues'
 import type { Venue } from '../venue/venues'
 import { eventApi } from './submission'
@@ -37,14 +38,15 @@ export async function loadAttendeeEvents(now = new Date()): Promise<AttendeeEven
   })
   if (confirmed.length === 0) return []
 
-  const venueIds = Array.from(new Set(confirmed.map((event) => event.venueId).filter(Boolean)))
   const organiserIds = Array.from(new Set(confirmed.map((event) => event.organiserId).filter((id): id is string => Boolean(id))))
-  const [counts, venueResults, organiserResults] = await Promise.all([
+  const [counts, eventVenueIds, organiserResults] = await Promise.all([
     fetchRegistrationCounts(confirmed.map((event) => event.id)),
-    Promise.all(venueIds.map(async (id) => [id, await fetchVenue(id)] as const)),
+    Promise.all(confirmed.map(async (event) => [event.id, await fetchApprovedVenueId(event.id)] as const)),
     Promise.all(organiserIds.map(async (id) => [id, await fetchUser(id)] as const)),
   ])
-  const venues = new Map(venueResults)
+  const venueIdByEvent = new Map(eventVenueIds)
+  const venueIds = Array.from(new Set(eventVenueIds.map(([, id]) => id).filter((id): id is string => Boolean(id))))
+  const venues = new Map(await Promise.all(venueIds.map(async (id) => [id, await fetchVenue(id)] as const)))
   const organisers = new Map(organiserResults)
 
   return confirmed.map((event) => {
@@ -53,7 +55,7 @@ export async function loadAttendeeEvents(now = new Date()): Promise<AttendeeEven
       ...event,
       confirmedRegistrations,
       registrationStatus: registrationAvailability(event, confirmedRegistrations, now),
-      venue: venues.get(event.venueId) ?? null,
+      venue: venues.get(venueIdByEvent.get(event.id) ?? '') ?? null,
       organiser: event.organiserId ? organisers.get(event.organiserId) ?? null : null,
     }
   })

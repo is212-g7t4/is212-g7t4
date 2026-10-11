@@ -2,8 +2,8 @@ from unittest.mock import patch
 
 from app import create_app
 
-MANAGER = {"user_id": "user-manager", "username": "Alice Tan", "role": "Event Coordinator", "manager_id": None}
-COORDINATOR = {"user_id": "user-report", "username": "Marcus Lim", "role": "Event Coordinator", "manager_id": "user-manager"}
+MANAGER = {"user_id": "user-manager", "username": "Alice Tan", "role": "Event Coordinator Lead"}
+COORDINATOR = {"user_id": "user-report", "username": "Marcus Lim", "role": "Event Coordinator"}
 
 
 @patch("app.routes.get_available_coordinators")
@@ -112,7 +112,7 @@ def test_assign_coordinator_requires_acting_user_id():
 
 @patch("app.routes.get_user")
 def test_assign_coordinator_rejects_non_manager(mock_get_user):
-    """An Event Coordinator who reports to a manager cannot assign/reassign."""
+    """An Event Coordinator (not the Lead) cannot assign/reassign."""
     mock_get_user.return_value = COORDINATOR
 
     client = create_app().test_client()
@@ -122,7 +122,7 @@ def test_assign_coordinator_rejects_non_manager(mock_get_user):
     )
 
     assert response.status_code == 403
-    assert "manager" in response.json["error"]
+    assert "Lead" in response.json["error"]
 
 
 @patch("app.routes.get_user")
@@ -154,3 +154,22 @@ def test_assign_coordinator_handles_acting_user_lookup_error(mock_get_user, mock
     assert response.status_code == 500
     assert "Failed to validate acting user" in response.json["error"]
     mock_get_coordinators.assert_not_called()
+
+
+@patch("app.routes.assign_event_coordinator")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_lead_can_assign_an_event_to_themselves(mock_get_user, mock_get_coordinators, mock_assign):
+    """The Lead appears in the assignable pool, so self-assignment succeeds."""
+    mock_get_user.return_value = MANAGER
+    mock_get_coordinators.return_value = [MANAGER, COORDINATOR]
+    mock_assign.return_value = {"eventId": "EVT-001", "assignedCoordinatorId": "user-manager"}
+
+    client = create_app().test_client()
+    response = client.post(
+        "/events/EVT-001/assign-coordinator/user-manager",
+        json={"actingUserId": "user-manager"},
+    )
+
+    assert response.status_code == 200
+    mock_assign.assert_called_once_with("EVT-001", "user-manager")

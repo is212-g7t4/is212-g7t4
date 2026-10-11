@@ -30,11 +30,13 @@ this up alongside every other service.
 
 ## Endpoints
 
-- `GET /coordinators` — every Event Coordinator, fetched from `user-service`.
+- `GET /coordinators` — everyone an event can be assigned to: the Event
+  Coordinator Lead (so the Lead can take an event on themselves) and every
+  Event Coordinator, fetched from `user-service`.
 - `POST /events/<event_id>/assign-coordinator/<coordinator_id>` — assigns or
   reassigns the coordinator on an event. Body must include
-  `{"actingUserId": "<user id>"}`; only the Event Coordinator manager (role
-  `Event Coordinator`, `manager_id` is `null`) may do this — `403` otherwise.
+  `{"actingUserId": "<user id>"}`; only the Event Coordinator Lead (role
+  `Event Coordinator Lead`) may do this — `403` otherwise.
   Validates `coordinator_id` is a real, available Event Coordinator before
   calling `event-service` to persist the change.
 

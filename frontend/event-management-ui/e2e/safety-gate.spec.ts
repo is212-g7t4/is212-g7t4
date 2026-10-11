@@ -15,7 +15,7 @@ test('AC1: an approved event is not offered Confirmed, and is told to submit for
   await mock(page, 'event', `/events/${approved.id}`, (route) => json(route, approved))
   await mock(page, 'venueBooking', `/events/${approved.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   // 'Approved' still shows the registrations panel, which is left alone by this story.
-  await mock(page, 'registration', '/registrations', (route) => json(route, { registrations: [] }))
+  await mock(page, 'attendeeRegistration', `/events/${approved.id}/registrations`, (route) => json(route, { registrations: [] }))
   await page.goto('/my-events')
 
   await page.getByRole('button', { name: /Safety Pending Expo/ }).click()

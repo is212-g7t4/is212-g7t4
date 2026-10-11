@@ -6,16 +6,14 @@ import pytest
 from app.validation import event_has_started, validate_registration
 
 
-def test_validation_trims_and_normalizes_input():
+def test_validation_trims_ids_and_drops_profile_fields():
     cleaned, errors, missing = validate_registration({
         "eventId": " event ", "attendeeId": " attendee ",
-        "fullName": " Adam Yeo ", "email": " ADAM@EXAMPLE.COM ",
-        "organization": " External ",
+        "fullName": "Adam Yeo", "email": "adam@example.com",
     })
     assert errors == []
     assert missing == []
-    assert cleaned["email"] == "adam@example.com"
-    assert cleaned["fullName"] == "Adam Yeo"
+    assert cleaned == {"eventId": "event", "attendeeId": "attendee"}
 
 
 def test_event_started_handles_singapore_local_time():

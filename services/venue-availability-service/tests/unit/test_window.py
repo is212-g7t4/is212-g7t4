@@ -10,6 +10,8 @@ Service, a composite. Database calls are mocked.
 """
 from datetime import datetime
 
+from app.calendar import SINGAPORE
+
 import pytest
 
 VENUE_ID = "00000000-0000-0000-0000-0000000000f1"
@@ -56,10 +58,8 @@ def test_returns_every_venues_bookings_in_one_call(setup):
     query, params = cursor.execute.call_args.args
     assert "venue_id = %s" not in query
     assert params == [
-        datetime(2026, 11, 10, 12, 0),
-        datetime(2026, 11, 10, 9, 0),
-        datetime(2026, 11, 10, 12, 0),
-        datetime(2026, 11, 10, 9, 0),
+        datetime(2026, 11, 10, 12, 0, tzinfo=SINGAPORE),
+        datetime(2026, 11, 10, 9, 0, tzinfo=SINGAPORE),
     ]
 
 
@@ -118,7 +118,7 @@ def test_active_hold_is_returned_as_an_on_hold_interval(setup):
     assert hold["venueId"] == VENUE_ID
 
 
-def test_rejected_and_cancelled_never_block(setup):
+def test_rejected_cancelled_and_expired_never_block(setup):
     """Only statuses that can still take the venue are returned."""
     client, cursor = setup
     cursor.fetchall.return_value = []
@@ -126,7 +126,7 @@ def test_rejected_and_cancelled_never_block(setup):
     client.get(f"/venue-bookings/window?{WINDOW}")
 
     query, _ = cursor.execute.call_args.args
-    assert "NOT IN ('Rejected', 'Cancelled')" in query
+    assert "NOT IN ('Rejected', 'Cancelled', 'Expired')" in query
 
 
 def test_offset_input_is_converted_to_singapore_local(setup):
@@ -142,10 +142,8 @@ def test_offset_input_is_converted_to_singapore_local(setup):
     assert response.status_code == 200
     _, params = cursor.execute.call_args.args
     assert params == [
-        datetime(2026, 11, 10, 12, 0),
-        datetime(2026, 11, 10, 9, 0),
-        datetime(2026, 11, 10, 12, 0),
-        datetime(2026, 11, 10, 9, 0),
+        datetime(2026, 11, 10, 12, 0, tzinfo=SINGAPORE),
+        datetime(2026, 11, 10, 9, 0, tzinfo=SINGAPORE),
     ]
 
 
