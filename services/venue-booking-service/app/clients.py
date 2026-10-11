@@ -35,6 +35,10 @@ class BookingNotFoundError(Exception):
     pass
 
 
+class BookingStateError(Exception):
+    pass
+
+
 def get_event(event_id: str, coordinator_id: str) -> dict:
     """Fetch an event from Event Service, scoped to the requesting coordinator."""
     response = httpx.get(
@@ -123,6 +127,49 @@ def get_event_bookings(event_id: str) -> list:
     return response.json()["bookings"]
 
 
+def update_booking(
+    booking_id: str,
+    event_id: str,
+    venue_id: str,
+    start: str,
+    end: str,
+    required_capacity: int,
+    venue_requirements: str,
+) -> dict:
+    """Update and revalidate one booking without changing its siblings."""
+    response = httpx.patch(
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}",
+        json={
+            "eventId": event_id,
+            "venueId": venue_id,
+            "requestedStartTime": start,
+            "requestedEndTime": end,
+            "requiredCapacity": required_capacity,
+            "venueRequirements": venue_requirements,
+        },
+    )
+    if response.status_code == 404:
+        raise BookingNotFoundError
+    if response.status_code == 409:
+        if response.json().get("message", "").startswith("Cancelled"):
+            raise BookingStateError
+        raise BookingConflictError
+    response.raise_for_status()
+    return response.json()
+
+
+def cancel_booking(booking_id: str, event_id: str) -> dict:
+    """Cancel one retained booking record."""
+    response = httpx.patch(
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/cancel",
+        json={"eventId": event_id},
+    )
+    if response.status_code == 404:
+        raise BookingNotFoundError
+    response.raise_for_status()
+    return response.json()
+
+
 def decide_booking(booking_id: str, reviewed_by: str, status: str) -> dict:
     """Approve or reject a booking via Venue Availability Service."""
     action = "approve" if status == "Approved" else "reject"
@@ -133,6 +180,8 @@ def decide_booking(booking_id: str, reviewed_by: str, status: str) -> dict:
     if response.status_code == 404:
         raise BookingNotFoundError
     if response.status_code == 409:
+        if response.json().get("message", "").startswith("Cancelled"):
+            raise BookingStateError
         raise BookingConflictError
     response.raise_for_status()
     return response.json()
