@@ -72,5 +72,17 @@ export function mockApprovedVenue(page: Page, eventId: string, venueId = venues[
   }))
 }
 
+// SCRUM-149: an Approved event an Event Coordinator owns now renders the
+// submit-for-safety-check panel, which reads its readiness on mount. Any test
+// that opens such an event needs this, even if safety isn't what it's testing.
+export function mockSafetyReadiness(
+  page: Page,
+  readiness: Record<string, unknown> = {},
+) {
+  return mock(page, 'safetyCheck', '/safety-checks/readiness', (route) => json(route, {
+    ready: true, eventStatus: 'Approved', outstanding: [], openSafetyCheck: null, ...readiness,
+  }))
+}
+
 export const asUser = (page: Page, userId: string) =>
   page.addInitScript((id) => localStorage.setItem('activeUserId', id), userId)
