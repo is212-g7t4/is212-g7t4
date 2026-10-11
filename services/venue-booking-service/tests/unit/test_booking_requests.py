@@ -6,6 +6,7 @@ from app import create_app
 from app.clients import (
     BookingConflictError,
     BookingNotFoundError,
+    BookingStateError,
     EventNotAssignedError,
     EventNotFoundError,
 )
@@ -275,3 +276,233 @@ def test_approve_booking_request_missing_returns_404(mock_decide_booking):
         "/booking-requests/missing/approve", json={"reviewedBy": "staff-1"}
     )
     assert response.status_code == 404
+
+
+@patch("app.routes.decide_booking")
+def test_cancelled_booking_cannot_be_reviewed(mock_decide_booking):
+    mock_decide_booking.side_effect = BookingStateError
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1/approve", json={"reviewedBy": "staff-1"}
+    )
+
+    assert response.status_code == 409
+    assert "cannot be reviewed" in response.json["message"]
+
+
+@patch("app.routes.update_booking")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_update_booking_revalidates_and_resubmits_only_selected_booking(
+    mock_get_event, mock_get_venues, mock_update_booking
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+    mock_update_booking.return_value = {
+        **BOOKING,
+        "requiredCapacity": 50,
+        "status": "Pending Review",
+        "reviewedBy": None,
+    }
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1",
+        json=REQUEST | {"requiredCapacity": 50},
+    )
+
+    assert response.status_code == 200
+    assert response.json["status"] == "Pending Review"
+    mock_get_event.assert_called_once_with("evt-1", "coord-1")
+    mock_update_booking.assert_called_once_with(
+        "booking-1", "evt-1", "ven-2", "2026-10-01T09:00",
+        "2026-10-01T12:00", 50, "Projector"
+    )
+
+
+@patch("app.routes.update_booking")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_update_booking_rechecks_capacity_before_saving(
+    mock_get_event, mock_get_venues, mock_update_booking
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1",
+        json=REQUEST | {"venueId": "ven-1", "requiredCapacity": 61},
+    )
+
+    assert response.status_code == 422
+    mock_update_booking.assert_not_called()
+
+
+@patch("app.routes.update_booking")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_update_booking_reports_conflict_without_changing_siblings(
+    mock_get_event, mock_get_venues, mock_update_booking
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+    mock_update_booking.side_effect = BookingConflictError
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=REQUEST
+    )
+
+    assert response.status_code == 409
+    assert "Grand Ballroom" in response.json["message"]
+
+
+@patch("app.routes.update_booking")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_cancelled_booking_cannot_be_resubmitted(
+    mock_get_event, mock_get_venues, mock_update_booking
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+    mock_update_booking.side_effect = BookingStateError
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=REQUEST
+    )
+
+    assert response.status_code == 409
+    assert "cannot be modified" in response.json["message"]
+
+
+@patch("app.routes.cancel_booking")
+@patch("app.routes.get_event")
+def test_cancel_booking_updates_only_selected_booking(mock_get_event, mock_cancel_booking):
+    mock_get_event.return_value = EVENT
+    mock_cancel_booking.return_value = {**BOOKING, "status": "Cancelled"}
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1/cancel",
+        json={"eventId": "evt-1", "coordinatorId": "coord-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json["status"] == "Cancelled"
+    mock_get_event.assert_called_once_with("evt-1", "coord-1")
+    mock_cancel_booking.assert_called_once_with("booking-1", "evt-1")
+
+
+@patch("app.routes.cancel_booking")
+@patch("app.routes.get_event")
+def test_cancel_booking_requires_assigned_coordinator(mock_get_event, mock_cancel_booking):
+    mock_get_event.side_effect = EventNotAssignedError
+
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1/cancel",
+        json={"eventId": "evt-1", "coordinatorId": "someone-else"},
+    )
+
+    assert response.status_code == 403
+    mock_cancel_booking.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"eventId": "evt-1"},
+        REQUEST | {"requiredCapacity": 0},
+        REQUEST | {"venueRequirements": None},
+        REQUEST | {"requestedStartTime": "2026-10-01"},
+    ],
+)
+def test_update_booking_validates_request(payload):
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=payload
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("event_error", "expected_status"),
+    [(EventNotFoundError, 404), (EventNotAssignedError, 403), (RuntimeError("down"), 502)],
+)
+@patch("app.routes.get_event")
+def test_update_booking_requires_access_to_parent_event(
+    mock_get_event, event_error, expected_status
+):
+    mock_get_event.side_effect = event_error
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=REQUEST
+    )
+    assert response.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    ("venue_id", "expected_status"),
+    [("missing", 404), ("ven-3", 409)],
+)
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_update_booking_rechecks_venue_catalogue(
+    mock_get_event, mock_get_venues, venue_id, expected_status
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=REQUEST | {"venueId": venue_id}
+    )
+    assert response.status_code == expected_status
+
+
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_update_booking_reports_venue_service_failure(mock_get_event, mock_get_venues):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.side_effect = RuntimeError("down")
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=REQUEST
+    )
+    assert response.status_code == 502
+
+
+@pytest.mark.parametrize(
+    ("update_error", "expected_status"),
+    [(BookingNotFoundError, 404), (RuntimeError("down"), 502)],
+)
+@patch("app.routes.update_booking")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_event")
+def test_update_booking_reports_atomic_failure(
+    mock_get_event, mock_get_venues, mock_update_booking, update_error, expected_status
+):
+    mock_get_event.return_value = EVENT
+    mock_get_venues.return_value = VENUES
+    mock_update_booking.side_effect = update_error
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1", json=REQUEST
+    )
+    assert response.status_code == expected_status
+
+
+def test_cancel_booking_requires_parent_event_and_coordinator():
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1/cancel", json={}
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("cancel_error", "expected_status"),
+    [(BookingNotFoundError, 404), (RuntimeError("down"), 502)],
+)
+@patch("app.routes.cancel_booking")
+@patch("app.routes.get_event")
+def test_cancel_booking_reports_atomic_failure(
+    mock_get_event, mock_cancel_booking, cancel_error, expected_status
+):
+    mock_get_event.return_value = EVENT
+    mock_cancel_booking.side_effect = cancel_error
+    response = create_app().test_client().patch(
+        "/booking-requests/booking-1/cancel",
+        json={"eventId": "evt-1", "coordinatorId": "coord-1"},
+    )
+    assert response.status_code == expected_status
