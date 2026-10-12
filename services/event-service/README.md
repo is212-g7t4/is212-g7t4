@@ -117,10 +117,61 @@ yet approved. Any other disallowed transition still returns the generic
 `409 This status change is not allowed for the event's current stage.` with no
 `code`, and an unknown status returns `400`.
 
+### `PATCH /events/<id>/safety-status` — for Safety Check Service only
+
+The one way into a safety status. `PATCH /progress` above still cannot reach
+any of them, so the two tables of allowed moves never overlap:
+`ALLOWED_TRANSITIONS` is the coordinator's, `SAFETY_TRANSITIONS` is the
+workflow's. SCRUM-149 adds its single entry, `Approved → Pending Safety Check`.
+
+```json
+PATCH /events/<id>/safety-status
+{
+  "status": "Pending Safety Check",
+  "coordinatorId": "<uuid>",
+  "safetyCheckId": "<uuid>",
+  "roundNumber": 1
+}
+```
+
+Called by [`safety-check-service`](../safety-check-service/) (the composite),
+which has already confirmed every venue booking and equipment request is
+approved — that check is not repeated here. What *is* checked, inside
+`SELECT ... FOR UPDATE` because the composite's earlier read can be stale:
+
+- the caller is the event's assigned coordinator, else `403` (SCRUM-149 AC5) —
+  checked before the status, as in `PATCH /progress`
+- the event isn't already `Pending Safety Check`, else
+  `409 {"code": "SAFETY_CHECK_ALREADY_PENDING"}` (AC4)
+- `status` is reachable from the current one per `SAFETY_TRANSITIONS`, else
+  `409 {"code": "INVALID_SAFETY_TRANSITION", "currentStatus": "<status>"}`
+
+On success it returns `200` with the event and appends to `actionHistory`:
+
+```json
+{
+  "status": "Pending Safety Check",
+  "details": "Submitted for Operational Safety Check (round 1).",
+  "coordinatorId": "<uuid>", "safetyCheckId": "<uuid>",
+  "recordedAt": "2026-10-11T07:30:00+00:00"
+}
+```
+
+That is the event-side record of AC1's submission time, and what the event
+detail page reads to say when the event was submitted. `SafetyCheck.submitted_at`
+in `safety-check-record-service` is the authoritative one. The coordinator's
+`decision`/`decisionHistory` are untouched: a safety decision is its own thing,
+kept on the `SafetyCheck` round.
+
+Like every endpoint today there is no JWT, so this one trusts `coordinatorId`.
+Its own assignment check means a direct browser call still can't submit someone
+else's event (AC5), but it could skip the arrangements check — the same trust
+level as the rest of the system until auth lands.
+
 The lifecycle constants (`ALL_STATUSES`, `PRE_SAFETY_STATUSES`,
 `SAFETY_STATUSES`, `PREPARATION_STATUS`, `ALLOWED_TRANSITIONS`,
-`SAFETY_BLOCK_MESSAGES`) live at module level in `app/models.py` for the
-sibling safety stories to reuse. The frontend mirrors them in
+`SAFETY_TRANSITIONS`, `SAFETY_BLOCK_MESSAGES`) live at module level in
+`app/models.py` for the sibling safety stories to reuse. The frontend mirrors them in
 `src/features/event/eventStatus.ts` purely to offer the right options and
 explain the next step up front — the backend remains the authority.
 

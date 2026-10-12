@@ -1,0 +1,350 @@
+"""SCRUM-149: each downstream wrapper's request shape and status mapping.
+
+A composite is the only service allowed to call other services, so these are
+the calls that make the submit workflow work — and the one place where another
+service's status codes become this service's own exceptions. `httpx` is mocked
+(unit tests are hermetic; `pytest-socket` would block a real call anyway).
+
+Every failure maps to `DownstreamError`/`DownstreamTimeout` with no downstream
+URL or error text attached: the routes must not be able to leak our topology
+into a browser response.
+"""
+import httpx
+import pytest
+
+from app import clients
+from tests.unit.factories import (
+    BOOKING_ID,
+    COORDINATOR_ID,
+    EVENT_ID,
+    RECORD_ID,
+    booking,
+    equipment_request,
+    event,
+    record,
+)
+
+
+class Response:
+    def __init__(self, status_code=200, payload=None, text="{}"):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    @property
+    def is_success(self):
+        return 200 <= self.status_code < 300
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not JSON")
+        return self._payload
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Record every httpx call and hand back a queued response."""
+    calls = []
+    queue = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append({"method": method, "url": url, **kwargs})
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr("app.clients.httpx.request", fake_request)
+    return calls, queue
+
+
+# --- Event Service -----------------------------------------------------------
+
+
+def test_get_event_scopes_the_read_to_the_coordinator(sent):
+    """Event Service does AC5's check, so the coordinator travels with the read."""
+    calls, queue = sent
+    queue.append(Response(200, event("Approved")))
+
+    assert clients.get_event(EVENT_ID, COORDINATOR_ID)["status"] == "Approved"
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith(f"/events/{EVENT_ID}")
+    assert calls[0]["params"] == {"coordinatorId": COORDINATOR_ID}
+    assert calls[0]["timeout"] == clients.TIMEOUT
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (404, clients.EventNotFoundError),
+        (403, clients.EventNotAssignedError),
+        (400, clients.DownstreamError),
+        (500, clients.DownstreamError),
+        (503, clients.DownstreamError),
+    ],
+)
+def test_get_event_status_mapping(status, expected, sent):
+    _, queue = sent
+    queue.append(Response(status, {"message": "postgres://secret@host/db"}))
+
+    with pytest.raises(expected):
+        clients.get_event(EVENT_ID, COORDINATOR_ID)
+
+
+def test_set_event_safety_status_sends_the_round(sent):
+    calls, queue = sent
+    queue.append(Response(200, event("Pending Safety Check")))
+
+    updated = clients.set_event_safety_status(
+        EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 2
+    )
+
+    assert updated["status"] == "Pending Safety Check"
+    assert calls[0]["method"] == "PATCH"
+    assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/safety-status")
+    assert calls[0]["json"] == {
+        "status": "Pending Safety Check",
+        "coordinatorId": COORDINATOR_ID,
+        "safetyCheckId": RECORD_ID,
+        "roundNumber": 2,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (404, clients.EventNotFoundError),
+        (403, clients.EventNotAssignedError),
+        (500, clients.DownstreamError),
+    ],
+)
+def test_set_event_safety_status_mapping(status, expected, sent):
+    _, queue = sent
+    queue.append(Response(status, {"message": "nope"}))
+
+    with pytest.raises(expected):
+        clients.set_event_safety_status(
+            EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 1
+        )
+
+
+@pytest.mark.parametrize(
+    "code", ["SAFETY_CHECK_ALREADY_PENDING", "INVALID_SAFETY_TRANSITION"]
+)
+def test_event_conflicts_keep_their_code(code, sent):
+    """The routes branch on the code, so it has to survive the trip."""
+    _, queue = sent
+    queue.append(Response(409, {"code": code, "currentStatus": "Cancelled"}))
+
+    with pytest.raises(clients.EventTransitionError) as raised:
+        clients.set_event_safety_status(
+            EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 1
+        )
+
+    assert raised.value.code == code
+    assert raised.value.body["currentStatus"] == "Cancelled"
+
+
+def test_event_conflict_without_a_json_body(sent):
+    """Boundary: a 409 that isn't JSON still becomes a transition error, not a 500."""
+    _, queue = sent
+    queue.append(Response(409, None))
+
+    with pytest.raises(clients.EventTransitionError) as raised:
+        clients.set_event_safety_status(
+            EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 1
+        )
+
+    assert raised.value.code is None
+    assert raised.value.body == {}
+
+
+# --- Venue Availability Service ---------------------------------------------
+
+
+def test_bookings_are_read_for_the_whole_event(sent):
+    """Every booking, all statuses: an event can have several (SCRUM-156)."""
+    calls, queue = sent
+    queue.append(Response(200, {"bookings": [booking("Approved")]}))
+
+    bookings = clients.get_event_venue_bookings(EVENT_ID)
+
+    assert [b["id"] for b in bookings] == [BOOKING_ID]
+    assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/venue-bookings")
+
+
+def test_booking_read_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(503, {"message": "DATABASE_URL is not configured"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.get_event_venue_bookings(EVENT_ID)
+
+
+# --- Equipment Request Service ----------------------------------------------
+
+
+def test_equipment_requests_are_read_with_dev_identity_headers(sent):
+    """Contract: that endpoint is behind the DEV headers, and READ_ROLES
+    already allow Event Coordinators — so we send the caller's own identity."""
+    calls, queue = sent
+    queue.append(Response(200, {"requests": [equipment_request("Approved")]}))
+
+    clients.get_event_equipment_requests(EVENT_ID, COORDINATOR_ID)
+
+    assert calls[0]["params"] == {"eventId": EVENT_ID}
+    assert calls[0]["headers"] == {
+        "X-Dev-User-Id": COORDINATOR_ID,
+        "X-Dev-Role": "Event Coordinator",
+    }
+
+
+def test_equipment_read_rejection_is_a_downstream_error(sent):
+    """A 403 here is a misconfiguration, not the caller's fault — so not AC5's 403."""
+    _, queue = sent
+    queue.append(Response(403, {"message": "Only Technical Support ..."}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.get_event_equipment_requests(EVENT_ID, COORDINATOR_ID)
+
+
+# --- Safety Check Record Service --------------------------------------------
+
+
+def test_create_record_sends_the_notes(sent):
+    calls, queue = sent
+    queue.append(Response(201, record()))
+
+    created = clients.create_safety_check_record(
+        EVENT_ID, COORDINATOR_ID, "Speakers on the left.", "Enter via Door A."
+    )
+
+    assert created["roundNumber"] == 1
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["json"] == {
+        "eventId": EVENT_ID,
+        "submittedBy": COORDINATOR_ID,
+        "equipmentPlacementNotes": "Speakers on the left.",
+        "crowdMovementNotes": "Enter via Door A.",
+    }
+
+
+def test_create_record_omits_absent_notes_as_null(sent):
+    _, queue = sent
+    queue.append(Response(201, record()))
+
+    clients.create_safety_check_record(EVENT_ID, COORDINATOR_ID)
+
+    assert queue == []
+
+
+def test_create_record_conflict_carries_the_open_round(sent):
+    """AC4: the open round comes back so the route can say when it was submitted."""
+    _, queue = sent
+    queue.append(
+        Response(409, {"code": "SAFETY_CHECK_ALREADY_PENDING", "safetyCheck": record()})
+    )
+
+    with pytest.raises(clients.SafetyCheckAlreadyPendingError) as raised:
+        clients.create_safety_check_record(EVENT_ID, COORDINATOR_ID)
+
+    assert raised.value.existing["roundNumber"] == 1
+
+
+def test_create_record_conflict_without_a_body(sent):
+    _, queue = sent
+    queue.append(Response(409, None))
+
+    with pytest.raises(clients.SafetyCheckAlreadyPendingError) as raised:
+        clients.create_safety_check_record(EVENT_ID, COORDINATOR_ID)
+
+    assert raised.value.existing is None
+
+
+def test_create_record_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(400, {"message": "eventId must be a valid UUID."}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.create_safety_check_record(EVENT_ID, COORDINATOR_ID)
+
+
+def test_list_records_filters_by_status(sent):
+    calls, queue = sent
+    queue.append(Response(200, {"safetyChecks": [record()]}))
+
+    rounds = clients.list_safety_check_records(EVENT_ID, status="Pending")
+
+    assert rounds[0]["status"] == "Pending"
+    assert calls[0]["params"] == {"eventId": EVENT_ID, "status": "Pending"}
+
+
+def test_list_records_without_a_status_filter(sent):
+    calls, queue = sent
+    queue.append(Response(200, {"safetyChecks": []}))
+
+    assert clients.list_safety_check_records(EVENT_ID) == []
+    assert calls[0]["params"] == {"eventId": EVENT_ID}
+
+
+def test_list_records_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(503, {"message": "down"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.list_safety_check_records(EVENT_ID)
+
+
+def test_delete_record_accepts_204(sent):
+    """Compensation: 204 is the success case, with no body to parse."""
+    calls, queue = sent
+    queue.append(Response(204, None))
+
+    assert clients.delete_safety_check_record(RECORD_ID) is None
+    assert calls[0]["method"] == "DELETE"
+    assert calls[0]["url"].endswith(f"/safety-check-records/{RECORD_ID}")
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (404, clients.RecordNotFoundError),
+        (409, clients.DownstreamError),
+        (503, clients.DownstreamError),
+    ],
+)
+def test_delete_record_mapping(status, expected, sent):
+    _, queue = sent
+    queue.append(Response(status, {"message": "no"}))
+
+    with pytest.raises(expected):
+        clients.delete_safety_check_record(RECORD_ID)
+
+
+# --- Transport failures ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+        (httpx.ReadTimeout("too slow"), clients.DownstreamTimeout),
+        (httpx.ConnectTimeout("too slow"), clients.DownstreamTimeout),
+        (httpx.ConnectError("refused"), clients.DownstreamError),
+        (httpx.RemoteProtocolError("garbage"), clients.DownstreamError),
+    ],
+)
+def test_transport_failures_are_mapped(raised, expected, sent):
+    """A timeout becomes a 504 upstream and anything else a 502 — never a 500."""
+    _, queue = sent
+    queue.append(raised)
+
+    with pytest.raises(expected):
+        clients.get_event(EVENT_ID, COORDINATOR_ID)
+
+
+def test_default_urls_are_the_host_ports():
+    """`uv run flask run` outside Docker must work without an .env."""
+    assert clients.EVENT_SERVICE_URL.endswith((":5003", ":5000"))
+    assert clients.VENUE_AVAILABILITY_SERVICE_URL.endswith((":5008", ":5000"))
+    assert clients.EQUIPMENT_REQUEST_SERVICE_URL.endswith((":5011", ":5000"))
+    assert clients.SAFETY_CHECK_RECORD_SERVICE_URL.endswith((":5013", ":5000"))

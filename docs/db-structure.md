@@ -230,7 +230,7 @@ One row per review round, so earlier decisions stay visible as history.
 | submitted_at | TIMESTAMPTZ | changed | When it was submitted, shown in the Safety Officer's queue. |
 | equipment_placement_notes | TEXT | | The coordinator's notes on where equipment will go, read by the Safety Officer. |
 | crowd_movement_notes | TEXT | | The coordinator's notes on expected crowd flow, read by the Safety Officer. |
-| status | VARCHAR(50) | | The round's outcome (for example Pending, Approved, Changes Requested, Rejected). |
+| status | VARCHAR(50) | | The round's outcome: Pending, Safety Approved, Changes Requested or Safety Rejected (`RECORD_STATUSES` in `safety-check-record-service`). Deliberately not `Approved` — that is only ever an *event* status, the one an event holds before its safety check. |
 | decided_by | UUID (FK User) | | The Safety Officer who decided, taken from the verified login. |
 | decided_at | TIMESTAMPTZ | changed | When the decision was made. |
 | remarks | TEXT | | The Safety Officer's overall reason or comments, shown to the coordinator. |
