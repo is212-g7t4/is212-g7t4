@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import './venueDetail.css'
+import { VenueClosuresPanel } from '../features/venue/VenueClosuresPanel'
 import type { Role, User } from '../types'
 import { fetchVenue } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
@@ -24,7 +26,14 @@ function Chips({ values }: { values: string[] }) {
   return <span className="chip-list">{values.map((value) => <span key={value} className="chip">{value}</span>)}</span>
 }
 
-export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; onBack: () => void; onEdit: () => void }) {
+type VenueDetailPageProps = { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; onBack: () => void; onEdit: () => void }
+
+export function VenueDetailPage(props: VenueDetailPageProps) {
+  // Route changes reset cached detail and drafts; refreshes keep the same mounted panel.
+  return <VenueDetailContent key={props.venueId} {...props} />
+}
+
+function VenueDetailContent({ venueId, role, user, onBack, onEdit }: VenueDetailPageProps) {
   const [venue, setVenue] = useState<Venue | null>(null)
   const [hold, setHold] = useState<VenueHold | null>(null)
   const [error, setError] = useState('')
@@ -46,13 +55,11 @@ export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venue
       }
     }).catch((cause: Error) => {
       if (active) {
-        setVenue(null)
         setError(cause.message)
       }
     }).finally(() => {
       if (active) setLoading(false)
     })
-    return () => { active = false }
     const interval = window.setInterval(() => setRefresh((value) => value + 1), 30_000)
     return () => { active = false; window.clearInterval(interval) }
   }, [venueId, role, refresh])
@@ -79,17 +86,18 @@ export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venue
 
   if (!canViewVenues(role)) return <RoleWarning>{VENUE_ACCESS_NOTICE}</RoleWarning>
 
-  return <div className="page-stack">
-    <section className="intro">
+  return <div className="page-stack venue-detail-page">
+    <section className="venue-detail-toolbar" aria-label="Venue navigation">
       <button className="button small" onClick={onBack}><ArrowLeftIcon size={13} /> Back to venue catalogue</button>{' '}
       <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}><RefreshIcon size={13} /> Refresh</button>
     </section>
-    {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : venue && <article className="panel event-card">
-      <header className="event-card-header">
-        <h2>{venue.name || 'Not specified'}</h2>
+    {venue && error && <p className="field-error" role="alert">Unable to refresh venue: {error}. Showing the last loaded details.</p>}
+    {!venue && loading ? <DetailPanelSkeleton /> : !venue && error ? <p className="field-error" role="alert">{error}</p> : venue && <article className="panel venue-detail-card">
+      <header className="venue-detail-header">
+        <div><p className="venue-detail-eyebrow">Venue overview</p><h2>{venue.name || 'Not specified'}</h2></div>
         <span className={`venue-status ${statusClass(venue.status)}`}>{venue.status}</span>
       </header>
-      <dl className="event-details">
+      <dl className="venue-detail-metadata">
         <div className="event-detail"><dt>Location</dt><dd>{venue.location || 'Not specified'}</dd></div>
         <div className="event-detail"><dt>Capacity</dt><dd>{venue.capacity === null ? 'Not specified' : `${venue.capacity} people`}</dd></div>
         <div className="event-detail"><dt>Accessibility</dt><dd>{venue.accessibility || 'Not specified'}</dd></div>
@@ -113,6 +121,7 @@ export function VenueDetailPage({ venueId, role, user, onBack, onEdit }: { venue
         </div>
         {holdError && <p className="field-error" role="alert">{holdError}</p>}
       </form>}
+      {role === 'Venue Staff' && user?.role === 'Venue Staff' && venue.id === venueId && <VenueClosuresPanel key={`${venueId}:${user.id}`} venueId={venueId} venueName={venue.name} user={user} />}
     </article>}
   </div>
 }

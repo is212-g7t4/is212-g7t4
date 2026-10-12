@@ -60,6 +60,7 @@ services:
     environment:
       <<: *frontend-environment
       CALENDAR_DEV_MODE: "${CALENDAR_DEV_MODE:-false}"
+      VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
     ports:
       - "127.0.0.1:5008:5000"
 
@@ -112,6 +113,7 @@ services:
       - ./services/venue-booking-service/.env
     environment:
       <<: *frontend-environment
+      VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
     ports:
       - "5007:5000"
 
