@@ -6,6 +6,7 @@ import type { EquipmentRequestStatus, EventReservation, ReviewedRequest } from '
 import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { EventCardSkeletonList, Spinner } from '../components/Loading'
 import { RefreshIcon, PlusIcon } from '../components/Icon'
+import { isCoordinator } from '../roles'
 
 type StatusFilter = EquipmentRequestStatus | 'All'
 
@@ -25,7 +26,7 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
   const [actionError, setActionError] = useState('')
   const [reviewingId, setReviewingId] = useState<string | null>(null)
 
-  const allowed = (role === 'Technical Support' || role === 'Event Coordinator') && user !== null
+  const allowed = (role === 'Technical Support' || isCoordinator(role)) && user !== null
   const canReview = role === 'Technical Support'
 
   const load = useCallback((activeFilter: StatusFilter, reviewer: User) => {
@@ -93,7 +94,7 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
           </select>
         </label>
         <button className="button small" onClick={() => { setLoading(true); void load(filter, user) }}><RefreshIcon size={14} /> Refresh requests</button>
-        {role === 'Event Coordinator' && onCreate && <button className="button small primary" onClick={onCreate}><PlusIcon size={14} /> New request</button>}
+        {isCoordinator(role) && onCreate && <button className="button small primary" onClick={onCreate}><PlusIcon size={14} /> New request</button>}
       </div>
       {actionError && <p className="field-error" role="alert">{actionError}</p>}
     </section>

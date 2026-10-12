@@ -161,20 +161,15 @@ def test_optional_field_wrong_type(setup):
     )
 
 
-def test_submitted_queue_loads_all_persisted_events_without_coordinator_filter(setup):
+def test_submitted_queue_requires_a_coordinator_id(setup):
+    """No caller-less "show me everything" — the old unfiltered fallback is gone."""
     client, _, cursor = setup
-    cursor.fetchall.return_value = [saved_row()]
     response = client.get("/events/submitted")
-    assert response.status_code == 200
-    assert response.json["events"][0]["eventName"] == "Community Workshop"
-    query, params = cursor.execute.call_args.args
-    assert "WHERE status IN ('Submitted', 'Under Review')" in query
-    assert "coordinator_id = %s" not in query
-    assert "ORDER BY submission_date ASC NULLS LAST" in query
-    assert params == []
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
 
 
-def test_submitted_queue_still_accepts_optional_coordinator_filter(setup):
+def test_submitted_queue_filters_to_the_coordinator(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = []
     response = client.get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}")
@@ -189,7 +184,7 @@ def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [saved_row()]
     response = client.get(
-        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true"
+        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead"
     )
     assert response.status_code == 200
     assert len(response.json["events"]) == 1
@@ -208,7 +203,8 @@ def test_submitted_queue_rejects_invalid_optional_coordinator_id(query_string, s
 
 def test_empty_queue(setup):
     setup[2].fetchall.return_value = []
-    assert setup[0].get("/events/submitted").json == {"events": []}
+    response = setup[0].get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}")
+    assert response.json == {"events": []}
 
 
 def test_assign_coordinator_updates_event(setup):
@@ -547,3 +543,43 @@ def test_timestamptz_values_serialize_as_singapore_local():
 
     assert serialized["preferredStartDate"] == "2026-10-01T09:00:00"
     assert serialized["preferredEndDate"] == "2026-10-01T17:00:00"
+
+
+def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [saved_row()]
+    response = client.get("/events/unassigned")
+    assert response.status_code == 200
+    assert response.json["events"][0]["coordinatorId"] is None
+    query = cursor.execute.call_args.args[0]
+    assert "WHERE status = 'Submitted' AND coordinator_id IS NULL" in query
+    assert "'Under Review'" not in query
+    assert "ORDER BY submission_date ASC NULLS LAST" in query
+
+
+def test_unassigned_queue_needs_database(monkeypatch):
+    client = create_app({"TESTING": True, "DATABASE_URL": ""}).test_client()
+    assert client.get("/events/unassigned").status_code == 503
+
+
+def test_submitted_queue_ignores_the_retired_is_manager_flag(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = []
+    response = client.get(
+        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true"
+    )
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" in query
+    assert params == [OTHER_COORDINATOR_ID]
+
+
+@pytest.mark.parametrize("role", ["Venue Staff", "Event Coordinator", "Attendee"])
+def test_only_the_lead_can_view_every_submitted_request(role, setup):
+    client, _, cursor = setup
+    response = client.get(
+        "/events/submitted",
+        query_string={"coordinatorId": OTHER_COORDINATOR_ID, "viewerRole": role},
+    )
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()

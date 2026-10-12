@@ -241,8 +241,8 @@ def submit_event(database_url, data):
     return serialize(saved)
 
 
-def list_submitted(database_url, coordinator_id=None, is_manager=False):
-    if is_manager or coordinator_id is None:
+def list_submitted(database_url, coordinator_id, view_all=False):
+    if view_all:
         query = f"""SELECT {ROW_COLUMNS}
                     FROM public."Event" WHERE status IN ('Submitted', 'Under Review')
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
@@ -257,6 +257,20 @@ def list_submitted(database_url, coordinator_id=None, is_manager=False):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, params)
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def list_unassigned(database_url):
+    """The Lead's queue: submitted requests no coordinator has been assigned.
+
+    Assignment moves an event to 'Under Review', so it drops out of here."""
+    query = f"""SELECT {ROW_COLUMNS}
+                FROM public."Event"
+                WHERE status = 'Submitted' AND coordinator_id IS NULL
+                ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query)
             return [serialize(row) for row in cursor.fetchall()]
 
 
@@ -381,9 +395,9 @@ def list_events(
     venue=None,
     date_from=None,
     date_to=None,
-    is_manager=False,
+    view_all=False,
 ):
-    if is_manager:
+    if view_all:
         conditions = []
         params = []
     else:
@@ -458,7 +472,7 @@ def get_organiser_event(database_url, event_id, organiser_id):
     return serialize(event)
 
 
-def get_event(database_url, event_id, coordinator_id, is_manager=False):
+def get_event(database_url, event_id, coordinator_id, view_all=False):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -470,7 +484,7 @@ def get_event(database_url, event_id, coordinator_id, is_manager=False):
             event = cursor.fetchone()
     if not event:
         raise EventNotFoundError
-    if not is_manager and (
+    if not view_all and (
         not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id
     ):
         raise EventNotAssignedError

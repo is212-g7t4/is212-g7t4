@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from app import create_app
 
 MANAGER = {"user_id": "user-manager", "username": "Alice Tan", "role": "Event Coordinator Lead"}
@@ -173,3 +175,59 @@ def test_lead_can_assign_an_event_to_themselves(mock_get_user, mock_get_coordina
 
     assert response.status_code == 200
     mock_assign.assert_called_once_with("EVT-001", "user-manager")
+
+
+ORGANISER = {"user_id": "user-organiser", "username": "Priya Nair", "role": "Event Organiser"}
+
+
+@patch("app.routes.get_unassigned_events")
+@patch("app.routes.get_user")
+def test_lead_sees_the_unassigned_queue(mock_get_user, mock_get_unassigned):
+    """The Lead gets the submitted events that still need a coordinator."""
+    mock_get_user.return_value = MANAGER
+    mock_get_unassigned.return_value = [{"id": "EVT-001", "coordinatorId": None}]
+
+    client = create_app().test_client()
+    response = client.get("/queue?actingUserId=user-manager")
+
+    assert response.status_code == 200
+    assert response.json == {"events": [{"id": "EVT-001", "coordinatorId": None}]}
+    mock_get_user.assert_called_once_with("user-manager")
+
+
+@pytest.mark.parametrize("acting_user", [COORDINATOR, ORGANISER, None])
+@patch("app.routes.get_unassigned_events")
+@patch("app.routes.get_user")
+def test_only_the_lead_can_see_the_queue(mock_get_user, mock_get_unassigned, acting_user):
+    """Event Coordinators, other roles and unknown users get 403 and no events."""
+    mock_get_user.return_value = acting_user
+
+    client = create_app().test_client()
+    response = client.get("/queue?actingUserId=someone")
+
+    assert response.status_code == 403
+    mock_get_unassigned.assert_not_called()
+
+
+def test_queue_requires_acting_user_id():
+    response = create_app().test_client().get("/queue")
+    assert response.status_code == 400
+    assert "actingUserId" in response.json["error"]
+
+
+@patch("app.routes.get_user")
+def test_queue_handles_acting_user_lookup_error(mock_get_user):
+    mock_get_user.side_effect = Exception("User Service unreachable")
+    response = create_app().test_client().get("/queue?actingUserId=user-manager")
+    assert response.status_code == 500
+    assert "Failed to validate acting user" in response.json["error"]
+
+
+@patch("app.routes.get_unassigned_events")
+@patch("app.routes.get_user")
+def test_queue_handles_event_service_error(mock_get_user, mock_get_unassigned):
+    mock_get_user.return_value = MANAGER
+    mock_get_unassigned.side_effect = Exception("Event Service down")
+    response = create_app().test_client().get("/queue?actingUserId=user-manager")
+    assert response.status_code == 500
+    assert "Failed to fetch unassigned events" in response.json["error"]

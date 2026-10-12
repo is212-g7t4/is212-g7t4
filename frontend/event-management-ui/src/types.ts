@@ -1,13 +1,14 @@
 // The Event Coordinator Lead assigns coordinators and otherwise works as an
 // Event Coordinator (docs/db-structure.md, User.role).
 export type Role = 'Event Organiser' | 'Event Coordinator' | 'Event Coordinator Lead' | 'Venue Staff' | 'Technical Support' | 'Safety Officer' | 'Attendee'
-export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'detail' | 'myEvents' | 'browseEvents' | 'myRegistrations' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests' | 'safetyChecks' | 'newEquipmentRequest'
+export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'queue' | 'detail' | 'myEvents' | 'browseEvents' | 'myRegistrations' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests' | 'safetyChecks' | 'newEquipmentRequest'
 
 export const routeTitles: Record<Route, string> = {
   dashboard: 'Overview',
   submit: 'Submit an event',
   manage: 'Event information',
   review: 'Request review',
+  queue: 'Unassigned requests',
   detail: 'Event record',
   myEvents: 'My events',
   browseEvents: 'Browse events',

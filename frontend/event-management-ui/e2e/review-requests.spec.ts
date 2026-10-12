@@ -24,7 +24,7 @@ test('coordinator approves an assigned request', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Tech Conference' })).toBeVisible()
   expect(query?.get('coordinatorId')).toBe(users.coordinator.user_id)
-  expect(query?.has('isManager')).toBe(false)
+  expect(query?.has('viewerRole')).toBe(false)
 
   await page.getByRole('button', { name: 'Approve Request' }).click()
   await expect(page.getByRole('dialog', { name: 'Event Request Approved' })).toContainText('Tech Conference was approved')
@@ -54,29 +54,69 @@ test('rejection needs a reason', async ({ page }) => {
   expect(rejectBody).toEqual({ coordinatorId: users.coordinator.user_id, reason: 'Venue clash' })
 })
 
-test('manager assigns a coordinator to an unassigned request', async ({ page }) => {
+test('lead sees the unassigned queue and an assigned event leaves it', async ({ page }) => {
+  let queueQuery: URLSearchParams | undefined
   let assignBody: unknown
   await asUser(page, users.manager.user_id)
-  await mock(page, 'event', '/events/submitted', (route) => {
-    expect(new URL(route.request().url()).searchParams.get('isManager')).toBe('true')
-    return json(route, { events: [makeEvent({ coordinatorId: null })] })
+  await mock(page, 'assignment', '/queue', (route) => {
+    queueQuery = new URL(route.request().url()).searchParams
+    return json(route, { events: [makeEvent({ coordinatorId: null, organiserId: users.organiser.user_id })] })
   })
   await mock(page, 'assignment', `/events/evt-001/assign-coordinator/${users.coordinator.user_id}`, (route) => {
     assignBody = route.request().postDataJSON()
     return json(route, { eventId: 'evt-001', assignedCoordinatorId: users.coordinator.user_id })
   })
-  await page.goto('/requests/review')
+  await page.goto('/requests/queue')
 
-  await page.getByRole('button', { name: 'Assign Coordinator' }).click()
-  await page.getByLabel('Coordinator', { exact: true }).selectOption(users.coordinator.user_id)
-  await page.getByRole('button', { name: 'Confirm Assignment' }).click()
+  const row = page.getByRole('row', { name: /Tech Conference/ })
+  await expect(row).toContainText(users.organiser.username)
+  await expect(row).toContainText('100')
+  expect(queueQuery?.get('actingUserId')).toBe(users.manager.user_id)
 
-  await expect(page.getByRole('button', { name: 'Reassign Coordinator' })).toBeVisible()
+  await row.getByLabel('Coordinator').selectOption(users.coordinator.user_id)
+  await row.getByRole('button', { name: 'Assign' }).click()
+
+  await expect(page.getByRole('status')).toContainText(`Tech Conference was assigned to ${users.coordinator.username}`)
+  await expect(page.getByText('No requests are waiting for a coordinator.')).toBeVisible()
   expect(assignBody).toEqual({ actingUserId: users.manager.user_id })
+})
+
+test('coordinator cannot see the unassigned queue', async ({ page }) => {
+  await asUser(page, users.coordinator.user_id)
+  await page.goto('/requests/queue')
+  await expect(page.getByText('The unassigned request queue is visible only to the Event Coordinator Lead.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Unassigned requests' })).toHaveCount(0)
+})
+
+test('organiser cannot see the unassigned queue', async ({ page }) => {
+  await asUser(page, users.organiser.user_id)
+  await page.goto('/requests/queue')
+  await expect(page.getByText('The unassigned request queue is visible only to the Event Coordinator Lead.')).toBeVisible()
 })
 
 test('organiser cannot see the review queue', async ({ page }) => {
   await asUser(page, users.organiser.user_id)
   await page.goto('/requests/review')
   await expect(page.getByText('Submitted event requests are visible to Event Coordinators.')).toBeVisible()
+})
+
+test('lead moves between the Events tabs', async ({ page }) => {
+  await asUser(page, users.manager.user_id)
+  await mock(page, 'assignment', '/queue', (route) => json(route, { events: [] }))
+  let reviewQuery: URLSearchParams | undefined
+  await mock(page, 'event', '/events/submitted', (route) => {
+    reviewQuery = new URL(route.request().url()).searchParams
+    return json(route, { events: [] })
+  })
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Events', exact: true }).click()
+  await expect(page).toHaveURL(/\/requests\/queue$/)
+  await expect(page.getByRole('tab', { name: 'Unassigned requests' })).toHaveAttribute('aria-selected', 'true')
+
+  await page.getByRole('tab', { name: 'Request review' }).click()
+  await expect(page).toHaveURL(/\/requests\/review$/)
+  await expect(page.getByText('No submitted event requests yet.')).toBeVisible()
+  expect(reviewQuery?.get('viewerRole')).toBe('Event Coordinator Lead')
+  expect(reviewQuery?.has('isManager')).toBe(false)
 })

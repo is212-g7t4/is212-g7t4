@@ -29,3 +29,11 @@ def test_available_coordinators_propagate_user_service_failure(monkeypatch):
     monkeypatch.setattr(clients.httpx, "get", Mock(return_value=response(503, {})))
     with pytest.raises(httpx.HTTPStatusError):
         clients.get_available_coordinators()
+
+
+def test_unassigned_events_come_from_event_service(monkeypatch):
+    get = Mock(return_value=response(200, {"events": [{"id": "evt-1"}]}))
+    monkeypatch.setattr(clients.httpx, "get", get)
+
+    assert clients.get_unassigned_events() == [{"id": "evt-1"}]
+    assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/unassigned"

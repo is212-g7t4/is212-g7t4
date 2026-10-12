@@ -44,3 +44,10 @@ def assign_event_coordinator(event_id: str, coordinator_id: str) -> dict:
     )
     response.raise_for_status()
     return response.json()
+
+
+def get_unassigned_events() -> list:
+    """Submitted events with no coordinator yet, oldest first, from Event Service."""
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events/unassigned")
+    response.raise_for_status()
+    return response.json()["events"]
