@@ -11,6 +11,8 @@ export default defineConfig({
         'src/features/calendar/**.{ts,tsx}',
         'src/pages/VenueCalendarPage.tsx',
         'src/features/venue/venueSearch.ts',
+        'src/features/venue/venueClosures.ts',
+        'src/features/venue/VenueClosuresPanel.tsx',
         'src/features/venue/permissions.ts',
         'src/pages/VenueSearchPage.tsx',
       ],

@@ -51,6 +51,7 @@ def _parse_datetime(value):
 
 def create_app(config=None):
     app = Flask(__name__)
+    app.config["VENUE_CLOSURE_DEV_MODE"] = os.getenv("VENUE_CLOSURE_DEV_MODE") == "true"
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
@@ -66,7 +67,7 @@ def create_app(config=None):
         if origin == app.config["FRONTEND_ORIGIN"]:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            if request.path in {"/venue-bookings", "/venue-holds"}:
+            if request.path in {"/venue-bookings", "/venue-holds"} or request.path.startswith("/venue-closures"):
                 response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
                 response.headers["Access-Control-Allow-Headers"] = (
                     "Content-Type, X-Dev-User-Id, X-Dev-Role"
@@ -389,4 +390,6 @@ def create_app(config=None):
             ), 409
         return jsonify(booking), 200
 
+    from app.closures import bp as closures_bp
+    app.register_blueprint(closures_bp)
     return app
