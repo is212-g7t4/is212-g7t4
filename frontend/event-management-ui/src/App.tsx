@@ -8,6 +8,10 @@ import { MyEventsPage } from './pages/MyEventsPage'
 import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
 import { AttendeeRegistrationsPage } from './pages/AttendeeRegistrationsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
+import { UnassignedQueuePage } from './pages/UnassignedQueuePage'
+import { EventsTabs } from './components/EventsTabs'
+import { coordinatorEventTabs } from './features/event/permissions'
+import { isCoordinator } from './roles'
 import { SubmissionPage } from './pages/SubmissionPage'
 import { EquipmentPage } from './pages/EquipmentPage'
 import { EquipmentRequestsPage } from './pages/EquipmentRequestsPage'
@@ -31,6 +35,7 @@ const paths: Record<Route, string> = {
   submit: '/events/new',
   manage: '/events/evt-001/edit',
   review: '/requests/review',
+  queue: '/requests/queue',
   detail: '/events',
   myEvents: '/my-events',
   browseEvents: '/events/browse',
@@ -54,6 +59,7 @@ function getRoute(): Route {
   if (path === '/events/new') return 'submit'
   if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
+  if (path === '/requests/queue') return 'queue'
   if (path === '/my-events') return 'myEvents'
   if (path === '/events/browse') return 'browseEvents'
   if (path === '/registrations') return 'myRegistrations'
@@ -177,22 +183,24 @@ function App() {
     setEvent((current) => ({ ...current, [field]: value }))
   }
 
-  // The Lead uses the coordinator screens, with the manager's extra rights.
-  const isManager = activeUser?.role === 'Event Coordinator Lead'
-  const role: Role = isManager ? 'Event Coordinator' : activeUser?.role ?? 'Event Organiser'
+  const role: Role = activeUser?.role ?? 'Event Organiser'
+  const eventTabs = isCoordinator(role) ? coordinatorEventTabs(role) : []
+  const inEventsPage = eventTabs.includes(route)
   const resolveUserName = (userId: string | null | undefined) => users.find((user) => user.id === userId)?.username ?? null
 
   return <div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
     <main className={`main-content${route === 'venueCalendar' ? ' calendar-route' : ''}`}>
-      <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
+      <Topbar route={route} title={inEventsPage ? 'Events' : undefined} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
       <HoldReminderAlert user={activeUser} />
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
       {route === 'submit' && <SubmissionPage role={role} currentOrganiserId={activeUser?.id} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
-      {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
-      {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {inEventsPage && <EventsTabs tabs={eventTabs} route={route} onNavigate={navigate} />}
+      {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
+      {route === 'queue' && <UnassignedQueuePage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
+      {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
@@ -205,7 +213,7 @@ function App() {
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} coordinators={users.filter((u) => u.role === 'Event Coordinator' || u.role === 'Event Coordinator Lead')} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
       {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
-      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
+      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div>
 }

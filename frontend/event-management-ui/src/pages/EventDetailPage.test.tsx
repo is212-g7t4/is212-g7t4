@@ -60,7 +60,7 @@ beforeEach(() => {
 })
 
 test('shows the selected event status and full recorded details', async () => {
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
 
   expect(await screen.findByRole('heading', { name: 'Community Workshop' })).toBeInTheDocument()
   expect(screen.getByText('Rejected', { selector: '.status-badge' })).toBeInTheDocument()
@@ -96,7 +96,7 @@ test('assigned coordinator updates the status and action details', async () => {
       recordedAt: '2026-10-03T10:00:00+08:00',
     }],
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'Approved' } })
@@ -114,7 +114,7 @@ test('assigned coordinator updates the status and action details', async () => {
 })
 
 test('rejected event status cannot be changed while action details remain editable', async () => {
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
 
   await screen.findByRole('heading', { name: 'Community Workshop' })
   const status = screen.getByLabelText('Status')
@@ -132,7 +132,7 @@ test('rejected event status cannot be changed while action details remain editab
 // coordinator is told what has to happen instead of being offered a dead option.
 test('approved event offers only Approved and says to submit for safety check', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved' })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   const status = screen.getByLabelText('Status')
@@ -147,7 +147,7 @@ test('approved event offers only Approved and says to submit for safety check', 
 
 test('pending safety check event shows the waiting reason', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Pending Safety Check' })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByRole('note')).toHaveTextContent(
@@ -157,7 +157,7 @@ test('pending safety check event shows the waiting reason', async () => {
 
 test('SCRUM-150 AC3: a Safety Officer sees the Approve panel on a pending event', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Pending Safety Check' })
-  render(<EventDetailPage eventId={event.id} role="Safety Officer" isManager={false} currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Safety Officer" currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByRole('heading', { name: 'Operational Safety Check' })).toBeInTheDocument()
@@ -167,7 +167,7 @@ test('SCRUM-150 AC3: a Safety Officer sees the Approve panel on a pending event'
 
 test('SCRUM-150 AC3: a Safety Officer sees no Approve panel once the event is Confirmed', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
-  render(<EventDetailPage eventId={event.id} role="Safety Officer" isManager={false} currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Safety Officer" currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.queryByRole('heading', { name: 'Operational Safety Check' })).not.toBeInTheDocument()
@@ -175,7 +175,7 @@ test('SCRUM-150 AC3: a Safety Officer sees no Approve panel once the event is Co
 
 test('an Event Coordinator sees no Approve panel on a pending event', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Pending Safety Check' })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.queryByRole('heading', { name: 'Operational Safety Check' })).not.toBeInTheDocument()
@@ -183,7 +183,7 @@ test('an Event Coordinator sees no Approve panel on a pending event', async () =
 
 test('safety changes requested event says what must happen', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Safety Changes Requested' })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByRole('note')).toHaveTextContent(
@@ -196,7 +196,7 @@ test('API block on confirming is shown to the coordinator', async () => {
   vi.mocked(eventApi)
     .mockResolvedValueOnce({ ...event, status: 'Approved' })
     .mockRejectedValueOnce(new Error(blocked))
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   // The dropdown gives no way to ask for this, so drive the save the way a
@@ -214,7 +214,7 @@ test('a confirmed event has reached preparation and records progress', async () 
     ...confirmedEvent,
     actionDetails: 'Preparation under way.',
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   // Already past the gate, so no hint — and nothing further to move to.
@@ -232,18 +232,18 @@ test('a confirmed event has reached preparation and records progress', async () 
 })
 
 test.each(['Venue Staff', 'Technical Support'] as const)('%s views event details without edit controls', async (role) => {
-  render(<EventDetailPage eventId={event.id} role={role} isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role={role} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
 
   expect(await screen.findByRole('heading', { name: 'Community Workshop' })).toBeInTheDocument()
   expect(eventApi).toHaveBeenCalledWith(
-    `/events/${event.id}?coordinatorId=${coordinatorId}&isManager=true&viewerRole=${role.replace(' ', '+')}`,
+    `/events/${event.id}?coordinatorId=${coordinatorId}&viewerRole=${role.replace(' ', '+')}`,
   )
   expect(screen.getByText('Only the assigned Event Coordinator can update this event.')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Save progress' })).not.toBeInTheDocument()
 })
 
 test('does not load event details for an attendee', () => {
-  render(<EventDetailPage eventId={event.id} role="Attendee" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Attendee" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
 
   expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, Technical Support, and Safety Officers.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
@@ -255,7 +255,7 @@ const safetyPanel = () => screen.queryByRole('heading', { name: 'Submit for safe
 
 test('AC5: the assigned coordinator of an Approved event can submit it', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved' })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(safetyPanel()).toBeInTheDocument()
@@ -265,7 +265,7 @@ test('AC5: a coordinator who is not the assigned one never sees the panel', asyn
   vi.mocked(eventApi).mockResolvedValue({
     ...event, status: 'Approved', coordinatorId: '22222222-2222-4222-8222-222222222222',
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(safetyPanel()).not.toBeInTheDocument()
@@ -275,7 +275,7 @@ test('AC5: a Lead viewing another coordinator\'s event as a manager cannot submi
   vi.mocked(eventApi).mockResolvedValue({
     ...event, status: 'Approved', coordinatorId: '22222222-2222-4222-8222-222222222222',
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager currentCoordinatorId={coordinatorId} currentCoordinatorName="Alice Tan" resolveUserName={() => 'Alice Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator Lead" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alice Tan" resolveUserName={() => 'Alice Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(safetyPanel()).not.toBeInTheDocument()
@@ -283,7 +283,7 @@ test('AC5: a Lead viewing another coordinator\'s event as a manager cannot submi
 
 test.each(['Venue Staff', 'Technical Support'] as const)('AC5: %s cannot submit for a safety check', async (role) => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved' })
-  render(<EventDetailPage eventId={event.id} role={role} isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Siti" backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role={role} currentCoordinatorId={coordinatorId} currentCoordinatorName="Siti" backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(safetyPanel()).not.toBeInTheDocument()
@@ -292,7 +292,7 @@ test.each(['Venue Staff', 'Technical Support'] as const)('AC5: %s cannot submit 
 test.each(['Submitted', 'Under Review', 'Rejected', 'Confirmed', 'Safety Changes Requested'] as const)(
   'the panel is hidden on a %s event', async (status) => {
     vi.mocked(eventApi).mockResolvedValue({ ...event, status })
-    render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+    render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
     await screen.findByRole('heading', { name: 'Community Workshop' })
 
     expect(safetyPanel()).not.toBeInTheDocument()
@@ -310,7 +310,7 @@ test('AC1: a pending event shows when it was submitted, and no submit button', a
       recordedAt: '2026-10-05T02:00:00+00:00',
     }],
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(safetyPanel()).not.toBeInTheDocument()
@@ -321,7 +321,7 @@ test('AC1: a pending event shows when it was submitted, and no submit button', a
 
 test('SCRUM-151 AC5: the venue bookings panel is hidden once the event is Cancelled', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Cancelled', coordinatorId })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.queryByLabelText('Venue bookings')).not.toBeInTheDocument()
@@ -329,7 +329,7 @@ test('SCRUM-151 AC5: the venue bookings panel is hidden once the event is Cancel
 
 test('the venue bookings panel still shows for every other status', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved', coordinatorId })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByLabelText('Venue bookings')).toBeInTheDocument()
@@ -348,7 +348,7 @@ test('SCRUM-151 AC6: action history shows the reason and areas for a change requ
       areas: ['venue arrangement', 'event details'],
     }],
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByText('Areas: venue arrangement, event details')).toBeInTheDocument()
@@ -367,7 +367,7 @@ test('SCRUM-151 AC6: action history shows the reason for a rejection, with no ar
       remarks: 'Unsafe egress plan.',
     }],
   })
-  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByText('Reason: Unsafe egress plan.')).toBeInTheDocument()

@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 
 from app.clients import (
     get_available_coordinators,
+    get_unassigned_events,
     get_user,
     assign_event_coordinator,
 )
@@ -35,6 +36,39 @@ def get_coordinators():
         return jsonify(coordinators=coordinators), 200
     except Exception as e:
         return jsonify(error=f"Failed to fetch coordinators: {str(e)}"), 500
+
+
+@bp.get("/queue")
+def get_queue():
+    """
+    The Event Coordinator Lead's queue of submitted requests with no
+    coordinator assigned yet, oldest submission first.
+
+    Query parameters:
+    - actingUserId: the id of the user asking. Only the Event Coordinator
+      Lead may see the queue.
+
+    Response (200):
+    {"events": [...]}
+    """
+    acting_user_id = request.args.get("actingUserId")
+    if not acting_user_id:
+        return jsonify(error="actingUserId is required"), 400
+
+    try:
+        acting_user = get_user(acting_user_id)
+    except Exception as e:
+        return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
+
+    if not acting_user or acting_user.get("role") != LEAD_ROLE:
+        return jsonify(
+            error="Only the Event Coordinator Lead can view the unassigned queue"
+        ), 403
+
+    try:
+        return jsonify(events=get_unassigned_events()), 200
+    except Exception as e:
+        return jsonify(error=f"Failed to fetch unassigned events: {str(e)}"), 500
 
 
 @bp.post("/events/<event_id>/assign-coordinator/<coordinator_id>")

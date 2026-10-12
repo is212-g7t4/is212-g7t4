@@ -33,6 +33,12 @@ this up alongside every other service.
 - `GET /coordinators` — everyone an event can be assigned to: the Event
   Coordinator Lead (so the Lead can take an event on themselves) and every
   Event Coordinator, fetched from `user-service`.
+- `GET /queue?actingUserId=<user id>` — the Lead's queue: submitted events
+  with no coordinator assigned yet, oldest submission first (from
+  `event-service`'s `GET /events/unassigned`). Only the Event Coordinator Lead
+  may view it — `403` for everyone else, `400` without `actingUserId`. An
+  event leaves the queue once assigned, because assignment moves it to
+  `Under Review`.
 - `POST /events/<event_id>/assign-coordinator/<coordinator_id>` — assigns or
   reassigns the coordinator on an event. Body must include
   `{"actingUserId": "<user id>"}`; only the Event Coordinator Lead (role

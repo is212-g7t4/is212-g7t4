@@ -32,6 +32,7 @@ from app.models import (
     list_organiser_events,
     list_overlapping_events,
     list_submitted,
+    list_unassigned,
     reject_event,
     submit_event,
     update_event_coordinator,
@@ -39,6 +40,12 @@ from app.models import (
     update_event_safety_status,
 )
 from app.validation import validate
+
+# Roles that see every event rather than only the ones assigned to them,
+# passed as ?viewerRole=. Until services verify a JWT (AGENTS.md) the role is
+# whatever the caller sends, like coordinatorId.
+LEAD_ROLE = "Event Coordinator Lead"
+ALL_EVENTS_ROLES = (LEAD_ROLE, "Venue Staff", "Technical Support", "Safety Officer")
 
 
 def create_app(config=None):
@@ -120,20 +127,32 @@ def create_app(config=None):
 
     @app.get("/events/submitted")
     def submitted():
-        coordinator_id = request.args.get("coordinatorId")
-        if coordinator_id not in (None, ""):
-            try:
-                coordinator_id = str(UUID(coordinator_id))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid current coordinator ID is required."), 400
-        is_manager = request.args.get("isManager") in ("true", "1")
+        try:
+            coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+        viewer_role = request.args.get("viewerRole") or None
+        if viewer_role and viewer_role != LEAD_ROLE:
+            return jsonify(
+                message="Only the Event Coordinator Lead can view every submitted request."
+            ), 403
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         return jsonify(
-            events=list_submitted(app.config["DATABASE_URL"], coordinator_id, is_manager)
+            events=list_submitted(
+                app.config["DATABASE_URL"], coordinator_id, view_all=bool(viewer_role)
+            )
         )
+
+    @app.get("/events/unassigned")
+    def unassigned():
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Event Service."
+            ), 503
+        return jsonify(events=list_unassigned(app.config["DATABASE_URL"]))
 
     @app.get("/events")
     def list_events_route():
@@ -155,14 +174,10 @@ def create_app(config=None):
             return jsonify(message="A valid current coordinator ID is required."), 400
 
         viewer_role = request.args.get("viewerRole") or None
-        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support", "Safety Officer"):
+        if viewer_role and viewer_role not in ALL_EVENTS_ROLES:
             return jsonify(message="This role cannot view all internal events."), 403
         status = request.args.get("status") or None
         venue = request.args.get("venue") or None
-        is_manager = (
-            request.args.get("isManager") in ("true", "1")
-            or viewer_role in ("Venue Staff", "Technical Support", "Safety Officer")
-        )
 
         date_from = date_to = None
         try:
@@ -195,7 +210,7 @@ def create_app(config=None):
                 venue,
                 date_from,
                 date_to,
-                is_manager,
+                view_all=bool(viewer_role),
             )
         )
 
@@ -264,18 +279,19 @@ def create_app(config=None):
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
         viewer_role = request.args.get("viewerRole") or None
-        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support", "Safety Officer"):
+        if viewer_role and viewer_role not in ALL_EVENTS_ROLES:
             return jsonify(message="This role cannot view all internal events."), 403
-        is_manager = (
-            request.args.get("isManager") in ("true", "1")
-            or viewer_role in ("Venue Staff", "Technical Support", "Safety Officer")
-        )
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         try:
-            event = get_event(app.config["DATABASE_URL"], str(event_id), coordinator_id, is_manager)
+            event = get_event(
+                app.config["DATABASE_URL"],
+                str(event_id),
+                coordinator_id,
+                view_all=bool(viewer_role),
+            )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
         except EventNotAssignedError:
