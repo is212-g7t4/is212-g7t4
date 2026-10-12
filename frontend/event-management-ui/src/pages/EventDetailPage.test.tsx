@@ -10,6 +10,11 @@ vi.mock('../features/registration/registrations', () => ({ fetchRegistrations: v
 vi.mock('../features/venue/VenueBookingsPanel', () => ({
   VenueBookingsPanel: () => <section aria-label="Venue bookings" />,
 }))
+// SCRUM-149: this file covers *who* gets the submit panel (AC5) and where it
+// sits; the panel's own behaviour is SafetySubmitPanel.test.tsx.
+vi.mock('../features/safety/SafetySubmitPanel', () => ({
+  SafetySubmitPanel: () => <h4>Submit for safety check</h4>,
+}))
 
 const coordinatorId = '11111111-1111-4111-8111-111111111111'
 const event: SubmittedEvent = {
@@ -211,4 +216,72 @@ test('does not load event details for an attendee', () => {
 
   expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, and Technical Support.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
+})
+
+// --- SCRUM-149: who sees the submit-for-safety-check panel (AC5) -------------
+
+const safetyPanel = () => screen.queryByRole('heading', { name: 'Submit for safety check' })
+
+test('AC5: the assigned coordinator of an Approved event can submit it', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved' })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(safetyPanel()).toBeInTheDocument()
+})
+
+test('AC5: a coordinator who is not the assigned one never sees the panel', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event, status: 'Approved', coordinatorId: '22222222-2222-4222-8222-222222222222',
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(safetyPanel()).not.toBeInTheDocument()
+})
+
+test('AC5: a Lead viewing another coordinator\'s event as a manager cannot submit', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event, status: 'Approved', coordinatorId: '22222222-2222-4222-8222-222222222222',
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager currentCoordinatorId={coordinatorId} currentCoordinatorName="Alice Tan" resolveUserName={() => 'Alice Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(safetyPanel()).not.toBeInTheDocument()
+})
+
+test.each(['Venue Staff', 'Technical Support'] as const)('AC5: %s cannot submit for a safety check', async (role) => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved' })
+  render(<EventDetailPage eventId={event.id} role={role} isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Siti" backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(safetyPanel()).not.toBeInTheDocument()
+})
+
+test.each(['Submitted', 'Under Review', 'Rejected', 'Confirmed', 'Safety Changes Requested'] as const)(
+  'the panel is hidden on a %s event', async (status) => {
+    vi.mocked(eventApi).mockResolvedValue({ ...event, status })
+    render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'Community Workshop' })
+
+    expect(safetyPanel()).not.toBeInTheDocument()
+  },
+)
+
+test('AC1: a pending event shows when it was submitted, and no submit button', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Pending Safety Check',
+    actionHistory: [{
+      status: 'Pending Safety Check',
+      details: 'Submitted for Operational Safety Check (round 1).',
+      coordinatorId,
+      recordedAt: '2026-10-05T02:00:00+00:00',
+    }],
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(safetyPanel()).not.toBeInTheDocument()
+  expect(screen.getByText(/Submitted for safety check on/)).toHaveTextContent('05/10/2026')
 })

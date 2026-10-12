@@ -910,14 +910,82 @@ textarea:disabled {
    pending; a safety cancellation reads as a rejection. */
 
 .status-badge.pending-safety-check,
-.status-badge.safety-changes-requested {
+.status-badge.safety-changes-requested,
+.status-badge.pending-review {
   background: var(--color-warning-soft);
   color: var(--color-warning);
+}
+
+.status-badge.safety-approved {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.status-badge.safety-rejected,
+.status-badge.expired {
+  background: var(--color-error-soft);
+  color: var(--color-error);
 }
 
 .status-badge.cancelled {
   background: var(--color-error-soft);
   color: var(--color-error);
+}
+
+/* Submit for safety check (SCRUM-149) */
+
+.safety-submit {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.safety-submit h4 {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+}
+
+/* The arrangements standing between the event and its safety check (AC2).
+   Warning-toned rather than error-toned: nothing is wrong, something is
+   simply not finished yet. */
+
+.safety-outstanding {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
+}
+
+.safety-outstanding h5 {
+  margin: 0 0 var(--space-3);
+  font-size: 13px;
+}
+
+.safety-outstanding-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.safety-outstanding-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.safety-outstanding-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.safety-outstanding-label {
+  font-weight: 600;
 }
 
 /* Impact rows */

@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, mockSafetyReadiness, test, expect, users, venues } from './fixtures'
 
 const approved = makeEvent({ id: 'evt-002', eventName: 'Hack Night', status: 'Approved', expectedAttendance: '50' })
 const registrations = [
@@ -20,6 +20,8 @@ test('coordinator filters events and opens one with registrations', async ({ pag
   await mock(page, 'event', '/events/evt-002', (route) => json(route, approved))
   await mock(page, 'venueBooking', '/events/evt-002/booking-requests', (route) => json(route, { bookings: [] }))
   await mock(page, 'attendeeRegistration', '/events/evt-002/registrations', (route) => json(route, { registrations }))
+  // SCRUM-149 added the submit panel to an Approved event this coordinator owns.
+  await mockSafetyReadiness(page)
   await page.goto('/my-events')
 
   await expect(page.getByRole('button', { name: /Tech Conference/ })).toBeVisible()

@@ -66,6 +66,9 @@ PREPARATION_STATUS = "Confirmed"
 # transition is a save that keeps the status and updates the action details, so
 # every status lists itself. The frontend's src/features/event/eventStatus.ts
 # mirrors this table.
+#
+# Safety-workflow moves do NOT belong here — they live in SAFETY_TRANSITIONS
+# below and are reachable only through PATCH /events/<id>/safety-status.
 ALLOWED_TRANSITIONS = {
     "Submitted": {"Submitted", "Under Review"},
     "Under Review": {"Under Review", "Approved", "Rejected"},
@@ -77,6 +80,14 @@ ALLOWED_TRANSITIONS = {
     "Confirmed": {"Confirmed"},
     "Safety Changes Requested": {"Safety Changes Requested"},
     "Cancelled": {"Cancelled"},
+}
+
+# Moves only the safety-check workflow may make, via PATCH /events/<id>/safety-status
+# (Safety Check Service). SCRUM-149 adds the first; SCRUM-150 (-> Confirmed),
+# SCRUM-151 (-> Safety Changes Requested / Cancelled) and SCRUM-164
+# (Safety Changes Requested -> Pending Safety Check) extend this table.
+SAFETY_TRANSITIONS = {
+    "Approved": {"Pending Safety Check"},
 }
 
 # Why an event at each status can't progress to 'Confirmed' yet (SCRUM-152 AC1).
@@ -304,7 +315,16 @@ class RejectionReasonError(Exception):
 
 
 class InvalidStatusTransitionError(Exception):
-    pass
+    """PATCH /progress raises this bare; the safety endpoint names the status
+    it refused to move from, so the composite can report it (SCRUM-149)."""
+
+    def __init__(self, current_status=None):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class SafetyCheckAlreadyPendingError(Exception):
+    """SCRUM-149 AC4: the event is already waiting for its safety check."""
 
 
 class SafetyApprovalRequiredError(Exception):
@@ -509,6 +529,88 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 "decisionHistory": decision_history,
                 "actionDetails": action_details,
                 "actionHistory": action_history,
+            }
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET status = %s, description = %s
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [status, json.dumps(metadata, ensure_ascii=False), event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def update_event_safety_status(
+    database_url, event_id, status, coordinator_id, safety_check_id, round_number
+):
+    """Move an event along the safety-check workflow (SCRUM-149 AC1).
+
+    For Safety Check Service only — it is the service that has checked the
+    event's venue bookings and equipment requests first. The coordinator and
+    status checks are repeated here under `FOR UPDATE` because the composite's
+    earlier read can be stale: the event may have been reassigned, or another
+    submission may have landed, in between.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            # Assignment first, as in update_event_progress: a caller who isn't
+            # the assigned coordinator gets 403 and learns nothing else (AC5).
+            if status == "Pending Safety Check" and (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
+                raise EventNotAssignedError
+            if (
+                status == "Pending Safety Check"
+                and event["status"] == "Pending Safety Check"
+            ):
+                raise SafetyCheckAlreadyPendingError
+            if status not in SAFETY_TRANSITIONS.get(event["status"], set()):
+                raise InvalidStatusTransitionError(event["status"])
+
+            (
+                description,
+                purpose,
+                decision,
+                decision_history,
+                action_details,
+                action_history,
+            ) = unpack_metadata(event["description"])
+            # SAFETY_TRANSITIONS only allows 'Pending Safety Check' today, so
+            # this wording always fits. SCRUM-150/151 add their own as they
+            # add their moves to that table.
+            action = {
+                "status": status,
+                "details": (
+                    f"Submitted for Operational Safety Check (round {round_number})."
+                ),
+                "coordinatorId": coordinator_id,
+                "safetyCheckId": safety_check_id,
+                "recordedAt": datetime.now(UTC).isoformat(),
+            }
+            # The event-side record of AC1's "submission time is recorded".
+            # SafetyCheck.submitted_at is the authoritative one. The coordinator
+            # decision (Approved/Rejected) is untouched: a safety decision is
+            # its own thing, kept on the SafetyCheck round.
+            metadata = {
+                "_connectsphere": "event-submission-v1",
+                "description": description,
+                "purpose": purpose,
+                "decision": decision,
+                "decisionHistory": decision_history,
+                "actionDetails": action_details,
+                "actionHistory": [*action_history, action],
             }
             cursor.execute(
                 f"""UPDATE public."Event"

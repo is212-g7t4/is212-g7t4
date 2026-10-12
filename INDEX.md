@@ -32,6 +32,7 @@ is212-g7t4/
 │   ├── venue-booking-service/          # composite (built)
 │   ├── equipment-reservation-service/  # composite (built, availability check + review)
 │   ├── attendee-registration-service/  # composite (built)
+│   ├── safety-check-service/           # composite (built, submit) — safety-check workflow
 │   ├── user-service/                   # atomic (built, read-only)
 │   ├── event-service/                  # atomic (built)
 │   ├── venue-service/                   # atomic (built, read-only)
@@ -39,6 +40,7 @@ is212-g7t4/
 │   ├── equipment-service/              # atomic (built)
 │   ├── equipment-request-service/      # atomic (built, request records + review)
 │   ├── registration-service/           # atomic (built, read-only)
+│   ├── safety-check-record-service/    # atomic (built) — owns the SafetyCheck review rounds
 │   ├── notification-service/           # atomic (planned)
 │   ├── forum-service/                  # atomic, MongoDB (planned)
 │   └── email-sms-wrapper-service/      # wrapper (planned)
@@ -81,6 +83,7 @@ composites are allowed to call other services.
 | Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration, User | Registers an attendee after checking that the event is confirmed, open, and has capacity. Lists registrations with the attendee's name, email and organisation from User Service (`GET /events/<id>/registrations` for coordinators). No Forum call. | built (registration) |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment, Equipment Request | Availability checking and review validation (SCRUM-33), port 5010: `GET /equipment-reservations` groups requests by event with each Pending line's two-stage availability (physical status, then total less quantity held by Approved lines of other non-rejected events overlapping the window); `PATCH /equipment-reservations/requests/:id` and `.../events/:id` approve/reject, blocking Approve while any line is insufficient. Request submission not built yet; no Forum call/notification. | built (review) |
 | Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration, Broker | Register/withdraw an attendee for an event. No Forum call. | planned |
+| Safety Check Service | `services/safety-check-service/` | Event, Venue Availability, Equipment Request, Safety Check Record, (later Venue, User, Forum, Broker) | The Operational Safety Check workflow, port 5012. SCRUM-149 builds submit: `POST /safety-checks` checks the caller is the assigned coordinator, gathers every venue booking and equipment request in parallel and lists what's outstanding, creates the round with the coordinator's notes, then moves the event to `Pending Safety Check` (rolling the round back if that fails). `GET /safety-checks/readiness` is the read-only version for the UI. Review/approve/reject/resubmit (SCRUM-163/150/151/164) and the notification are not built. | built (submit) |
 
 ## Atomic services
 
@@ -98,6 +101,7 @@ call another service, Forum, or the broker.
 | Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records (attendee ID only; one row per event and attendee). Supports read lookups/counts and an internal write used by Attendee Registration Service with duplicate and capacity enforcement; re-registering after withdrawal reuses the row. | built |
 | Equipment Request | `services/equipment-request-service/` | Supabase Postgres | Equipment request records (`public."EquipmentRequest"`) and their Pending/Approved/Rejected status. `GET /equipment-requests[?status=&eventId=&eventIds=]`, `GET /equipment-requests/:id`, `PATCH /equipment-requests/:id` and `PATCH /events/:id/equipment-requests` (Technical Support, SCRUM-33). Does no availability checking — that is Equipment Reservation Service | built (records + review) |
 | Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Read-only (`GET /registrations?eventId=`) — no registration/withdrawal endpoints yet; called directly by the frontend (a "simple read," no composite needed) | built (read-only) |
+| Safety Check Record | `services/safety-check-record-service/` | Supabase Postgres | Operational Safety Check records (`public."SafetyCheck"`), port 5013 — one row per **review round**, so earlier decisions stay visible as history. `POST /safety-check-records` opens round N+1 and refuses a new round while one is `Pending` (`UNIQUE (event_id, round_number)` behind it); `GET /safety-check-records?eventId=[&status=]` lists rounds newest first; `DELETE /safety-check-records/:id` removes an undecided round for Safety Check Service's rollback only. Writes no `SafetyCheckFlag` rows yet (SCRUM-151) | built (records) |
 | Notification | `services/notification-service/` | Supabase Postgres | Notification records; consumes the broker queue, calls the Email/SMS Wrapper | planned |
 | Forum / Communication | `services/forum-service/` | **MongoDB (Atlas)** | All communication tied to a request — clarifications, approval/rejection reasons, comments — keyed by `entityType` + `entityId` | planned |
 
