@@ -175,8 +175,12 @@ def create_booking_request():
             venue_requirements.strip(),
             coordinator_id,
         )
-    except BookingConflictError:
-        return jsonify(message=f"{venue['name']} is already booked for that time."), 409
+    except BookingConflictError as error:
+        return jsonify(
+            message=f"{venue['name']} is unavailable for that time.",
+            code="VENUE_UNAVAILABLE",
+            conflictTypes=error.conflict_types,
+        ), 409
     except Exception as e:
         return jsonify(message=f"Failed to save the booking request: {e}"), 502
 
@@ -321,8 +325,12 @@ def update_booking_request(booking_id):
         return jsonify(message="Venue booking not found for this event."), 404
     except BookingStateError:
         return jsonify(message="Cancelled venue bookings cannot be modified."), 409
-    except BookingConflictError:
-        return jsonify(message=f"{venue['name']} is already booked for that time."), 409
+    except BookingConflictError as error:
+        return jsonify(
+            message=f"{venue['name']} is unavailable for that time.",
+            code="VENUE_UNAVAILABLE",
+            conflictTypes=error.conflict_types,
+        ), 409
     except Exception as error:
         return jsonify(message=f"Failed to update the booking request: {error}"), 502
     return jsonify(booking), 200
@@ -376,9 +384,11 @@ def _decide(booking_id, status):
         return jsonify(message="Venue booking not found."), 404
     except BookingStateError:
         return jsonify(message="Cancelled venue bookings cannot be reviewed."), 409
-    except BookingConflictError:
+    except BookingConflictError as error:
         return jsonify(
-            message="This venue is already booked for the requested time."
+            message="This venue is unavailable for the requested time.",
+            code="VENUE_UNAVAILABLE",
+            conflictTypes=error.conflict_types,
         ), 409
     except Exception as e:
         return jsonify(message=f"Failed to update the booking request: {e}"), 502

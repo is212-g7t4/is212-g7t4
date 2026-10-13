@@ -269,9 +269,11 @@ def create_app(config=None):
                 venue_requirements.strip(),
                 requested_by,
             )
-        except BookingConflictError:
+        except BookingConflictError as error:
             return jsonify(
-                message="This venue is already booked for the requested time."
+                message="This venue is unavailable for the requested time.",
+                code="VENUE_UNAVAILABLE",
+                conflictTypes=error.conflict_types,
             ), 409
         return jsonify(booking), 201
 
@@ -333,9 +335,11 @@ def create_app(config=None):
             return jsonify(message="Venue booking not found for this event."), 404
         except BookingStateError:
             return jsonify(message="Cancelled venue bookings cannot be modified."), 409
-        except BookingConflictError:
+        except BookingConflictError as error:
             return jsonify(
-                message="This venue is already booked for the requested time."
+                message="This venue is unavailable for the requested time.",
+                code="VENUE_UNAVAILABLE",
+                conflictTypes=error.conflict_types,
             ), 409
         return jsonify(booking), 200
 
@@ -384,9 +388,11 @@ def create_app(config=None):
             return jsonify(message="Venue booking not found."), 404
         except BookingStateError:
             return jsonify(message="Cancelled venue bookings cannot be reviewed."), 409
-        except BookingConflictError:
+        except BookingConflictError as error:
             return jsonify(
-                message="This venue is already booked for the requested time."
+                message="This venue is unavailable for the requested time.",
+                code="VENUE_UNAVAILABLE",
+                conflictTypes=error.conflict_types,
             ), 409
         return jsonify(booking), 200
 

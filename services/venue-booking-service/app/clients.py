@@ -28,7 +28,20 @@ class EventNotAssignedError(Exception):
 
 
 class BookingConflictError(Exception):
-    pass
+    def __init__(self, conflict_types=()):
+        super().__init__("Venue unavailable for the requested time.")
+        self.conflict_types = list(conflict_types)
+
+
+def _conflict_types(response):
+    # Legacy 409s have only a message; retain their generic conflict behavior.
+    types = response.json().get("conflictTypes", [])
+    if not isinstance(types, list) or any(
+        kind not in ("APPROVED_BOOKING", "TENTATIVE_HOLD", "VENUE_CLOSURE")
+        for kind in types
+    ):
+        raise ValueError("Invalid availability conflict response.")
+    return types
 
 
 class BookingNotFoundError(Exception):
@@ -113,7 +126,7 @@ def create_booking(
         },
     )
     if response.status_code == 409:
-        raise BookingConflictError
+        raise BookingConflictError(_conflict_types(response))
     response.raise_for_status()
     return response.json()
 
@@ -153,7 +166,7 @@ def update_booking(
     if response.status_code == 409:
         if response.json().get("message", "").startswith("Cancelled"):
             raise BookingStateError
-        raise BookingConflictError
+        raise BookingConflictError(_conflict_types(response))
     response.raise_for_status()
     return response.json()
 
@@ -182,6 +195,6 @@ def decide_booking(booking_id: str, reviewed_by: str, status: str) -> dict:
     if response.status_code == 409:
         if response.json().get("message", "").startswith("Cancelled"):
             raise BookingStateError
-        raise BookingConflictError
+        raise BookingConflictError(_conflict_types(response))
     response.raise_for_status()
     return response.json()

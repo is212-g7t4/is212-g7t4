@@ -47,7 +47,9 @@ class BookingNotFoundError(Exception):
 
 
 class BookingConflictError(Exception):
-    pass
+    def __init__(self, conflict_types=()):
+        super().__init__("Venue unavailable for the requested time.")
+        self.conflict_types = list(conflict_types)
 
 
 class BookingStateError(Exception):
@@ -162,18 +164,29 @@ def list_bookings(database_url, venue_id, date_from, date_to):
             return bookings
 
 
-def _has_conflict(cursor, venue_id, start, end, exclude_booking_id=None):
-    # Start-inclusive, end-exclusive overlap check. Approved bookings and
-    # active holds ('On Hold' rows) are hard conflicts.
-    query = """SELECT 1 FROM public."VenueBooking"
+def _conflict_types(cursor, venue_id, start, end, exclude_booking_id=None):
+    # Raw half-open intervals; no setup/turnaround buffer is applied.
+    query = """SELECT DISTINCT CASE WHEN status = 'Approved' THEN 'APPROVED_BOOKING'
+                        ELSE 'TENTATIVE_HOLD' END AS conflict_type
+               FROM public."VenueBooking"
                WHERE venue_id = %s AND status IN ('Approved', 'On Hold')
+                 AND (status = 'Approved' OR hold_expires_at > now())
                  AND requested_start_time < %s AND requested_end_time > %s"""
     params = [venue_id, _aware(end), _aware(start)]
     if exclude_booking_id:
         query += " AND booking_id <> %s"
         params.append(exclude_booking_id)
-    cursor.execute(f"{query} LIMIT 1", params)
-    return cursor.fetchone() is not None
+    query += """ UNION SELECT 'VENUE_CLOSURE' AS conflict_type
+                 FROM public."VenueClosure"
+                 WHERE venue_id = %s
+                   AND start_date_time < %s AND end_date_time > %s"""
+    params.extend([venue_id, _aware(end), _aware(start)])
+    cursor.execute(query, params)
+    return sorted(row["conflict_type"] for row in cursor.fetchall())
+
+
+def _has_conflict(cursor, venue_id, start, end, exclude_booking_id=None):
+    return bool(_conflict_types(cursor, venue_id, start, end, exclude_booking_id))
 
 
 def create_booking(database_url, event_id, venue_id, start, end, required_capacity, venue_requirements, requested_by):
@@ -186,8 +199,9 @@ def create_booking(database_url, event_id, venue_id, start, end, required_capaci
                 'SELECT venue_id FROM public."Venue" WHERE venue_id = %s FOR UPDATE',
                 [venue_id],
             )
-            if _has_conflict(cursor, venue_id, start, end):
-                raise BookingConflictError
+            conflicts = _conflict_types(cursor, venue_id, start, end)
+            if conflicts:
+                raise BookingConflictError(conflicts)
             cursor.execute(
                 f"""INSERT INTO public."VenueBooking"
                     (booking_id, event_id, venue_id, requested_start_time,
@@ -238,10 +252,11 @@ def update_booking(
                 'SELECT venue_id FROM public."Venue" WHERE venue_id = %s FOR UPDATE',
                 [venue_id],
             )
-            if _has_conflict(
+            conflicts = _conflict_types(
                 cursor, venue_id, start, end, exclude_booking_id=booking_id
-            ):
-                raise BookingConflictError
+            )
+            if conflicts:
+                raise BookingConflictError(conflicts)
 
             cursor.execute(
                 f"""UPDATE public."VenueBooking"
@@ -371,14 +386,15 @@ def decide_booking(database_url, booking_id, reviewed_by, status):
                     'SELECT venue_id FROM public."Venue" WHERE venue_id = %s FOR UPDATE',
                     [booking["venue_id"]],
                 )
-                if _has_conflict(
+                conflicts = _conflict_types(
                     cursor,
                     booking["venue_id"],
                     booking["requested_start_time"],
                     booking["requested_end_time"],
                     exclude_booking_id=booking_id,
-                ):
-                    raise BookingConflictError
+                )
+                if conflicts:
+                    raise BookingConflictError(conflicts)
             cursor.execute(
                 f"""UPDATE public."VenueBooking"
                     SET status = %s, reviewed_by = %s
