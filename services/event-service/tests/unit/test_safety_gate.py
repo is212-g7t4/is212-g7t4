@@ -280,3 +280,18 @@ def test_only_pending_safety_check_leads_into_confirmed():
         if "Confirmed" in targets
     }
     assert sources_in_allowed_transitions == {"Confirmed"}
+
+
+def test_pre_safety_transitions_unchanged():
+    """SCRUM-152 AC2: SCRUM-19's transitions keep working unchanged."""
+    assert ALLOWED_TRANSITIONS["Submitted"] == {"Submitted", "Under Review"}
+    assert ALLOWED_TRANSITIONS["Under Review"] == {"Under Review", "Approved", "Rejected"}
+    assert ALLOWED_TRANSITIONS["Approved"] == {"Approved"}
+    assert ALLOWED_TRANSITIONS["Rejected"] == {"Rejected"}
+
+
+def test_safety_workflow_never_starts_before_approval():
+    """SCRUM-152 AC2: the safety workflow can't touch an event that hasn't
+    reached the safety check yet.
+    """
+    assert not set(SAFETY_TRANSITIONS) & {"Submitted", "Under Review", "Rejected"}

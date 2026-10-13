@@ -140,3 +140,51 @@ def test_cors_does_not_allow_the_internal_header(setup):
     assert "X-Internal-Service-Token" not in response.headers.get(
         "Access-Control-Allow-Headers", ""
     )
+
+
+def test_startup_warns_when_lock_is_off(monkeypatch, caplog):
+    """SCRUM-152 B2: make it visible when the stack is running unlocked."""
+    connection = MagicMock()
+    monkeypatch.setattr(
+        "app.models.psycopg2.connect", lambda *args, **kwargs: connection
+    )
+    with caplog.at_level("WARNING"):
+        create_app({"TESTING": True, "INTERNAL_SERVICE_TOKEN": ""})
+
+    assert "INTERNAL_SERVICE_TOKEN is not set" in caplog.text
+
+
+def test_startup_does_not_warn_when_lock_is_on(monkeypatch, caplog):
+    connection = MagicMock()
+    monkeypatch.setattr(
+        "app.models.psycopg2.connect", lambda *args, **kwargs: connection
+    )
+    with caplog.at_level("WARNING"):
+        create_app({"TESTING": True, "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN})
+
+    assert "INTERNAL_SERVICE_TOKEN is not set" not in caplog.text
+
+
+def test_coordinator_cannot_confirm_through_safety_status_when_locked(setup):
+    """SCRUM-152 AC1, API path via /safety-status (not just /progress).
+
+    A coordinator who reads their event's open-round safetyCheckId from
+    GET /events/<id> and calls /safety-status directly, trying to move
+    straight to 'Confirmed' without a Safety Officer's approval, is refused
+    before the request ever reaches the database.
+    """
+    client, _, cursor = setup
+
+    response = client.patch(
+        f"/events/{EVENT_ID}/safety-status",
+        json={
+            "status": "Confirmed",
+            "decidedBy": COORDINATOR_ID,
+            "safetyCheckId": SAFETY_CHECK_ID,
+            "roundNumber": 1,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json["code"] == "INTERNAL_ONLY"
+    cursor.execute.assert_not_called()

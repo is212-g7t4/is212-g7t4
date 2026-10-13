@@ -2,6 +2,7 @@ import os
 
 from flask import Flask, request
 
+from app import clients
 from app.routes import bp
 
 
@@ -14,6 +15,14 @@ def create_app() -> Flask:
         "http://localhost:5174",
     )
     app.config["MAX_CONTENT_LENGTH"] = 65536
+
+    if not clients.INTERNAL_SERVICE_TOKEN:
+        app.logger.warning(
+            "INTERNAL_SERVICE_TOKEN is not set: calls to PATCH "
+            "/events/<id>/safety-status won't carry X-Internal-Service-Token, "
+            "so Event Service's lock (if it has one configured) will reject "
+            "them (SCRUM-150/152)."
+        )
 
     @app.after_request
     def add_cors_headers(response):
