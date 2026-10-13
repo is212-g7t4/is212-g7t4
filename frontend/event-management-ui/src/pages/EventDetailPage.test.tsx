@@ -15,6 +15,11 @@ vi.mock('../features/venue/VenueBookingsPanel', () => ({
 vi.mock('../features/safety/SafetySubmitPanel', () => ({
   SafetySubmitPanel: () => <h4>Submit for safety check</h4>,
 }))
+// SCRUM-150: likewise, this file covers *who* gets the Approve panel (AC3,
+// UI side); the panel's own behaviour is SafetyDecisionPanel.test.tsx.
+vi.mock('../features/safety/SafetyDecisionPanel', () => ({
+  SafetyDecisionPanel: () => <h4>Operational Safety Check</h4>,
+}))
 
 const coordinatorId = '11111111-1111-4111-8111-111111111111'
 const event: SubmittedEvent = {
@@ -150,6 +155,32 @@ test('pending safety check event shows the waiting reason', async () => {
   )
 })
 
+test('SCRUM-150 AC3: a Safety Officer sees the Approve panel on a pending event', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Pending Safety Check' })
+  render(<EventDetailPage eventId={event.id} role="Safety Officer" isManager={false} currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByRole('heading', { name: 'Operational Safety Check' })).toBeInTheDocument()
+  // The generic waiting note is the coordinator's message, not shown here.
+  expect(screen.queryByText("This event is waiting for the Safety Officer's decision.")).not.toBeInTheDocument()
+})
+
+test('SCRUM-150 AC3: a Safety Officer sees no Approve panel once the event is Confirmed', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
+  render(<EventDetailPage eventId={event.id} role="Safety Officer" isManager={false} currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.queryByRole('heading', { name: 'Operational Safety Check' })).not.toBeInTheDocument()
+})
+
+test('an Event Coordinator sees no Approve panel on a pending event', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Pending Safety Check' })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.queryByRole('heading', { name: 'Operational Safety Check' })).not.toBeInTheDocument()
+})
+
 test('safety changes requested event says what must happen', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Safety Changes Requested' })
   render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
@@ -214,7 +245,7 @@ test.each(['Venue Staff', 'Technical Support'] as const)('%s views event details
 test('does not load event details for an attendee', () => {
   render(<EventDetailPage eventId={event.id} role="Attendee" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" backLabel="my events" onBack={vi.fn()} />)
 
-  expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, and Technical Support.')).toBeInTheDocument()
+  expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, Technical Support, and Safety Officers.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
 })
 

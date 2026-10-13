@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import {
   SafetySubmitError,
+  approveSafetyCheck,
   fetchSafetyReadiness,
   submitSafetyCheck,
   submittedForSafetyCheckAt,
@@ -13,6 +14,7 @@ import type { SubmittedEvent } from '../event/submission'
 
 const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const coordinatorId = '11111111-1111-4111-8111-111111111111'
+const officerId = '33333333-3333-4333-8333-333333333333'
 
 const respond = (status: number, body: unknown) => vi.fn().mockResolvedValue({
   ok: status >= 200 && status < 300,
@@ -118,6 +120,33 @@ test('a failure with no JSON body still reads as an error', async () => {
   await expect(fetchSafetyReadiness(eventId, coordinatorId)).rejects.toThrowError(
     'Unable to complete the safety check request.',
   )
+})
+
+test('SCRUM-150 AC2: eventId, safetyOfficerId and remarks are sent to approve', async () => {
+  vi.stubGlobal('fetch', respond(200, { safetyCheck: { roundNumber: 1 }, event: {} }))
+
+  await approveSafetyCheck({ eventId, safetyOfficerId: officerId, remarks: 'Looks safe.' })
+
+  const [url, init] = vi.mocked(fetch).mock.calls[0]
+  expect(String(url)).toBe('http://localhost:5012/safety-checks/approve')
+  expect(init?.method).toBe('POST')
+  expect(JSON.parse(String(init?.body))).toEqual({
+    eventId,
+    safetyOfficerId: officerId,
+    remarks: 'Looks safe.',
+  })
+})
+
+test('SCRUM-150 AC3: a 409 when the event is not Pending Safety Check surfaces its code', async () => {
+  vi.stubGlobal('fetch', respond(409, {
+    code: 'EVENT_NOT_PENDING_SAFETY_CHECK',
+    message: "Only an event 'Pending Safety Check' can be approved (current status: 'Approved').",
+    currentStatus: 'Approved',
+  }))
+
+  await expect(approveSafetyCheck({ eventId, safetyOfficerId: officerId })).rejects.toMatchObject({
+    code: 'EVENT_NOT_PENDING_SAFETY_CHECK',
+  })
 })
 
 test('AC1: the submission time comes from the event\'s own history', () => {

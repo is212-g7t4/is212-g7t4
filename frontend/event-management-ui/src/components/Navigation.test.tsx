@@ -42,3 +42,16 @@ test('Request review tab is still shown to Event Coordinators', () => {
   render(<Sidebar route="review" role="Event Coordinator" onNavigate={vi.fn()} />)
   expect(screen.getByRole('button', { name: 'Request review' })).toBeInTheDocument()
 })
+
+test('Safety checks tab is shown only to Safety Officers', () => {
+  render(<Sidebar route="dashboard" role="Safety Officer" onNavigate={vi.fn()} />)
+  expect(screen.getByRole('button', { name: 'Safety checks' })).toBeInTheDocument()
+})
+
+test.each(['Event Coordinator', 'Venue Staff', 'Technical Support', 'Attendee'] as const)(
+  'Safety checks tab is hidden from %s',
+  (role) => {
+    render(<Sidebar route="dashboard" role={role} onNavigate={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Safety checks' })).not.toBeInTheDocument()
+  },
+)
