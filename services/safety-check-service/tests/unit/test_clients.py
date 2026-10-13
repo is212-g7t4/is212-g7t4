@@ -17,11 +17,13 @@ from tests.unit.factories import (
     BOOKING_ID,
     COORDINATOR_ID,
     EVENT_ID,
+    OFFICER_ID,
     RECORD_ID,
     booking,
     equipment_request,
     event,
     record,
+    user,
 )
 
 
@@ -73,6 +75,28 @@ def test_get_event_scopes_the_read_to_the_coordinator(sent):
     assert calls[0]["timeout"] == clients.TIMEOUT
 
 
+def test_get_event_passes_viewer_role_when_given(sent):
+    """SCRUM-150: the Safety Officer reads with viewerRole, not as the coordinator."""
+    calls, queue = sent
+    queue.append(Response(200, event("Pending Safety Check")))
+
+    clients.get_event(EVENT_ID, OFFICER_ID, viewer_role="Safety Officer")
+
+    assert calls[0]["params"] == {
+        "coordinatorId": OFFICER_ID,
+        "viewerRole": "Safety Officer",
+    }
+
+
+def test_get_event_without_viewer_role_omits_it(sent):
+    calls, queue = sent
+    queue.append(Response(200, event("Approved")))
+
+    clients.get_event(EVENT_ID, COORDINATOR_ID, viewer_role=None)
+
+    assert calls[0]["params"] == {"coordinatorId": COORDINATOR_ID}
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
@@ -91,12 +115,17 @@ def test_get_event_status_mapping(status, expected, sent):
         clients.get_event(EVENT_ID, COORDINATOR_ID)
 
 
-def test_set_event_safety_status_sends_the_round(sent):
+def test_set_event_safety_status_sends_the_round(sent, monkeypatch):
+    monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "shared-secret")
     calls, queue = sent
     queue.append(Response(200, event("Pending Safety Check")))
 
     updated = clients.set_event_safety_status(
-        EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 2
+        EVENT_ID,
+        "Pending Safety Check",
+        RECORD_ID,
+        2,
+        coordinator_id=COORDINATOR_ID,
     )
 
     assert updated["status"] == "Pending Safety Check"
@@ -104,9 +133,33 @@ def test_set_event_safety_status_sends_the_round(sent):
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/safety-status")
     assert calls[0]["json"] == {
         "status": "Pending Safety Check",
-        "coordinatorId": COORDINATOR_ID,
         "safetyCheckId": RECORD_ID,
         "roundNumber": 2,
+        "coordinatorId": COORDINATOR_ID,
+    }
+    assert calls[0]["headers"] == {"X-Internal-Service-Token": "shared-secret"}
+
+
+def test_set_event_safety_status_sends_decided_by_and_remarks_for_approve(sent):
+    """SCRUM-150: approving sends decidedBy and remarks, not coordinatorId."""
+    calls, queue = sent
+    queue.append(Response(200, event("Confirmed")))
+
+    clients.set_event_safety_status(
+        EVENT_ID,
+        "Confirmed",
+        RECORD_ID,
+        1,
+        decided_by=OFFICER_ID,
+        remarks="Looks safe.",
+    )
+
+    assert calls[0]["json"] == {
+        "status": "Confirmed",
+        "safetyCheckId": RECORD_ID,
+        "roundNumber": 1,
+        "decidedBy": OFFICER_ID,
+        "remarks": "Looks safe.",
     }
 
 
@@ -114,7 +167,6 @@ def test_set_event_safety_status_sends_the_round(sent):
     ("status", "expected"),
     [
         (404, clients.EventNotFoundError),
-        (403, clients.EventNotAssignedError),
         (500, clients.DownstreamError),
     ],
 )
@@ -124,12 +176,34 @@ def test_set_event_safety_status_mapping(status, expected, sent):
 
     with pytest.raises(expected):
         clients.set_event_safety_status(
-            EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 1
+            EVENT_ID, "Pending Safety Check", RECORD_ID, 1, coordinator_id=COORDINATOR_ID
+        )
+
+
+def test_set_event_safety_status_403_without_internal_only_code_is_not_assigned(sent):
+    """A plain 403 (AC5) is still EventNotAssignedError, not a credentials error."""
+    _, queue = sent
+    queue.append(Response(403, {"message": "nope"}))
+
+    with pytest.raises(clients.EventNotAssignedError):
+        clients.set_event_safety_status(
+            EVENT_ID, "Pending Safety Check", RECORD_ID, 1, coordinator_id=COORDINATOR_ID
+        )
+
+
+def test_set_event_safety_status_403_internal_only_is_a_credentials_error(sent):
+    """SCRUM-150: Event Service refusing our token is our problem, not the caller's."""
+    _, queue = sent
+    queue.append(Response(403, {"code": "INTERNAL_ONLY", "message": "nope"}))
+
+    with pytest.raises(clients.ServiceCredentialsError):
+        clients.set_event_safety_status(
+            EVENT_ID, "Confirmed", RECORD_ID, 1, decided_by=OFFICER_ID
         )
 
 
 @pytest.mark.parametrize(
-    "code", ["SAFETY_CHECK_ALREADY_PENDING", "INVALID_SAFETY_TRANSITION"]
+    "code", ["SAFETY_CHECK_ALREADY_PENDING", "INVALID_SAFETY_TRANSITION", "STALE_SAFETY_CHECK"]
 )
 def test_event_conflicts_keep_their_code(code, sent):
     """The routes branch on the code, so it has to survive the trip."""
@@ -138,7 +212,7 @@ def test_event_conflicts_keep_their_code(code, sent):
 
     with pytest.raises(clients.EventTransitionError) as raised:
         clients.set_event_safety_status(
-            EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 1
+            EVENT_ID, "Pending Safety Check", RECORD_ID, 1, coordinator_id=COORDINATOR_ID
         )
 
     assert raised.value.code == code
@@ -152,7 +226,7 @@ def test_event_conflict_without_a_json_body(sent):
 
     with pytest.raises(clients.EventTransitionError) as raised:
         clients.set_event_safety_status(
-            EVENT_ID, "Pending Safety Check", COORDINATOR_ID, RECORD_ID, 1
+            EVENT_ID, "Pending Safety Check", RECORD_ID, 1, coordinator_id=COORDINATOR_ID
         )
 
     assert raised.value.code is None
@@ -321,6 +395,112 @@ def test_delete_record_mapping(status, expected, sent):
         clients.delete_safety_check_record(RECORD_ID)
 
 
+def test_decide_record_sends_the_decision(sent):
+    calls, queue = sent
+    queue.append(Response(200, record(status="Safety Approved", decidedBy=OFFICER_ID)))
+
+    decided = clients.decide_safety_check_record(
+        RECORD_ID, "Safety Approved", OFFICER_ID, "Looks safe."
+    )
+
+    assert decided["status"] == "Safety Approved"
+    assert calls[0]["method"] == "PATCH"
+    assert calls[0]["url"].endswith(f"/safety-check-records/{RECORD_ID}/decision")
+    assert calls[0]["json"] == {
+        "status": "Safety Approved",
+        "decidedBy": OFFICER_ID,
+        "remarks": "Looks safe.",
+    }
+
+
+def test_decide_record_conflict_carries_the_existing_round(sent):
+    _, queue = sent
+    queue.append(
+        Response(
+            409,
+            {"code": "SAFETY_CHECK_ALREADY_DECIDED", "safetyCheck": record(status="Safety Approved")},
+        )
+    )
+
+    with pytest.raises(clients.SafetyCheckAlreadyDecidedError) as raised:
+        clients.decide_safety_check_record(RECORD_ID, "Safety Approved", OFFICER_ID)
+
+    assert raised.value.existing["status"] == "Safety Approved"
+
+
+def test_decide_record_missing_round_is_not_found(sent):
+    _, queue = sent
+    queue.append(Response(404, {"message": "no"}))
+
+    with pytest.raises(clients.RecordNotFoundError):
+        clients.decide_safety_check_record(RECORD_ID, "Safety Approved", OFFICER_ID)
+
+
+def test_decide_record_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(503, {"message": "down"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.decide_safety_check_record(RECORD_ID, "Safety Approved", OFFICER_ID)
+
+
+def test_reopen_record_sends_decided_at(sent):
+    calls, queue = sent
+    queue.append(Response(200, record(status="Pending")))
+
+    clients.reopen_safety_check_record(RECORD_ID, "2026-11-02T03:00:00+00:00")
+
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"].endswith(f"/safety-check-records/{RECORD_ID}/reopen")
+    assert calls[0]["json"] == {"decidedAt": "2026-11-02T03:00:00+00:00"}
+
+
+def test_reopen_record_missing_round_is_not_found(sent):
+    _, queue = sent
+    queue.append(Response(404, {"message": "no"}))
+
+    with pytest.raises(clients.RecordNotFoundError):
+        clients.reopen_safety_check_record(RECORD_ID, "2026-11-02T03:00:00+00:00")
+
+
+def test_reopen_record_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(409, {"message": "nope"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.reopen_safety_check_record(RECORD_ID, "2026-11-02T03:00:00+00:00")
+
+
+# --- User Service -------------------------------------------------------------
+
+
+def test_get_user_returns_the_role(sent):
+    calls, queue = sent
+    queue.append(Response(200, user(role="Safety Officer")))
+
+    found = clients.get_user(OFFICER_ID)
+
+    assert found["role"] == "Safety Officer"
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith(f"/users/{OFFICER_ID}")
+
+
+def test_get_user_not_found(sent):
+    _, queue = sent
+    queue.append(Response(404, {"message": "User not found."}))
+
+    with pytest.raises(clients.UserNotFoundError):
+        clients.get_user(OFFICER_ID)
+
+
+def test_get_user_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(503, {"message": "down"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.get_user(OFFICER_ID)
+
+
 # --- Transport failures ------------------------------------------------------
 
 
@@ -348,3 +528,4 @@ def test_default_urls_are_the_host_ports():
     assert clients.VENUE_AVAILABILITY_SERVICE_URL.endswith((":5008", ":5000"))
     assert clients.EQUIPMENT_REQUEST_SERVICE_URL.endswith((":5011", ":5000"))
     assert clients.SAFETY_CHECK_RECORD_SERVICE_URL.endswith((":5013", ":5000"))
+    assert clients.USER_SERVICE_URL.endswith((":5001", ":5000"))
