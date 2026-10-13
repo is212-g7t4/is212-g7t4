@@ -83,11 +83,13 @@ ALLOWED_TRANSITIONS = {
 }
 
 # Moves only the safety-check workflow may make, via PATCH /events/<id>/safety-status
-# (Safety Check Service). SCRUM-149 adds the first; SCRUM-150 (-> Confirmed),
-# SCRUM-151 (-> Safety Changes Requested / Cancelled) and SCRUM-164
-# (Safety Changes Requested -> Pending Safety Check) extend this table.
+# (Safety Check Service). SCRUM-149 adds the first; SCRUM-150 adds the second
+# (-> Confirmed); SCRUM-151 (-> Safety Changes Requested / Cancelled) and
+# SCRUM-164 (Safety Changes Requested -> Pending Safety Check) extend this
+# table further.
 SAFETY_TRANSITIONS = {
     "Approved": {"Pending Safety Check"},
+    "Pending Safety Check": {"Confirmed"},
 }
 
 # Why an event at each status can't progress to 'Confirmed' yet (SCRUM-152 AC1).
@@ -327,6 +329,15 @@ class SafetyCheckAlreadyPendingError(Exception):
     """SCRUM-149 AC4: the event is already waiting for its safety check."""
 
 
+class StaleSafetyCheckError(Exception):
+    """SCRUM-150 AC3: the round being approved isn't the one the event has open.
+
+    Stops a stale or made-up round from confirming the event, with no call to
+    another service: the latest 'Pending Safety Check' action's safetyCheckId
+    must match the round being decided.
+    """
+
+
 class SafetyApprovalRequiredError(Exception):
     """SCRUM-152 AC1: the event has not passed its Operational Safety Check."""
 
@@ -542,15 +553,22 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
 
 
 def update_event_safety_status(
-    database_url, event_id, status, coordinator_id, safety_check_id, round_number
+    database_url,
+    event_id,
+    status,
+    safety_check_id,
+    round_number,
+    coordinator_id=None,
+    decided_by=None,
+    remarks=None,
 ):
-    """Move an event along the safety-check workflow (SCRUM-149 AC1).
+    """Move an event along the safety-check workflow (SCRUM-149 AC1, SCRUM-150 AC1).
 
-    For Safety Check Service only — it is the service that has checked the
-    event's venue bookings and equipment requests first. The coordinator and
-    status checks are repeated here under `FOR UPDATE` because the composite's
-    earlier read can be stale: the event may have been reassigned, or another
-    submission may have landed, in between.
+    For Safety Check Service only — it is the service that has already
+    checked the caller's role (coordinator or Safety Officer) and the event's
+    arrangements. Everything that can be is re-checked here under `FOR
+    UPDATE` because the composite's earlier read can be stale: the event may
+    have been reassigned, or another decision may have landed, in between.
     """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -566,6 +584,9 @@ def update_event_safety_status(
                 raise EventNotFoundError
             # Assignment first, as in update_event_progress: a caller who isn't
             # the assigned coordinator gets 403 and learns nothing else (AC5).
+            # Only the submit move has a coordinator at all — the Safety
+            # Officer approving is not the coordinator, and the composite
+            # already checked that role via User Service.
             if status == "Pending Safety Check" and (
                 not event["coordinator_id"]
                 or str(event["coordinator_id"]) != coordinator_id
@@ -587,22 +608,51 @@ def update_event_safety_status(
                 action_details,
                 action_history,
             ) = unpack_metadata(event["description"])
-            # SAFETY_TRANSITIONS only allows 'Pending Safety Check' today, so
-            # this wording always fits. SCRUM-150/151 add their own as they
-            # add their moves to that table.
-            action = {
-                "status": status,
-                "details": (
-                    f"Submitted for Operational Safety Check (round {round_number})."
-                ),
-                "coordinatorId": coordinator_id,
-                "safetyCheckId": safety_check_id,
-                "recordedAt": datetime.now(UTC).isoformat(),
-            }
-            # The event-side record of AC1's "submission time is recorded".
-            # SafetyCheck.submitted_at is the authoritative one. The coordinator
-            # decision (Approved/Rejected) is untouched: a safety decision is
-            # its own thing, kept on the SafetyCheck round.
+            recorded_at = datetime.now(UTC).isoformat()
+
+            if status == "Confirmed":
+                # AC3: the round being approved must be the one this event has
+                # open — the latest 'Pending Safety Check' entry's
+                # safetyCheckId. Stops a stale or made-up round from
+                # confirming the event, with no call to another service.
+                latest_pending = next(
+                    (
+                        entry
+                        for entry in reversed(action_history)
+                        if entry.get("status") == "Pending Safety Check"
+                    ),
+                    None,
+                )
+                if (
+                    not latest_pending
+                    or latest_pending.get("safetyCheckId") != safety_check_id
+                ):
+                    raise StaleSafetyCheckError
+                action = {
+                    "status": status,
+                    "details": (
+                        f"Operational Safety Check approved (round {round_number})."
+                    ),
+                    "decidedBy": decided_by,
+                    "safetyCheckId": safety_check_id,
+                    "remarks": remarks,
+                    "recordedAt": recorded_at,
+                }
+            else:
+                # SAFETY_TRANSITIONS only allows the submit move here otherwise.
+                action = {
+                    "status": status,
+                    "details": (
+                        f"Submitted for Operational Safety Check (round {round_number})."
+                    ),
+                    "coordinatorId": coordinator_id,
+                    "safetyCheckId": safety_check_id,
+                    "recordedAt": recorded_at,
+                }
+            # The event-side record of AC1/AC2's "in the event's history".
+            # SafetyCheck.submitted_at/decided_at is the authoritative one.
+            # The coordinator decision (Approved/Rejected) is untouched: a
+            # safety decision is its own thing, kept on the SafetyCheck round.
             metadata = {
                 "_connectsphere": "event-submission-v1",
                 "description": description,
