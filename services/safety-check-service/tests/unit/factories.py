@@ -3,6 +3,7 @@
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
 OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
+OFFICER_ID = "33333333-3333-4333-8333-333333333333"
 BOOKING_ID = "66666666-6666-4666-8666-666666666666"
 REQUEST_ID = "77777777-7777-4777-8777-777777777777"
 RECORD_ID = "55555555-5555-4555-8555-555555555555"
@@ -47,6 +48,16 @@ def event(status="Approved"):
         "status": status,
         "coordinatorId": COORDINATOR_ID,
         "actionHistory": [],
+    }
+
+
+def user(role="Safety Officer", user_id=OFFICER_ID, **overrides):
+    """A user as `user-service` serialises it."""
+    return {
+        "id": user_id,
+        "name": "Nurul Huda",
+        "role": role,
+        **overrides,
     }
 
 

@@ -134,10 +134,13 @@ services:
       VENUE_AVAILABILITY_SERVICE_URL: "http://venue-availability-service:5000"
       EQUIPMENT_REQUEST_SERVICE_URL: "http://equipment-request-service:5000"
       SAFETY_CHECK_RECORD_SERVICE_URL: "http://safety-check-record-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
     depends_on:
       - event-service
       - venue-availability-service
       - equipment-request-service
       - safety-check-record-service
+      - user-service
     ports:
       - "5012:5000"

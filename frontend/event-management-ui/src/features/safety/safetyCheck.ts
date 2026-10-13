@@ -41,6 +41,12 @@ export interface SubmitSafetyCheck {
   crowdMovementNotes?: string
 }
 
+export interface ApproveSafetyCheck {
+  eventId: string
+  safetyOfficerId: string
+  remarks?: string
+}
+
 export const NOTES_LIMIT = 2000
 
 /**
@@ -97,6 +103,17 @@ export async function submitSafetyCheck(
   details: SubmitSafetyCheck,
 ): Promise<{ safetyCheck: SafetyCheckRecord; event: SubmittedEvent }> {
   return request('/safety-checks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(details),
+  })
+}
+
+/** Approve the event's Operational Safety Check (SCRUM-150 AC1, AC2). */
+export async function approveSafetyCheck(
+  details: ApproveSafetyCheck,
+): Promise<{ safetyCheck: SafetyCheckRecord; event: SubmittedEvent }> {
+  return request('/safety-checks/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(details),

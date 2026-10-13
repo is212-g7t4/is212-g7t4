@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
-from app.models import FIELDS
+from app.models import ALLOWED_TRANSITIONS, FIELDS, SAFETY_TRANSITIONS
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -257,3 +257,26 @@ def test_gate_runs_under_row_lock(setup):
     patch_progress(client, "Confirmed")
 
     assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
+
+
+def test_only_pending_safety_check_leads_into_confirmed():
+    """SCRUM-150: 'Pending Safety Check' is the only route into 'Confirmed'.
+
+    In SAFETY_TRANSITIONS, only 'Pending Safety Check' may move to
+    'Confirmed'. In ALLOWED_TRANSITIONS (this gate's table), nothing but
+    'Confirmed' itself may move there either — this story's AC3 and SCRUM-152
+    AC1 both hold.
+    """
+    sources_in_safety_transitions = {
+        source
+        for source, targets in SAFETY_TRANSITIONS.items()
+        if "Confirmed" in targets
+    }
+    assert sources_in_safety_transitions == {"Pending Safety Check"}
+
+    sources_in_allowed_transitions = {
+        source
+        for source, targets in ALLOWED_TRANSITIONS.items()
+        if "Confirmed" in targets
+    }
+    assert sources_in_allowed_transitions == {"Confirmed"}
