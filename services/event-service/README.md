@@ -125,22 +125,29 @@ any of them, so the two tables of allowed moves never overlap:
 workflow's. SCRUM-149 adds `Approved → Pending Safety Check`; SCRUM-150 adds
 `Pending Safety Check → Confirmed`.
 
-**Locked to Safety Check Service (SCRUM-150, moved forward from SCRUM-152
-v2's B1).** This story opens the first legitimate route into `Confirmed`, so
-without a lock a direct API call could confirm an event and skip the Safety
-Officer. Every request must carry the shared secret:
+**Optionally locked to Safety Check Service (SCRUM-150, moved forward from
+SCRUM-152 v2's B1).** This story opens the first legitimate route into
+`Confirmed`, so a direct API call could in principle confirm an event and
+skip the Safety Officer. Setting `INTERNAL_SERVICE_TOKEN` closes that: every
+request must then carry the shared secret:
 
 ```
 X-Internal-Service-Token: <INTERNAL_SERVICE_TOKEN>
 ```
 
 checked with `hmac.compare_digest` before the body is even parsed: missing or
-wrong → `403 {"code": "INTERNAL_ONLY"}`; `INTERNAL_SERVICE_TOKEN` unset on this
-service → `503`. The header is deliberately **not** in the CORS allow-headers
-list, so a browser cannot send it — only a server-to-server caller can. Set
+wrong → `403 {"code": "INTERNAL_ONLY"}`. The header is deliberately **not** in
+the CORS allow-headers list, so a browser cannot send it — only a
+server-to-server caller can.
+
+**The lock is opt-in.** If `INTERNAL_SERVICE_TOKEN` is unset on this service
+(the default for local/dev setups that don't configure it), the check is
+skipped entirely and the endpoint behaves exactly as it did before SCRUM-150
+— no `503`, no header required. To turn the lock on, set
 `INTERNAL_SERVICE_TOKEN` to the same value here and in
-[`safety-check-service`](../safety-check-service/), which sends the header on
-every call to this endpoint, submit and approve alike.
+[`safety-check-service`](../safety-check-service/), which sends the header
+(or an empty one, if it also has nothing configured) on every call to this
+endpoint, submit and approve alike.
 
 ```json
 PATCH /events/<id>/safety-status

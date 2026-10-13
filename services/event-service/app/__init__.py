@@ -355,21 +355,23 @@ def create_app(config=None):
         caller's role and the event's arrangements first. Deliberately
         separate from PATCH /progress, which still cannot reach any safety
         status (SCRUM-152), so there is exactly one way into this part of the
-        lifecycle — and that way is locked to Safety Check Service by the
-        internal token below (SCRUM-150, moved forward from SCRUM-152 v2,
-        since this story opens the route the lock protects).
+        lifecycle.
+
+        The internal token below (SCRUM-150, moved forward from SCRUM-152 v2)
+        is an opt-in lock: if `INTERNAL_SERVICE_TOKEN` isn't configured on
+        this service, the check is skipped entirely rather than failing
+        closed — local/dev setups that don't set it behave exactly as before
+        SCRUM-150. Configuring it (on both this service and Safety Check
+        Service) turns the lock on.
         """
         configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
-        if not configured_token:
-            return jsonify(
-                message="INTERNAL_SERVICE_TOKEN is not configured for Event Service."
-            ), 503
-        presented_token = request.headers.get("X-Internal-Service-Token", "")
-        if not hmac.compare_digest(presented_token, configured_token):
-            return jsonify(
-                code="INTERNAL_ONLY",
-                message="Only the Safety Check workflow can change an event's safety status.",
-            ), 403
+        if configured_token:
+            presented_token = request.headers.get("X-Internal-Service-Token", "")
+            if not hmac.compare_digest(presented_token, configured_token):
+                return jsonify(
+                    code="INTERNAL_ONLY",
+                    message="Only the Safety Check workflow can change an event's safety status.",
+                ), 403
 
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
