@@ -7,7 +7,7 @@ SCRUM-150 builds the second, **approve**. SCRUM-163 (review), SCRUM-151
 
 Submitting and approving each need facts from more than one atomic and write
 to two, which is exactly what a composite is for (AGENTS.md;
-`c4_diagram/export/c4.jpg`). The records live in
+`c4_diagram/export/c4.png`). The records live in
 [`safety-check-record-service`](../safety-check-record-service/) and the
 event's status in [`event-service`](../event-service/) — neither knows about
 the other.

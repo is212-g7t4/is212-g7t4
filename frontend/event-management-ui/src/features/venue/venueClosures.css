@@ -1,0 +1,120 @@
+/* Scoped to the closure panel so shared form and button rules remain unchanged. */
+.venue-closures {
+  padding: var(--space-5);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-ink);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.venue-closures .closure-section-header,
+.venue-closures .closure-history-header,
+.venue-closures .closure-form-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.venue-closures h3 { font-size: 18px; margin: 0 0 var(--space-1); }
+.venue-closures h4 { font-size: 15px; margin: 0; }
+.venue-closures .closure-section-header p { margin: 0; }
+.venue-closures .button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.venue-closures .button:hover:not(:disabled) { background: var(--color-background); border-color: var(--color-muted); }
+.venue-closures .button.closure-primary {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.venue-closures .button.closure-primary:hover:not(:disabled) { background: var(--color-ink); border-color: var(--color-ink); }
+.venue-closures .button.closure-secondary { border-color: var(--color-muted); }
+.venue-closures .button:focus-visible { outline: 2px solid var(--color-primary-dark); outline-offset: 3px; }
+.venue-closures .button:disabled { opacity: .55; cursor: not-allowed; }
+.venue-closures .closure-disclosure svg { flex-shrink: 0; transition: transform .15s ease; }
+.venue-closures .closure-disclosure[aria-expanded="true"] svg { transform: rotate(180deg); }
+.venue-closures .closure-notice {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-border-strong);
+  background: var(--color-background);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.venue-closures .closure-notice p { margin: 0; }
+.venue-closures .closure-notice p + p { margin-top: var(--space-2); }
+.venue-closures .venue-closure-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-sidebar);
+}
+.venue-closures .closure-field-wide,
+.venue-closures .closure-form-heading,
+.venue-closures .venue-closure-form .venue-detail-action-buttons { grid-column: 1 / -1; }
+.venue-closures .closure-form-heading p { margin: 0; font-size: 12px; color: var(--color-muted); }
+.venue-closures .field { display: grid; gap: var(--space-2); min-width: 0; margin: 0; }
+.venue-closures .closure-field-label { display: flex; align-items: baseline; gap: var(--space-1); }
+.venue-closures .required-marker { color: var(--color-error); font-weight: 700; }
+.venue-closures .field input,
+.venue-closures .field textarea { width: 100%; min-width: 0; padding: 10px 12px; min-height: 44px; }
+.venue-closures .field textarea { min-height: 100px; resize: vertical; }
+.venue-closures .field input[readonly] {
+  background: var(--color-border);
+  color: var(--color-muted);
+  border-color: var(--color-border-strong);
+  cursor: default;
+}
+.venue-closures .field small { color: var(--color-muted); font-size: 12px; font-weight: 400; }
+.venue-closures .venue-closure-form .venue-detail-action-buttons { justify-content: flex-end; flex-wrap: wrap; padding-top: var(--space-2); }
+.venue-closures .closure-history-header { margin: var(--space-5) 0 var(--space-3); }
+.venue-closures .closure-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--color-background);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-muted);
+}
+.venue-closures .closure-empty svg { flex-shrink: 0; }
+.venue-closures .closure-empty p { margin: 0 0 var(--space-1); color: var(--color-ink); font-weight: 600; }
+.venue-closures .closure-empty span { font-size: 12px; }
+.venue-closures .closure-list { list-style: none; padding: 0; margin: 0; overflow-wrap: anywhere; display: grid; gap: var(--space-3); }
+.venue-closures .closure-list li { padding: var(--space-4); border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary-dark); border-radius: var(--radius-sm); }
+.venue-closures .closure-list p { margin: var(--space-2) 0; }
+.venue-closures .closure-list small { color: var(--color-muted); }
+.venue-closures .closure-list + .button { margin-top: var(--space-4); }
+.venue-closures .closure-success { padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--color-success-soft); color: var(--color-success); }
+@media (max-width: 600px) {
+  .venue-closures { padding: var(--space-4); }
+  .venue-closures .closure-section-header { align-items: stretch; }
+  .venue-closures .closure-disclosure { width: 100%; }
+  .venue-closures .venue-closure-form { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
+  .venue-closures .closure-empty { padding: var(--space-4); }
+  .venue-closures .venue-closure-form .venue-detail-action-buttons .button { flex: 1 1 130px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .venue-closures .closure-disclosure svg { transition: none; }
+}
