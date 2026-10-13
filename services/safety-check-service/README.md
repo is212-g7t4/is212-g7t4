@@ -6,7 +6,7 @@ SCRUM-163 (review), SCRUM-150 (approve), SCRUM-151 (reject / request changes)
 and SCRUM-164 (resubmit) extend it.
 
 Submitting needs facts from three atomics and writes to two, which is exactly
-what a composite is for (AGENTS.md; `c4_diagram/export/c4.jpg`). The records
+what a composite is for (AGENTS.md; `c4_diagram/export/c4.png`). The records
 live in [`safety-check-record-service`](../safety-check-record-service/) and
 the event's status in [`event-service`](../event-service/) — neither knows
 about the other.

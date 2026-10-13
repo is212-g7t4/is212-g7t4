@@ -7,6 +7,7 @@ from app.routes import bp
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["VENUE_CLOSURE_DEV_MODE"] = os.getenv("VENUE_CLOSURE_DEV_MODE") == "true"
     app.config["FRONTEND_ORIGIN"] = os.getenv("FRONTEND_ORIGIN", "http://localhost:5174")
 
     @app.after_request
@@ -20,11 +21,13 @@ def create_app() -> Flask:
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Dev-User-Id, X-Dev-Role"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
         return response
 
     app.register_blueprint(bp)
+    from app.closures import bp as closures_bp
+    app.register_blueprint(closures_bp)
     return app

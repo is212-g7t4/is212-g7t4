@@ -1,7 +1,7 @@
 """SCRUM-149: submit an event for its Operational Safety Check.
 
 The workflow needs facts from three atomics and writes to two, so it is a
-composite (AGENTS.md; `c4_diagram/export/c4.jpg`). The records themselves are
+composite (AGENTS.md; `c4_diagram/export/c4.png`). The records themselves are
 owned by `safety-check-record-service`, and the event's status by
 `event-service`; neither of them knows about the other.
 """

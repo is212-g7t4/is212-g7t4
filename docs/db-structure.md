@@ -1,6 +1,6 @@
 # ConnectSphere C4 database structure
 
-Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is created by the single baseline migration `database/supabase/migrations/20261011140000_baseline_schema.sql`; mock data is in `database/supabase/seed.sql`.
+Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is created by baseline migration `database/supabase/migrations/20261011140000_baseline_schema.sql` plus subsequent migrations; mock data is in `database/supabase/seed.sql`. SCRUM-170 adds `20261012234245_require_venue_closure_metadata.sql` to require closure venue/creator/creation-time metadata. This describes the migration target, not proof it has been applied to the shared database.
 
 **Conventions**
 
@@ -147,12 +147,12 @@ A **hold** is a row with status `On Hold`: `event_id` is empty, the time range r
 | Column | Type / constraint | Change | What it is for and how it is used |
 |---|---|---|---|
 | closure_id | UUID (PK) | | Unique ID of one period of temporary unavailability. |
-| venue_id | UUID (FK Venue) | | The venue being closed. |
+| venue_id | UUID (FK Venue) NOT NULL | changed | The venue being closed. |
 | start_date_time | TIMESTAMPTZ NOT NULL | changed | When the closure begins, used by the availability check and the calendar. |
 | end_date_time | TIMESTAMPTZ NOT NULL | changed | When the closure ends, after which the venue is bookable again. |
 | reason | TEXT NOT NULL | changed | The operational reason (maintenance, renovation and so on), shown on the calendar and in notifications. |
-| created_by | UUID (FK User) | | The Venue Staff member who recorded the closure. |
-| created_at | TIMESTAMPTZ | changed | When the closure was recorded. |
+| created_by | UUID (FK User) NOT NULL | changed | The Venue Staff member who recorded the closure. |
+| created_at | TIMESTAMPTZ NOT NULL | changed | When the closure was recorded; supplied by the service, not invented during migration. |
 
 ---
 
