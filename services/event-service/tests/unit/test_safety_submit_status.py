@@ -28,6 +28,8 @@ EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
 OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
 SAFETY_CHECK_ID = "55555555-5555-4555-8555-555555555555"
+INTERNAL_TOKEN = "test-internal-token"
+INTERNAL_HEADERS = {"X-Internal-Service-Token": INTERNAL_TOKEN}
 
 # Every status an event can hold that must not reach 'Pending Safety Check'.
 # Only 'Approved' may (SAFETY_TRANSITIONS).
@@ -48,7 +50,13 @@ def setup(monkeypatch):
     monkeypatch.setattr(
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": "unused-test-url",
+            "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
+        }
+    )
     return app.test_client(), connection, cursor
 
 
@@ -84,7 +92,7 @@ def event_row(status="Approved", coordinator_id=COORDINATOR_ID, action_history=N
     return row
 
 
-def patch_safety_status(client, **overrides):
+def patch_safety_status(client, headers=INTERNAL_HEADERS, **overrides):
     body = {
         "status": "Pending Safety Check",
         "coordinatorId": COORDINATOR_ID,
@@ -92,7 +100,7 @@ def patch_safety_status(client, **overrides):
         "roundNumber": 1,
         **overrides,
     }
-    return client.patch(f"/events/{EVENT_ID}/safety-status", json=body)
+    return client.patch(f"/events/{EVENT_ID}/safety-status", json=body, headers=headers)
 
 
 # --- AC1: the move and the submission time ----------------------------------
@@ -246,10 +254,15 @@ def test_only_an_approved_event_can_be_submitted(current_status, setup):
 
 
 @pytest.mark.parametrize(
-    "status", ["Confirmed", "Safety Changes Requested", "Cancelled"]
+    "status", ["Safety Changes Requested", "Cancelled"]
 )
 def test_statuses_for_later_stories_are_not_reachable_yet(status, setup):
-    """SCRUM-150/151 add their own moves to SAFETY_TRANSITIONS; until then, no."""
+    """SCRUM-151 adds its own moves to SAFETY_TRANSITIONS; until then, no.
+
+    'Confirmed' is deliberately absent here: SCRUM-150 makes it reachable
+    from 'Pending Safety Check' (not from 'Approved', which this test fixes
+    the event at) — see test_safety_approve_status.py.
+    """
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Approved")
 
@@ -285,23 +298,21 @@ def test_pre_safety_statuses_are_not_accepted(status, setup):
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    ("overrides", "message"),
     [
-        {"coordinatorId": "not-a-uuid"},
-        {"coordinatorId": ""},
-        {"safetyCheckId": "not-a-uuid"},
-        {"safetyCheckId": None},
+        ({"coordinatorId": "not-a-uuid"}, "A valid coordinator ID is required."),
+        ({"coordinatorId": ""}, "A valid coordinator ID is required."),
+        ({"safetyCheckId": "not-a-uuid"}, "A valid safety check ID is required."),
+        ({"safetyCheckId": None}, "A valid safety check ID is required."),
     ],
 )
-def test_bad_identifiers_are_rejected(overrides, setup):
+def test_bad_identifiers_are_rejected(overrides, message, setup):
     client, _, cursor = setup
 
     response = patch_safety_status(client, **overrides)
 
     assert response.status_code == 400
-    assert response.json["message"] == (
-        "A valid coordinator ID and safety check ID are required."
-    )
+    assert response.json["message"] == message
     cursor.execute.assert_not_called()
 
 
@@ -319,7 +330,9 @@ def test_bad_round_number_is_rejected(round_number, setup):
 def test_non_object_body_is_rejected(setup):
     client, _, cursor = setup
 
-    response = client.patch(f"/events/{EVENT_ID}/safety-status", json=["nope"])
+    response = client.patch(
+        f"/events/{EVENT_ID}/safety-status", json=["nope"], headers=INTERNAL_HEADERS
+    )
 
     assert response.status_code == 400
     assert response.json["message"] == "Send a JSON object."
@@ -327,7 +340,13 @@ def test_non_object_body_is_rejected(setup):
 
 
 def test_without_database_url():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": None,
+            "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
+        }
+    ).test_client()
 
     response = patch_safety_status(client)
 

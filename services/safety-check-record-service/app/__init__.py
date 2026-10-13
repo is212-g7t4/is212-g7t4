@@ -8,15 +8,21 @@ from flask import Flask, jsonify, request
 load_dotenv()
 
 from app.models import (
+    DECISION_STATUSES,
     NOTES_LIMIT,
     RECORD_STATUSES,
     RecordNotDeletableError,
     RecordNotFoundError,
+    RoundAlreadyDecidedError,
     RoundAlreadyOpenError,
+    RoundNotLatestError,
+    RoundNotReopenableError,
     clean_notes,
     create_round,
+    decide_round,
     delete_open_round,
     list_rounds,
+    reopen_round,
 )
 
 NO_DATABASE = (
@@ -57,7 +63,7 @@ def create_app(config=None) -> Flask:
                 "Content-Type, Authorization, Accept"
             )
             response.headers["Access-Control-Allow-Methods"] = (
-                "GET, POST, DELETE, OPTIONS"
+                "GET, POST, PATCH, DELETE, OPTIONS"
             )
         if request.method == "OPTIONS":
             response.status_code = 200
@@ -151,6 +157,83 @@ def create_app(config=None) -> Flask:
             ), 409
         return "", 204
 
+    @app.patch("/safety-check-records/<safety_check_id>/decision")
+    def decide_record(safety_check_id):
+        """Decide the open round (SCRUM-150 AC2): status, who decided, when, remarks.
+
+        Called by Safety Check Service after it has checked the caller's role
+        and the event's status. Re-validated here anyway, and the row is
+        locked `FOR UPDATE` so a simultaneous decide loses the race here, not
+        in the event (AC3 / the race guard).
+        """
+        safety_check_id = _uuid_or_none(safety_check_id)
+        if not safety_check_id:
+            return jsonify(message="The safety check ID must be a valid UUID."), 400
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        status = data.get("status")
+        if status not in DECISION_STATUSES:
+            return jsonify(
+                message=f"status must be one of: {', '.join(DECISION_STATUSES)}."
+            ), 400
+        decided_by = _uuid_or_none(data.get("decidedBy"))
+        if not decided_by:
+            return jsonify(message="decidedBy must be a valid UUID."), 400
+        remarks, failure = _remarks(data)
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message=NO_DATABASE), 503
+        try:
+            decided = decide_round(
+                app.config["DATABASE_URL"], safety_check_id, status, decided_by, remarks
+            )
+        except RecordNotFoundError:
+            return jsonify(message="Safety check not found."), 404
+        except RoundAlreadyDecidedError as already:
+            return jsonify(
+                code="SAFETY_CHECK_ALREADY_DECIDED",
+                message="This safety check has already been decided.",
+                safetyCheck=already.existing,
+            ), 409
+        except RoundNotLatestError:
+            return jsonify(
+                code="NOT_LATEST_ROUND",
+                message="A later round exists for this event; this round can no longer be decided.",
+            ), 409
+        return jsonify(decided), 200
+
+    @app.post("/safety-check-records/<safety_check_id>/reopen")
+    def reopen_record(safety_check_id):
+        """Compensation only: undo the decision the caller's own request just made.
+
+        Not a general "withdraw a decision" endpoint. `decidedAt` must match
+        what `decide_round` returned, so this can only undo the write the
+        same request just made, never an older decision (SCRUM-153 handles
+        a deliberate later withdrawal).
+        """
+        safety_check_id = _uuid_or_none(safety_check_id)
+        if not safety_check_id:
+            return jsonify(message="The safety check ID must be a valid UUID."), 400
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        decided_at = data.get("decidedAt")
+        if not isinstance(decided_at, str) or not decided_at:
+            return jsonify(message="decidedAt is required."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message=NO_DATABASE), 503
+        try:
+            reopened = reopen_round(app.config["DATABASE_URL"], safety_check_id, decided_at)
+        except RecordNotFoundError:
+            return jsonify(message="Safety check not found."), 404
+        except RoundNotReopenableError:
+            return jsonify(
+                message="This safety check is not the decided round being undone."
+            ), 409
+        return jsonify(reopened), 200
+
     return app
 
 
@@ -171,3 +254,16 @@ def _notes(data):
             )
         cleaned.append(clean_notes(value))
     return cleaned, None
+
+
+def _remarks(data):
+    """The Safety Officer's optional remarks, trimmed to NULL when blank (SCRUM-150 AC2)."""
+    value = data.get("remarks")
+    if value is not None and not isinstance(value, str):
+        return None, (jsonify(message="remarks must be text."), 400)
+    if isinstance(value, str) and len(value) > NOTES_LIMIT:
+        return None, (
+            jsonify(message=f"remarks must be {NOTES_LIMIT} characters or fewer."),
+            400,
+        )
+    return clean_notes(value), None

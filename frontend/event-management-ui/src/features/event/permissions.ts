@@ -1,7 +1,7 @@
 import type { Role } from '../../types'
 
 export function canViewInternalEvents(role: Role) {
-  return role === 'Event Coordinator' || role === 'Venue Staff' || role === 'Technical Support'
+  return role === 'Event Coordinator' || role === 'Venue Staff' || role === 'Technical Support' || role === 'Safety Officer'
 }
 
 export function canViewMyEvents(role: Role) {
@@ -9,8 +9,8 @@ export function canViewMyEvents(role: Role) {
 }
 
 export function canViewAllInternalEvents(role: Role, isManager: boolean) {
-  return (role === 'Event Coordinator' && isManager) || role === 'Venue Staff' || role === 'Technical Support'
+  return (role === 'Event Coordinator' && isManager) || role === 'Venue Staff' || role === 'Technical Support' || role === 'Safety Officer'
 }
 
 export const INTERNAL_EVENT_ACCESS_MESSAGE =
-  'Event information is visible to Event Coordinators, Venue Staff, and Technical Support.'
+  'Event information is visible to Event Coordinators, Venue Staff, Technical Support, and Safety Officers.'
