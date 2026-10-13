@@ -1,3 +1,4 @@
+import hmac
 import os
 from datetime import datetime, time
 from uuid import UUID
@@ -20,6 +21,7 @@ from app.models import (
     RejectionReasonError,
     SafetyApprovalRequiredError,
     SafetyCheckAlreadyPendingError,
+    StaleSafetyCheckError,
     approve_event,
     get_event,
     get_organiser_event,
@@ -37,8 +39,6 @@ from app.models import (
 )
 from app.validation import validate
 
-EVENT_STATUSES = ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected")
-
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -48,8 +48,15 @@ def create_app(config=None):
         # vite.config.ts), so that is the origin the browser sends.
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
         MAX_CONTENT_LENGTH=65536,
+        INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN"),
     )
     app.config.update(config or {})
+
+    if not app.config["INTERNAL_SERVICE_TOKEN"]:
+        app.logger.warning(
+            "INTERNAL_SERVICE_TOKEN is not set: PATCH /events/<id>/safety-status "
+            "is not locked to Safety Check Service (SCRUM-150/152)."
+        )
 
     @app.after_request
     def cors(response):
@@ -62,6 +69,8 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
+            # Deliberately not listing X-Internal-Service-Token here: a
+            # browser can't send it, so only a server-to-server caller can.
             response.headers["Access-Control-Allow-Headers"] = (
                 "Content-Type, Authorization, Accept"
             )
@@ -145,13 +154,13 @@ def create_app(config=None):
             return jsonify(message="A valid current coordinator ID is required."), 400
 
         viewer_role = request.args.get("viewerRole") or None
-        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support"):
+        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support", "Safety Officer"):
             return jsonify(message="This role cannot view all internal events."), 403
         status = request.args.get("status") or None
         venue = request.args.get("venue") or None
         is_manager = (
             request.args.get("isManager") in ("true", "1")
-            or viewer_role in ("Venue Staff", "Technical Support")
+            or viewer_role in ("Venue Staff", "Technical Support", "Safety Officer")
         )
 
         date_from = date_to = None
@@ -213,8 +222,8 @@ def create_app(config=None):
     def overlapping_events():
         # Time-window lookup for Equipment Reservation Service; summaries only, no event body.
         statuses = [part for part in request.args.get("statuses", "").split(",") if part]
-        if not statuses or any(s not in EVENT_STATUSES for s in statuses):
-            return jsonify(message=f"statuses must list values from: {', '.join(EVENT_STATUSES)}."), 400
+        if not statuses or any(s not in ALL_STATUSES for s in statuses):
+            return jsonify(message=f"statuses must list values from: {', '.join(ALL_STATUSES)}."), 400
         try:
             start, end = (datetime.fromisoformat(request.args.get(key, "")) for key in ("start", "end"))
             exclude = request.args.get("excludeEventId")
@@ -254,11 +263,11 @@ def create_app(config=None):
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid current coordinator ID is required."), 400
         viewer_role = request.args.get("viewerRole") or None
-        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support"):
+        if viewer_role and viewer_role not in ("Venue Staff", "Technical Support", "Safety Officer"):
             return jsonify(message="This role cannot view all internal events."), 403
         is_manager = (
             request.args.get("isManager") in ("true", "1")
-            or viewer_role in ("Venue Staff", "Technical Support")
+            or viewer_role in ("Venue Staff", "Technical Support", "Safety Officer")
         )
         if not app.config["DATABASE_URL"]:
             return jsonify(
@@ -344,29 +353,42 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/safety-status")
     def update_safety_status(event_id):
-        """Move an event along the safety-check workflow (SCRUM-149 AC1).
+        """Move an event along the safety-check workflow (SCRUM-149 AC1, SCRUM-150 AC1).
 
         For Safety Check Service only: it is the service that has checked the
-        event's venue bookings and equipment requests first. Deliberately
+        caller's role and the event's arrangements first. Deliberately
         separate from PATCH /progress, which still cannot reach any safety
         status (SCRUM-152), so there is exactly one way into this part of the
         lifecycle.
+
+        The internal token below (SCRUM-150, moved forward from SCRUM-152 v2)
+        is an opt-in lock: if `INTERNAL_SERVICE_TOKEN` isn't configured on
+        this service, the check is skipped entirely rather than failing
+        closed — local/dev setups that don't set it behave exactly as before
+        SCRUM-150. Configuring it (on both this service and Safety Check
+        Service) turns the lock on.
         """
+        configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
+        if configured_token:
+            presented_token = request.headers.get("X-Internal-Service-Token", "")
+            if not hmac.compare_digest(presented_token, configured_token):
+                return jsonify(
+                    code="INTERNAL_ONLY",
+                    message="Only the Safety Check workflow can change an event's safety status.",
+                ), 403
+
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
         status = data.get("status", "")
-        try:
-            coordinator_id = str(UUID(data.get("coordinatorId", "")))
-            safety_check_id = str(UUID(data.get("safetyCheckId", "")))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(
-                message="A valid coordinator ID and safety check ID are required."
-            ), 400
         if status not in SAFETY_STATUSES:
             return jsonify(
                 message=f"Status must be one of: {', '.join(SAFETY_STATUSES)}."
             ), 400
+        try:
+            safety_check_id = str(UUID(data.get("safetyCheckId", "")))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid safety check ID is required."), 400
         round_number = data.get("roundNumber")
         if (
             isinstance(round_number, bool)
@@ -374,6 +396,34 @@ def create_app(config=None):
             or round_number < 1
         ):
             return jsonify(message="roundNumber must be a positive whole number."), 400
+
+        # Only the two moves this story (and SCRUM-149) actually implement
+        # need their own identity field validated; an unimplemented move
+        # (SCRUM-151's) falls through to the SAFETY_TRANSITIONS check below
+        # and gets 409, not a 400 about a field it doesn't carry yet.
+        coordinator_id = None
+        decided_by = None
+        remarks = None
+        if status == "Pending Safety Check":
+            try:
+                coordinator_id = str(UUID(data.get("coordinatorId", "")))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="A valid coordinator ID is required."), 400
+        elif status == "Confirmed":
+            try:
+                decided_by = str(UUID(data.get("decidedBy", "")))
+            except (ValueError, TypeError, AttributeError):
+                return jsonify(message="A valid decidedBy ID is required."), 400
+            remarks = data.get("remarks")
+            if remarks is not None and not isinstance(remarks, str):
+                return jsonify(message="remarks must be text."), 400
+            if isinstance(remarks, str):
+                remarks = remarks.strip() or None
+                if remarks and len(remarks) > 2000:
+                    return jsonify(
+                        message="remarks must be 2000 characters or fewer."
+                    ), 400
+
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         try:
@@ -381,9 +431,11 @@ def create_app(config=None):
                 app.config["DATABASE_URL"],
                 str(event_id),
                 status,
-                coordinator_id,
                 safety_check_id,
                 round_number,
+                coordinator_id=coordinator_id,
+                decided_by=decided_by,
+                remarks=remarks,
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
@@ -396,6 +448,11 @@ def create_app(config=None):
             return jsonify(
                 code="SAFETY_CHECK_ALREADY_PENDING",
                 message="This event is already waiting for its safety check.",
+            ), 409
+        except StaleSafetyCheckError:
+            return jsonify(
+                code="STALE_SAFETY_CHECK",
+                message="This safety check round is no longer the one awaiting a decision.",
             ), 409
         except InvalidStatusTransitionError as blocked:
             return jsonify(

@@ -130,7 +130,7 @@ def test_manager_can_view_unassigned_event(setup):
     assert response.status_code == 200
 
 
-@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support"])
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer"])
 def test_internal_operational_staff_can_view_any_event_read_only(role, setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = saved_row()

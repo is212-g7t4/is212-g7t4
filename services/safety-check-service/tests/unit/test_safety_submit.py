@@ -83,7 +83,14 @@ class Downstream:
         return self.created
 
     def set_event_safety_status(
-        self, event_id, status, coordinator_id, safety_check_id, round_number
+        self,
+        event_id,
+        status,
+        safety_check_id,
+        round_number,
+        coordinator_id=None,
+        decided_by=None,
+        remarks=None,
     ):
         self.calls.append(
             ("patch_event", event_id, status, coordinator_id, safety_check_id, round_number)
@@ -481,6 +488,17 @@ def test_event_deleted_mid_flight_rolls_the_round_back(client, downstream):
     response = submit(client)
 
     assert response.status_code == 404
+    assert downstream.call("delete") == ("delete", RECORD_ID)
+
+
+def test_service_credentials_error_rolls_the_round_back(client, downstream):
+    """SCRUM-150: Event Service refusing our internal token is our problem."""
+    downstream.fail["patch_event"] = clients.ServiceCredentialsError
+
+    response = submit(client)
+
+    assert response.status_code == 502
+    assert response.json["message"] == "Event Service refused this service's credentials."
     assert downstream.call("delete") == ("delete", RECORD_ID)
 
 

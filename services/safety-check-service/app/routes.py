@@ -24,11 +24,18 @@ NOTE_FIELDS = (
 )
 PENDING_SAFETY_CHECK = "Pending Safety Check"
 READY_STATUS = "Approved"
+SAFETY_OFFICER = "Safety Officer"
+CONFIRMED = "Confirmed"
+SAFETY_APPROVED = "Safety Approved"
 
 NOT_ASSIGNED = (
     "Only the event's assigned coordinator can submit it for a safety check."
 )
+NOT_SAFETY_OFFICER = (
+    "Only a Safety Officer can approve an event's Operational Safety Check."
+)
 UNREADABLE_ARRANGEMENTS = "Unable to check the event's arrangements right now."
+UNREADABLE_ROLE = "Unable to check the caller's role right now."
 
 
 @bp.get("/health")
@@ -97,15 +104,95 @@ def submit_safety_check():
         updated = clients.set_event_safety_status(
             event_id,
             PENDING_SAFETY_CHECK,
-            coordinator_id,
             record["id"],
             record["roundNumber"],
+            coordinator_id=coordinator_id,
         )
     except Exception as error:  # noqa: BLE001 — every failure compensates alike
         _compensate(record["id"])
         return _event_update_failure(error, event_id)
 
     return jsonify(safetyCheck=record, event=updated), 201
+
+
+@bp.post("/safety-checks/approve")
+def approve_safety_check():
+    """Approve an event's Operational Safety Check (SCRUM-150).
+
+    Body: `eventId`, `safetyOfficerId`, optional `remarks` (AC2).
+
+    Record first, then event, as submit does: the record service is the race
+    guard (AC3) — if two Safety Officers click at once, only one decide can
+    win the open round; the second gets `409` before the event is touched.
+    If the event move then fails, the decision is undone, so the event never
+    reads 'Pending Safety Check' with a decided round, nor 'Confirmed'
+    without one.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    event_id = _uuid_or_none(data.get("eventId"))
+    safety_officer_id = _uuid_or_none(data.get("safetyOfficerId"))
+    if not event_id or not safety_officer_id:
+        return jsonify(message="eventId and safetyOfficerId must be valid UUIDs."), 400
+    remarks, failure = _approval_remarks(data)
+    if failure:
+        return failure
+
+    failure = _check_safety_officer(safety_officer_id)
+    if failure:
+        return failure
+
+    event, failure = _load_event_for_officer(event_id, safety_officer_id)
+    if failure:
+        return failure
+    failure = _approve_status_failure(event)
+    if failure:
+        return failure
+
+    open_round, failure = _open_round(event_id)
+    if failure:
+        return failure
+    if not open_round:
+        return jsonify(
+            code="NO_OPEN_SAFETY_CHECK",
+            message="This event has no safety check awaiting a decision.",
+        ), 409
+
+    try:
+        decided = clients.decide_safety_check_record(
+            open_round["id"], SAFETY_APPROVED, safety_officer_id, remarks
+        )
+    except clients.SafetyCheckAlreadyDecidedError as already:
+        return jsonify(
+            code="SAFETY_CHECK_ALREADY_DECIDED",
+            message="This safety check has already been decided.",
+            safetyCheck=already.existing,
+        ), 409
+    except clients.RecordNotFoundError:
+        return jsonify(
+            code="NO_OPEN_SAFETY_CHECK",
+            message="This event has no safety check awaiting a decision.",
+        ), 409
+    except clients.DownstreamTimeout:
+        return jsonify(message="Approving took too long. Please try again."), 504
+    except clients.DownstreamError:
+        return jsonify(message="Unable to approve this safety check right now."), 502
+
+    try:
+        updated = clients.set_event_safety_status(
+            event_id,
+            CONFIRMED,
+            decided["id"],
+            decided["roundNumber"],
+            decided_by=safety_officer_id,
+            remarks=remarks,
+        )
+    except Exception as error:  # noqa: BLE001 — every failure compensates alike
+        _compensate_decision(decided["id"], decided["decidedAt"])
+        return _approve_event_update_failure(error)
+
+    return jsonify(safetyCheck=decided, event=updated), 200
 
 
 @bp.get("/safety-checks/readiness")
@@ -249,8 +336,112 @@ def _compensate(safety_check_id):
         )
 
 
+def _check_safety_officer(user_id):
+    """Step 2 of approve: the caller's role, looked up rather than trusted."""
+    try:
+        found = clients.get_user(user_id)
+    except clients.UserNotFoundError:
+        return jsonify(code="NOT_SAFETY_OFFICER", message=NOT_SAFETY_OFFICER), 403
+    except clients.DownstreamTimeout:
+        return jsonify(message=UNREADABLE_ROLE), 504
+    except clients.DownstreamError:
+        return jsonify(message=UNREADABLE_ROLE), 502
+    if found.get("role") != SAFETY_OFFICER:
+        return jsonify(code="NOT_SAFETY_OFFICER", message=NOT_SAFETY_OFFICER), 403
+    return None
+
+
+def _load_event_for_officer(event_id, safety_officer_id):
+    """Step 3 of approve: read the event as the Safety Officer, not a coordinator."""
+    try:
+        return (
+            clients.get_event(event_id, safety_officer_id, viewer_role=SAFETY_OFFICER),
+            None,
+        )
+    except (clients.EventNotFoundError, clients.EventNotAssignedError):
+        # EventNotAssignedError shouldn't occur here since viewerRole is
+        # always sent, but if Event Service ever refused it anyway, there is
+        # nothing more specific to tell this caller.
+        return None, (jsonify(message="Event request not found."), 404)
+    except clients.DownstreamTimeout:
+        return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 504)
+    except clients.DownstreamError:
+        return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 502)
+
+
+def _approve_status_failure(event):
+    """Step 3's status check (AC3): only a 'Pending Safety Check' event qualifies."""
+    status = event.get("status")
+    if status == PENDING_SAFETY_CHECK:
+        return None
+    return (
+        jsonify(
+            code="EVENT_NOT_PENDING_SAFETY_CHECK",
+            message=(
+                "Only an event 'Pending Safety Check' can be approved "
+                f"(current status: '{status}')."
+            ),
+            currentStatus=status,
+        ),
+        409,
+    )
+
+
+def _compensate_decision(safety_check_id, decided_at):
+    """Undo the decision we just made when the event couldn't then be moved.
+
+    If this also fails there is nothing left to try, so the id goes to the
+    log at ERROR and the caller still gets the original error. The README
+    says how to clear that by hand.
+    """
+    try:
+        clients.reopen_safety_check_record(safety_check_id, decided_at)
+    except Exception:  # noqa: BLE001 — the original error is what matters
+        logger.error(
+            "Could not reopen safety check %s after the event status update "
+            "failed; it is left decided and must be reopened by hand.",
+            safety_check_id,
+        )
+
+
+def _approve_event_update_failure(error):
+    """Map Event Service's refusal of approve's step 6 after the decision has been undone."""
+    if isinstance(error, clients.ServiceCredentialsError):
+        return jsonify(message="Event Service refused this service's credentials."), 502
+    if isinstance(error, clients.EventNotFoundError):
+        return jsonify(message="Event request not found."), 404
+    if isinstance(error, clients.EventTransitionError):
+        return jsonify(
+            code="EVENT_NOT_PENDING_SAFETY_CHECK",
+            message=error.body.get("message")
+            or "Only an event 'Pending Safety Check' can be approved.",
+            currentStatus=error.body.get("currentStatus"),
+        ), 409
+    if isinstance(error, clients.DownstreamTimeout):
+        return jsonify(message="Approving took too long. Please try again."), 504
+    return jsonify(message="Unable to approve this safety check right now."), 502
+
+
+def _approval_remarks(data):
+    """The Safety Officer's optional remarks (AC2). Blank is sent through as None."""
+    value = data.get("remarks")
+    if value is not None and not isinstance(value, str):
+        return None, (jsonify(message="remarks must be text."), 400)
+    if isinstance(value, str) and len(value) > NOTES_LIMIT:
+        return None, (
+            jsonify(message=f"remarks must be {NOTES_LIMIT} characters or fewer."),
+            400,
+        )
+    cleaned = value.strip() or None if isinstance(value, str) else None
+    return cleaned, None
+
+
 def _event_update_failure(error, event_id):
     """Map Event Service's refusal of step 6 after the round has been undone."""
+    if isinstance(error, clients.ServiceCredentialsError):
+        # This service's own token was refused — a misconfiguration, not the
+        # caller's fault, so it is not AC5's 403.
+        return jsonify(message="Event Service refused this service's credentials."), 502
     if isinstance(error, clients.EventNotAssignedError):
         # Reassigned between step 2 and step 6 (AC5).
         return jsonify(code="NOT_ASSIGNED_COORDINATOR", message=NOT_ASSIGNED), 403

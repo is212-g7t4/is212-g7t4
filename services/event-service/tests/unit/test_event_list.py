@@ -196,7 +196,7 @@ def test_manager_can_still_combine_with_optional_filters(setup):
     assert params == ["Approved"]
 
 
-@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support"])
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer"])
 def test_internal_operational_staff_see_all_events_with_existing_filters(role, setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [saved_row()]
