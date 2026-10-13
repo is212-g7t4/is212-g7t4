@@ -2,24 +2,26 @@
 
 Composite service (port **5012**) that coordinates the Operational Safety
 Check workflow (change #6). SCRUM-149 builds the first half, **submit**;
-SCRUM-163 (review), SCRUM-150 (approve), SCRUM-151 (reject / request changes)
-and SCRUM-164 (resubmit) extend it.
+SCRUM-150 builds the second, **approve**. SCRUM-163 (review), SCRUM-151
+(reject / request changes) and SCRUM-164 (resubmit) extend it further.
 
-Submitting needs facts from three atomics and writes to two, which is exactly
-what a composite is for (AGENTS.md; `c4_diagram/export/c4.jpg`). The records
-live in [`safety-check-record-service`](../safety-check-record-service/) and
-the event's status in [`event-service`](../event-service/) — neither knows
-about the other.
+Submitting and approving each need facts from more than one atomic and write
+to two, which is exactly what a composite is for (AGENTS.md;
+`c4_diagram/export/c4.jpg`). The records live in
+[`safety-check-record-service`](../safety-check-record-service/) and the
+event's status in [`event-service`](../event-service/) — neither knows about
+the other.
 
 | Calls | For |
 |---|---|
 | Event Service (5003) | the event and its coordinator; the lifecycle move |
 | Venue Availability Service (5008) | every venue booking for the event |
 | Equipment Request Service (5011) | every equipment request for the event |
-| Safety Check Record Service (5013) | creating, listing and rolling back a round |
+| Safety Check Record Service (5013) | creating, deciding, listing and rolling back a round |
+| User Service (5001) | the caller's role (SCRUM-150: is this a Safety Officer?) |
 
 No notification in this story: Notification Service and RabbitMQ aren't built,
-and the "submitted" notification is change-6 story 6.9.
+and the "decision" notification is SCRUM-168.
 
 ## `POST /safety-checks`
 
@@ -91,6 +93,80 @@ the round by hand:
 curl -X DELETE localhost:5013/safety-check-records/<id>   # 204; it is still Pending
 ```
 
+## `POST /safety-checks/approve`
+
+```json
+{
+  "eventId": "<uuid>",
+  "safetyOfficerId": "<uuid>",
+  "remarks": "Looks safe."
+}
+```
+
+`remarks` is optional, up to 2000 characters (AC2).
+
+```
+UI ──POST /safety-checks/approve──► Safety Check Service (composite, 5012)
+ 1. validate body (UUIDs, remarks ≤ 2000 chars)                             400
+ 2. GET  User Service   /users/<safetyOfficerId>                            403 NOT_SAFETY_OFFICER
+    role must be 'Safety Officer'
+ 3. GET  Event Service  /events/<id>?coordinatorId=<officer>&viewerRole=Safety Officer
+    event must be 'Pending Safety Check'                 409 EVENT_NOT_PENDING_SAFETY_CHECK (AC3)
+ 4. GET  Record Service /safety-check-records?eventId=<id>&status=Pending   409 NO_OPEN_SAFETY_CHECK
+ 5. PATCH Record Service /safety-check-records/<roundId>/decision
+          {status: "Safety Approved", decidedBy, remarks}     409 SAFETY_CHECK_ALREADY_DECIDED
+ 6. PATCH Event Service /events/<id>/safety-status   (X-Internal-Service-Token)
+          {status: "Confirmed", decidedBy, safetyCheckId, roundNumber, remarks}
+        on any failure → POST Record Service /safety-check-records/<roundId>/reopen {decidedAt}
+ 7. 200 {safetyCheck, event}
+```
+
+| Case | Response |
+|---|---|
+| Bad body, bad UUIDs, non-text remarks, remarks over 2000 characters | `400 {"message": ...}` |
+| Caller unknown or not a Safety Officer | `403 {"code": "NOT_SAFETY_OFFICER"}` |
+| Event not found | `404` |
+| Event not `Pending Safety Check` (AC3) | `409 {"code": "EVENT_NOT_PENDING_SAFETY_CHECK", "currentStatus": "..."}` |
+| No open round (data out of step) | `409 {"code": "NO_OPEN_SAFETY_CHECK"}` |
+| Round already decided — two officers at once (AC3/race) | `409 {"code": "SAFETY_CHECK_ALREADY_DECIDED", "safetyCheck": {...}}`, event untouched |
+| Event Service refused step 6 (stale status or round), after reopening | `409 {"code": "EVENT_NOT_PENDING_SAFETY_CHECK"}` |
+| Event Service refused this service's own token, after reopening | `502` |
+| A downstream service failed / timed out | `502` / `504` |
+| Success (AC1, AC2) | `200 {"safetyCheck": {...}, "event": {...}}` |
+
+**Decide first, event second — same shape as submit.** The record service is
+the race guard (AC3): if two Safety Officers click at once, only one `PATCH
+.../decision` can see the round still `Pending`; the loser gets `409` before
+the event is touched. If step 6 then fails, step 5's decision is undone via
+`POST .../reopen`, which only works if `decidedAt` matches exactly — so this
+can only undo the decision this request just made.
+
+**The role is looked up, not trusted.** `safetyOfficerId` travels to User
+Service, which answers with the caller's current role. A non-Safety-Officer
+(or an unknown id) never gets past step 2, regardless of what the request
+claims.
+
+**Event Service's own round check is the second line of defence (AC3).**
+Step 6 sends `safetyCheckId`; Event Service's `/safety-status` route checks
+that round is the one the event actually has open before writing `Confirmed`
+— see [`event-service`](../event-service/README.md). That means a stale read
+in step 3 still can't confirm the wrong round, even without a second call
+here.
+
+### The compensation edge case, approve's version
+
+If step 6 fails and the reopening `POST .../reopen` **also** fails, the round
+id goes to the log at `ERROR` and the caller gets the original error. The
+event then stays `Pending Safety Check` while the round reads `Safety
+Approved` — the next approve attempt gets `NO_OPEN_SAFETY_CHECK`. To clear it,
+find the id in the log and reopen the round by hand with the `decidedAt` it
+was given:
+
+```
+curl -X POST localhost:5013/safety-check-records/<id>/reopen \
+  -H "Content-Type: application/json" -d '{"decidedAt": "<the timestamp from the log/DB>"}'
+```
+
 ## `GET /safety-checks/readiness?eventId=<uuid>&coordinatorId=<uuid>`
 
 Steps 2–4 only, no writes — what the submit panel calls on mount so a
@@ -149,7 +225,13 @@ uv run pytest
 ## Trust
 
 Like every endpoint today there is no JWT, so this service trusts
-`coordinatorId` and Event Service trusts the one it is handed. Event Service's
-own assignment check means a direct browser call still can't submit someone
-else's event (AC5), but it could skip the arrangements check — the same trust
-level as the rest of the system until auth lands.
+`coordinatorId` on submit. Approve is the first place a role is actually
+checked server-side: `safetyOfficerId` is looked up in User Service rather
+than trusted from the request (SCRUM-150). Event Service's own assignment and
+round checks mean a direct browser call still can't submit someone else's
+event (AC5) or confirm the wrong round (AC3), but either call could skip this
+service's own arrangements/role checks if it somehow had
+`INTERNAL_SERVICE_TOKEN` — the same trust level as the rest of the system
+until auth lands. Set `INTERNAL_SERVICE_TOKEN` (shared with
+[`event-service`](../event-service/)) in this service's environment; without
+it, every call to `/safety-status` is refused.
