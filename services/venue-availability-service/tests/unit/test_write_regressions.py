@@ -69,7 +69,7 @@ def test_decision_database_unconfigured(setup):
 def test_write_remains_naive_pending_without_dev_gate(setup):
     client, cursor = setup
     client.application.config["CALENDAR_DEV_MODE"] = False
-    cursor.fetchone.side_effect = [None, booking_row()]
+    cursor.fetchone.side_effect = [booking_row()]
     response = client.post("/venue-bookings", json=PAYLOAD)
     assert response.status_code == 201
     assert response.json["requestedStartTime"] == "2026-10-01T09:00:00"
@@ -82,6 +82,6 @@ def test_write_remains_naive_pending_without_dev_gate(setup):
         VENUE_ID,
         booking_row()["requested_end_time"].replace(tzinfo=SINGAPORE),
         booking_row()["requested_start_time"].replace(tzinfo=SINGAPORE),
-    ]
+    ] * 2
     assert "VenueHold" not in sql
     assert "'Pending Review'" in cursor.execute.call_args.args[0]

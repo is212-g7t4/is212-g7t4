@@ -22,12 +22,36 @@ export interface CreateVenueBooking {
   venueRequirements: string
 }
 
+export class VenueBookingError extends Error {
+  status: number
+  code?: string
+  conflictTypes: string[]
+
+  constructor(status: number, body: unknown) {
+    const data = body && typeof body === 'object' ? body as Record<string, unknown> : {}
+    super(typeof data.message === 'string' && data.message.trim() ? data.message : 'Unable to complete the venue booking request.')
+    this.status = status
+    this.code = typeof data.code === 'string' ? data.code : undefined
+    this.conflictTypes = Array.isArray(data.conflictTypes)
+      ? [...new Set(data.conflictTypes.filter((value): value is string => typeof value === 'string'))]
+      : []
+  }
+}
+
 const serviceUrl = () => import.meta.env.VITE_VENUE_BOOKING_SERVICE_URL || 'http://localhost:5007'
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${serviceUrl()}${path}`, init)
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.message || 'Unable to complete the venue booking request.')
+  const uncertainMessage = init?.method
+    ? 'Unable to confirm whether the booking request was saved. Check existing bookings before trying again.'
+    : 'Unable to load venue bookings.'
+  const response = await fetch(`${serviceUrl()}${path}`, init).catch(() => {
+    throw new Error(uncertainMessage)
+  })
+  const body = await response.json().catch(() => {
+    if (response.ok) throw new Error(uncertainMessage)
+    return {}
+  })
+  if (!response.ok) throw new VenueBookingError(response.status, body)
   return body
 }
 
