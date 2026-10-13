@@ -96,6 +96,14 @@ a save that keeps the status and updates the action details, and that keeps
 working at every stage. Only the pre-safety transitions (SCRUM-19) actually move
 an event, which is what keeps AC2 true.
 
+SCRUM-152 AC1's guarantee that `Confirmed` can't be reached "through ... the
+API" covers `PATCH /events/<id>/safety-status` too, not just `/progress`:
+that endpoint accepts a direct call only from Safety Check Service, proven by
+`X-Internal-Service-Token`. That lock is opt-in — set `INTERNAL_SERVICE_TOKEN`
+here and on Safety Check Service to turn it on; `docker-compose.yml` passes
+the same value to both from the root `.env`. Leaving it unset logs a startup
+warning and leaves the endpoint unlocked, as it was before SCRUM-150.
+
 The gate runs inside the row lock (`SELECT ... FOR UPDATE`) and after the
 assigned-coordinator check, so a caller who isn't the assigned coordinator
 still gets `403` and learns nothing about the event's stage. A blocked move

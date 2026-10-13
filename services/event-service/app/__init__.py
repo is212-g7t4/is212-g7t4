@@ -39,8 +39,6 @@ from app.models import (
 )
 from app.validation import validate
 
-EVENT_STATUSES = ("Submitted", "Under Review", "Approved", "Confirmed", "Rejected")
-
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -53,6 +51,12 @@ def create_app(config=None):
         INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN"),
     )
     app.config.update(config or {})
+
+    if not app.config["INTERNAL_SERVICE_TOKEN"]:
+        app.logger.warning(
+            "INTERNAL_SERVICE_TOKEN is not set: PATCH /events/<id>/safety-status "
+            "is not locked to Safety Check Service (SCRUM-150/152)."
+        )
 
     @app.after_request
     def cors(response):
@@ -218,8 +222,8 @@ def create_app(config=None):
     def overlapping_events():
         # Time-window lookup for Equipment Reservation Service; summaries only, no event body.
         statuses = [part for part in request.args.get("statuses", "").split(",") if part]
-        if not statuses or any(s not in EVENT_STATUSES for s in statuses):
-            return jsonify(message=f"statuses must list values from: {', '.join(EVENT_STATUSES)}."), 400
+        if not statuses or any(s not in ALL_STATUSES for s in statuses):
+            return jsonify(message=f"statuses must list values from: {', '.join(ALL_STATUSES)}."), 400
         try:
             start, end = (datetime.fromisoformat(request.args.get(key, "")) for key in ("start", "end"))
             exclude = request.args.get("excludeEventId")

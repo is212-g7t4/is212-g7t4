@@ -101,3 +101,23 @@ def test_overlapping_events_reject_bad_input(setup, query):
 def test_overlapping_events_missing_database_url_is_503():
     client = create_app({"DATABASE_URL": None}).test_client()
     assert client.get(f"/events/overlapping?{WINDOW}").status_code == 503
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["Pending Safety Check", "Safety Changes Requested", "Cancelled", "Confirmed"],
+)
+def test_overlapping_events_accepts_every_safety_status(setup, status):
+    """SCRUM-152 B3: the whole lifecycle, not just the pre-Week-7 five values."""
+    client, cursor, _ = setup
+    cursor.fetchall.return_value = []
+
+    response = client.get(f"/events/overlapping?start=2026-10-01T09:00&end=2026-10-01T17:00&statuses={status}")
+
+    assert response.status_code == 200
+
+
+def test_overlapping_events_still_rejects_an_unknown_status(setup):
+    client, _, connect = setup
+    assert client.get(f"/events/overlapping?start=2026-10-01T09:00&end=2026-10-01T17:00&statuses=Bogus").status_code == 400
+    connect.assert_not_called()
