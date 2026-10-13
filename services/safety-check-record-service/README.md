@@ -19,6 +19,8 @@ this service calls no other service (AGENTS.md).
 | `POST` | `/safety-check-records` | Opens the next round for an event (SCRUM-149) |
 | `GET` | `/safety-check-records?eventId=<uuid>[&status=<status>]` | An event's rounds, newest first |
 | `DELETE` | `/safety-check-records/<id>` | Removes an undecided round — compensation only, see below |
+| `PATCH` | `/safety-check-records/<id>/decision` | Decides the open round (SCRUM-150) |
+| `POST` | `/safety-check-records/<id>/reopen` | Undoes a decision — compensation only, see below |
 
 ### `POST /safety-check-records`
 
@@ -41,6 +43,36 @@ transaction**, under `FOR UPDATE` on the event's latest round. For a first
 submission there is no row to lock, so `UNIQUE (event_id, round_number)`
 (`safety_check_event_round_key`) is the backstop: the losing insert's
 `UniqueViolation` is caught and answered with the same `409`.
+
+### `PATCH /safety-check-records/<id>/decision`
+
+Body: `{status, decidedBy, remarks?}`. `status` must be one of
+`DECISION_STATUSES` — only `Safety Approved` until SCRUM-151 adds
+`Changes Requested` and `Safety Rejected`. `remarks` is optional text, up to
+2000 characters; blank is stored as `NULL`.
+
+The round is selected `FOR UPDATE` first, so this is also the race guard for
+SCRUM-150 AC3: if two Safety Officers decide the same round at once, only one
+`UPDATE` can see it still `Pending`.
+
+- `200` with the decided record (`decidedBy`, `decidedAt = now()`, `remarks`).
+- `404` when the round doesn't exist.
+- `409 {"code": "SAFETY_CHECK_ALREADY_DECIDED", "safetyCheck": {...}}` when the
+  round is no longer `Pending` — the race's loser, or a stale retry.
+- `409 {"code": "NOT_LATEST_ROUND"}` when a later round exists for the event.
+- `400` for a bad UUID, an unlisted `status`, or remarks that aren't text or
+  are over 2000 characters.
+- `503` when `DATABASE_URL` is unset or the database is unreachable.
+
+### `POST /safety-check-records/<id>/reopen` is for compensation only
+
+Body: `{decidedAt}`, the value `PATCH .../decision` returned. Safety Check
+Service calls this when it decided a round and then could not move the event
+(for example, the event's status changed underneath it). `decidedAt` must
+match the round's current `decidedAt` exactly, so this can only undo the
+decision the same request just made — never an older, unrelated decision.
+`409` if the round isn't decided or `decidedAt` doesn't match; `404` if
+missing.
 
 ### `DELETE /safety-check-records/<id>` is for compensation only
 
