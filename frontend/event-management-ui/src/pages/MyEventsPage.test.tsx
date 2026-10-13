@@ -110,6 +110,6 @@ test('filters events by their venue requirements text', async () => {
 test('does not load internal events for an attendee', () => {
   render(<MyEventsPage role="Attendee" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
-  expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, and Technical Support.')).toBeInTheDocument()
+  expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, Technical Support, and Safety Officers.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
 })

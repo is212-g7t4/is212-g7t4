@@ -15,6 +15,7 @@ import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
 import { OrganiserEventDetailPage } from './OrganiserEventDetailPage'
 import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
 import { SafetySubmitPanel } from '../features/safety/SafetySubmitPanel'
+import { SafetyDecisionPanel } from '../features/safety/SafetyDecisionPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 
 type EventDetailProps = { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
@@ -52,7 +53,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
     if (canViewAllInternalEvents(role, isManager)) params.set('isManager', 'true')
-    if (role === 'Venue Staff' || role === 'Technical Support') params.set('viewerRole', role)
+    if (role === 'Venue Staff' || role === 'Technical Support' || role === 'Safety Officer') params.set('viewerRole', role)
     eventApi(`/events/${eventId}?${params.toString()}`).then((body) => {
       if (active) {
         setEvent(body)
@@ -180,7 +181,14 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
           refreshKey={bookingsChanged}
           onSubmitted={() => { setLoading(true); setRefresh((value) => value + 1) }}
         />}
-        {event.status === 'Pending Safety Check' && (() => {
+        {/* SCRUM-150: the Safety Officer's decision, offered only while the
+            event is actually awaiting one (AC3, UI side). */}
+        {role === 'Safety Officer' && event.status === 'Pending Safety Check' && <SafetyDecisionPanel
+          eventId={event.id}
+          safetyOfficerId={currentCoordinator.id}
+          onApproved={() => { setLoading(true); setRefresh((value) => value + 1) }}
+        />}
+        {event.status === 'Pending Safety Check' && role !== 'Safety Officer' && (() => {
           const submittedAt = submittedForSafetyCheckAt(event)
           return <p className="muted" role="status">
             {submittedAt
