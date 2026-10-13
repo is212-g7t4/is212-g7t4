@@ -22,6 +22,10 @@ CHANGES_REQUESTED = "Changes Requested"
 SAFETY_REJECTED = "Safety Rejected"
 RECORD_STATUSES = (PENDING, SAFETY_APPROVED, CHANGES_REQUESTED, SAFETY_REJECTED)
 
+# SCRUM-150 only decides approvals; SCRUM-151 adds CHANGES_REQUESTED and
+# SAFETY_REJECTED to this tuple.
+DECISION_STATUSES = (SAFETY_APPROVED,)
+
 NOTES_LIMIT = 2000
 
 
@@ -39,6 +43,22 @@ class RecordNotFoundError(Exception):
 
 class RecordNotDeletableError(Exception):
     """The round has already been decided, so the composite's rollback must not remove it."""
+
+
+class RoundAlreadyDecidedError(Exception):
+    """The round is no longer 'Pending', so it can't be decided again (race guard)."""
+
+    def __init__(self, existing):
+        super().__init__(existing)
+        self.existing = existing
+
+
+class RoundNotLatestError(Exception):
+    """A later round exists for the event, so this one is history, not the open round."""
+
+
+class RoundNotReopenableError(Exception):
+    """Compensation only: the round isn't decided, or `decidedAt` doesn't match the decision being undone."""
 
 
 def _utc(value):
@@ -155,6 +175,70 @@ def delete_open_round(database_url, safety_check_id):
                 'DELETE FROM public."SafetyCheck" WHERE safety_check_id = %s',
                 [safety_check_id],
             )
+
+
+def decide_round(database_url, safety_check_id, status, decided_by, remarks=None):
+    """Decide the open round: SCRUM-150 AC2 (approve), SCRUM-151 (reject/changes).
+
+    `FOR UPDATE` on this round is the race guard for AC3: if two Safety
+    Officers click at once, only one `UPDATE` can win; the other finds the
+    round no longer 'Pending' and raises `RoundAlreadyDecidedError` before
+    anything is written.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."SafetyCheck"
+                    WHERE safety_check_id = %s
+                    FOR UPDATE""",
+                [safety_check_id],
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                raise RecordNotFoundError
+            if existing["status"] != PENDING or existing["decided_at"] is not None:
+                raise RoundAlreadyDecidedError(serialize(existing))
+            latest = _latest_round(cursor, existing["event_id"], lock=False)
+            if latest and latest["round_number"] != existing["round_number"]:
+                raise RoundNotLatestError
+            cursor.execute(
+                f"""UPDATE public."SafetyCheck"
+                    SET status = %s, decided_by = %s, decided_at = now(), remarks = %s
+                    WHERE safety_check_id = %s
+                    RETURNING {COLUMNS}""",
+                [status, decided_by, clean_notes(remarks), safety_check_id],
+            )
+            return serialize(cursor.fetchone())
+
+
+def reopen_round(database_url, safety_check_id, decided_at):
+    """Compensation only: undo the decision the caller's own request just made.
+
+    Reverts to 'Pending' and clears the decision fields, but only if
+    `decided_at` matches the value `decide_round` returned. That way this can
+    only undo the write the same request just made, never an older decision.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."SafetyCheck"
+                    WHERE safety_check_id = %s
+                    FOR UPDATE""",
+                [safety_check_id],
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                raise RecordNotFoundError
+            if existing["decided_at"] is None or _utc(existing["decided_at"]) != decided_at:
+                raise RoundNotReopenableError
+            cursor.execute(
+                f"""UPDATE public."SafetyCheck"
+                    SET status = %s, decided_by = NULL, decided_at = NULL, remarks = NULL
+                    WHERE safety_check_id = %s
+                    RETURNING {COLUMNS}""",
+                [PENDING, safety_check_id],
+            )
+            return serialize(cursor.fetchone())
 
 
 def clean_notes(value):

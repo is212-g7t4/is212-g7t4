@@ -9,6 +9,7 @@ export const users = {
   coordinator: { user_id: 'u-coord', username: 'Carl Ng', email: 'carl@example.com', role: 'Event Coordinator', organization: 'Org A' },
   venueStaff: { user_id: '00000000-0000-0000-0000-0000000000aa', username: 'Vera Koh', email: 'vera@example.com', role: 'Venue Staff', organization: 'Org A' },
   techSupport: { user_id: '00000000-0000-0000-0000-0000000000bb', username: 'Wei Chen', email: 'wei@example.com', role: 'Technical Support', organization: 'Org A' },
+  safetyOfficer: { user_id: '00000000-0000-0000-0000-0000000000cc', username: 'Nurul Huda', email: 'nurul@example.com', role: 'Safety Officer', organization: 'Org A' },
   attendee: { user_id: 'u-attendee', username: 'Adam Yeo', email: 'adam@example.com', role: 'Attendee', organization: 'Org B' },
 }
 export const allUsers = Object.values(users)

@@ -7,7 +7,17 @@ the quantity other non-rejected events hold over an overlapping window.
 """
 
 # Event statuses whose Approved equipment requests hold stock; pending events hold it once Technical Support approves a line.
-RESERVING_EVENT_STATUSES = ("Approved", "Confirmed", "Submitted", "Under Review")
+# Pending Safety Check and Safety Changes Requested are in the safety-check
+# workflow (SCRUM-149/152), between Approved and Confirmed, and hold stock the
+# same way; Cancelled is deliberately excluded (SCRUM-151 AC5).
+RESERVING_EVENT_STATUSES = (
+    "Approved",
+    "Confirmed",
+    "Submitted",
+    "Under Review",
+    "Pending Safety Check",
+    "Safety Changes Requested",
+)
 
 
 def effective_available_stock(equipment, reserved_quantity):
