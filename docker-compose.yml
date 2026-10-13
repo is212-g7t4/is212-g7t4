@@ -17,6 +17,7 @@ services:
       - ./services/event-service/.env
     environment:
       <<: *frontend-environment
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
     ports:
       - "5003:5000"
 

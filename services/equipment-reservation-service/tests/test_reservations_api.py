@@ -2,6 +2,7 @@
 import pytest
 
 from app import create_app
+from app.availability import RESERVING_EVENT_STATUSES
 from app.clients import DownstreamError
 
 USER = "ad3d6da3-7220-4f80-9157-2ee4abc0455c"
@@ -114,7 +115,7 @@ def test_partial_allocation_only_subtracts_what_overlapping_events_hold(world, c
     event = next(e for e in rows(client) if e["eventId"] == TARGET)
 
     assert event["requests"][0]["availability"] == {"reservedQuantity": 7, "availableStock": 3, "isInsufficient": False}
-    assert ("overlapping", START, END, ("Approved", "Confirmed", "Submitted", "Under Review"), TARGET) in world.calls
+    assert ("overlapping", START, END, RESERVING_EVENT_STATUSES, TARGET) in world.calls
     assert ("list_requests", "Approved", [OTHER, THIRD]) in world.calls
 
 
@@ -132,6 +133,28 @@ def test_only_approved_requests_from_overlapping_events_reduce_available_stock(w
 
     assert request["availability"] == {"reservedQuantity": 4, "availableStock": 6, "isInsufficient": False}
     assert ("list_requests", "Approved", [OTHER]) in world.calls
+
+
+def test_overlapping_event_pending_safety_check_still_holds_its_equipment(world, client):
+    """SCRUM-152 B7: SCRUM-149 moved approved-and-submitted events into
+    'Pending Safety Check', outside the pre-Week-7 status list, which had
+    silently freed their held equipment for a second overlapping event to
+    take. 'Pending Safety Check' and 'Safety Changes Requested' are back in
+    RESERVING_EVENT_STATUSES, so the hold survives a safety-check round.
+    """
+    world.overlapping = [{"id": OTHER, "status": "Pending Safety Check"}]
+    world.requests = [
+        line("r1", TARGET, MIC, 6),
+        line("held", OTHER, MIC, 4, "Approved"),
+    ]
+
+    request = rows(client)[0]["requests"][0]
+
+    assert request["availability"] == {"reservedQuantity": 4, "availableStock": 6, "isInsufficient": False}
+    assert ("overlapping", START, END, RESERVING_EVENT_STATUSES, TARGET) in world.calls
+    assert "Pending Safety Check" in RESERVING_EVENT_STATUSES
+    assert "Safety Changes Requested" in RESERVING_EVENT_STATUSES
+    assert "Cancelled" not in RESERVING_EVENT_STATUSES
 
 
 def test_rejected_request_from_an_overlapping_event_does_not_reserve_stock(world, client):
