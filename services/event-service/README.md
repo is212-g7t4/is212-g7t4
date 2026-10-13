@@ -122,7 +122,25 @@ yet approved. Any other disallowed transition still returns the generic
 The one way into a safety status. `PATCH /progress` above still cannot reach
 any of them, so the two tables of allowed moves never overlap:
 `ALLOWED_TRANSITIONS` is the coordinator's, `SAFETY_TRANSITIONS` is the
-workflow's. SCRUM-149 adds its single entry, `Approved → Pending Safety Check`.
+workflow's. SCRUM-149 adds `Approved → Pending Safety Check`; SCRUM-150 adds
+`Pending Safety Check → Confirmed`.
+
+**Locked to Safety Check Service (SCRUM-150, moved forward from SCRUM-152
+v2's B1).** This story opens the first legitimate route into `Confirmed`, so
+without a lock a direct API call could confirm an event and skip the Safety
+Officer. Every request must carry the shared secret:
+
+```
+X-Internal-Service-Token: <INTERNAL_SERVICE_TOKEN>
+```
+
+checked with `hmac.compare_digest` before the body is even parsed: missing or
+wrong → `403 {"code": "INTERNAL_ONLY"}`; `INTERNAL_SERVICE_TOKEN` unset on this
+service → `503`. The header is deliberately **not** in the CORS allow-headers
+list, so a browser cannot send it — only a server-to-server caller can. Set
+`INTERNAL_SERVICE_TOKEN` to the same value here and in
+[`safety-check-service`](../safety-check-service/), which sends the header on
+every call to this endpoint, submit and approve alike.
 
 ```json
 PATCH /events/<id>/safety-status
@@ -134,19 +152,41 @@ PATCH /events/<id>/safety-status
 }
 ```
 
-Called by [`safety-check-service`](../safety-check-service/) (the composite),
-which has already confirmed every venue booking and equipment request is
-approved — that check is not repeated here. What *is* checked, inside
-`SELECT ... FOR UPDATE` because the composite's earlier read can be stale:
+```json
+PATCH /events/<id>/safety-status
+{
+  "status": "Confirmed",
+  "decidedBy": "<uuid>",
+  "safetyCheckId": "<uuid>",
+  "roundNumber": 1,
+  "remarks": "Looks safe."
+}
+```
 
-- the caller is the event's assigned coordinator, else `403` (SCRUM-149 AC5) —
-  checked before the status, as in `PATCH /progress`
-- the event isn't already `Pending Safety Check`, else
-  `409 {"code": "SAFETY_CHECK_ALREADY_PENDING"}` (AC4)
-- `status` is reachable from the current one per `SAFETY_TRANSITIONS`, else
-  `409 {"code": "INVALID_SAFETY_TRANSITION", "currentStatus": "<status>"}`
+Called by the composite, which has already checked the caller's role
+(coordinator for submit, Safety Officer for approve, via User Service) and
+the event's arrangements — neither is repeated here. What *is* checked,
+inside `SELECT ... FOR UPDATE` because the composite's earlier read can be
+stale:
 
-On success it returns `200` with the event and appends to `actionHistory`:
+- **Submit** (`status: "Pending Safety Check"`): the caller is the event's
+  assigned coordinator, else `403` (SCRUM-149 AC5); the event isn't already
+  `Pending Safety Check`, else `409 {"code": "SAFETY_CHECK_ALREADY_PENDING"}`
+  (AC4).
+- **Approve** (`status: "Confirmed"`): no coordinator check — the Safety
+  Officer deciding is not the coordinator. Instead, the round being approved
+  must be the one the event actually has open: the latest `actionHistory`
+  entry with `status == "Pending Safety Check"` must carry the same
+  `safetyCheckId` as this request, else
+  `409 {"code": "STALE_SAFETY_CHECK"}` (SCRUM-150 AC3). This is what stops a
+  stale or made-up round from confirming the event, with no call to another
+  service.
+- Either way, `status` must be reachable from the current one per
+  `SAFETY_TRANSITIONS`, else
+  `409 {"code": "INVALID_SAFETY_TRANSITION", "currentStatus": "<status>"}`.
+
+On success it returns `200` with the event and appends to `actionHistory`.
+Submit:
 
 ```json
 {
@@ -157,16 +197,31 @@ On success it returns `200` with the event and appends to `actionHistory`:
 }
 ```
 
-That is the event-side record of AC1's submission time, and what the event
-detail page reads to say when the event was submitted. `SafetyCheck.submitted_at`
-in `safety-check-record-service` is the authoritative one. The coordinator's
-`decision`/`decisionHistory` are untouched: a safety decision is its own thing,
-kept on the `SafetyCheck` round.
+Approve:
 
-Like every endpoint today there is no JWT, so this one trusts `coordinatorId`.
-Its own assignment check means a direct browser call still can't submit someone
-else's event (AC5), but it could skip the arrangements check — the same trust
-level as the rest of the system until auth lands.
+```json
+{
+  "status": "Confirmed",
+  "details": "Operational Safety Check approved (round 1).",
+  "decidedBy": "<uuid>", "safetyCheckId": "<uuid>",
+  "remarks": "Looks safe.",
+  "recordedAt": "2026-11-02T03:00:00+00:00"
+}
+```
+
+That is the event-side record of AC1/AC2's "in the event's history" — what
+the event detail page reads to show the submission and the decision.
+`SafetyCheck.submitted_at`/`decided_at` in `safety-check-record-service` stay
+the authoritative times. The coordinator's `decision`/`decisionHistory` are
+untouched throughout: a safety decision is its own thing, kept on the
+`SafetyCheck` round.
+
+Like every endpoint today there is no JWT, so this one trusts `coordinatorId`
+and `decidedBy`. The internal token plus the assignment/round checks mean a
+direct browser call still can't submit someone else's event or invent a
+decision (AC5, AC3), but it could skip the arrangements check or role lookup
+if it somehow had the token — the same trust level as the rest of the system
+until auth lands.
 
 The lifecycle constants (`ALL_STATUSES`, `PRE_SAFETY_STATUSES`,
 `SAFETY_STATUSES`, `PREPARATION_STATUS`, `ALLOWED_TRANSITIONS`,
