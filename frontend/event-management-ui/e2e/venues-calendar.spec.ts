@@ -18,6 +18,7 @@ test.beforeEach(async ({ page, mockApi }) => {
   await mock(page, 'user', '/users', (route) => json(route, { users: allUsers }))
   await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'availability', '/venue-holds', (route) => json(route, { holds: [] }))
+  await mock(page, 'venueBooking', '/venue-closures', (route) => json(route, { closures: [], nextCursor: null }))
 })
 
 test('venue staff browses the catalogue and opens a venue', async ({ page }) => {
