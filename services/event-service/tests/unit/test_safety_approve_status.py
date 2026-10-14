@@ -257,6 +257,65 @@ def test_missing_pending_entry_is_refused(setup):
     assert response.json["code"] == "STALE_SAFETY_CHECK"
 
 
+def test_a_coordinator_progress_save_does_not_make_the_open_round_stale(setup):
+    """A progress note saved while the event waits for its decision writes its
+    own 'Pending Safety Check' entry, with no round id. Matching on status
+    alone let that shadow the real submission, so the Safety Officer could no
+    longer approve the round that is genuinely open.
+    """
+    client, _, cursor = setup
+    cursor.fetchone.side_effect = [
+        event_row(
+            "Pending Safety Check",
+            action_history=[
+                {
+                    "status": "Pending Safety Check",
+                    "details": "Submitted for Operational Safety Check (round 1).",
+                    "coordinatorId": COORDINATOR_ID,
+                    "safetyCheckId": SAFETY_CHECK_ID,
+                    "recordedAt": "2026-11-01T02:30:00+00:00",
+                },
+                {
+                    "status": "Pending Safety Check",
+                    "details": "Chased the venue for the floor plan.",
+                    "coordinatorId": COORDINATOR_ID,
+                    "recordedAt": "2026-11-01T06:00:00+00:00",
+                },
+            ],
+        ),
+        event_row("Confirmed"),
+    ]
+
+    response = patch_safety_status(client)
+
+    assert response.status_code == 200
+    assert response.json["status"] == "Confirmed"
+    assert cursor.execute.call_args_list[1].args[1][0] == "Confirmed"
+
+
+def test_a_progress_save_cannot_stand_in_for_a_submission(setup):
+    """The flip side: an entry with no round id is not a submission, so it
+    can't satisfy the check on its own.
+    """
+    client, _, cursor = setup
+    cursor.fetchone.return_value = event_row(
+        "Pending Safety Check",
+        action_history=[
+            {
+                "status": "Pending Safety Check",
+                "details": "Chased the venue for the floor plan.",
+                "coordinatorId": COORDINATOR_ID,
+                "recordedAt": "2026-11-01T06:00:00+00:00",
+            },
+        ],
+    )
+
+    response = patch_safety_status(client)
+
+    assert response.status_code == 409
+    assert response.json["code"] == "STALE_SAFETY_CHECK"
+
+
 def test_missing_event_is_404(setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = None
