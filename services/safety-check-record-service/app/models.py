@@ -176,7 +176,7 @@ def _flags_for(cursor, safety_check_ids):
         return {}
     cursor.execute(
         f"""SELECT {FLAG_COLUMNS} FROM public."SafetyCheckFlag"
-            WHERE safety_check_id = ANY(%s)""",
+            WHERE safety_check_id = ANY(%s::uuid[])""",
         [list(safety_check_ids)],
     )
     flags_by_round = {}
