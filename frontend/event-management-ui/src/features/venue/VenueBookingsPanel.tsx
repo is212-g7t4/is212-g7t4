@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Field, StatusBadge } from '../../components/FormControls'
 import { InlineLoading } from '../../components/Loading'
 import { formatSchedule } from '../event/dateFormat'
 import { fetchVenues } from './venues'
 import type { Venue } from './venues'
-import { cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
+import { VenueBookingError, cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
 import type { VenueBooking } from './venueBookings'
 
 type Props = {
@@ -20,6 +20,12 @@ type Props = {
    * (or stop it being ready), so the page is told to re-read that.
    */
   onBookingsChanged?: () => void
+}
+
+const conflictMessages: Record<string, string> = {
+  APPROVED_BOOKING: 'An approved booking overlaps this time.',
+  TENTATIVE_HOLD: 'An active tentative hold overlaps this time.',
+  VENUE_CLOSURE: 'The venue is closed during this time.',
 }
 
 const localDateTime = (value: string) => value ? value.slice(0, 16) : ''
@@ -39,6 +45,7 @@ export function VenueBookingsPanel({
   const [loadError, setLoadError] = useState('')
   const [venueError, setVenueError] = useState('')
   const [submitError, setSubmitError] = useState('')
+  const draftRevision = useRef(0)
   const [submitMessage, setSubmitMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -68,6 +75,7 @@ export function VenueBookingsPanel({
   const availableVenues = venues.filter((venue) => venue.status === 'Available')
 
   const resetForm = () => {
+    setSubmitError('')
     setEditingId(null)
     setVenueId('')
     setStart(localDateTime(eventStart))
@@ -102,6 +110,7 @@ export function VenueBookingsPanel({
       return
     }
     setSaving(true)
+    const submittedRevision = draftRevision.current
     try {
       const details = {
         eventId,
@@ -124,11 +133,20 @@ export function VenueBookingsPanel({
       ).sort((left, right) => left.requestedStartTime.localeCompare(right.requestedStartTime)))
       setSubmitMessage(editingId
         ? `${selectedVenue?.name || 'Venue'} booking updated and returned to pending review.`
-        : `${selectedVenue?.name || 'Venue'} booking request submitted independently.`)
+        : `${selectedVenue?.name || 'Venue'} booking request submitted. Status: Pending Review.`)
       resetForm()
       onBookingsChanged?.()
     } catch (cause) {
-      setSubmitError(cause instanceof Error ? cause.message : 'Unable to save this venue booking.')
+      if (cause instanceof VenueBookingError && cause.status === 409 && cause.code === 'VENUE_UNAVAILABLE') {
+        // A late rejection belongs to the submitted draft, not a newly edited time/venue.
+        if (submittedRevision !== draftRevision.current) return
+        const reasons = cause.conflictTypes
+          .map((type) => Object.hasOwn(conflictMessages, type) ? conflictMessages[type] : '')
+          .filter(Boolean).join(' ')
+        setSubmitError(`Request not submitted. ${reasons || 'The venue is unavailable for this time.'} Choose another venue or time.`)
+      } else {
+        setSubmitError(cause instanceof Error ? cause.message : 'Unable to save this venue booking.')
+      }
     } finally {
       setSaving(false)
     }
@@ -179,7 +197,7 @@ export function VenueBookingsPanel({
           </article>)}
         </div>}
 
-      <form className="venue-booking-form" onSubmit={submit}>
+      <form className="venue-booking-form" onSubmit={submit} onChangeCapture={() => { draftRevision.current += 1 }}>
         <h4>{editingId ? 'Edit venue booking' : 'Add venue booking'}</h4>
         <label className="field"><span>Venue <span className="required">*</span></span>
           <select value={venueId} onChange={(change) => { setVenueId(change.target.value); setSubmitError('') }} disabled={Boolean(venueError)} required>
@@ -189,11 +207,11 @@ export function VenueBookingsPanel({
           {venueError && <span className="field-error" role="alert">{venueError}</span>}
         </label>
         <div className="field-row">
-          <Field label="Booking start" type="datetime-local" value={start} onChange={setStart} required />
-          <Field label="Booking end" type="datetime-local" value={end} onChange={setEnd} required />
+          <Field label="Booking start" type="datetime-local" value={start} onChange={(value) => { setStart(value); setSubmitError('') }} required />
+          <Field label="Booking end" type="datetime-local" value={end} onChange={(value) => { setEnd(value); setSubmitError('') }} required />
         </div>
-        <Field label="Expected attendance / required capacity" type="number" min="1" value={requiredCapacity} onChange={setRequiredCapacity} required />
-        <Field label="Venue requirements" value={requirements} onChange={setRequirements} textarea placeholder="e.g. Theatre seating, stage and projector." />
+        <Field label="Expected attendance / required capacity" type="number" min="1" value={requiredCapacity} onChange={(value) => { setRequiredCapacity(value); setSubmitError('') }} required />
+        <Field label="Venue requirements" value={requirements} onChange={(value) => { setRequirements(value); setSubmitError('') }} textarea placeholder="e.g. Theatre seating, stage and projector." />
         {submitError && <p className="field-error" role="alert">{submitError}</p>}
         {submitMessage && <p role="status">{submitMessage}</p>}
         <button className="button primary" type="submit" disabled={saving || cancellingId !== null || Boolean(venueError)}>

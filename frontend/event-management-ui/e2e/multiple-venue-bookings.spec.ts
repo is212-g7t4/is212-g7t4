@@ -55,7 +55,7 @@ test('assigned coordinator creates and views independent venue bookings for one 
   await page.getByLabel('Venue requirements').fill('Breakout tables')
   await page.getByRole('button', { name: 'Submit venue booking' }).click()
 
-  await expect(page.getByText('Meeting Room booking request submitted independently.')).toBeVisible()
+  await expect(page.getByText('Meeting Room booking request submitted. Status: Pending Review.')).toBeVisible()
   expect(submitted).toHaveLength(1)
   expect(submitted[0]).toMatchObject({
     eventId: event.id,

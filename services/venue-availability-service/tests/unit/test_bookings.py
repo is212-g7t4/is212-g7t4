@@ -21,7 +21,7 @@ def test_health():
 
 def test_create_booking_succeeds_when_no_conflict(setup):
     client, cursor = setup
-    cursor.fetchone.side_effect = [None, booking_row()]
+    cursor.fetchone.side_effect = [booking_row()]
 
     response = client.post(
         "/venue-bookings",
@@ -60,7 +60,7 @@ def test_conflicts_are_scoped_to_venue_and_time_not_event(setup):
 
 def test_create_booking_rejects_overlap_with_approved_booking(setup):
     client, cursor = setup
-    cursor.fetchone.side_effect = [{"booking_id": BOOKING_ID}]
+    cursor.fetchall.return_value = [{"conflict_type": "APPROVED_BOOKING"}]
 
     response = client.post(
         "/venue-bookings",
@@ -99,7 +99,6 @@ def test_approve_booking_succeeds_when_no_conflict(setup):
     client, cursor = setup
     cursor.fetchone.side_effect = [
         booking_row(),
-        None,
         booking_row(status="Approved", reviewed_by=USER_ID),
     ]
 
@@ -113,7 +112,8 @@ def test_approve_booking_succeeds_when_no_conflict(setup):
 
 def test_approve_booking_rejects_when_now_conflicting(setup):
     client, cursor = setup
-    cursor.fetchone.side_effect = [booking_row(), {"booking_id": "other"}]
+    cursor.fetchone.side_effect = [booking_row()]
+    cursor.fetchall.return_value = [{"conflict_type": "APPROVED_BOOKING"}]
 
     response = client.patch(
         f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}
@@ -203,7 +203,6 @@ def test_update_booking_changes_only_selected_row_and_resets_review(setup):
     client, cursor = setup
     cursor.fetchone.side_effect = [
         booking_row(status="Approved", reviewed_by=USER_ID),
-        None,
         booking_row(
             required_capacity=50,
             venue_requirements="Revised breakout layout",
@@ -238,7 +237,8 @@ def test_update_booking_changes_only_selected_row_and_resets_review(setup):
 
 def test_update_booking_rechecks_conflicts_for_only_that_booking(setup):
     client, cursor = setup
-    cursor.fetchone.side_effect = [booking_row(), {"booking_id": "other"}]
+    cursor.fetchone.side_effect = [booking_row()]
+    cursor.fetchall.return_value = [{"conflict_type": "APPROVED_BOOKING"}]
 
     response = client.patch(
         f"/venue-bookings/{BOOKING_ID}",
