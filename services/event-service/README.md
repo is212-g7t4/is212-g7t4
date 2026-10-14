@@ -100,9 +100,15 @@ SCRUM-152 AC1's guarantee that `Confirmed` can't be reached "through ... the
 API" covers `PATCH /events/<id>/safety-status` too, not just `/progress`:
 that endpoint accepts a direct call only from Safety Check Service, proven by
 `X-Internal-Service-Token`. That lock is opt-in — set `INTERNAL_SERVICE_TOKEN`
-here and on Safety Check Service to turn it on; `docker-compose.yml` passes
-the same value to both from the root `.env`. Leaving it unset logs a startup
-warning and leaves the endpoint unlocked, as it was before SCRUM-150.
+here and on Safety Check Service to turn it on. Leaving it unset logs a
+startup warning and leaves the endpoint unlocked, as it was before SCRUM-150.
+
+Under Compose, this service reads the root `.env` and then
+`services/event-service/.env`, so one value in the root `.env` configures the
+whole stack while a per-service token still overrides it. The token is
+deliberately not passed through Compose's `environment:`, which would
+override the per-service file with an empty value whenever the root `.env`
+had none — silently unlocking an installation that was previously locked.
 
 The gate runs inside the row lock (`SELECT ... FOR UPDATE`) and after the
 assigned-coordinator check, so a caller who isn't the assigned coordinator
