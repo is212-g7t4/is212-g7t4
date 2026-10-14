@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
+import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { ArrowRightIcon } from '../components/Icon'
+import { RoleWarning } from '../components/FormControls'
 import { EventCardSkeletonList } from '../components/Loading'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
+import { canReviewSafetyChecks, SAFETY_CHECKS_ACCESS_NOTICE } from '../features/safety/permissions'
 
-type Props = { safetyOfficerId?: string; onViewDetails: (id: string) => void }
+type Props = { role: Role; safetyOfficerId?: string; onViewDetails: (id: string) => void }
 
 /**
  * SCRUM-150: the minimal list of events awaiting a safety check.
@@ -14,14 +17,19 @@ type Props = { safetyOfficerId?: string; onViewDetails: (id: string) => void }
  * SCRUM-162 (Claire) owns the full queue — venues, submission date, nearest
  * first, resubmission label — and replaces or extends this page.
  */
-export function SafetyChecksPage({ safetyOfficerId, onViewDetails }: Props) {
+export function SafetyChecksPage({ role, safetyOfficerId, onViewDetails }: Props) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const officerId = safetyOfficerId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || ''
+  // The sidebar only offers this page to a Safety Officer, but the route is
+  // reachable directly, so the check belongs here too — otherwise any role
+  // could open it and the read below would claim viewerRole=Safety Officer
+  // on their behalf.
+  const allowed = canReviewSafetyChecks(role)
 
   useEffect(() => {
-    if (!officerId) return
+    if (!allowed || !officerId) return
     let active = true
     const params = new URLSearchParams({
       coordinatorId: officerId,
@@ -34,7 +42,9 @@ export function SafetyChecksPage({ safetyOfficerId, onViewDetails }: Props) {
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [officerId])
+  }, [allowed, officerId])
+
+  if (!allowed) return <RoleWarning>{SAFETY_CHECKS_ACCESS_NOTICE}</RoleWarning>
 
   return <div className="page-stack">
     <section className="intro"><h1>Safety checks</h1><p className="muted">Events waiting for an Operational Safety Check decision.</p></section>

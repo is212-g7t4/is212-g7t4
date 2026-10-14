@@ -612,14 +612,23 @@ def update_event_safety_status(
 
             if status == "Confirmed":
                 # AC3: the round being approved must be the one this event has
-                # open — the latest 'Pending Safety Check' entry's
+                # open — the latest safety-check submission entry's
                 # safetyCheckId. Stops a stale or made-up round from
                 # confirming the event, with no call to another service.
+                #
+                # The entry must carry a safetyCheckId to count as a
+                # submission: a coordinator saving progress while the event
+                # waits for its decision writes a 'Pending Safety Check'
+                # entry too (the self-transition in ALLOWED_TRANSITIONS), but
+                # without a round id. Matching on status alone let that save
+                # shadow the real submission and made the open round look
+                # stale, so the Safety Officer could no longer approve it.
                 latest_pending = next(
                     (
                         entry
                         for entry in reversed(action_history)
                         if entry.get("status") == "Pending Safety Check"
+                        and entry.get("safetyCheckId")
                     ),
                     None,
                 )

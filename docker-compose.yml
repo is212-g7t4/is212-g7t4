@@ -13,11 +13,21 @@ services:
 
   event-service:
     build: ./services/event-service
+    # INTERNAL_SERVICE_TOKEN comes from the root .env via env_file, not from
+    # environment:. `environment:` always overrides env_file for a key it
+    # names — including with an empty string when the root value is unset —
+    # so naming it there (as this block used to) silently blanked out a token
+    # already configured in this service's own .env, unlocking
+    # /safety-status for anyone who hadn't also set it in the root .env.
+    # Service file last, as venue-availability-service does, so nothing the
+    # root .env happens to carry (DATABASE_URL, …) overrides this service's
+    # own settings.
     env_file:
+      - path: ./.env
+        required: false
       - ./services/event-service/.env
     environment:
       <<: *frontend-environment
-      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
     ports:
       - "5003:5000"
 

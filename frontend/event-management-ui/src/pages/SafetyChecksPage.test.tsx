@@ -35,7 +35,7 @@ beforeEach(() => {
 test('lists events awaiting a safety check, with name, schedule and attendance', async () => {
   vi.mocked(eventApi).mockResolvedValue({ events: [pendingEvent] })
 
-  render(<SafetyChecksPage safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
+  render(<SafetyChecksPage role="Safety Officer" safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
 
   expect(await screen.findByText('Community Workshop')).toBeInTheDocument()
   expect(screen.getByText('120 attendees')).toBeInTheDocument()
@@ -47,7 +47,7 @@ test('lists events awaiting a safety check, with name, schedule and attendance',
 test('empty state when nothing is waiting', async () => {
   vi.mocked(eventApi).mockResolvedValue({ events: [] })
 
-  render(<SafetyChecksPage safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
+  render(<SafetyChecksPage role="Safety Officer" safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
 
   expect(await screen.findByText('No events are waiting for a safety check.')).toBeInTheDocument()
 })
@@ -56,7 +56,7 @@ test('clicking an event opens its record', async () => {
   vi.mocked(eventApi).mockResolvedValue({ events: [pendingEvent] })
   const onViewDetails = vi.fn()
 
-  render(<SafetyChecksPage safetyOfficerId={safetyOfficerId} onViewDetails={onViewDetails} />)
+  render(<SafetyChecksPage role="Safety Officer" safetyOfficerId={safetyOfficerId} onViewDetails={onViewDetails} />)
   fireEvent.click(await screen.findByText('Community Workshop'))
 
   expect(onViewDetails).toHaveBeenCalledWith(pendingEvent.id)
@@ -65,7 +65,21 @@ test('clicking an event opens its record', async () => {
 test('a read failure is shown as an alert', async () => {
   vi.mocked(eventApi).mockRejectedValue(new Error('Unable to load events.'))
 
-  render(<SafetyChecksPage safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
+  render(<SafetyChecksPage role="Safety Officer" safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load events.')
 })
+
+test.each(['Attendee', 'Event Organiser', 'Event Coordinator', 'Venue Staff', 'Technical Support'] as const)(
+  'a %s opening the route directly sees the notice and reads nothing',
+  (role) => {
+    vi.mocked(eventApi).mockResolvedValue({ events: [pendingEvent] })
+
+    render(<SafetyChecksPage role={role} safetyOfficerId={safetyOfficerId} onViewDetails={vi.fn()} />)
+
+    expect(screen.getByText('The safety check queue is visible to Safety Officers.')).toBeInTheDocument()
+    expect(screen.queryByText('Community Workshop')).not.toBeInTheDocument()
+    // The request would otherwise claim viewerRole=Safety Officer for them.
+    expect(eventApi).not.toHaveBeenCalled()
+  },
+)

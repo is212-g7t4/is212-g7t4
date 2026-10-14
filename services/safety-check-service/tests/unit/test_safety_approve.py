@@ -38,10 +38,18 @@ class Downstream:
         self.updated = event("Confirmed")
         self.calls = []
         self.fail = {}
+        # Names of calls whose real-world side effect still happens even
+        # though the call reports failure — simulates a response lost after
+        # the downstream write actually succeeded (SCRUM-150 bug fix).
+        self.apply_despite_failure = set()
+        # Call name -> the 1-based invocation from which `fail` starts
+        # applying, so a later read can fail where an earlier one succeeded.
+        self.fail_from = {}
 
     def _maybe_fail(self, name):
         error = self.fail.get(name)
-        if error:
+        made = len([call for call in self.calls if call[0] == name])
+        if error and made >= self.fail_from.get(name, 1):
             raise error
 
     def get_user(self, user_id):
@@ -61,6 +69,8 @@ class Downstream:
 
     def decide_safety_check_record(self, safety_check_id, status, decided_by, remarks=None):
         self.calls.append(("decide", safety_check_id, status, decided_by, remarks))
+        if "decide" in self.apply_despite_failure:
+            self.rounds = [self.decided]
         self._maybe_fail("decide")
         return self.decided
 
@@ -77,6 +87,8 @@ class Downstream:
         self.calls.append(
             ("patch_event", event_id, status, safety_check_id, round_number, decided_by, remarks)
         )
+        if "patch_event" in self.apply_despite_failure:
+            self.event = self.updated
         self._maybe_fail("patch_event")
         return self.updated
 
@@ -316,6 +328,73 @@ def test_open_round_lookup_downstream_failure(error, status, client, downstream)
     assert response.status_code == status
 
 
+# --- Reconciliation: a lost response doesn't mean the write failed ----------
+
+
+@pytest.mark.parametrize("error", [clients.DownstreamError, clients.DownstreamTimeout])
+def test_decide_response_lost_but_it_actually_succeeded(error, client, downstream):
+    """SCRUM-150 bug fix: a read timeout/dropped connection on the decide call
+    doesn't mean the record service never got it — it may have decided the
+    round and only the reply was lost. Reconciling, rather than reporting
+    failure outright, means a client doesn't retry into NO_OPEN_SAFETY_CHECK
+    forever (the round is no longer 'Pending').
+    """
+    downstream.fail["decide"] = error
+    downstream.apply_despite_failure.add("decide")
+
+    response = approve(client)
+
+    assert response.status_code == 200
+    assert response.json["safetyCheck"]["status"] == "Safety Approved"
+    assert response.json["event"]["status"] == "Confirmed"
+    assert downstream.names()[-1] == "patch_event"
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [(clients.DownstreamError, 502), (clients.DownstreamTimeout, 504)],
+)
+def test_decide_response_lost_and_it_really_did_fail(error, status, client, downstream):
+    """The ordinary case: reconciliation finds the round still 'Pending', so
+    the original failure is reported (same as before this fix).
+    """
+    downstream.fail["decide"] = error
+
+    response = approve(client)
+
+    assert response.status_code == status
+    assert "patch_event" not in downstream.names()
+
+
+def test_decide_response_lost_and_the_reconciliation_read_fails_too(client, downstream):
+    """Still ambiguous after the second read, so report the original failure."""
+    downstream.fail["decide"] = clients.DownstreamTimeout
+    downstream.apply_despite_failure.add("decide")
+    downstream.fail["list_records"] = clients.DownstreamError
+    downstream.fail_from["list_records"] = 2  # the open-round read still works
+
+    response = approve(client)
+
+    assert response.status_code == 504
+    assert "patch_event" not in downstream.names()
+
+
+@pytest.mark.parametrize("error", [clients.DownstreamError, clients.DownstreamTimeout])
+def test_confirm_response_lost_but_it_actually_succeeded(error, client, downstream):
+    """SCRUM-150 bug fix: a lost response on the confirm call must not undo a
+    decision that already went through end to end — that would leave a
+    Confirmed event with its safety check reopened.
+    """
+    downstream.fail["patch_event"] = error
+    downstream.apply_despite_failure.add("patch_event")
+
+    response = approve(client)
+
+    assert response.status_code == 200
+    assert response.json["event"]["status"] == "Confirmed"
+    assert "reopen" not in downstream.names()
+
+
 # --- Compensation: the event move fails, so the decision is undone ----------
 
 
@@ -376,6 +455,19 @@ def test_event_update_downstream_failure_rolls_the_decision_back(error, status, 
     response = approve(client)
 
     assert response.status_code == status
+    assert downstream.names()[-1] == "reopen"
+
+
+def test_unexpected_event_refusal_rolls_the_decision_back(client, downstream):
+    """Anything Event Service refuses outright, without a more specific
+    mapping, still compensates and reports a plain 502.
+    """
+    downstream.fail["patch_event"] = clients.EventNotAssignedError
+
+    response = approve(client)
+
+    assert response.status_code == 502
+    assert response.json["message"] == "Unable to approve this safety check right now."
     assert downstream.names()[-1] == "reopen"
 
 
