@@ -12,6 +12,24 @@ export interface OutstandingArrangement {
   reason: string
 }
 
+/** The three planning areas a change request can flag (SCRUM-151 AC1). Mirrors
+ * `FLAG_AREAS` in safety-check-record-service. */
+export type SafetyFlagArea = 'venue arrangement' | 'technical arrangement' | 'event details'
+
+export const FLAG_AREAS: { value: SafetyFlagArea; label: string }[] = [
+  { value: 'venue arrangement', label: 'Venue arrangement' },
+  { value: 'technical arrangement', label: 'Technical / equipment arrangement' },
+  { value: 'event details', label: 'Event details' },
+]
+
+export interface SafetyCheckFlag {
+  id: string
+  area: SafetyFlagArea
+  bookingId: string | null
+  equipmentRequestId: string | null
+  changeRequired: string
+}
+
 /** One review round. Mirrors `RECORD_STATUSES` in safety-check-record-service. */
 export interface SafetyCheckRecord {
   id: string
@@ -25,6 +43,7 @@ export interface SafetyCheckRecord {
   decidedBy: string | null
   decidedAt: string | null
   remarks: string | null
+  flags: SafetyCheckFlag[]
 }
 
 export interface SafetyReadiness {
@@ -45,6 +64,26 @@ export interface ApproveSafetyCheck {
   eventId: string
   safetyOfficerId: string
   remarks?: string
+}
+
+export interface RequestSafetyChanges {
+  eventId: string
+  safetyOfficerId: string
+  reason: string
+  flags: { area: SafetyFlagArea; changeRequired: string }[]
+}
+
+export interface RejectSafetyCheck {
+  eventId: string
+  safetyOfficerId: string
+  reason: string
+}
+
+/** The venue bookings a rejection released, and any it couldn't (SCRUM-151 AC5). */
+export interface SafetyRejectionRelease {
+  venueBookingsReleased: string[]
+  venueBookingsNotReleased: string[]
+  equipment: string
 }
 
 export const NOTES_LIMIT = 2000
@@ -117,6 +156,32 @@ export async function approveSafetyCheck(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(details),
+  })
+}
+
+/** Request changes to the event's safety arrangements (SCRUM-151 AC1, AC2). */
+export async function requestSafetyChanges(
+  details: RequestSafetyChanges,
+): Promise<{ safetyCheck: SafetyCheckRecord; event: SubmittedEvent }> {
+  return request('/safety-checks/request-changes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(details),
+  })
+}
+
+/**
+ * Reject the event's Operational Safety Check (SCRUM-151 AC3, AC4, AC5).
+ * Always sends `confirmed: true` — call this only once the officer has gone
+ * through the UI's own confirm step.
+ */
+export async function rejectSafetyCheck(
+  details: RejectSafetyCheck,
+): Promise<{ safetyCheck: SafetyCheckRecord; event: SubmittedEvent; release: SafetyRejectionRelease }> {
+  return request('/safety-checks/reject', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...details, confirmed: true }),
   })
 }
 

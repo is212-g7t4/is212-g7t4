@@ -24,6 +24,10 @@ export interface EventAction {
   details: string
   coordinatorId: string
   recordedAt: string
+  /** Set on the Safety Officer's decision entries (SCRUM-150/151). */
+  remarks?: string | null
+  /** Set only on a 'Safety Changes Requested' entry (SCRUM-151 AC1, AC6). */
+  areas?: string[]
 }
 
 export interface EventProgressUpdate {
