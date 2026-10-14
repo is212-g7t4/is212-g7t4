@@ -46,22 +46,36 @@ submission there is no row to lock, so `UNIQUE (event_id, round_number)`
 
 ### `PATCH /safety-check-records/<id>/decision`
 
-Body: `{status, decidedBy, remarks?}`. `status` must be one of
-`DECISION_STATUSES` — only `Safety Approved` until SCRUM-151 adds
-`Changes Requested` and `Safety Rejected`. `remarks` is optional text, up to
-2000 characters; blank is stored as `NULL`.
+Body: `{status, decidedBy, remarks?, flags?}`. `status` is one of
+`DECISION_STATUSES`: `Safety Approved`, `Changes Requested`, `Safety Rejected`.
+Per-status rules, checked before the database is touched:
+
+| `status` | `remarks` | `flags` |
+| --- | --- | --- |
+| `Safety Approved` | optional | absent or `[]` |
+| `Changes Requested` | required, non-blank | 1 to 3 items, each `{area, changeRequired}`, no area repeated |
+| `Safety Rejected` | required, non-blank | absent or `[]` |
+
+`remarks` is text up to 2000 characters. Each flag's `area` is one of
+`FLAG_AREAS` (`"venue arrangement"`, `"technical arrangement"`,
+`"event details"`) and `changeRequired` is non-blank text up to 2000
+characters. Flags are area-level: `bookingId` / `equipmentRequestId` are
+always `null` from this endpoint (SCRUM-151 AC1).
 
 The round is selected `FOR UPDATE` first, so this is also the race guard for
-SCRUM-150 AC3: if two Safety Officers decide the same round at once, only one
-`UPDATE` can see it still `Pending`.
+SCRUM-150 AC3 / SCRUM-151 AC7: if two Safety Officers decide the same round at
+once, only one `UPDATE` can see it still `Pending`. The decision and its flags
+are written in one transaction.
 
-- `200` with the decided record (`decidedBy`, `decidedAt = now()`, `remarks`).
+- `200` with the decided record (`decidedBy`, `decidedAt = now()`, `remarks`,
+  `flags`).
 - `404` when the round doesn't exist.
 - `409 {"code": "SAFETY_CHECK_ALREADY_DECIDED", "safetyCheck": {...}}` when the
   round is no longer `Pending` — the race's loser, or a stale retry.
 - `409 {"code": "NOT_LATEST_ROUND"}` when a later round exists for the event.
-- `400` for a bad UUID, an unlisted `status`, or remarks that aren't text or
-  are over 2000 characters.
+- `400` for a bad UUID, an unlisted `status`, remarks that aren't text, are
+  over 2000 characters or are missing for a change/reject decision, or flags
+  that break any rule above.
 - `503` when `DATABASE_URL` is unset or the database is unreachable.
 
 ### `POST /safety-check-records/<id>/reopen` is for compensation only
@@ -71,6 +85,8 @@ Service calls this when it decided a round and then could not move the event
 (for example, the event's status changed underneath it). `decidedAt` must
 match the round's current `decidedAt` exactly, so this can only undo the
 decision the same request just made — never an older, unrelated decision.
+Reopening also deletes the round's `SafetyCheckFlag` rows, since they belong
+to the decision being undone.
 `409` if the round isn't decided or `decidedAt` doesn't match; `404` if
 missing.
 
@@ -93,8 +109,16 @@ withdrawal, if it is ever wanted, is a new story.
   "submittedBy": "<uuid>", "submittedAt": "2026-10-11T07:30:00+00:00",
   "equipmentPlacementNotes": "Speakers either side of the stage.",
   "crowdMovementNotes": "Entry through Door A.",
-  "status": "Pending", "decidedBy": null, "decidedAt": null, "remarks": null
+  "status": "Pending", "decidedBy": null, "decidedAt": null, "remarks": null,
+  "flags": []
 }
+```
+
+A decided `Changes Requested` round carries one flag per selected area:
+
+```json
+{"id": "<uuid>", "area": "venue arrangement", "bookingId": null,
+ "equipmentRequestId": null, "changeRequired": "Move the stage left of centre."}
 ```
 
 `status` is one of `Pending`, `Safety Approved`, `Changes Requested`,
@@ -120,5 +144,6 @@ uv run pytest
 ## Schema
 
 Created by `database/supabase/migrations/20261011140000_baseline_schema.sql`
-(SCRUM-169). This service applies no migrations of its own. It writes no
-`SafetyCheckFlag` rows either — those are SCRUM-151's.
+(SCRUM-169). This service applies no migrations of its own. It writes
+`SafetyCheckFlag` rows for a `Changes Requested` decision (SCRUM-151),
+area-level only: `bookingId` and `equipmentRequestId` stay `NULL`.
