@@ -7,6 +7,8 @@ import {
   SafetySubmitError,
   approveSafetyCheck,
   fetchSafetyReadiness,
+  rejectSafetyCheck,
+  requestSafetyChanges,
   submitSafetyCheck,
   submittedForSafetyCheckAt,
 } from './safetyCheck'
@@ -147,6 +149,62 @@ test('SCRUM-150 AC3: a 409 when the event is not Pending Safety Check surfaces i
   await expect(approveSafetyCheck({ eventId, safetyOfficerId: officerId })).rejects.toMatchObject({
     code: 'EVENT_NOT_PENDING_SAFETY_CHECK',
   })
+})
+
+test('SCRUM-151 AC1: reason and flags are sent to request-changes', async () => {
+  vi.stubGlobal('fetch', respond(200, { safetyCheck: { roundNumber: 1 }, event: {} }))
+
+  await requestSafetyChanges({
+    eventId,
+    safetyOfficerId: officerId,
+    reason: 'Needs another look.',
+    flags: [{ area: 'venue arrangement', changeRequired: 'Move the stage.' }],
+  })
+
+  const [url, init] = vi.mocked(fetch).mock.calls[0]
+  expect(String(url)).toBe('http://localhost:5012/safety-checks/request-changes')
+  expect(init?.method).toBe('POST')
+  expect(JSON.parse(String(init?.body))).toEqual({
+    eventId,
+    safetyOfficerId: officerId,
+    reason: 'Needs another look.',
+    flags: [{ area: 'venue arrangement', changeRequired: 'Move the stage.' }],
+  })
+})
+
+test('SCRUM-151 AC1: a 400 for missing areas surfaces as an error', async () => {
+  vi.stubGlobal('fetch', respond(400, { message: 'Select at least one affected area.' }))
+
+  await expect(requestSafetyChanges({
+    eventId, safetyOfficerId: officerId, reason: 'Needs another look.', flags: [],
+  })).rejects.toThrowError('Select at least one affected area.')
+})
+
+test('SCRUM-151 AC3: reject always sends confirmed: true', async () => {
+  const release = { venueBookingsReleased: ['b1'], venueBookingsNotReleased: [], equipment: 'Released.' }
+  vi.stubGlobal('fetch', respond(200, { safetyCheck: { roundNumber: 1 }, event: {}, release }))
+
+  const result = await rejectSafetyCheck({
+    eventId, safetyOfficerId: officerId, reason: 'Unsafe egress plan.',
+  })
+
+  const [url, init] = vi.mocked(fetch).mock.calls[0]
+  expect(String(url)).toBe('http://localhost:5012/safety-checks/reject')
+  expect(JSON.parse(String(init?.body))).toEqual({
+    eventId, safetyOfficerId: officerId, reason: 'Unsafe egress plan.', confirmed: true,
+  })
+  expect(result.release).toEqual(release)
+})
+
+test('SCRUM-151 AC3: a 400 without confirmation surfaces its code', async () => {
+  vi.stubGlobal('fetch', respond(400, {
+    code: 'REJECTION_NOT_CONFIRMED',
+    message: 'Confirm the rejection before it can be saved.',
+  }))
+
+  await expect(rejectSafetyCheck({
+    eventId, safetyOfficerId: officerId, reason: 'Unsafe egress plan.',
+  })).rejects.toMatchObject({ code: 'REJECTION_NOT_CONFIRMED' })
 })
 
 test('AC1: the submission time comes from the event\'s own history', () => {

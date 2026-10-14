@@ -84,13 +84,17 @@ ALLOWED_TRANSITIONS = {
 
 # Moves only the safety-check workflow may make, via PATCH /events/<id>/safety-status
 # (Safety Check Service). SCRUM-149 adds the first; SCRUM-150 adds the second
-# (-> Confirmed); SCRUM-151 (-> Safety Changes Requested / Cancelled) and
-# SCRUM-164 (Safety Changes Requested -> Pending Safety Check) extend this
-# table further.
+# (-> Confirmed); SCRUM-151 adds the other two (-> Safety Changes Requested /
+# Cancelled). 'Cancelled' has no entry: a rejected event can never move again
+# (SCRUM-151 AC4). SCRUM-164 adds "Safety Changes Requested": {"Pending Safety Check"}.
 SAFETY_TRANSITIONS = {
     "Approved": {"Pending Safety Check"},
-    "Pending Safety Check": {"Confirmed"},
+    "Pending Safety Check": {"Confirmed", "Safety Changes Requested", "Cancelled"},
 }
+
+# Stored verbatim in action-history entries' "areas"; mirrors the Safety
+# Check Record Service's FLAG_AREAS (SCRUM-151).
+SAFETY_FLAG_AREAS = ("venue arrangement", "technical arrangement", "event details")
 
 # Why an event at each status can't progress to 'Confirmed' yet (SCRUM-152 AC1).
 # The UI shows these verbatim, so they are whole sentences; it only surfaces the
@@ -552,6 +556,31 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
     return serialize(updated)
 
 
+def _stale_safety_check_check(action_history, safety_check_id):
+    """AC3/AC6: the round being decided must be the one this event has open —
+    the latest 'Pending Safety Check' submission entry's safetyCheckId.
+    Stops a stale or made-up round from moving the event, with no call to
+    another service.
+
+    The entry must carry a safetyCheckId to count as a submission: a
+    coordinator saving progress while the event waits for its decision
+    writes a 'Pending Safety Check' entry too (the self-transition in
+    ALLOWED_TRANSITIONS), but without a round id. Matching on status alone
+    let that save shadow the real submission and made the open round look
+    stale, so the Safety Officer could no longer decide it.
+    """
+    latest_pending = next(
+        (
+            entry
+            for entry in reversed(action_history)
+            if entry.get("status") == "Pending Safety Check" and entry.get("safetyCheckId")
+        ),
+        None,
+    )
+    if not latest_pending or latest_pending.get("safetyCheckId") != safety_check_id:
+        raise StaleSafetyCheckError
+
+
 def update_event_safety_status(
     database_url,
     event_id,
@@ -561,6 +590,7 @@ def update_event_safety_status(
     coordinator_id=None,
     decided_by=None,
     remarks=None,
+    areas=None,
 ):
     """Move an event along the safety-check workflow (SCRUM-149 AC1, SCRUM-150 AC1).
 
@@ -611,36 +641,38 @@ def update_event_safety_status(
             recorded_at = datetime.now(UTC).isoformat()
 
             if status == "Confirmed":
-                # AC3: the round being approved must be the one this event has
-                # open — the latest safety-check submission entry's
-                # safetyCheckId. Stops a stale or made-up round from
-                # confirming the event, with no call to another service.
-                #
-                # The entry must carry a safetyCheckId to count as a
-                # submission: a coordinator saving progress while the event
-                # waits for its decision writes a 'Pending Safety Check'
-                # entry too (the self-transition in ALLOWED_TRANSITIONS), but
-                # without a round id. Matching on status alone let that save
-                # shadow the real submission and made the open round look
-                # stale, so the Safety Officer could no longer approve it.
-                latest_pending = next(
-                    (
-                        entry
-                        for entry in reversed(action_history)
-                        if entry.get("status") == "Pending Safety Check"
-                        and entry.get("safetyCheckId")
-                    ),
-                    None,
-                )
-                if (
-                    not latest_pending
-                    or latest_pending.get("safetyCheckId") != safety_check_id
-                ):
-                    raise StaleSafetyCheckError
+                _stale_safety_check_check(action_history, safety_check_id)
                 action = {
                     "status": status,
                     "details": (
                         f"Operational Safety Check approved (round {round_number})."
+                    ),
+                    "decidedBy": decided_by,
+                    "safetyCheckId": safety_check_id,
+                    "remarks": remarks,
+                    "recordedAt": recorded_at,
+                }
+            elif status == "Safety Changes Requested":
+                _stale_safety_check_check(action_history, safety_check_id)
+                action = {
+                    "status": status,
+                    "details": (
+                        f"Operational Safety Check: changes requested (round "
+                        f"{round_number}) for {', '.join(areas)}."
+                    ),
+                    "decidedBy": decided_by,
+                    "safetyCheckId": safety_check_id,
+                    "remarks": remarks,
+                    "areas": areas,
+                    "recordedAt": recorded_at,
+                }
+            elif status == "Cancelled":
+                _stale_safety_check_check(action_history, safety_check_id)
+                action = {
+                    "status": status,
+                    "details": (
+                        f"Operational Safety Check rejected (round {round_number}). "
+                        "The event is cancelled."
                     ),
                     "decidedBy": decided_by,
                     "safetyCheckId": safety_check_id,

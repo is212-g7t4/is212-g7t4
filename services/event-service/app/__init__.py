@@ -12,6 +12,7 @@ load_dotenv()
 from app.models import (
     ALL_STATUSES,
     FIELDS,
+    SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
     EventNotAssignedError,
     EventNotFoundError,
@@ -397,19 +398,17 @@ def create_app(config=None):
         ):
             return jsonify(message="roundNumber must be a positive whole number."), 400
 
-        # Only the two moves this story (and SCRUM-149) actually implement
-        # need their own identity field validated; an unimplemented move
-        # (SCRUM-151's) falls through to the SAFETY_TRANSITIONS check below
-        # and gets 409, not a 400 about a field it doesn't carry yet.
+        # Each move needs its own identity fields validated.
         coordinator_id = None
         decided_by = None
         remarks = None
+        areas = None
         if status == "Pending Safety Check":
             try:
                 coordinator_id = str(UUID(data.get("coordinatorId", "")))
             except (ValueError, TypeError, AttributeError):
                 return jsonify(message="A valid coordinator ID is required."), 400
-        elif status == "Confirmed":
+        elif status in ("Confirmed", "Safety Changes Requested", "Cancelled"):
             try:
                 decided_by = str(UUID(data.get("decidedBy", "")))
             except (ValueError, TypeError, AttributeError):
@@ -423,6 +422,26 @@ def create_app(config=None):
                     return jsonify(
                         message="remarks must be 2000 characters or fewer."
                     ), 400
+            # 'Confirmed' keeps remarks optional (SCRUM-150); the other two
+            # require it, non-blank (SCRUM-151 AC1, AC3, AC6).
+            if status != "Confirmed" and not remarks:
+                return jsonify(message="remarks is required."), 400
+            if status == "Safety Changes Requested":
+                raw_areas = data.get("areas")
+                if not isinstance(raw_areas, list) or not raw_areas:
+                    return jsonify(
+                        message="areas must be a non-empty list."
+                    ), 400
+                if len(raw_areas) != len(set(raw_areas)) or any(
+                    area not in SAFETY_FLAG_AREAS for area in raw_areas
+                ):
+                    return jsonify(
+                        message=(
+                            f"areas must be distinct values from: "
+                            f"{', '.join(SAFETY_FLAG_AREAS)}."
+                        )
+                    ), 400
+                areas = raw_areas
 
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
@@ -436,6 +455,7 @@ def create_app(config=None):
                 coordinator_id=coordinator_id,
                 decided_by=decided_by,
                 remarks=remarks,
+                areas=areas,
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404

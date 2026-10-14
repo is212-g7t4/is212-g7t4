@@ -131,7 +131,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
 
-      {canUpdate && <VenueBookingsPanel
+      {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel
         eventId={event.id}
         coordinatorId={currentCoordinator.id}
         eventStart={event.preferredStartDate}
@@ -185,8 +185,9 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
             event is actually awaiting one (AC3, UI side). */}
         {role === 'Safety Officer' && event.status === 'Pending Safety Check' && <SafetyDecisionPanel
           eventId={event.id}
+          eventName={event.eventName}
           safetyOfficerId={currentCoordinator.id}
-          onApproved={() => { setLoading(true); setRefresh((value) => value + 1) }}
+          onDecided={() => { setLoading(true); setRefresh((value) => value + 1) }}
         />}
         {event.status === 'Pending Safety Check' && role !== 'Safety Officer' && (() => {
           const submittedAt = submittedForSafetyCheckAt(event)
@@ -202,7 +203,15 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
           <dl className="event-details">
             {event.actionHistory.map((action, index) => <div className="event-detail full" key={`${action.recordedAt}-${index}`}>
               <dt>{action.status} · {new Date(action.recordedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT</dt>
-              <dd>{action.details}</dd>
+              <dd>
+                {action.details}
+                {action.areas && action.areas.length > 0 && <>
+                  <br /><span className="muted">Areas: {action.areas.join(', ')}</span>
+                </>}
+                {action.remarks && <>
+                  <br /><span className="muted">Reason: {action.remarks}</span>
+                </>}
+              </dd>
             </div>)}
           </dl>}
       </section>
