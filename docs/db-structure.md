@@ -251,6 +251,14 @@ One row per item the Safety Officer flags when requesting changes.
 | equip_request_id | UUID (FK EquipmentRequest), nullable | new | The specific equipment request Technical Support must re-review; empty for other areas. |
 | change_required | TEXT | new | What the Safety Officer wants changed for this item, shown to the coordinator. |
 
+SCRUM-151 writes flags **area-level only**: `booking_id` and
+`equip_request_id` stay `NULL` on every row it inserts. A flagged `venue
+arrangement` or `technical arrangement` means *the event's arrangements in
+that area* generally, not one specific booking or request; bookings and
+equipment requests are otherwise left exactly as they are (AC2 "existing
+arrangements are preserved"). SCRUM-164's resubmit flow is what reads these
+flags to decide which areas need review again.
+
 ---
 
 ## Forum service (MongoDB, planned)
