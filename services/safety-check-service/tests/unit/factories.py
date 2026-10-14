@@ -75,5 +75,6 @@ def record(round_number=1, status="Pending", **overrides):
         "decidedBy": None,
         "decidedAt": None,
         "remarks": None,
+        "flags": [],
         **overrides,
     }
