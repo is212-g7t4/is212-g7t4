@@ -185,6 +185,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
             event is actually awaiting one (AC3, UI side). */}
         {role === 'Safety Officer' && event.status === 'Pending Safety Check' && <SafetyDecisionPanel
           eventId={event.id}
+          eventName={event.eventName}
           safetyOfficerId={currentCoordinator.id}
           onDecided={() => { setLoading(true); setRefresh((value) => value + 1) }}
         />}

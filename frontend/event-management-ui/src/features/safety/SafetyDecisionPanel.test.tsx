@@ -5,9 +5,9 @@
  * AC1 request changes needs at least one area with its own change text.
  * AC2/AC6 approving and requesting changes send remarks/reason, tell the
  *     officer, and reload the event.
- * AC3 reject needs a reason and its own confirm step before anything sends.
+ * AC3 reject needs a reason and an explicit confirmation before anything sends.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import {
@@ -35,6 +35,7 @@ let onDecided: Mock<() => void>
 
 const renderPanel = () => render(<SafetyDecisionPanel
   eventId={eventId}
+  eventName="Community Workshop"
   safetyOfficerId={safetyOfficerId}
   onDecided={onDecided}
 />)
@@ -231,40 +232,49 @@ test('request changes: an API error is shown', async () => {
 
 // --- Reject ------------------------------------------------------------------
 
-test('AC3: reject needs a reason before it opens the confirm step', () => {
+const openRejectDialog = () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+  return screen.getByRole('dialog', { name: 'Reject and cancel this event?' })
+}
+
+test('AC3: Reject opens a dialog that names the consequence, before anything is sent', () => {
   renderPanel()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
 
-  expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled()
+  const dialog = openRejectDialog()
 
-  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Unsafe egress plan.' } })
-
-  expect(screen.getByRole('button', { name: 'Reject' })).not.toBeDisabled()
-})
-
-test('AC3: clicking Reject opens a confirm step before anything is sent', () => {
-  renderPanel()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Unsafe egress plan.' } })
-
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-
-  expect(screen.getByText(/Reject and cancel this event\?/)).toBeInTheDocument()
+  expect(dialog).toHaveTextContent('Community Workshop')
+  expect(dialog).toHaveTextContent(/venue\s+bookings are released/)
+  expect(dialog).toHaveTextContent(/can't be undone/)
   expect(rejectSafetyCheck).not.toHaveBeenCalled()
 })
 
-test('AC3, AC5: confirming reject sends the reason and shows the release message', async () => {
+test('AC3: the confirm button stays disabled until a reason is given', () => {
+  renderPanel()
+  const dialog = openRejectDialog()
+  const confirm = within(dialog).getByRole('button', { name: 'Confirm rejection' })
+
+  expect(confirm).toBeDisabled()
+
+  fireEvent.change(within(dialog).getByLabelText(/Reason for rejection/), {
+    target: { value: 'Unsafe egress plan.' },
+  })
+
+  expect(confirm).not.toBeDisabled()
+})
+
+test('AC3, AC5: confirming sends the reason and shows the release message', async () => {
   vi.mocked(rejectSafetyCheck).mockResolvedValue({
     safetyCheck: { status: 'Safety Rejected' },
     event: { status: 'Cancelled' },
     release: { venueBookingsReleased: ['b1'], venueBookingsNotReleased: [], equipment: 'Released.' },
   } as never)
   renderPanel()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Unsafe egress plan.' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+  const dialog = openRejectDialog()
+  fireEvent.change(within(dialog).getByLabelText(/Reason for rejection/), {
+    target: { value: 'Unsafe egress plan.' },
+  })
 
-  fireEvent.click(screen.getByRole('button', { name: 'Yes, reject and cancel' }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm rejection' }))
 
   expect(await screen.findByText(
     'Rejected. The event is cancelled and its venue bookings were released.',
@@ -284,39 +294,63 @@ test('a release that could not clear every booking is flagged in the message', a
     release: { venueBookingsReleased: [], venueBookingsNotReleased: ['b1'], equipment: 'Released.' },
   } as never)
   renderPanel()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Unsafe egress plan.' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+  const dialog = openRejectDialog()
+  fireEvent.change(within(dialog).getByLabelText(/Reason for rejection/), {
+    target: { value: 'Unsafe egress plan.' },
+  })
 
-  fireEvent.click(screen.getByRole('button', { name: 'Yes, reject and cancel' }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm rejection' }))
 
   expect(await screen.findByText(/must be cancelled by Venue Staff/)).toBeInTheDocument()
 })
 
-test('cancelling the reject confirm step sends nothing', () => {
+test('the confirm button reports progress while the rejection is in flight', async () => {
+  let release: () => void = () => {}
+  vi.mocked(rejectSafetyCheck).mockImplementation(
+    () => new Promise((resolve) => {
+      release = () => resolve({
+        safetyCheck: {}, event: {},
+        release: { venueBookingsReleased: [], venueBookingsNotReleased: [], equipment: '' },
+      } as never)
+    }),
+  )
   renderPanel()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Unsafe egress plan.' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+  const dialog = openRejectDialog()
+  fireEvent.change(within(dialog).getByLabelText(/Reason for rejection/), {
+    target: { value: 'Unsafe egress plan.' },
+  })
 
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm rejection' }))
 
-  expect(screen.queryByText(/Reject and cancel this event\?/)).not.toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: 'Rejecting…' })).toBeDisabled()
+  release()
+  await waitFor(() => expect(rejectSafetyCheck).toHaveBeenCalledTimes(1))
+})
+
+test('cancelling the reject dialog sends nothing and returns to the decision', () => {
+  renderPanel()
+  const dialog = openRejectDialog()
+
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument()
   expect(rejectSafetyCheck).not.toHaveBeenCalled()
 })
 
-test('reject: a 400 without confirmation (API skipped) is shown as an error', async () => {
+test('reject: an API refusal is shown as an error', async () => {
   vi.mocked(rejectSafetyCheck).mockRejectedValue(new SafetySubmitError(
-    'Confirm the rejection before it can be saved.',
-    { code: 'REJECTION_NOT_CONFIRMED' },
+    'This safety check has already been decided.',
+    { code: 'SAFETY_CHECK_ALREADY_DECIDED' },
   ))
   renderPanel()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Unsafe egress plan.' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
+  const dialog = openRejectDialog()
+  fireEvent.change(within(dialog).getByLabelText(/Reason for rejection/), {
+    target: { value: 'Unsafe egress plan.' },
+  })
 
-  fireEvent.click(screen.getByRole('button', { name: 'Yes, reject and cancel' }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm rejection' }))
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('Confirm the rejection before it can be saved.')
+  expect(await screen.findByRole('alert')).toHaveTextContent('This safety check has already been decided.')
   expect(onDecided).not.toHaveBeenCalled()
 })

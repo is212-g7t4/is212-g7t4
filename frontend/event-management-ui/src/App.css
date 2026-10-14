@@ -1387,6 +1387,56 @@ td small {
   cursor: pointer;
 }
 
+/* Safety Officer's decision panel (SCRUM-150/151) */
+
+.safety-decision {
+  margin: var(--space-5) 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.safety-decision h4,
+.safety-decision h5 {
+  margin: 0 0 var(--space-2);
+}
+
+.safety-decision-form {
+  margin-bottom: var(--space-3);
+}
+
+.safety-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.safety-decision-areas {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.safety-decision-areas legend {
+  padding: 0 6px;
+  color: var(--color-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* The change text belongs to the area above it, so it is indented to the
+   checkbox's label rather than sitting flush with the next option. */
+.safety-decision-area textarea {
+  width: 100%;
+  min-height: 62px;
+  margin-top: 6px;
+  padding: 9px 11px;
+  font-size: 13.5px;
+  resize: vertical;
+}
+
 .venue-search-actions {
   display: flex;
   flex-wrap: wrap;
