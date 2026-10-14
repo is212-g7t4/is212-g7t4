@@ -1,9 +1,10 @@
 # safety-check-service
 
 Composite service (port **5012**) that coordinates the Operational Safety
-Check workflow (change #6). SCRUM-149 builds the first half, **submit**;
-SCRUM-150 builds the second, **approve**. SCRUM-163 (review), SCRUM-151
-(reject / request changes) and SCRUM-164 (resubmit) extend it further.
+Check workflow (change #6). SCRUM-149 builds the first step, **submit**;
+SCRUM-150 the second, **approve**; SCRUM-151 the other two, **request
+changes** and **reject**. SCRUM-163 (review) and SCRUM-164 (resubmit) extend
+it further.
 
 Submitting and approving each need facts from more than one atomic and write
 to two, which is exactly what a composite is for (AGENTS.md;
@@ -166,6 +167,107 @@ was given:
 curl -X POST localhost:5013/safety-check-records/<id>/reopen \
   -H "Content-Type: application/json" -d '{"decidedAt": "<the timestamp from the log/DB>"}'
 ```
+
+## `POST /safety-checks/request-changes`
+
+```json
+{
+  "eventId": "<uuid>",
+  "safetyOfficerId": "<uuid>",
+  "reason": "Needs another look.",
+  "flags": [
+    {"area": "venue arrangement", "changeRequired": "Move the stage left of centre."},
+    {"area": "event details", "changeRequired": "Fix the clashing start time."}
+  ]
+}
+```
+
+`reason` is required text, up to 2000 characters (AC1). `flags` is 1 to 3
+entries, each a distinct `area` (`"venue arrangement"`, `"technical
+arrangement"`, `"event details"`) with its own non-blank `changeRequired`
+(AC1). Shares every step with approve and reject — see `_decide` in
+`app/routes.py`:
+
+```
+UI ──POST /safety-checks/request-changes──► Safety Check Service (composite, 5012)
+ 1. validate body (UUIDs, reason, flags)                                   400
+ 2. GET  User Service   /users/<safetyOfficerId>                           403 NOT_SAFETY_OFFICER
+ 3. GET  Event Service  /events/<id>?...&viewerRole=Safety Officer
+    event must be 'Pending Safety Check'                409 EVENT_NOT_PENDING_SAFETY_CHECK (AC7)
+ 4. GET  Record Service /safety-check-records?eventId=<id>&status=Pending  409 NO_OPEN_SAFETY_CHECK
+ 5. PATCH Record Service /safety-check-records/<roundId>/decision
+          {status: "Changes Requested", decidedBy, remarks, flags}  409 SAFETY_CHECK_ALREADY_DECIDED
+ 6. PATCH Event Service /events/<id>/safety-status   (X-Internal-Service-Token)
+          {status: "Safety Changes Requested", decidedBy, safetyCheckId, roundNumber, remarks, areas}
+        on any failure → POST Record Service /safety-check-records/<roundId>/reopen {decidedAt}
+ 7. 200 {safetyCheck, event}
+```
+
+Bookings and equipment requests are never read or written here (AC2's
+"existing arrangements are preserved") — Venue Availability and Equipment
+Request Service aren't called at all. Responses follow the same shape as
+approve (`403 NOT_SAFETY_OFFICER`, `404`, `409
+EVENT_NOT_PENDING_SAFETY_CHECK` / `NO_OPEN_SAFETY_CHECK` / `SAFETY_CHECK_ALREADY_DECIDED`,
+`502`/`504`), plus `400` when `reason` or `flags` break any rule above.
+
+## `POST /safety-checks/reject`
+
+```json
+{
+  "eventId": "<uuid>",
+  "safetyOfficerId": "<uuid>",
+  "reason": "Unsafe egress plan.",
+  "confirmed": true
+}
+```
+
+`reason` is required text, up to 2000 characters (AC3). `confirmed` must be
+`true` — the API enforces the UI's confirm step itself, so a client that
+skips it gets `400 {"code": "REJECTION_NOT_CONFIRMED"}` and nothing is saved.
+
+```
+UI ──POST /safety-checks/reject──► Safety Check Service (composite, 5012)
+ 1. validate body (UUIDs, reason, confirmed === true)                      400
+ 2–6. same steps as approve/request-changes, deciding "Safety Rejected"
+      and moving the event to "Cancelled"       409 EVENT_NOT_PENDING_SAFETY_CHECK (AC7)
+ 7. release (AC5): GET Venue Availability /events/<id>/venue-bookings
+    for each booking not already Cancelled/Expired/Rejected:
+         PATCH Venue Availability /venue-bookings/<bookingId>/cancel {eventId}
+ 8. 200 {safetyCheck, event, release}
+```
+
+`release` in the response:
+
+```json
+{
+  "venueBookingsReleased": ["<bookingId>", "..."],
+  "venueBookingsNotReleased": [],
+  "equipment": "Released: equipment held by a Cancelled event no longer counts against availability."
+}
+```
+
+**Release last, and only once the event is definitely `Cancelled`.**
+Cancelling a booking can't be undone the way the decision can — the slot may
+be taken a second later — so it only happens after step 6 succeeds. A
+booking already `Cancelled`, `Expired` or `Rejected` is left alone: it
+already blocks nothing, and its status stays accurate history. Equipment
+needs no write: `equipment-reservation-service` already excludes a
+`Cancelled` event's requests from held stock.
+
+**A release failure doesn't undo the rejection.** If listing the bookings or
+cancelling one fails, the event really is cancelled, so the response is
+still `200` — the ids that couldn't be released land in
+`venueBookingsNotReleased` and are logged at `ERROR`. To clear one by hand
+(cancel is idempotent, so this is safe to repeat):
+
+```
+curl -X PATCH localhost:5008/venue-bookings/<id>/cancel \
+  -H "Content-Type: application/json" -d '{"eventId": "<eventId>"}'
+```
+
+**AC4: `Cancelled` is terminal.** Event Service's `SAFETY_TRANSITIONS` has no
+entry for `Cancelled`, so nothing — not a resubmit, not another decision —
+can move the event again.
 
 ## `GET /safety-checks/readiness?eventId=<uuid>&coordinatorId=<uuid>`
 

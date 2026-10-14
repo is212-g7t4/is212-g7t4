@@ -27,12 +27,18 @@ READY_STATUS = "Approved"
 SAFETY_OFFICER = "Safety Officer"
 CONFIRMED = "Confirmed"
 SAFETY_APPROVED = "Safety Approved"
+SAFETY_CHANGES_REQUESTED = "Safety Changes Requested"
+CANCELLED = "Cancelled"
+CHANGES_REQUESTED = "Changes Requested"
+SAFETY_REJECTED = "Safety Rejected"
+FLAG_AREAS = ("venue arrangement", "technical arrangement", "event details")
+RELEASED_BOOKING_STATUSES = ("Cancelled", "Expired", "Rejected")
 
 NOT_ASSIGNED = (
     "Only the event's assigned coordinator can submit it for a safety check."
 )
 NOT_SAFETY_OFFICER = (
-    "Only a Safety Officer can approve an event's Operational Safety Check."
+    "Only a Safety Officer can decide an event's Operational Safety Check."
 )
 UNREADABLE_ARRANGEMENTS = "Unable to check the event's arrangements right now."
 UNREADABLE_ROLE = "Unable to check the caller's role right now."
@@ -139,77 +145,242 @@ def approve_safety_check():
     if failure:
         return failure
 
-    failure = _check_safety_officer(safety_officer_id)
+    decided, updated, failure = _decide(
+        event_id, safety_officer_id, SAFETY_APPROVED, CONFIRMED, remarks, verb="approve"
+    )
     if failure:
         return failure
+
+    return jsonify(safetyCheck=decided, event=updated), 200
+
+
+@bp.post("/safety-checks/request-changes")
+def request_safety_changes():
+    """Request changes to an event's safety arrangements (SCRUM-151 AC1, AC2, AC6).
+
+    Body: `eventId`, `safetyOfficerId`, `reason`, `flags: [{area, changeRequired}]`.
+
+    Shares every step with approve and reject (see `_decide`): only the
+    record's decided status, the event's target status and the extra
+    `areas` on the event-side history entry differ. Bookings and equipment
+    requests are left exactly as they are (AC2's "existing arrangements are
+    preserved") — this route never calls Venue Availability or Equipment
+    Request.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    event_id = _uuid_or_none(data.get("eventId"))
+    safety_officer_id = _uuid_or_none(data.get("safetyOfficerId"))
+    if not event_id or not safety_officer_id:
+        return jsonify(message="eventId and safetyOfficerId must be valid UUIDs."), 400
+    reason, failure = _required_reason(data)
+    if failure:
+        return failure
+    flags, areas, failure = _change_flags(data)
+    if failure:
+        return failure
+
+    decided, updated, failure = _decide(
+        event_id,
+        safety_officer_id,
+        CHANGES_REQUESTED,
+        SAFETY_CHANGES_REQUESTED,
+        reason,
+        flags=flags,
+        areas=areas,
+        verb="request-changes",
+    )
+    if failure:
+        return failure
+
+    return jsonify(safetyCheck=decided, event=updated), 200
+
+
+@bp.post("/safety-checks/reject")
+def reject_safety_check():
+    """Reject an event's Operational Safety Check (SCRUM-151 AC3, AC4, AC5, AC6).
+
+    Body: `eventId`, `safetyOfficerId`, `reason`, `confirmed: true`.
+
+    Shares every step up to the event move with approve and request-changes
+    (see `_decide`). Once the event is definitely 'Cancelled', its venue
+    bookings are released (AC5) — last, and only here, because cancelling a
+    booking can't be undone the way the decision itself can be.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    event_id = _uuid_or_none(data.get("eventId"))
+    safety_officer_id = _uuid_or_none(data.get("safetyOfficerId"))
+    if not event_id or not safety_officer_id:
+        return jsonify(message="eventId and safetyOfficerId must be valid UUIDs."), 400
+    reason, failure = _required_reason(data)
+    if failure:
+        return failure
+    if data.get("confirmed") is not True:
+        return jsonify(
+            code="REJECTION_NOT_CONFIRMED",
+            message="Confirm the rejection before it can be saved.",
+        ), 400
+
+    decided, updated, failure = _decide(
+        event_id, safety_officer_id, SAFETY_REJECTED, CANCELLED, reason, verb="reject"
+    )
+    if failure:
+        return failure
+
+    released, not_released = _release_venue_bookings(event_id)
+    return jsonify(
+        safetyCheck=decided,
+        event=updated,
+        release={
+            "venueBookingsReleased": released,
+            "venueBookingsNotReleased": not_released,
+            "equipment": (
+                "Released: equipment held by a Cancelled event no longer "
+                "counts against availability."
+            ),
+        },
+    ), 200
+
+
+def _decide(
+    event_id,
+    safety_officer_id,
+    record_status,
+    event_status,
+    remarks,
+    flags=None,
+    areas=None,
+    verb="decide",
+):
+    """Steps shared by approve, request-changes and reject (SCRUM-150, SCRUM-151).
+
+    Role check -> load the event as the officer -> check it's 'Pending
+    Safety Check' (AC7) -> decide the open round (the race guard) -> move
+    the event, undoing the decision if that fails. Returns
+    `(decided, updated, None)` on success, or `(None, None, failure)` where
+    `failure` is the `(response, status)` tuple a route should return as is.
+    """
+    failure = _check_safety_officer(safety_officer_id)
+    if failure:
+        return None, None, failure
 
     event, failure = _load_event_for_officer(event_id, safety_officer_id)
     if failure:
-        return failure
+        return None, None, failure
     failure = _approve_status_failure(event)
     if failure:
-        return failure
+        return None, None, failure
 
     open_round, failure = _open_round(event_id)
     if failure:
-        return failure
+        return None, None, failure
     if not open_round:
-        return jsonify(
-            code="NO_OPEN_SAFETY_CHECK",
-            message="This event has no safety check awaiting a decision.",
-        ), 409
+        return None, None, (
+            jsonify(
+                code="NO_OPEN_SAFETY_CHECK",
+                message="This event has no safety check awaiting a decision.",
+            ),
+            409,
+        )
 
     try:
         decided = clients.decide_safety_check_record(
-            open_round["id"], SAFETY_APPROVED, safety_officer_id, remarks
+            open_round["id"], record_status, safety_officer_id, remarks, flags or []
         )
     except clients.SafetyCheckAlreadyDecidedError as already:
-        return jsonify(
-            code="SAFETY_CHECK_ALREADY_DECIDED",
-            message="This safety check has already been decided.",
-            safetyCheck=already.existing,
-        ), 409
+        return None, None, (
+            jsonify(
+                code="SAFETY_CHECK_ALREADY_DECIDED",
+                message="This safety check has already been decided.",
+                safetyCheck=already.existing,
+            ),
+            409,
+        )
     except clients.RecordNotFoundError:
-        return jsonify(
-            code="NO_OPEN_SAFETY_CHECK",
-            message="This event has no safety check awaiting a decision.",
-        ), 409
+        return None, None, (
+            jsonify(
+                code="NO_OPEN_SAFETY_CHECK",
+                message="This event has no safety check awaiting a decision.",
+            ),
+            409,
+        )
     except (clients.DownstreamTimeout, clients.DownstreamError) as error:
         # The decide call may have actually gone through and only the
         # response was lost (a read timeout, a dropped connection) — check
         # before reporting failure. Otherwise a retry finds no 'Pending'
-        # round left (it's Safety Approved already) and gets stuck on
-        # NO_OPEN_SAFETY_CHECK forever.
-        decided = _find_decided_round(event_id, open_round["id"])
+        # round left and gets stuck on NO_OPEN_SAFETY_CHECK forever.
+        decided = _find_decided_round(event_id, open_round["id"], record_status)
         if decided is None:
-            return _decide_failure(error)
+            return None, None, _decide_failure(error, verb)
 
     try:
         updated = clients.set_event_safety_status(
             event_id,
-            CONFIRMED,
+            event_status,
             decided["id"],
             decided["roundNumber"],
             decided_by=safety_officer_id,
             remarks=remarks,
+            areas=areas,
         )
     except (clients.DownstreamTimeout, clients.DownstreamError) as error:
         # Same reconciliation as above, one step later: Event Service may
-        # have actually confirmed the event and only the response was lost.
-        # Don't undo a decision that already succeeded end to end — that
-        # would leave a Confirmed event with its safety check reopened.
+        # have actually moved the event and only the response was lost.
+        # Don't undo a decision that already succeeded end to end.
         event_after, _lookup_failure = _load_event_for_officer(
             event_id, safety_officer_id
         )
-        if event_after and event_after.get("status") == CONFIRMED:
-            return jsonify(safetyCheck=decided, event=event_after), 200
+        if event_after and event_after.get("status") == event_status:
+            return decided, event_after, None
         _compensate_decision(decided["id"], decided["decidedAt"])
-        return _decide_failure(error)
+        return None, None, _decide_failure(error, verb)
     except Exception as error:  # noqa: BLE001 — every other failure compensates alike
         _compensate_decision(decided["id"], decided["decidedAt"])
-        return _approve_event_update_failure(error)
+        return None, None, _approve_event_update_failure(error, verb)
 
-    return jsonify(safetyCheck=decided, event=updated), 200
+    return decided, updated, None
+
+
+def _release_venue_bookings(event_id):
+    """AC5: release every live booking once the event is definitely 'Cancelled'.
+
+    A booking already 'Cancelled', 'Expired' or 'Rejected' already blocks
+    nothing, so it's left as is — its status stays accurate history. A
+    cancel that fails is reported in `venueBookingsNotReleased` and logged
+    at ERROR; the decision itself still stands, since the event really is
+    cancelled (the README has the by-hand `curl` to clear it).
+    """
+    try:
+        bookings = clients.get_event_venue_bookings(event_id)
+    except (clients.DownstreamTimeout, clients.DownstreamError):
+        logger.error(
+            "Could not list venue bookings for event %s to release them "
+            "after a safety rejection; they must be cancelled by hand.",
+            event_id,
+        )
+        return [], []
+
+    released = []
+    not_released = []
+    for booking in bookings:
+        if booking.get("status") in RELEASED_BOOKING_STATUSES:
+            continue
+        booking_id = booking.get("id")
+        try:
+            clients.cancel_venue_booking(booking_id, event_id)
+            released.append(booking_id)
+        except Exception:  # noqa: BLE001 — the decision still stands
+            not_released.append(booking_id)
+            logger.error(
+                "Could not release venue booking %s for event %s after a "
+                "safety rejection; it must be cancelled by hand.",
+                booking_id,
+                event_id,
+            )
+    return released, not_released
 
 
 @bp.get("/safety-checks/readiness")
@@ -387,7 +558,7 @@ def _load_event_for_officer(event_id, safety_officer_id):
 
 
 def _approve_status_failure(event):
-    """Step 3's status check (AC3): only a 'Pending Safety Check' event qualifies."""
+    """Step 3's status check (AC3/AC7): only a 'Pending Safety Check' event qualifies."""
     status = event.get("status")
     if status == PENDING_SAFETY_CHECK:
         return None
@@ -395,7 +566,7 @@ def _approve_status_failure(event):
         jsonify(
             code="EVENT_NOT_PENDING_SAFETY_CHECK",
             message=(
-                "Only an event 'Pending Safety Check' can be approved "
+                "Only an event 'Pending Safety Check' can be decided "
                 f"(current status: '{status}')."
             ),
             currentStatus=status,
@@ -404,30 +575,40 @@ def _approve_status_failure(event):
     )
 
 
-def _find_decided_round(event_id, safety_check_id):
+def _find_decided_round(event_id, safety_check_id, record_status):
     """Check whether a round was actually decided despite a lost response.
 
     Called only after decide_safety_check_record raises a timeout/transport
     error — ambiguous, since that can mean the record service never got the
     request or that it processed it and only the reply was lost. Returns the
-    record if it is now 'Safety Approved', otherwise None (including when
-    this lookup itself fails, which is just as ambiguous — the caller falls
-    back to reporting the original failure).
+    record if it is now decided as `record_status`, otherwise None (including
+    when this lookup itself fails, which is just as ambiguous — the caller
+    falls back to reporting the original failure).
     """
     try:
         rounds = clients.list_safety_check_records(event_id)
     except (clients.DownstreamTimeout, clients.DownstreamError):
         return None
     match = next((r for r in rounds if r.get("id") == safety_check_id), None)
-    if match and match.get("status") == SAFETY_APPROVED:
+    if match and match.get("status") == record_status:
         return match
     return None
 
 
-def _decide_failure(error):
+# verb -> (present participle, infinitive used in "Unable to <x> this ..."),
+# for the three decisions' downstream-failure messages.
+VERB_FORMS = {
+    "approve": ("Approving", "approve"),
+    "request-changes": ("Requesting changes to", "request changes to"),
+    "reject": ("Rejecting", "reject"),
+}
+
+
+def _decide_failure(error, verb):
+    participle, infinitive = VERB_FORMS[verb]
     if isinstance(error, clients.DownstreamTimeout):
-        return jsonify(message="Approving took too long. Please try again."), 504
-    return jsonify(message="Unable to approve this safety check right now."), 502
+        return jsonify(message=f"{participle} took too long. Please try again."), 504
+    return jsonify(message=f"Unable to {infinitive} this safety check right now."), 502
 
 
 def _compensate_decision(safety_check_id, decided_at):
@@ -447,12 +628,19 @@ def _compensate_decision(safety_check_id, decided_at):
         )
 
 
-def _approve_event_update_failure(error):
-    """Map Event Service's refusal of approve's step 6 after the decision has been undone.
+EVENT_TRANSITION_FALLBACK_MESSAGE = {
+    "approve": "Only an event 'Pending Safety Check' can be approved.",
+    "request-changes": "Only an event 'Pending Safety Check' can have changes requested.",
+    "reject": "Only an event 'Pending Safety Check' can be rejected.",
+}
+
+
+def _approve_event_update_failure(error, verb):
+    """Map Event Service's refusal of the event-move step after the decision has been undone.
 
     Only definite refusals reach here. Timeouts and transport errors are
-    ambiguous — they may mean the event was confirmed and the reply lost —
-    so approve handles those itself, by reconciling before compensating.
+    ambiguous — they may mean the event was moved and the reply lost — so
+    `_decide` handles those itself, by reconciling before compensating.
     """
     if isinstance(error, clients.ServiceCredentialsError):
         return jsonify(message="Event Service refused this service's credentials."), 502
@@ -461,11 +649,10 @@ def _approve_event_update_failure(error):
     if isinstance(error, clients.EventTransitionError):
         return jsonify(
             code="EVENT_NOT_PENDING_SAFETY_CHECK",
-            message=error.body.get("message")
-            or "Only an event 'Pending Safety Check' can be approved.",
+            message=error.body.get("message") or EVENT_TRANSITION_FALLBACK_MESSAGE[verb],
             currentStatus=error.body.get("currentStatus"),
         ), 409
-    return jsonify(message="Unable to approve this safety check right now."), 502
+    return jsonify(message=f"Unable to {VERB_FORMS[verb][1]} this safety check right now."), 502
 
 
 def _approval_remarks(data):
@@ -532,3 +719,71 @@ def _notes(data):
             )
         cleaned.append(value if isinstance(value, str) and value.strip() else None)
     return cleaned, None
+
+
+def _required_reason(data):
+    """The reason for a change request or a rejection (AC1, AC3): required text."""
+    value = data.get("reason")
+    if not isinstance(value, str) or not value.strip():
+        return None, (jsonify(message="reason is required."), 400)
+    if len(value) > NOTES_LIMIT:
+        return None, (
+            jsonify(message=f"reason must be {NOTES_LIMIT} characters or fewer."),
+            400,
+        )
+    return value.strip(), None
+
+
+def _change_flags(data):
+    """The affected areas and their change text for a change request (AC1).
+
+    Returns `(flags, areas, failure)`, where `flags` is what Safety Check
+    Record Service expects and `areas` is the plain list Event Service
+    stores on the event's history entry — the same selection, two shapes.
+    """
+    raw = data.get("flags")
+    if not isinstance(raw, list) or not raw:
+        return None, None, (
+            jsonify(message="Select at least one affected area."),
+            400,
+        )
+    if len(raw) > len(FLAG_AREAS):
+        return None, None, (
+            jsonify(message="Each area may be selected at most once."),
+            400,
+        )
+
+    seen = set()
+    flags = []
+    areas = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None, None, (jsonify(message="Each flag must be an object."), 400)
+        area = item.get("area")
+        if area not in FLAG_AREAS:
+            return None, None, (
+                jsonify(message=f"area must be one of: {', '.join(FLAG_AREAS)}."),
+                400,
+            )
+        if area in seen:
+            return None, None, (
+                jsonify(message="Each area may be selected at most once."),
+                400,
+            )
+        seen.add(area)
+        change_required = item.get("changeRequired")
+        if not isinstance(change_required, str) or not change_required.strip():
+            return None, None, (
+                jsonify(message="Describe the change needed for every selected area."),
+                400,
+            )
+        if len(change_required) > NOTES_LIMIT:
+            return None, None, (
+                jsonify(
+                    message=f"changeRequired must be {NOTES_LIMIT} characters or fewer."
+                ),
+                400,
+            )
+        flags.append({"area": area, "changeRequired": change_required.strip()})
+        areas.append(area)
+    return flags, areas, None

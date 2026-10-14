@@ -163,6 +163,42 @@ def test_set_event_safety_status_sends_decided_by_and_remarks_for_approve(sent):
     }
 
 
+def test_set_event_safety_status_sends_areas_when_given(sent):
+    """SCRUM-151: a change request's areas travel with the move."""
+    calls, queue = sent
+    queue.append(Response(200, event("Safety Changes Requested")))
+
+    clients.set_event_safety_status(
+        EVENT_ID,
+        "Safety Changes Requested",
+        RECORD_ID,
+        1,
+        decided_by=OFFICER_ID,
+        remarks="Needs another look.",
+        areas=["venue arrangement"],
+    )
+
+    assert calls[0]["json"] == {
+        "status": "Safety Changes Requested",
+        "safetyCheckId": RECORD_ID,
+        "roundNumber": 1,
+        "decidedBy": OFFICER_ID,
+        "remarks": "Needs another look.",
+        "areas": ["venue arrangement"],
+    }
+
+
+def test_set_event_safety_status_omits_areas_when_not_given(sent):
+    calls, queue = sent
+    queue.append(Response(200, event("Cancelled")))
+
+    clients.set_event_safety_status(
+        EVENT_ID, "Cancelled", RECORD_ID, 1, decided_by=OFFICER_ID, remarks="Unsafe."
+    )
+
+    assert "areas" not in calls[0]["json"]
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
@@ -253,6 +289,35 @@ def test_booking_read_failure_is_a_downstream_error(sent):
 
     with pytest.raises(clients.DownstreamError):
         clients.get_event_venue_bookings(EVENT_ID)
+
+
+def test_cancel_venue_booking_sends_the_event_id(sent):
+    """SCRUM-151 AC5: releasing a booking on a safety rejection."""
+    calls, queue = sent
+    queue.append(Response(200, booking("Cancelled")))
+
+    cancelled = clients.cancel_venue_booking(BOOKING_ID, EVENT_ID)
+
+    assert cancelled["status"] == "Cancelled"
+    assert calls[0]["method"] == "PATCH"
+    assert calls[0]["url"].endswith(f"/venue-bookings/{BOOKING_ID}/cancel")
+    assert calls[0]["json"] == {"eventId": EVENT_ID}
+
+
+def test_cancel_venue_booking_missing_is_not_found(sent):
+    _, queue = sent
+    queue.append(Response(404, {"message": "no"}))
+
+    with pytest.raises(clients.RecordNotFoundError):
+        clients.cancel_venue_booking(BOOKING_ID, EVENT_ID)
+
+
+def test_cancel_venue_booking_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(503, {"message": "down"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.cancel_venue_booking(BOOKING_ID, EVENT_ID)
 
 
 # --- Equipment Request Service ----------------------------------------------
@@ -411,6 +476,33 @@ def test_decide_record_sends_the_decision(sent):
         "decidedBy": OFFICER_ID,
         "remarks": "Looks safe.",
     }
+
+
+def test_decide_record_sends_flags_when_given(sent):
+    """SCRUM-151: a change request's flags travel with the decision."""
+    calls, queue = sent
+    queue.append(Response(200, record(status="Changes Requested")))
+
+    flags = [{"area": "venue arrangement", "changeRequired": "Move the stage."}]
+    clients.decide_safety_check_record(
+        RECORD_ID, "Changes Requested", OFFICER_ID, "Needs another look.", flags
+    )
+
+    assert calls[0]["json"] == {
+        "status": "Changes Requested",
+        "decidedBy": OFFICER_ID,
+        "remarks": "Needs another look.",
+        "flags": flags,
+    }
+
+
+def test_decide_record_omits_flags_when_not_given(sent):
+    calls, queue = sent
+    queue.append(Response(200, record(status="Safety Approved")))
+
+    clients.decide_safety_check_record(RECORD_ID, "Safety Approved", OFFICER_ID, "Looks safe.")
+
+    assert "flags" not in calls[0]["json"]
 
 
 def test_decide_record_conflict_carries_the_existing_round(sent):
