@@ -7,9 +7,11 @@ import {
   requestSafetyChanges,
 } from './safetyCheck'
 import type { SafetyFlagArea } from './safetyCheck'
+import { SafetyRejectDialog } from './SafetyRejectDialog'
 
 type Props = {
   eventId: string
+  eventName: string
   safetyOfficerId: string
   /** Called after any successful decision so the page reloads the event. */
   onDecided: () => void
@@ -26,13 +28,14 @@ type View = 'idle' | 'request-changes' | 'reject'
  * view (its remarks field and button are always there, as before SCRUM-151);
  * Request changes and Reject replace it with their own form until cancelled.
  */
-export function SafetyDecisionPanel({ eventId, safetyOfficerId, onDecided }: Props) {
+export function SafetyDecisionPanel({ eventId, eventName, safetyOfficerId, onDecided }: Props) {
   const [view, setView] = useState<View>('idle')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
   const idle = () => setView('idle')
   const decided = (text: string) => { setMessage(text); setError(''); idle(); onDecided() }
+  const open = (next: View) => { setError(''); setMessage(''); setView(next) }
 
   return <div className="safety-decision">
     <h4>Operational Safety Check</h4>
@@ -40,7 +43,7 @@ export function SafetyDecisionPanel({ eventId, safetyOfficerId, onDecided }: Pro
     {error && <p className="field-error" role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}
 
-    {view === 'idle' && <>
+    {view !== 'request-changes' && <>
       <ApproveAction
         eventId={eventId}
         safetyOfficerId={safetyOfficerId}
@@ -48,10 +51,10 @@ export function SafetyDecisionPanel({ eventId, safetyOfficerId, onDecided }: Pro
         onDecided={decided}
       />
       <div className="safety-decision-actions">
-        <button className="button" type="button" onClick={() => { setError(''); setMessage(''); setView('request-changes') }}>
+        <button className="button" type="button" onClick={() => open('request-changes')}>
           Request changes
         </button>{' '}
-        <button className="button reject" type="button" onClick={() => { setError(''); setMessage(''); setView('reject') }}>
+        <button className="button reject" type="button" onClick={() => open('reject')}>
           Reject
         </button>
       </div>
@@ -67,6 +70,7 @@ export function SafetyDecisionPanel({ eventId, safetyOfficerId, onDecided }: Pro
 
     {view === 'reject' && <RejectAction
       eventId={eventId}
+      eventName={eventName}
       safetyOfficerId={safetyOfficerId}
       onCancel={idle}
       onError={setError}
@@ -145,28 +149,21 @@ function RequestChangesAction({ eventId, safetyOfficerId, onCancel, onError, onD
   })
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [validationError, setValidationError] = useState('')
 
   const areas = FLAG_AREAS.filter((area) => checked[area.value])
-  const canSubmit = areas.length > 0
-    && areas.every((area) => selected[area.value].trim())
-    && reason.trim().length > 0
+  // Shown live rather than on submit: the button stays disabled until the
+  // request is valid, so a message that only appeared on click never would
+  // (AC1's "select at least one area" / "describe the change needed").
+  const blocker = areas.length === 0
+    ? 'Select at least one affected area.'
+    : areas.some((area) => !selected[area.value].trim())
+      ? 'Describe the change needed for every selected area.'
+      : !reason.trim()
+        ? 'Add a reason for the change request.'
+        : ''
 
   const submit = async () => {
-    if (submitting) return
-    if (areas.length === 0) {
-      setValidationError('Select at least one area.')
-      return
-    }
-    if (areas.some((area) => !selected[area.value].trim())) {
-      setValidationError('Describe the change needed for every selected area.')
-      return
-    }
-    if (!reason.trim()) {
-      setValidationError('A reason is required.')
-      return
-    }
-    setValidationError('')
+    if (submitting || blocker) return
     setSubmitting(true)
     onError('')
     try {
@@ -188,15 +185,20 @@ function RequestChangesAction({ eventId, safetyOfficerId, onCancel, onError, onD
   }
 
   return <div className="safety-decision-form">
-    <fieldset className="field">
+    <h5>Request changes</h5>
+    <p className="muted">
+      The event returns to the coordinator at <strong>Safety Changes Requested</strong>. Its venue
+      bookings and equipment requests are kept as they are.
+    </p>
+    <fieldset className="safety-decision-areas">
       <legend>Affected areas</legend>
       {FLAG_AREAS.map((area) => <div key={area.value} className="safety-decision-area">
-        <label>
+        <label className="checkbox-option">
           <input
             type="checkbox"
             checked={checked[area.value]}
             onChange={(change) => setChecked({ ...checked, [area.value]: change.target.checked })}
-          />{' '}
+          />
           {area.label}
         </label>
         {checked[area.value] && <textarea
@@ -223,18 +225,17 @@ function RequestChangesAction({ eventId, safetyOfficerId, onCancel, onError, onD
       <span className="muted">{reason.length} / {NOTES_LIMIT}</span>
     </div>
 
-    {validationError && <p className="field-error" role="alert">{validationError}</p>}
+    {blocker && <p className="muted" role="note">{blocker}</p>}
 
-    <button className="button primary" type="button" disabled={submitting || !canSubmit} onClick={submit}>
+    <button className="button primary" type="button" disabled={submitting || Boolean(blocker)} onClick={submit}>
       {submitting ? 'Requesting changes…' : 'Request changes'}
     </button>{' '}
     <button className="button small" type="button" disabled={submitting} onClick={onCancel}>Cancel</button>
   </div>
 }
 
-function RejectAction({ eventId, safetyOfficerId, onCancel, onError, onDecided }: ActionProps & { onCancel: () => void }) {
+function RejectAction({ eventId, eventName, safetyOfficerId, onCancel, onError, onDecided }: ActionProps & { eventName: string; onCancel: () => void }) {
   const [reason, setReason] = useState('')
-  const [confirming, setConfirming] = useState(false)
   const [rejecting, setRejecting] = useState(false)
 
   const reject = async () => {
@@ -255,33 +256,12 @@ function RejectAction({ eventId, safetyOfficerId, onCancel, onError, onDecided }
     }
   }
 
-  return <div className="safety-decision-form">
-    <div className="field">
-      <label htmlFor="safety-reject-reason">Reason</label>
-      <textarea
-        id="safety-reject-reason"
-        value={reason}
-        maxLength={NOTES_LIMIT}
-        onChange={(change) => setReason(change.target.value)}
-        placeholder="Why this safety arrangement is being rejected."
-        required
-      />
-      <span className="muted">{reason.length} / {NOTES_LIMIT}</span>
-    </div>
-
-    {confirming ? <div className="safety-decision-confirm">
-      <p>Reject and cancel this event? This can't be undone. Its venue bookings will be released.</p>
-      <button className="button reject" type="button" disabled={rejecting} onClick={reject}>
-        {rejecting ? 'Rejecting…' : 'Yes, reject and cancel'}
-      </button>{' '}
-      <button className="button small" type="button" disabled={rejecting} onClick={() => setConfirming(false)}>
-        Cancel
-      </button>
-    </div> : <>
-      <button className="button reject" type="button" disabled={!reason.trim()} onClick={() => setConfirming(true)}>
-        Reject
-      </button>{' '}
-      <button className="button small" type="button" onClick={onCancel}>Cancel</button>
-    </>}
-  </div>
+  return <SafetyRejectDialog
+    eventName={eventName}
+    reason={reason}
+    submitting={rejecting}
+    onReasonChange={setReason}
+    onCancel={onCancel}
+    onConfirm={reject}
+  />
 }

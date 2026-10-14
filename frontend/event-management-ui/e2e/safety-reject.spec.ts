@@ -53,10 +53,10 @@ test('AC3, AC4, AC5: rejecting with a reason and confirming cancels the event', 
   await expect(page.getByRole('heading', { name: 'Operational Safety Check' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Reject' }).click()
-  await page.getByLabel('Reason').fill('Unsafe egress plan.')
-  await page.getByRole('button', { name: 'Reject' }).click()
-  await expect(page.getByText(/Reject and cancel this event\?/)).toBeVisible()
-  await page.getByRole('button', { name: 'Yes, reject and cancel' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Reject and cancel this event?' })
+  await expect(dialog).toContainText('Safety Reject Expo')
+  await dialog.getByLabel('Reason for rejection').fill('Unsafe egress plan.')
+  await dialog.getByRole('button', { name: 'Confirm rejection' }).click()
 
   await expect(page.locator('.status-badge').first()).toContainText('Cancelled')
   expect(rejections.at(-1)).toMatchObject({
@@ -67,15 +67,30 @@ test('AC3, AC4, AC5: rejecting with a reason and confirming cancels the event', 
   })
 })
 
-test('AC3: the Reject button stays disabled until a reason is entered', async ({ page, mockApi }) => {
+test('AC3: the confirm button stays disabled until a reason is entered', async ({ page, mockApi }) => {
   await openAsSafetyOfficer(page, mockApi, [pending])
 
   await page.goto(`/events/${pending.id}`)
   await expect(page.getByRole('heading', { name: 'Operational Safety Check' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Reject' }).click()
-  await expect(page.getByRole('button', { name: 'Reject' })).toBeDisabled()
+  const dialog = page.getByRole('dialog', { name: 'Reject and cancel this event?' })
+  const confirm = dialog.getByRole('button', { name: 'Confirm rejection' })
+  await expect(confirm).toBeDisabled()
 
-  await page.getByLabel('Reason').fill('Unsafe egress plan.')
-  await expect(page.getByRole('button', { name: 'Reject' })).toBeEnabled()
+  await dialog.getByLabel('Reason for rejection').fill('Unsafe egress plan.')
+  await expect(confirm).toBeEnabled()
+})
+
+test('AC3: cancelling the dialog sends nothing and leaves the event pending', async ({ page, mockApi }) => {
+  await openAsSafetyOfficer(page, mockApi, [pending])
+
+  await page.goto(`/events/${pending.id}`)
+  await page.getByRole('button', { name: 'Reject' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Reject and cancel this event?' })
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Reject' })).toBeVisible()
+  await expect(page.locator('.status-badge').first()).toContainText('Pending Safety Check')
 })
