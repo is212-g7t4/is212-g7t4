@@ -174,10 +174,15 @@ def approve_safety_check():
             code="NO_OPEN_SAFETY_CHECK",
             message="This event has no safety check awaiting a decision.",
         ), 409
-    except clients.DownstreamTimeout:
-        return jsonify(message="Approving took too long. Please try again."), 504
-    except clients.DownstreamError:
-        return jsonify(message="Unable to approve this safety check right now."), 502
+    except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+        # The decide call may have actually gone through and only the
+        # response was lost (a read timeout, a dropped connection) — check
+        # before reporting failure. Otherwise a retry finds no 'Pending'
+        # round left (it's Safety Approved already) and gets stuck on
+        # NO_OPEN_SAFETY_CHECK forever.
+        decided = _find_decided_round(event_id, open_round["id"])
+        if decided is None:
+            return _decide_failure(error)
 
     try:
         updated = clients.set_event_safety_status(
@@ -188,7 +193,19 @@ def approve_safety_check():
             decided_by=safety_officer_id,
             remarks=remarks,
         )
-    except Exception as error:  # noqa: BLE001 — every failure compensates alike
+    except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+        # Same reconciliation as above, one step later: Event Service may
+        # have actually confirmed the event and only the response was lost.
+        # Don't undo a decision that already succeeded end to end — that
+        # would leave a Confirmed event with its safety check reopened.
+        event_after, _lookup_failure = _load_event_for_officer(
+            event_id, safety_officer_id
+        )
+        if event_after and event_after.get("status") == CONFIRMED:
+            return jsonify(safetyCheck=decided, event=event_after), 200
+        _compensate_decision(decided["id"], decided["decidedAt"])
+        return _decide_failure(error)
+    except Exception as error:  # noqa: BLE001 — every other failure compensates alike
         _compensate_decision(decided["id"], decided["decidedAt"])
         return _approve_event_update_failure(error)
 
@@ -387,6 +404,32 @@ def _approve_status_failure(event):
     )
 
 
+def _find_decided_round(event_id, safety_check_id):
+    """Check whether a round was actually decided despite a lost response.
+
+    Called only after decide_safety_check_record raises a timeout/transport
+    error — ambiguous, since that can mean the record service never got the
+    request or that it processed it and only the reply was lost. Returns the
+    record if it is now 'Safety Approved', otherwise None (including when
+    this lookup itself fails, which is just as ambiguous — the caller falls
+    back to reporting the original failure).
+    """
+    try:
+        rounds = clients.list_safety_check_records(event_id)
+    except (clients.DownstreamTimeout, clients.DownstreamError):
+        return None
+    match = next((r for r in rounds if r.get("id") == safety_check_id), None)
+    if match and match.get("status") == SAFETY_APPROVED:
+        return match
+    return None
+
+
+def _decide_failure(error):
+    if isinstance(error, clients.DownstreamTimeout):
+        return jsonify(message="Approving took too long. Please try again."), 504
+    return jsonify(message="Unable to approve this safety check right now."), 502
+
+
 def _compensate_decision(safety_check_id, decided_at):
     """Undo the decision we just made when the event couldn't then be moved.
 
@@ -405,7 +448,12 @@ def _compensate_decision(safety_check_id, decided_at):
 
 
 def _approve_event_update_failure(error):
-    """Map Event Service's refusal of approve's step 6 after the decision has been undone."""
+    """Map Event Service's refusal of approve's step 6 after the decision has been undone.
+
+    Only definite refusals reach here. Timeouts and transport errors are
+    ambiguous — they may mean the event was confirmed and the reply lost —
+    so approve handles those itself, by reconciling before compensating.
+    """
     if isinstance(error, clients.ServiceCredentialsError):
         return jsonify(message="Event Service refused this service's credentials."), 502
     if isinstance(error, clients.EventNotFoundError):
@@ -417,8 +465,6 @@ def _approve_event_update_failure(error):
             or "Only an event 'Pending Safety Check' can be approved.",
             currentStatus=error.body.get("currentStatus"),
         ), 409
-    if isinstance(error, clients.DownstreamTimeout):
-        return jsonify(message="Approving took too long. Please try again."), 504
     return jsonify(message="Unable to approve this safety check right now."), 502
 
 
