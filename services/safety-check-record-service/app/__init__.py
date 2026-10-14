@@ -8,9 +8,12 @@ from flask import Flask, jsonify, request
 load_dotenv()
 
 from app.models import (
+    CHANGES_REQUESTED,
     DECISION_STATUSES,
+    FLAG_AREAS,
     NOTES_LIMIT,
     RECORD_STATUSES,
+    SAFETY_REJECTED,
     RecordNotDeletableError,
     RecordNotFoundError,
     RoundAlreadyDecidedError,
@@ -180,14 +183,23 @@ def create_app(config=None) -> Flask:
         decided_by = _uuid_or_none(data.get("decidedBy"))
         if not decided_by:
             return jsonify(message="decidedBy must be a valid UUID."), 400
-        remarks, failure = _remarks(data)
+        remarks_required = status in (CHANGES_REQUESTED, SAFETY_REJECTED)
+        remarks, failure = _remarks(data, required=remarks_required)
+        if failure:
+            return failure
+        flags, failure = _flags(data, status)
         if failure:
             return failure
         if not app.config["DATABASE_URL"]:
             return jsonify(message=NO_DATABASE), 503
         try:
             decided = decide_round(
-                app.config["DATABASE_URL"], safety_check_id, status, decided_by, remarks
+                app.config["DATABASE_URL"],
+                safety_check_id,
+                status,
+                decided_by,
+                remarks,
+                flags,
             )
         except RecordNotFoundError:
             return jsonify(message="Safety check not found."), 404
@@ -256,8 +268,12 @@ def _notes(data):
     return cleaned, None
 
 
-def _remarks(data):
-    """The Safety Officer's optional remarks, trimmed to NULL when blank (SCRUM-150 AC2)."""
+def _remarks(data, required=False):
+    """The Safety Officer's remarks, trimmed to NULL when blank.
+
+    Optional for an approval (SCRUM-150 AC2); required, non-blank for a
+    change request or a rejection (SCRUM-151 AC1, AC3, AC6).
+    """
     value = data.get("remarks")
     if value is not None and not isinstance(value, str):
         return None, (jsonify(message="remarks must be text."), 400)
@@ -266,4 +282,65 @@ def _remarks(data):
             jsonify(message=f"remarks must be {NOTES_LIMIT} characters or fewer."),
             400,
         )
-    return clean_notes(value), None
+    cleaned = clean_notes(value)
+    if required and not cleaned:
+        return None, (jsonify(message="remarks is required."), 400)
+    return cleaned, None
+
+
+def _flags(data, status):
+    """Validate the per-area flags for a decision (SCRUM-151 AC1).
+
+    A change request needs 1 to 3 flags, each a known area (no area twice)
+    with non-blank `changeRequired` text; approval and rejection must send
+    none.
+    """
+    raw = data.get("flags", [])
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        return None, (jsonify(message="flags must be a list."), 400)
+
+    if status != CHANGES_REQUESTED:
+        if raw:
+            return None, (
+                jsonify(message=f"flags are only accepted for {CHANGES_REQUESTED}."),
+                400,
+            )
+        return [], None
+
+    if not raw:
+        return None, (
+            jsonify(message="At least one area must be selected."),
+            400,
+        )
+    if len(raw) > len(FLAG_AREAS):
+        return None, (jsonify(message="Each area may be flagged at most once."), 400)
+
+    seen = set()
+    cleaned = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None, (jsonify(message="Each flag must be an object."), 400)
+        area = item.get("area")
+        if area not in FLAG_AREAS:
+            return None, (
+                jsonify(message=f"area must be one of: {', '.join(FLAG_AREAS)}."),
+                400,
+            )
+        if area in seen:
+            return None, (jsonify(message="Each area may be flagged at most once."), 400)
+        seen.add(area)
+        change_required = item.get("changeRequired")
+        if not isinstance(change_required, str) or not change_required.strip():
+            return None, (
+                jsonify(message="changeRequired is required for each selected area."),
+                400,
+            )
+        if len(change_required) > NOTES_LIMIT:
+            return None, (
+                jsonify(message=f"changeRequired must be {NOTES_LIMIT} characters or fewer."),
+                400,
+            )
+        cleaned.append({"area": area, "changeRequired": change_required.strip()})
+    return cleaned, None

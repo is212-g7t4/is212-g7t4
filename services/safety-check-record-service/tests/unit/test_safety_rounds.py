@@ -276,9 +276,12 @@ def test_database_failure_is_503(setup):
 
 def test_rounds_are_listed_newest_first(setup):
     client, _, cursor = setup
-    cursor.fetchall.return_value = [
-        record_row(round_number=2, status="Pending"),
-        record_row(round_number=1, status="Changes Requested", decided=True),
+    cursor.fetchall.side_effect = [
+        [
+            record_row(round_number=2, status="Pending"),
+            record_row(round_number=1, status="Changes Requested", decided=True),
+        ],
+        [],
     ]
 
     response = client.get(f"/safety-check-records?eventId={EVENT_ID}")
@@ -287,20 +290,21 @@ def test_rounds_are_listed_newest_first(setup):
     assert [r["roundNumber"] for r in response.json["safetyChecks"]] == [2, 1]
     assert response.json["safetyChecks"][1]["decidedAt"] == "2026-11-02T03:00:00+00:00"
     assert response.json["safetyChecks"][1]["remarks"] == "Looks safe."
-    assert "ORDER BY round_number DESC" in cursor.execute.call_args.args[0]
+    assert response.json["safetyChecks"][1]["flags"] == []
+    assert "ORDER BY round_number DESC" in cursor.execute.call_args_list[0].args[0]
 
 
 def test_rounds_can_be_filtered_by_status(setup):
     """AC4 uses this to fetch the open round to report back."""
     client, _, cursor = setup
-    cursor.fetchall.return_value = [record_row(status="Pending")]
+    cursor.fetchall.side_effect = [[record_row(status="Pending")], []]
 
     response = client.get(
         f"/safety-check-records?eventId={EVENT_ID}&status=Pending"
     )
 
     assert response.status_code == 200
-    sql, params = cursor.execute.call_args.args
+    sql, params = cursor.execute.call_args_list[0].args
     assert "AND status = %s" in sql
     assert params == [EVENT_ID, "Pending"]
 
