@@ -22,9 +22,12 @@ CHANGES_REQUESTED = "Changes Requested"
 SAFETY_REJECTED = "Safety Rejected"
 RECORD_STATUSES = (PENDING, SAFETY_APPROVED, CHANGES_REQUESTED, SAFETY_REJECTED)
 
-# SCRUM-150 only decides approvals; SCRUM-151 adds CHANGES_REQUESTED and
-# SAFETY_REJECTED to this tuple.
-DECISION_STATUSES = (SAFETY_APPROVED,)
+DECISION_STATUSES = (SAFETY_APPROVED, CHANGES_REQUESTED, SAFETY_REJECTED)
+
+# Stored verbatim in SafetyCheckFlag.area; mirrors docs/db-structure.md and
+# the seed data (SCRUM-151 AC1).
+FLAG_AREAS = ("venue arrangement", "technical arrangement", "event details")
+FLAG_COLUMNS = "flag_id, safety_check_id, area, booking_id, equip_request_id, change_required"
 
 NOTES_LIMIT = 2000
 
@@ -65,7 +68,7 @@ def _utc(value):
     return value.astimezone(UTC).isoformat() if value else None
 
 
-def serialize(row):
+def serialize(row, flags=()):
     return {
         "id": str(row["safety_check_id"]),
         "eventId": str(row["event_id"]) if row["event_id"] else None,
@@ -78,6 +81,17 @@ def serialize(row):
         "decidedBy": str(row["decided_by"]) if row["decided_by"] else None,
         "decidedAt": _utc(row["decided_at"]),
         "remarks": row["remarks"],
+        "flags": [serialize_flag(flag) for flag in flags],
+    }
+
+
+def serialize_flag(row):
+    return {
+        "id": str(row["flag_id"]),
+        "area": row["area"],
+        "bookingId": str(row["booking_id"]) if row["booking_id"] else None,
+        "equipmentRequestId": str(row["equip_request_id"]) if row["equip_request_id"] else None,
+        "changeRequired": row["change_required"],
     }
 
 
@@ -148,7 +162,27 @@ def list_rounds(database_url, event_id, status=None):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query + " ORDER BY round_number DESC", params)
-            return [serialize(row) for row in cursor.fetchall()]
+            rounds = cursor.fetchall()
+            flags_by_round = _flags_for(cursor, [row["safety_check_id"] for row in rounds])
+            return [
+                serialize(row, flags_by_round.get(row["safety_check_id"], []))
+                for row in rounds
+            ]
+
+
+def _flags_for(cursor, safety_check_ids):
+    """One round's flags keyed by safety_check_id; rounds without flags get []."""
+    if not safety_check_ids:
+        return {}
+    cursor.execute(
+        f"""SELECT {FLAG_COLUMNS} FROM public."SafetyCheckFlag"
+            WHERE safety_check_id = ANY(%s::uuid[])""",
+        [list(safety_check_ids)],
+    )
+    flags_by_round = {}
+    for flag in cursor.fetchall():
+        flags_by_round.setdefault(flag["safety_check_id"], []).append(flag)
+    return flags_by_round
 
 
 def delete_open_round(database_url, safety_check_id):
@@ -177,13 +211,17 @@ def delete_open_round(database_url, safety_check_id):
             )
 
 
-def decide_round(database_url, safety_check_id, status, decided_by, remarks=None):
+def decide_round(database_url, safety_check_id, status, decided_by, remarks=None, flags=()):
     """Decide the open round: SCRUM-150 AC2 (approve), SCRUM-151 (reject/changes).
 
     `FOR UPDATE` on this round is the race guard for AC3: if two Safety
     Officers click at once, only one `UPDATE` can win; the other finds the
     round no longer 'Pending' and raises `RoundAlreadyDecidedError` before
     anything is written.
+
+    `flags` (SCRUM-151 AC1, AC6) is one row per selected area, inserted in
+    the same transaction as the decision so a change request never saves
+    without its areas, or with them orphaned from a decision.
     """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -208,7 +246,18 @@ def decide_round(database_url, safety_check_id, status, decided_by, remarks=None
                     RETURNING {COLUMNS}""",
                 [status, decided_by, clean_notes(remarks), safety_check_id],
             )
-            return serialize(cursor.fetchone())
+            decided = cursor.fetchone()
+            inserted = []
+            for flag in flags:
+                cursor.execute(
+                    f"""INSERT INTO public."SafetyCheckFlag"
+                        (safety_check_id, area, change_required)
+                        VALUES (%s, %s, %s)
+                        RETURNING {FLAG_COLUMNS}""",
+                    [safety_check_id, flag["area"], flag["changeRequired"]],
+                )
+                inserted.append(cursor.fetchone())
+            return serialize(decided, inserted)
 
 
 def reopen_round(database_url, safety_check_id, decided_at):
@@ -231,6 +280,10 @@ def reopen_round(database_url, safety_check_id, decided_at):
                 raise RecordNotFoundError
             if existing["decided_at"] is None or _utc(existing["decided_at"]) != decided_at:
                 raise RoundNotReopenableError
+            cursor.execute(
+                'DELETE FROM public."SafetyCheckFlag" WHERE safety_check_id = %s',
+                [safety_check_id],
+            )
             cursor.execute(
                 f"""UPDATE public."SafetyCheck"
                     SET status = %s, decided_by = NULL, decided_at = NULL, remarks = NULL

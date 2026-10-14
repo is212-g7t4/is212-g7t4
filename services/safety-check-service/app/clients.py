@@ -144,6 +144,7 @@ def set_event_safety_status(
     coordinator_id: str = None,
     decided_by: str = None,
     remarks: str = None,
+    areas: list = None,
 ) -> dict:
     """Move the event along the safety workflow. Event Service re-checks under a row lock.
 
@@ -161,6 +162,8 @@ def set_event_safety_status(
     if decided_by is not None:
         body["decidedBy"] = decided_by
         body["remarks"] = remarks
+    if areas is not None:
+        body["areas"] = areas
     response = _send(
         "PATCH",
         f"{EVENT_SERVICE_URL}/events/{event_id}/safety-status",
@@ -189,6 +192,18 @@ def get_event_venue_bookings(event_id: str) -> list:
         _send("GET", f"{VENUE_AVAILABILITY_SERVICE_URL}/events/{event_id}/venue-bookings")
     )
     return response.json()["bookings"]
+
+
+def cancel_venue_booking(booking_id: str, event_id: str) -> dict:
+    """Release one booking on a safety rejection (SCRUM-151 AC5). Idempotent downstream."""
+    response = _send(
+        "PATCH",
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/cancel",
+        json={"eventId": event_id},
+    )
+    if response.status_code == 404:
+        raise RecordNotFoundError
+    return _ok(response).json()
 
 
 # --- Equipment Request Service (atomic, 5011) -------------------------------
@@ -263,13 +278,16 @@ def delete_safety_check_record(safety_check_id: str) -> None:
 
 
 def decide_safety_check_record(
-    safety_check_id: str, status: str, decided_by: str, remarks=None
+    safety_check_id: str, status: str, decided_by: str, remarks=None, flags=None
 ) -> dict:
-    """Decide the open round (SCRUM-150 AC2). The record service is the race guard."""
+    """Decide the open round (SCRUM-150 AC2, SCRUM-151). The record service is the race guard."""
+    body = {"status": status, "decidedBy": decided_by, "remarks": remarks}
+    if flags is not None:
+        body["flags"] = flags
     response = _send(
         "PATCH",
         f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{safety_check_id}/decision",
-        json={"status": status, "decidedBy": decided_by, "remarks": remarks},
+        json=body,
     )
     if response.status_code == 404:
         raise RecordNotFoundError

@@ -131,8 +131,10 @@ def test_older_round_cannot_be_decided_while_a_newer_round_exists(setup):
     assert cursor.execute.call_count == 2
 
 
-@pytest.mark.parametrize("status", ["Pending", "Changes Requested", "Safety Rejected", "Approved"])
+@pytest.mark.parametrize("status", ["Pending", "Approved"])
 def test_status_not_in_decision_statuses_is_rejected(status, setup):
+    """SCRUM-151 widens DECISION_STATUSES to include Changes Requested and
+    Safety Rejected, so only these remain invalid."""
     client, _, cursor = setup
 
     response = decide(client, status=status)

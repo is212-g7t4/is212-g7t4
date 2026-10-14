@@ -67,7 +67,9 @@ class Downstream:
         self._maybe_fail("list_records")
         return self.rounds
 
-    def decide_safety_check_record(self, safety_check_id, status, decided_by, remarks=None):
+    def decide_safety_check_record(
+        self, safety_check_id, status, decided_by, remarks=None, flags=None
+    ):
         self.calls.append(("decide", safety_check_id, status, decided_by, remarks))
         if "decide" in self.apply_despite_failure:
             self.rounds = [self.decided]
@@ -83,6 +85,7 @@ class Downstream:
         coordinator_id=None,
         decided_by=None,
         remarks=None,
+        areas=None,
     ):
         self.calls.append(
             ("patch_event", event_id, status, safety_check_id, round_number, decided_by, remarks)

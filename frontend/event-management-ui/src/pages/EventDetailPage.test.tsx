@@ -316,3 +316,60 @@ test('AC1: a pending event shows when it was submitted, and no submit button', a
   expect(safetyPanel()).not.toBeInTheDocument()
   expect(screen.getByText(/Submitted for safety check on/)).toHaveTextContent('05/10/2026')
 })
+
+// --- SCRUM-151: booking panel hidden on Cancelled, history shows reason/areas
+
+test('SCRUM-151 AC5: the venue bookings panel is hidden once the event is Cancelled', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Cancelled', coordinatorId })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.queryByLabelText('Venue bookings')).not.toBeInTheDocument()
+})
+
+test('the venue bookings panel still shows for every other status', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved', coordinatorId })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByLabelText('Venue bookings')).toBeInTheDocument()
+})
+
+test('SCRUM-151 AC6: action history shows the reason and areas for a change request', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Safety Changes Requested',
+    actionHistory: [{
+      status: 'Safety Changes Requested',
+      details: 'Operational Safety Check: changes requested (round 1) for venue arrangement, event details.',
+      coordinatorId,
+      recordedAt: '2026-10-05T02:00:00+00:00',
+      remarks: 'Needs another look.',
+      areas: ['venue arrangement', 'event details'],
+    }],
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByText('Areas: venue arrangement, event details')).toBeInTheDocument()
+  expect(screen.getByText('Reason: Needs another look.')).toBeInTheDocument()
+})
+
+test('SCRUM-151 AC6: action history shows the reason for a rejection, with no areas', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Cancelled',
+    actionHistory: [{
+      status: 'Cancelled',
+      details: 'Operational Safety Check rejected (round 1). The event is cancelled.',
+      coordinatorId,
+      recordedAt: '2026-10-05T02:00:00+00:00',
+      remarks: 'Unsafe egress plan.',
+    }],
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByText('Reason: Unsafe egress plan.')).toBeInTheDocument()
+  expect(screen.queryByText(/^Areas:/)).not.toBeInTheDocument()
+})

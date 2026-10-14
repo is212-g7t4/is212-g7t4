@@ -94,7 +94,7 @@ workspace "ConnectSphere" "C3 — API Application Components" {
 
         # Safety Check Module — owns the safety-check workflow
         connectSphere.apiApplication.safetyCheckModule -> connectSphere.apiApplication.eventModule "Reads event details from, and sets event status via"
-        connectSphere.apiApplication.safetyCheckModule -> connectSphere.apiApplication.venueAvailabilitiesModule "Checks approval of, and reopens flagged, venue bookings via"
+        connectSphere.apiApplication.safetyCheckModule -> connectSphere.apiApplication.venueAvailabilitiesModule "Checks approval of, and releases, on rejection, venue bookings via"
         connectSphere.apiApplication.safetyCheckModule -> connectSphere.apiApplication.equipmentAvailabilityModule "Checks approval of, and reopens flagged, equipment requests via"
         connectSphere.apiApplication.safetyCheckModule -> connectSphere.apiApplication.venueModule "Reads capacity, layout, emergency access and restrictions from"
         connectSphere.apiApplication.safetyCheckModule -> connectSphere.apiApplication.userModule "Looks up Safety Officers from (notifications)"

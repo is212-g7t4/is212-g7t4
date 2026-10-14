@@ -14,6 +14,7 @@ def record_row(
     equipment_placement_notes=None,
     crowd_movement_notes=None,
     decided=False,
+    remarks=None,
 ):
     """A `public."SafetyCheck"` row as `RealDictCursor` would return it."""
     return {
@@ -27,5 +28,5 @@ def record_row(
         "status": status,
         "decided_by": OFFICER_ID if decided else None,
         "decided_at": datetime(2026, 11, 2, 3, tzinfo=UTC) if decided else None,
-        "remarks": "Looks safe." if decided else None,
+        "remarks": (remarks or "Looks safe.") if decided else None,
     }
