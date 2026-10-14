@@ -27,6 +27,7 @@ from app.models import FIELDS
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
 OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
+OFFICER_ID = "33333333-3333-4333-8333-333333333333"
 SAFETY_CHECK_ID = "55555555-5555-4555-8555-555555555555"
 INTERNAL_TOKEN = "test-internal-token"
 INTERNAL_HEADERS = {"X-Internal-Service-Token": INTERNAL_TOKEN}
@@ -256,8 +257,8 @@ def test_only_an_approved_event_can_be_submitted(current_status, setup):
 @pytest.mark.parametrize(
     "status", ["Safety Changes Requested", "Cancelled"]
 )
-def test_statuses_for_later_stories_are_not_reachable_yet(status, setup):
-    """SCRUM-151 adds its own moves to SAFETY_TRANSITIONS; until then, no.
+def test_safety_changes_and_rejection_are_only_reachable_from_pending(status, setup):
+    """SCRUM-151's two moves, like SCRUM-150's, only leave 'Pending Safety Check'.
 
     'Confirmed' is deliberately absent here: SCRUM-150 makes it reachable
     from 'Pending Safety Check' (not from 'Approved', which this test fixes
@@ -266,7 +267,13 @@ def test_statuses_for_later_stories_are_not_reachable_yet(status, setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Approved")
 
-    response = patch_safety_status(client, status=status)
+    response = patch_safety_status(
+        client,
+        status=status,
+        decidedBy=OFFICER_ID,
+        remarks="Needs another look." if status == "Safety Changes Requested" else "Unsafe.",
+        areas=["venue arrangement"] if status == "Safety Changes Requested" else None,
+    )
 
     assert response.status_code == 409
     assert response.json["code"] == "INVALID_SAFETY_TRANSITION"
