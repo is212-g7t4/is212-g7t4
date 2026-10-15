@@ -17,6 +17,7 @@ HEADERS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
 
 @pytest.fixture
 def calendar(monkeypatch):
+    monkeypatch.setattr("app.list_window_closures", lambda *args: [])
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchall.return_value = []
@@ -157,7 +158,7 @@ def test_ac3_excluded_status(calendar, status):
     _, client, cursor = calendar
     cursor.fetchall.return_value = [booking_row(status=status)]
     assert client.get("/venue-bookings", query_string=QUERY, headers=HEADERS).json == {
-        "bookings": []
+        "bookings": [], "closures": []
     }
 
 

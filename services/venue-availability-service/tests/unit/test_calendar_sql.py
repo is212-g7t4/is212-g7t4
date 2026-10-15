@@ -18,14 +18,15 @@ class ReadConnection:
     def __init__(self, rows):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
+        self.db.create_function("now", 0, lambda: "2026-10-01T00:00:00+08:00")
         self.db.execute(
             'CREATE TABLE "VenueBooking" ('
             + ",".join(f"{c.strip()} TEXT" for c in COLUMNS.split(","))
-            + ")"
+            + ", hold_expires_at TEXT)"
         )
         for row in rows:
             self.db.execute(
-                'INSERT INTO "VenueBooking" VALUES ('
+                'INSERT INTO "VenueBooking" (' + COLUMNS + ') VALUES ('
                 + ",".join("?" for _ in COLUMNS.split(","))
                 + ")",
                 [v.isoformat() if isinstance(v, datetime) else v for v in row.values()],

@@ -87,7 +87,7 @@ def serialize_calendar(row):
     result["requestedEndTime"] = (
         row["requested_end_time"].replace(tzinfo=SINGAPORE).isoformat()
     )
-    result["blocksSelection"] = row["status"] == "Approved"
+    result["blocksSelection"] = row["status"] in {"Approved", "On Hold"}
     return result
 
 
@@ -112,6 +112,8 @@ def validate_calendar_row(row):
         fields = ("booking_id", "venue_id")
         if row.get("status") != "On Hold":
             fields += ("event_id",)
+        elif not isinstance(row.get("hold_expires_at"), datetime):
+            raise ValueError("Missing hold expiry")
         for field in fields:
             UUID(str(row[field]))
         start, end = row["requested_start_time"], row["requested_end_time"]
@@ -141,9 +143,10 @@ def list_bookings(database_url, venue_id, date_from, date_to):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {COLUMNS}, hold_expires_at FROM public."VenueBooking"
                     WHERE (venue_id = %s OR venue_id IS NULL)
                       AND (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
+                      AND (status IS NULL OR status <> 'On Hold' OR hold_expires_at IS NULL OR hold_expires_at > now())
                       AND ((requested_start_time < %s AND requested_end_time > %s)
                         OR requested_start_time IS NULL
                         OR requested_end_time IS NULL
@@ -422,8 +425,9 @@ def list_window_bookings(database_url, date_from, date_to):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {COLUMNS}, hold_expires_at FROM public."VenueBooking"
                     WHERE (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
+                      AND (status IS NULL OR status <> 'On Hold' OR hold_expires_at IS NULL OR hold_expires_at > now())
                       AND ((requested_start_time < %s AND requested_end_time > %s)
                         OR requested_start_time IS NULL
                         OR requested_end_time IS NULL
@@ -440,3 +444,64 @@ def list_window_bookings(database_url, date_from, date_to):
                 ):
                     bookings.append(serialize(row))
             return bookings
+
+
+def list_window_closures(database_url, date_from, date_to, venue_id=None):
+    """SCRUM-174: full original closure intervals, never paginated or clipped.
+
+    Retain null/inverted candidates in SQL so malformed data fails the read
+    instead of making a closed venue appear free. No booking/event is forged.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            scope = "(venue_id = %s OR venue_id IS NULL) AND " if venue_id else ""
+            params = [venue_id] if venue_id else []
+            params.extend([_aware(date_to), _aware(date_from)])
+            cursor.execute(
+                "SELECT closure_id, venue_id, start_date_time, end_date_time, reason "
+                'FROM public."VenueClosure" WHERE '
+                + scope
+                + "((start_date_time < %s AND end_date_time > %s) "
+                "OR start_date_time IS NULL OR end_date_time IS NULL "
+                "OR end_date_time <= start_date_time) "
+                "ORDER BY start_date_time, closure_id",
+                params,
+            )
+            from uuid import UUID
+
+            closures, seen = [], set()
+            for row in cursor.fetchall():
+                try:
+                    closure_id = str(UUID(str(row["closure_id"])))
+                    venue = str(UUID(str(row["venue_id"])))
+                    start = _aware(row["start_date_time"]).astimezone(SINGAPORE)
+                    end = _aware(row["end_date_time"]).astimezone(SINGAPORE)
+                    reason = row["reason"]
+                    if (
+                        end <= start
+                        or closure_id in seen
+                        or not isinstance(reason, str)
+                        or not reason.strip()
+                        or "\x00" in reason
+                    ):
+                        raise ValueError("Invalid closure")
+                    reason.encode("utf-8")
+                except (
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    AttributeError,
+                    OverflowError,
+                ) as error:
+                    raise CalendarDataError from error
+                seen.add(closure_id)
+                closures.append(
+                    dict(
+                        closureId=closure_id,
+                        venueId=venue,
+                        startDateTime=start.isoformat(),
+                        endDateTime=end.isoformat(),
+                        reason=reason,
+                    )
+                )
+            return closures

@@ -86,8 +86,8 @@ def search_venues(filters: list) -> list:
     return response.json()["venues"]
 
 
-def get_bookings_between(start: str, end: str) -> list:
-    """Non-rejected bookings overlapping [start, end) for every venue.
+def get_bookings_between(start: str, end: str) -> dict:
+    """Bookings and distinct closures overlapping [start, end) for every venue.
 
     Uses the window read, not `GET /venue-bookings`: that one answers for a
     single venue (what SCRUM-25's calendar grid needs) and is behind the
@@ -100,7 +100,10 @@ def get_bookings_between(start: str, end: str) -> list:
         timeout=SEARCH_TIMEOUT,
     )
     response.raise_for_status()
-    return response.json()["bookings"]
+    payload = response.json()
+    from app.search import validate_window
+
+    return validate_window(payload, start, end)
 
 
 def create_booking(

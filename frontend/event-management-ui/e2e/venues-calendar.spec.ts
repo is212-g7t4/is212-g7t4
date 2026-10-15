@@ -42,7 +42,7 @@ test('calendar shows a blocking booking for the selected venue', async ({ page }
     const request = route.request()
     headers.push(request.headers())
     const venueId = new URL(request.url()).searchParams.get('venueId')
-    return json(route, { bookings: venueId === booking.venueId ? [booking] : [] })
+    return json(route, { closures: [], bookings: venueId === booking.venueId ? [booking] : [] })
   })
   await page.goto('/venue-availability')
 

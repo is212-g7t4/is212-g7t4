@@ -57,14 +57,14 @@ def venue_search():
             get_bookings_between, criteria["start"], criteria["end"]
         )
         try:
-            venues, bookings = venues_call.result(), bookings_call.result()
+            venues, window = venues_call.result(), bookings_call.result()
         except httpx.TimeoutException:
             return jsonify(message="Venue search took too long. Please try again."), 504
         except Exception:
             # Don't leak the downstream URL or error text to the browser.
             return jsonify(message="Unable to search venues right now."), 502
 
-    results = shortlist(venues, bookings)
+    results = shortlist(venues, window["bookings"], window["closures"])
     return jsonify(venues=results, count=len(results))
 
 

@@ -7,6 +7,8 @@ from app import create_app
 
 @pytest.fixture
 def setup(monkeypatch):
+    # Legacy booking tests isolate the new, independently tested closure read.
+    monkeypatch.setattr("app.list_window_closures", lambda *args: [])
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr(
