@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { VenueCalendarPage } from './VenueCalendarPage'
 import { fetchVenues } from '../features/venue/venues'
 import { fetchCalendar } from '../features/calendar/api'
+import { singaporeDate } from '../features/calendar/dates'
 import type { Role } from '../types'
 vi.mock('../features/venue/venues', () => ({ fetchVenues: vi.fn() }))
 vi.mock('../features/calendar/api', () => ({ fetchCalendar: vi.fn() }))
@@ -434,9 +435,10 @@ test('view/navigation preserve anchor, month dates open day, venue and refresh r
   const calls = vi.mocked(fetchCalendar).mock.calls.length
   fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(calls + 1))
+  const expectedToday = singaporeDate(new Date())
   fireEvent.click(screen.getByRole('button', { name: 'Today' }))
   await waitFor(() =>
-    expect(screen.getByLabelText('Anchor date')).not.toHaveValue('2026-10-15'),
+    expect(screen.getByLabelText('Anchor date')).toHaveValue(expectedToday),
   )
 })
 
