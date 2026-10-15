@@ -16,30 +16,30 @@ export const booking = {
 afterEach(() => vi.unstubAllGlobals())
 test('caller abort signal reaches fetch without loosening single-venue validation', async () => {
   const controller = new AbortController()
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({bookings: [booking]})))
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({closures: [], bookings: [booking]})))
   vi.stubGlobal('fetch', fetcher)
   await fetchCalendar(venue, {start: '2026-10-01', end: '2026-10-02'}, user, controller.signal)
   expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal)
 })
 test('valid UUID belonging to another selected venue still fails this single-venue response', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({bookings: [{...booking, venueId: '00000000-0000-0000-0000-000000000002'}]}))))
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({closures: [], bookings: [{...booking, venueId: '00000000-0000-0000-0000-000000000002'}]}))))
   await expect(fetchCalendar(venue,{start:'2026-10-01',end:'2026-10-02'},user)).rejects.toThrow('Invalid availability response')
 })
 test('valid sub-millisecond API interval preserves microseconds', async () => {
   const row = { ...booking, requestedStartTime: '2026-10-01T10:00:00.000001+08:00',
     requestedEndTime: '2026-10-01T10:00:00.000999+08:00' }
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ bookings: [row] }))))
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [row] }))))
   await expect(fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user)).resolves.toEqual([row])
 })
 test.each(['2026-10-01T10:00:00.000001+08:00', '2026-10-01T10:00:00.000000+08:00'])('equal/reversed microsecond interval fails closed: %s', async (end) => {
   const row = { ...booking, requestedStartTime: '2026-10-01T10:00:00.000001+08:00', requestedEndTime: end }
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ bookings: [row] }))))
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [row] }))))
   await expect(fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user)).rejects.toThrow('Invalid availability response')
 })
 test('GET uses selected DEV identity and encoded explicit SGT bounds', async () => {
   const fetcher = vi
     .fn()
-    .mockResolvedValue(new Response(JSON.stringify({ bookings: [booking] })))
+    .mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [booking] })))
   vi.stubGlobal('fetch', fetcher)
   expect(
     await fetchCalendar(
@@ -70,13 +70,13 @@ test.each([401, 403, 503])('HTTP %s fails closed', async (status) => {
 test.each([
   {},
   null,
-  { bookings: [{ ...booking, status: 'Unknown' }] },
-  { bookings: [{ ...booking, blocksSelection: false }] },
+  { closures: [], bookings: [{ ...booking, status: 'Unknown' }] },
+  { closures: [], bookings: [{ ...booking, blocksSelection: false }] },
   {
-    bookings: [{ ...booking, requestedStartTime: '2026-02-30T09:00:00+08:00' }],
+    closures: [], bookings: [{ ...booking, requestedStartTime: '2026-02-30T09:00:00+08:00' }],
   },
-  { bookings: [{ ...booking, venueId: 'wrong' }] },
-  { bookings: [{ ...booking, requestedEndTime: booking.requestedStartTime }] },
+  { closures: [], bookings: [{ ...booking, venueId: 'wrong' }] },
+  { closures: [], bookings: [{ ...booking, requestedEndTime: booking.requestedStartTime }] },
 ])('invalid payload fails closed %#', async (body) => {
   vi.stubGlobal(
     'fetch',
@@ -98,7 +98,7 @@ test.each([
     'fetch',
     vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ bookings: [row] }))),
+      .mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [row] }))),
   )
   await expect(
     fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
@@ -120,7 +120,7 @@ test('non-JSON and network failure reject; empty and both pending statuses succe
   ]) {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response(JSON.stringify({ bookings }))),
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings }))),
     )
     expect(
       await fetchCalendar(
@@ -133,9 +133,9 @@ test('non-JSON and network failure reject; empty and both pending statuses succe
 })
 
 test.each([
-  { bookings: [booking, booking] },
-  { bookings: [{ ...booking, requestedBy: 5 }] },
-  { bookings: [{ ...booking, reviewedBy: undefined }] },
+  { closures: [], bookings: [booking, booking] },
+  { closures: [], bookings: [{ ...booking, requestedBy: 5 }] },
+  { closures: [], bookings: [{ ...booking, reviewedBy: undefined }] },
 ])('duplicate identity or malformed metadata is rejected %#', async (body) => {
   vi.stubGlobal(
     'fetch',

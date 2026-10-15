@@ -47,7 +47,7 @@ beforeEach(() => {
 test('bulk venue buttons select all from single or partial, deselect all and avoid no-op requests', async () => {
   vi.mocked(fetchVenues).mockResolvedValue([...venues, {...venues[1], id: '00000000-0000-0000-0000-000000000003', name: 'Studio'}])
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   const all = screen.getByRole('button', {name: 'Select all'})
   const none = screen.getByRole('button', {name: 'Deselect all'})
   expect(all).toHaveAttribute('type', 'button')
@@ -75,7 +75,7 @@ test('bulk venue buttons select all from single or partial, deselect all and avo
 
 test.each(['Select all', 'Deselect all'])('bulk %s aborts stale grid and inspection chains and resets inputs', async action => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   let finishGrid!: (rows: typeof approved[]) => void
   let finishInspection!: (rows: typeof approved[]) => void
   vi.mocked(fetchCalendar).mockClear()
@@ -100,7 +100,7 @@ test.each(['Select all', 'Deselect all'])('bulk %s aborts stale grid and inspect
 
 test.each(['Select all', 'Deselect all'])('bulk %s clears a completed inspected result', async action => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2027-02-10T09:00', '2027-02-11T00:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   await screen.findByRole('region', {name: 'Inspected range · Week'})
@@ -141,7 +141,7 @@ test('checkbox selection adds venues, preserves same-ID entries with names and p
 
 test('multi-venue inspection independently queries selected venues outside view, retaining same IDs and names', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('checkbox', {name: 'Room'}))
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(3))
   vi.mocked(fetchCalendar).mockClear().mockImplementation(async venueId => [{...approved, venueId, requestedStartTime: '2027-02-10T09:00:00+08:00', requestedEndTime: '2027-02-10T10:00:00+08:00'}])
@@ -161,7 +161,7 @@ test('multi-venue inspection independently queries selected venues outside view,
 
 test('obsolete multi-venue chains abort transport and never start later venues or chunks', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('checkbox', {name: 'Room'}))
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(3))
   let finish!: (rows: typeof approved[]) => void
@@ -179,7 +179,7 @@ test('obsolete multi-venue chains abort transport and never start later venues o
 
 test('normal Week and Day separate centered weekday strips from date headings', async () => {
   const {container} = render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('button', {name: 'Week'}))
   await waitFor(() => expect(container.querySelectorAll('.calendar-days .calendar-weekdays')).toHaveLength(7))
   expect([...container.querySelectorAll('.calendar-day h3')].map(e => e.textContent)).toEqual(['2026-09-28','2026-09-29','2026-09-30','2026-10-01','2026-10-02','2026-10-03','2026-10-04'])
@@ -190,7 +190,7 @@ test('normal Week and Day separate centered weekday strips from date headings', 
 
 test.each(['grid', 'inspection'])('one selected venue failure rejects complete %s result', async mode => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   if (mode === 'grid') vi.mocked(fetchCalendar).mockImplementation(async id => {
     if (id === venues[1].id) throw new Error('Room offline')
     return [approved]
@@ -213,7 +213,7 @@ test.each(['grid', 'inspection'])('one selected venue failure rejects complete %
 test('keyboard changes native multi-select; zero selection issues no requests and resets errors', async () => {
   const keyboard = userEvent.setup()
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   vi.mocked(fetchCalendar).mockClear()
   screen.getByRole('checkbox', {name: 'Hall'}).focus()
   await keyboard.keyboard(' ')
@@ -221,7 +221,7 @@ test('keyboard changes native multi-select; zero selection issues no requests an
   expect(fetchCalendar).not.toHaveBeenCalled()
   screen.getByRole('checkbox', {name: 'Room'}).focus()
   await keyboard.keyboard(' ')
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   expect(fetchCalendar).toHaveBeenCalledTimes(1)
   expect(vi.mocked(fetchCalendar).mock.calls[0][0]).toBe(venues[1].id)
 })
@@ -238,7 +238,7 @@ test('clearing selected set clears obsolete grid failure without falling back to
 
 test('multi-venue long inspection deduplicates within each venue only and caps every chunk', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('checkbox', {name: 'Room'}))
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(3))
   vi.mocked(fetchCalendar).mockClear().mockImplementation(async venueId => [{...approved, venueId, requestedStartTime: '2027-01-01T09:00:00+08:00', requestedEndTime: '2027-03-01T10:00:00+08:00'}])
@@ -250,7 +250,7 @@ test('multi-venue long inspection deduplicates within each venue only and caps e
 
 test.each(['success', 'failure'])('combined snapshot ignores stale %s after selected-set A+B to A to A+B', async outcome => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   let resolve!: (rows: typeof approved[]) => void
   let reject!: (error: Error) => void
   vi.mocked(fetchCalendar).mockImplementationOnce(() => new Promise((r,j) => {resolve=r;reject=j}))
@@ -258,7 +258,7 @@ test.each(['success', 'failure'])('combined snapshot ignores stale %s after sele
   const signal=vi.mocked(fetchCalendar).mock.calls[1][3]!
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   expect(signal.aborted).toBe(true)
   await act(async () => {if(outcome==='success') resolve([approved]); else reject(new Error('old failure'))})
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -267,7 +267,7 @@ test.each(['success', 'failure'])('combined snapshot ignores stale %s after sele
 
 test.each(['success', 'failure'])('selected-set edit aborts multi-venue inspection and ignores late %s', async outcome => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(3))
   let resolve!: (rows: typeof approved[]) => void
@@ -277,7 +277,7 @@ test.each(['success', 'failure'])('selected-set edit aborts multi-venue inspecti
   fireEvent.click(screen.getByRole('button', {name:'Inspect range'}))
   const signal=vi.mocked(fetchCalendar).mock.calls[0][3]!
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   expect(signal.aborted).toBe(true)
   await act(async () => {if(outcome==='success') resolve([approved]); else reject(new Error('old failure'))})
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
@@ -287,7 +287,7 @@ test.each(['success', 'failure'])('selected-set edit aborts multi-venue inspecti
 
 test('unsupported anchor is rejected without replacing the safe window', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.change(screen.getByLabelText('Anchor date'), { target: { value: '10000-01-01' } })
   expect(screen.getByRole('alert')).toHaveTextContent('Supported anchor dates')
   expect(screen.getByLabelText('Anchor date')).toHaveValue('2026-10-01')
@@ -295,7 +295,7 @@ test('unsupported anchor is rejected without replacing the safe window', async (
 })
 test.each([['0002-01-01', 'Previous'], ['9998-12-31', 'Next']])('anchor boundary %s disables crossing in all views', async (anchor, direction) => {
   render(<VenueCalendarPage user={user} initialDate={anchor} />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   expect(screen.getByLabelText('Anchor date')).toHaveAttribute('min', '0002-01-01')
   expect(screen.getByLabelText('Anchor date')).toHaveAttribute('max', '9998-12-31')
   for (const view of ['Day', 'Week', 'Month']) {
@@ -313,7 +313,7 @@ test.each([['0002-01-01', 'Previous'], ['9998-12-31', 'Next']])('anchor boundary
 test('unsupported initial anchor renders controlled feedback and a safe fallback', async () => {
   render(<VenueCalendarPage user={user} initialDate="10000-01-01" />)
   expect(screen.getByRole('alert')).toHaveTextContent('Supported anchor dates')
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('button', { name: 'Today' }))
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
@@ -349,7 +349,7 @@ test.each(['success', 'failure'])('A to B to A ignores first A late %s despite m
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(1))
   selectOnly(1)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   selectOnly(0)
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(3))
   await act(async () => { if (outcome === 'success') resolveOld([approved]); else rejectOld(new Error('old A')) })
@@ -363,7 +363,7 @@ test.each(['success', 'failure'])('A to B to A ignores first A late %s despite m
 test('default month loads real catalogue choices including non-requestable venues and empty snapshot', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
   expect(
-    await screen.findByText('No bookings in this window.'),
+    await screen.findByText('No bookings or closures in this window.'),
   ).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Month' })).toHaveAttribute(
     'aria-pressed',
@@ -387,7 +387,7 @@ test.each(['Event Organiser', 'Attendee'] as Role[])(
 
 test('view/navigation preserve anchor, month dates open day, venue and refresh refetch', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   fireEvent.click(screen.getByRole('button', { name: 'Month' }))
   await waitFor(() =>
     expect(fetchCalendar).toHaveBeenLastCalledWith(
@@ -590,7 +590,7 @@ test.each([
   ['2026-10-01T10:00', '2026-10-01T10:00', 'End date/time must be after start date/time'],
 ])('range validation %s %s is explicit on submit', async (start, end, message) => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range(start, end)
   expect(screen.getByRole('button', {name: 'Inspect range'})).toBeEnabled()
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
@@ -606,7 +606,7 @@ test('long inspection uses sequential 42-day chunks and deduplicates spanning re
     .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     .mockResolvedValueOnce([spanning]).mockResolvedValueOnce([spanning])
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2027-01-01T09:00', '2027-04-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(fetchCalendar).toHaveBeenCalledTimes(2)
@@ -625,13 +625,13 @@ test.each(['conflict', 'failure'])('later chunk %s fails the whole inspection wi
   if (kind === 'conflict') vi.mocked(fetchCalendar).mockResolvedValueOnce([{...spanning, reviewedBy: 'changed'}])
   else vi.mocked(fetchCalendar).mockRejectedValueOnce(new Error('offline'))
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2026-10-01T09:00', '2027-02-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(await screen.findByRole('alert')).toHaveTextContent('Inspection unavailable')
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
   expect(fetchCalendar).toHaveBeenCalledTimes(3)
-  expect(screen.getByText('No bookings in this window.')).toBeInTheDocument()
+  expect(screen.getByText('No bookings or closures in this window.')).toBeInTheDocument()
 })
 
 test('overnight month pills include both dates and day headers show actual weekday', async () => {
@@ -653,7 +653,7 @@ test.each(['success', 'failure'])('stale inspection %s is ignored after range ed
     .mockImplementationOnce(() => new Promise((r, j) => {resolve = r; reject = j}))
     .mockResolvedValueOnce([])
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2026-10-01T09:00', '2027-01-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   range('2026-10-02T09:00', '2026-10-02T10:00')
@@ -670,7 +670,7 @@ test.each(['venue', 'identity', 'unmount'])('inspection is invalidated on %s cha
   let resolve!: (rows: typeof approved[]) => void
   vi.mocked(fetchCalendar).mockResolvedValueOnce([]).mockImplementationOnce(() => new Promise(r => {resolve = r}))
   const page = render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2026-10-01T09:00', '2026-10-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   if (change === 'venue') selectOnly(1)
@@ -683,7 +683,7 @@ test.each(['venue', 'identity', 'unmount'])('inspection is invalidated on %s cha
 test('midnight end excludes next day and ignores records outside precise range', async () => {
   vi.mocked(fetchCalendar).mockResolvedValueOnce([]).mockResolvedValueOnce([approved])
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2026-10-01T10:00:01', '2026-10-02T00:00:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(await screen.findByRole('status')).toHaveTextContent('0 unavailable')
@@ -694,7 +694,7 @@ test('midnight end excludes next day and ignores records outside precise range',
 
 test('out-of-supported-year inspection reports invalid input without a request', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('10000-01-01T10:00', '10000-01-02T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(screen.getByRole('alert')).toHaveTextContent('Enter valid dates and times')
@@ -791,7 +791,7 @@ test('month approved marker is unavailable and clearing anchor does not navigate
 test('keyboard activates month date drilldown and native range controls are labelled',async()=>{
  const keyboard=userEvent.setup()
  render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
- await screen.findByText('No bookings in this window.')
+ await screen.findByText('No bookings or closures in this window.')
  screen.getByRole('button',{name:'Month'}).focus()
  await keyboard.keyboard('{Enter}')
  const date=await screen.findByRole('button',{name:'Open 2026-10-15'})
@@ -805,7 +805,7 @@ test('keyboard activates month date drilldown and native range controls are labe
 
 test('range inspector opens over month and successful inspection replaces it', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   expect(screen.queryByLabelText('Start (SGT)')).not.toBeInTheDocument()
   const toggle = screen.getByRole('button', { name: 'Inspect time range' })
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -825,7 +825,7 @@ test('range inspector opens over month and successful inspection replaces it', a
 
 test('inspection replaces browsing with only selected dates in week format', async () => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range('2027-02-10T09:00', '2027-02-12T00:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   const result = await screen.findByRole('region', {name: 'Inspected range · Week'})
@@ -847,7 +847,7 @@ test.each([
   ['2027-01-29T00:00', '2027-02-07T00:00', 'Month', 9],
 ])('inspection %s to %s uses %s and preserves every intersecting date', async (start, end, format, count) => {
   render(<VenueCalendarPage user={user} initialDate="2026-10-01" />)
-  await screen.findByText('No bookings in this window.')
+  await screen.findByText('No bookings or closures in this window.')
   range(start, end)
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   const result = await screen.findByRole('region', {name: `Inspected range · ${format}`})

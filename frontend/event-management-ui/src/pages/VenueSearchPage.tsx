@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import './venueSearch.css'
 import type { Role } from '../types'
 import { fetchVenues } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
@@ -37,6 +38,7 @@ function criteriaFromUrl(): VenueSearchCriteria | null {
   return {
     ...EMPTY_CRITERIA,
     date: start.slice(0, 10),
+    endDate: end.slice(0, 10),
     startTime: start.slice(11, 16),
     endTime: end.slice(11, 16),
     expectedAttendance: query.get('expectedAttendance') || '',
@@ -122,7 +124,10 @@ export function VenueSearchPage({ role, onViewVenue }: { role: Role; onViewVenue
   if (!allowed) return <RoleWarning>{VENUE_SEARCH_NOTICE}</RoleWarning>
 
   const update = (field: keyof VenueSearchCriteria, value: string) =>
-    setCriteria((current) => ({ ...current, [field]: value }))
+    setCriteria((current) => ({ ...current, [field]: value,
+      // Keep the same-day default in step until the user chooses another end date.
+      ...(field === 'date' && (!current.endDate || current.endDate === current.date) ? {endDate: value} : {}),
+    }))
 
   const toggle = (field: 'facilities' | 'accessibility', value: string) =>
     setCriteria((current) => ({
@@ -145,15 +150,16 @@ export function VenueSearchPage({ role, onViewVenue }: { role: Role; onViewVenue
   return <div className="page-stack">
     <section className="intro">
       <h1>Find a venue</h1>
-      <p className="muted">Enter when the event runs and how many people are expected. Only venues that fit the requirements and are free at that time are listed.</p>
+      <p className="muted">Enter when the event runs and how many people are expected. All dates and times are Singapore time (SGT). Only venues that fit the requirements and have no closure or blocking booking during the full event duration are listed. Search does not reserve a venue.</p>
     </section>
 
     {optionsError && <p className="muted" role="status">{optionsError}</p>}
 
     <form className="panel venue-search-form" noValidate onSubmit={(event) => { event.preventDefault(); runSearch(criteria) }}>
       <div className="venue-search-grid">
-        <Field label="Date" type="date" required value={criteria.date} onChange={(value) => update('date', value)} />
+        <Field label="Start date" type="date" required value={criteria.date} onChange={(value) => update('date', value)} />
         <Field label="Start time" type="time" required value={criteria.startTime} onChange={(value) => update('startTime', value)} />
+        <Field label="End date" type="date" required value={criteria.endDate} onChange={(value) => update('endDate', value)} />
         <Field label="End time" type="time" required value={criteria.endTime} onChange={(value) => update('endTime', value)} />
         <Field label="Expected attendance" type="number" min="1" required placeholder="e.g. 120" value={criteria.expectedAttendance} onChange={(value) => update('expectedAttendance', value)} />
         <Field label="Minimum capacity" type="number" min="1" placeholder="Optional" value={criteria.minCapacity} onChange={(value) => update('minCapacity', value)} />

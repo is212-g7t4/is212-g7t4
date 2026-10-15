@@ -4,7 +4,9 @@ Kept free of Flask and httpx so every rule here is unit-testable on plain
 dicts. The route in `routes.py` does the HTTP work; this module decides what
 is a valid search and what each venue's availability is.
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+SINGAPORE = timezone(timedelta(hours=8))
 
 # AC1's required criteria, in the order the message lists them back.
 REQUIRED_FIELDS = [
@@ -71,7 +73,9 @@ def validate_search(args, now=None):
         raise SearchError("Enter a valid date, start time and end time.")
     if end <= start:
         raise SearchError("The end time must be after the start time.")
-    if start < (now or datetime.now()):
+    if end - start > timedelta(days=42):
+        raise SearchError("Search windows must not exceed 42 days.")
+    if start < (now or datetime.now(SINGAPORE).replace(tzinfo=None)):
         raise SearchError("Choose a date and time in the future.")
 
     attendance = _positive_int(args.get("expectedAttendance"))
@@ -141,12 +145,51 @@ def availability_for(venue, bookings):
     return PENDING if overlapping else AVAILABLE
 
 
-def shortlist(venues, bookings):
+def shortlist(venues, bookings, closures):
     """Venues a coordinator can still request, Available ones first."""
+    closed_venues = {closure["venueId"] for closure in closures}
     results = [
-        {**venue, "availability": availability_for(venue, bookings)} for venue in venues
+        {**venue, "availability": availability_for(venue, bookings)}
+        for venue in venues
+        if venue.get("id") not in closed_venues
     ]
     bookable = [venue for venue in results if venue["availability"] in SHOWN]
     return sorted(
         bookable, key=lambda v: (SHOWN.index(v["availability"]), v.get("name") or "")
     )
+
+
+def validate_window(payload, start, end):
+    """Validate the full response, then retain half-open overlapping closures."""
+    from app.closure_contract import timestamp, uuid_value
+
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("bookings"), list)
+        or not isinstance(payload.get("closures"), list)
+    ):
+        raise ValueError("Invalid availability window")
+    window_start = datetime.fromisoformat(start).replace(tzinfo=SINGAPORE)
+    window_end = datetime.fromisoformat(end).replace(tzinfo=SINGAPORE)
+    closures, seen = [], set()
+    for closure in payload["closures"]:
+        if not isinstance(closure, dict):
+            raise ValueError("Invalid closure")
+        closure_id = uuid_value(closure["closureId"])
+        venue_id = uuid_value(closure["venueId"])
+        closure_start = timestamp(closure["startDateTime"])
+        closure_end = timestamp(closure["endDateTime"])
+        reason = closure["reason"]
+        if (
+            closure_id in seen
+            or closure_end <= closure_start
+            or not isinstance(reason, str)
+            or not reason.strip()
+            or "\x00" in reason
+        ):
+            raise ValueError("Invalid closure")
+        reason.encode("utf-8")
+        seen.add(closure_id)
+        if closure_start < window_end and closure_end > window_start:
+            closures.append({**closure, "venueId": venue_id})
+    return {"bookings": payload["bookings"], "closures": closures}

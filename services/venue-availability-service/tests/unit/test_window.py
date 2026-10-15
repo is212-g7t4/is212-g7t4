@@ -106,6 +106,7 @@ def test_active_hold_is_returned_as_an_on_hold_interval(setup):
             "required_capacity": None,
             "venue_requirements": "",
             "status": "On Hold",
+            "hold_expires_at": datetime(2090, 1, 1),
             "requested_by": "00000000-0000-0000-0000-00000000000c",
             "reviewed_by": None,
         }
