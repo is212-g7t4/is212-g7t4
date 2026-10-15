@@ -22,6 +22,7 @@ from app.models import (
     list_bookings,
     list_event_bookings,
     list_window_bookings,
+    list_window_closures,
     update_booking,
 )
 
@@ -131,7 +132,10 @@ def create_app(config=None):
         return jsonify(
             bookings=list_bookings(
                 app.config["DATABASE_URL"], venue_id, date_from, date_to
-            )
+            ),
+            closures=list_window_closures(
+                app.config["DATABASE_URL"], date_from, date_to, venue_id
+            ),
         )
 
     @app.get("/venue-bookings/window")
@@ -168,7 +172,10 @@ def create_app(config=None):
         return jsonify(
             bookings=list_window_bookings(
                 app.config["DATABASE_URL"], date_from, date_to
-            )
+            ),
+            closures=list_window_closures(
+                app.config["DATABASE_URL"], date_from, date_to
+            ),
         )
 
     @app.get("/venue-holds")

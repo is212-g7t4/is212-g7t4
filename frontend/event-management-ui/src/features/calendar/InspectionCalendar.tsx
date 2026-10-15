@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { CalendarBooking } from './api'
+import { ClosureDetails, entryClass, entryLabel } from './ClosureDetails'
+import type { CalendarEntry as CalendarBooking } from './api'
 import { addDays, overlaps, timestampMicros } from './dates'
 
 export function InspectionCalendar({ start, end, rows, summary, venueNames = {}, onBack }: {
@@ -44,11 +45,12 @@ export function InspectionCalendar({ start, end, rows, summary, venueNames = {},
               const from = later(later(b.requestedStartTime, start), date + 'T00:00:00+08:00')
               const to = earlier(earlier(b.requestedEndTime, end), addDays(date, 1) + 'T00:00:00+08:00')
               const clipped = timestampMicros(from) !== timestampMicros(b.requestedStartTime) || timestampMicros(to) !== timestampMicros(b.requestedEndTime)
-              return <p key={`${b.venueId}:${b.id}`} className={b.blocksSelection ? 'calendar-approved' : 'calendar-pending'}>
+              return <div key={`${b.venueId}:${b.id}`} className={entryClass(b)}>
                 <span className="calendar-venue-name">{venueNames[b.venueId]}</span>
-                {b.blocksSelection ? 'Unavailable' : 'Pending confirmation'} · {from.replace('T', ' ').replace('+08:00', '')} – {to.replace('T', ' ').replace('+08:00', '')} SGT
+                {entryLabel(b)} · {from.replace('T', ' ').replace('+08:00', '')} – {to.replace('T', ' ').replace('+08:00', '')} SGT
                 {clipped && <small>Clipped to selected range/day</small>}
-              </p>
+                <ClosureDetails entry={b} />
+              </div>
             })}
           </article>)}
         </div>

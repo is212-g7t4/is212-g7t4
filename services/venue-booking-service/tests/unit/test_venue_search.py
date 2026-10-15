@@ -16,9 +16,11 @@ import httpx
 import pytest
 
 from app import create_app
+from app.search import SINGAPORE
 
-TOMORROW = (datetime.now() + timedelta(days=1)).date().isoformat()
-YESTERDAY = (datetime.now() - timedelta(days=1)).date().isoformat()
+# Search inputs represent Singapore dates, regardless of the test runner's timezone.
+TOMORROW = (datetime.now(SINGAPORE) + timedelta(days=1)).date().isoformat()
+YESTERDAY = (datetime.now(SINGAPORE) - timedelta(days=1)).date().isoformat()
 START = f"{TOMORROW}T09:00:00"
 END = f"{TOMORROW}T12:00:00"
 
@@ -167,7 +169,7 @@ def test_ac3_forwards_optional_filters_to_venue_service(
 ):
     """AC3: every optional criterion reaches Venue Service unchanged."""
     mock_search_venues.return_value = []
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     search(
         client,
@@ -193,7 +195,7 @@ def test_ac3_forwards_optional_filters_to_venue_service(
 def test_ac3_stricter_min_capacity_wins(mock_search_venues, mock_get_bookings, client):
     """AC3: attendance and minCapacity are both floors, so the larger applies."""
     mock_search_venues.return_value = []
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     search(client, expectedAttendance="50", minCapacity="200")
 
@@ -205,7 +207,7 @@ def test_ac3_stricter_min_capacity_wins(mock_search_venues, mock_get_bookings, c
 def test_ac3_approved_overlap_hides_venue(mock_search_venues, mock_get_bookings, client):
     """AC3 conflict: an approved booking means the venue is not free."""
     mock_search_venues.return_value = [BALLROOM, ROOFTOP]
-    mock_get_bookings.return_value = [booking("ven-1", "Approved")]
+    mock_get_bookings.return_value = {"bookings": [booking("ven-1", "Approved")], "closures": []}
 
     response = search(client)
 
@@ -217,7 +219,7 @@ def test_ac3_approved_overlap_hides_venue(mock_search_venues, mock_get_bookings,
 def test_ac3_active_hold_hides_venue(mock_search_venues, mock_get_bookings, client):
     """A venue hold blocks the window from new booking requests."""
     mock_search_venues.return_value = [BALLROOM]
-    mock_get_bookings.return_value = [booking("ven-1", "On Hold")]
+    mock_get_bookings.return_value = {"bookings": [booking("ven-1", "On Hold")], "closures": []}
 
     response = search(client)
 
@@ -236,7 +238,7 @@ def test_ac4_pending_overlap_kept_with_pending_badge(
     both must behave the same.
     """
     mock_search_venues.return_value = [BALLROOM]
-    mock_get_bookings.return_value = [booking("ven-1", status)]
+    mock_get_bookings.return_value = {"bookings": [booking("ven-1", status)], "closures": []}
 
     response = search(client)
 
@@ -248,7 +250,7 @@ def test_ac4_pending_overlap_kept_with_pending_badge(
 def test_ac3_rejected_booking_ignored(mock_search_venues, mock_get_bookings, client):
     """AC3: Venue Availability already drops Rejected bookings, so none arrive."""
     mock_search_venues.return_value = [BALLROOM]
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     response = search(client)
 
@@ -263,7 +265,7 @@ def test_ac3_non_operational_venue_hidden(
 ):
     """AC3: Under Maintenance and the static Booked status both drop out."""
     mock_search_venues.return_value = [venue]
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     assert search(client).json == {"venues": [], "count": 0}
 
@@ -275,7 +277,7 @@ def test_ac3_bookings_for_other_venues_do_not_block(
 ):
     """AC3: the window query covers every venue, so rows are matched by id."""
     mock_search_venues.return_value = [BALLROOM]
-    mock_get_bookings.return_value = [booking("ven-9", "Approved")]
+    mock_get_bookings.return_value = {"bookings": [booking("ven-9", "Approved")], "closures": []}
 
     assert search(client).json["venues"][0]["availability"] == "Available"
 
@@ -292,7 +294,7 @@ def test_ac3_downstream_calls_run_in_parallel(
         return []
 
     mock_search_venues.side_effect = slow
-    mock_get_bookings.side_effect = slow
+    mock_get_bookings.side_effect = lambda *a: {"bookings": slow(*a), "closures": []}
 
     started = time.monotonic()
     response = search(client)
@@ -310,7 +312,7 @@ def test_ac3_downstream_calls_run_in_parallel(
 def test_ac4_result_has_all_display_fields(mock_search_venues, mock_get_bookings, client):
     """AC4: each result carries everything the card shows."""
     mock_search_venues.return_value = [ROOFTOP]
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     venue = search(client).json["venues"][0]
 
@@ -322,7 +324,7 @@ def test_ac4_result_has_all_display_fields(mock_search_venues, mock_get_bookings
 def test_ac4_available_sorted_before_pending(mock_search_venues, mock_get_bookings, client):
     """AC4: fully free venues come first, then by name."""
     mock_search_venues.return_value = [BALLROOM, ROOFTOP]
-    mock_get_bookings.return_value = [booking("ven-1", "Pending")]
+    mock_get_bookings.return_value = {"bookings": [booking("ven-1", "Pending")], "closures": []}
 
     response = search(client)
 
@@ -337,7 +339,7 @@ def test_ac4_available_sorted_before_pending(mock_search_venues, mock_get_bookin
 def test_ac5_no_matches_returns_empty_list(mock_search_venues, mock_get_bookings, client):
     """AC5: no venues available is a normal answer, not an error."""
     mock_search_venues.return_value = []
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     response = search(client)
 
@@ -353,7 +355,7 @@ def test_ac5_no_matches_returns_empty_list(mock_search_venues, mock_get_bookings
 def test_downstream_timeout_returns_504(mock_search_venues, mock_get_bookings, client):
     """Failure: a downstream service slower than the budget is a 504, not a hang."""
     mock_search_venues.side_effect = httpx.TimeoutException("too slow")
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     response = search(client)
 
@@ -370,7 +372,7 @@ def test_downstream_error_returns_502(mock_search_venues, mock_get_bookings, cli
         request=httpx.Request("GET", "http://venue-service:5000/venues"),
         response=httpx.Response(503),
     )
-    mock_get_bookings.return_value = []
+    mock_get_bookings.return_value = {"bookings": [], "closures": []}
 
     response = search(client)
 
@@ -449,7 +451,7 @@ def test_get_bookings_between_uses_the_all_venue_window_read(monkeypatch):
         captured.update(url=url, params=params, timeout=timeout)
         return httpx.Response(
             200,
-            json={"bookings": [booking("ven-1", "Approved")]},
+            json={"bookings": [booking("ven-1", "Approved")], "closures": []},
             request=httpx.Request("GET", url),
         )
 
@@ -457,7 +459,7 @@ def test_get_bookings_between_uses_the_all_venue_window_read(monkeypatch):
 
     bookings = clients.get_bookings_between(START, END)
 
-    assert [b["venueId"] for b in bookings] == ["ven-1"]
+    assert [b["venueId"] for b in bookings["bookings"]] == ["ven-1"]
     assert captured["url"].endswith("/venue-bookings/window")
     assert captured["params"] == {"dateFrom": START, "dateTo": END}
     # The window read covers every venue; the calendar read would need a

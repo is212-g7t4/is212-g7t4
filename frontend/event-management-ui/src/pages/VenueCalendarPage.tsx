@@ -1,10 +1,11 @@
 import '../features/calendar/calendar.css'
+import { ClosureDetails, entryClass, entryLabel } from '../features/calendar/ClosureDetails'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '../types'
 import { fetchVenues } from '../features/venue/venues'
 import type { Venue } from '../features/venue/venues'
 import { fetchCalendar } from '../features/calendar/api'
-import type { CalendarBooking } from '../features/calendar/api'
+import type { CalendarEntry as CalendarBooking } from '../features/calendar/api'
 import { canViewCalendar } from '../features/calendar/permissions'
 import { InspectionCalendar } from '../features/calendar/InspectionCalendar'
 import type { CalendarView } from '../features/calendar/dates'
@@ -23,7 +24,7 @@ import {
 function bookingLabel(b: CalendarBooking): string {
   const multiDay = b.requestedStartTime.slice(0, 10) !== b.requestedEndTime.slice(0, 10)
   const time = (value: string) => multiDay ? value.slice(0, 16).replace('T', ' ') : value.slice(11, 16)
-  return `${b.blocksSelection ? 'Unavailable' : 'Pending confirmation'} · ${time(b.requestedStartTime)}–${time(b.requestedEndTime)} SGT`
+  return `${entryLabel(b)} · ${time(b.requestedStartTime)}–${time(b.requestedEndTime)} SGT`
 }
 
 /** Switcher identity → read-only calendar, never a booking submission or real auth. */
@@ -114,7 +115,7 @@ function Calendar({
           if (version !== inspectionVersion.current) return
           for (const row of rows) {
             const prior = unique.get(`${row.venueId}:${row.id}`)
-            if (prior && (Object.keys(prior) as (keyof CalendarBooking)[]).some(key => prior[key] !== row[key]))
+            if (prior && JSON.stringify(prior) !== JSON.stringify(row))
               throw new Error('Booking changed between chunks; retry the complete inspection.')
             unique.set(`${row.venueId}:${row.id}`, row)
           }
@@ -125,7 +126,7 @@ function Calendar({
       setInspectionRows(matching)
       setInspectorOpen(false)
       setInspected({start: startTime!, end: endTime!})
-      setSelection(`Venues: ${selectedVenues.map(v => v.name).join(', ')}. Selected range: ${start.replace('T', ' ')} – ${end.replace('T', ' ')} SGT. ${matching.filter(b => b.blocksSelection).length} unavailable; ${matching.filter(b => !b.blocksSelection).length} pending confirmation. This is not a reservation.`)
+      setSelection(`Venues: ${selectedVenues.map(v => v.name).join(', ')}. Selected range: ${start.replace('T', ' ')} – ${end.replace('T', ' ')} SGT. ${matching.filter(b => b.blocksSelection).length} unavailable; ${matching.filter(b => !b.blocksSelection).length} pending confirmation. ${matching.filter(b => b.status === 'Closed').length} closed; ${matching.filter(b => b.status === 'On Hold').length} on hold. This is not a reservation.`)
     } catch {
       if (version === inspectionVersion.current) setInspectionError('Inspection unavailable. Retry; no availability can be inferred.')
     } finally {
@@ -252,7 +253,7 @@ function Calendar({
         </div>
       </div>
       <div className="calendar-subbar">
-        <span>SGT · Read-only <span className="calendar-legend-approved">Unavailable</span><span className="calendar-legend-pending">Pending confirmation</span></span>
+        <span>SGT · Read-only <span className="calendar-legend-approved">Unavailable</span><span className="calendar-legend-pending">Pending confirmation</span><span className="calendar-legend-closed">Closed</span><span className="calendar-legend-hold">On hold</span></span>
         <div>
           <button onClick={() => { clearSelection(); setRevision(r => r + 1) }}>Refresh</button>
           <button disabled={!venueIds.length} aria-expanded={inspectorOpen} aria-controls="calendar-inspector" onClick={() => setInspectorOpen(!inspectorOpen)}>Inspect time range</button>
@@ -288,14 +289,14 @@ function Calendar({
               const entries = ready ? bookings.filter(b => overlaps(
                 date + 'T00:00:00+08:00', addDays(date, 1) + 'T00:00:00+08:00',
                 b.requestedStartTime, b.requestedEndTime,
-              )) : []
+              )).sort((a, b) => Number(b.status === 'Closed') - Number(a.status === 'Closed')) : []
               return <button key={date} aria-label={`Open ${date}`}
                 className={date.slice(0, 7) !== anchor.slice(0, 7) ? 'calendar-outside' : ''}
                 aria-current={date === singaporeDate(new Date()) ? 'date' : undefined}
                 disabled={!supportedAnchor(date)} onClick={() => { changeAnchor(date); changeView('day') }}>
                 <span className="calendar-date">{Number(date.slice(8))}</span>
                 {entries.slice(0, 1).map(b => <span key={`${b.venueId}:${b.id}`}
-                  className={b.blocksSelection ? 'calendar-approved' : 'calendar-pending'}
+                  className={entryClass(b)}
                   title={`${venueNames[b.venueId]} · ${bookingLabel(b)}`}>
                   <span className="calendar-venue-name">{venueNames[b.venueId]}</span>{bookingLabel(b)}
                 </span>)}
@@ -310,7 +311,7 @@ function Calendar({
       {!inspected && venueIds.length > 0 && !ready && !error && !(catalogueLoaded && venues.length === 0) && (
         <p>Loading availability…</p>
       )}
-      {!inspected && ready && bookings.length === 0 && <p className="calendar-empty">No bookings in this window.</p>}
+      {!inspected && ready && bookings.length === 0 && <p className="calendar-empty">No bookings or closures in this window.</p>}
       {!inspected && ready && view !== 'month' && (
         <div className="calendar-days">
           {Array.from({ length: view === 'day' ? 1 : 7 }, (_, i) =>
@@ -331,11 +332,7 @@ function Calendar({
                 .map((b) => (
                   <div
                     key={`${b.venueId}:${b.id}`}
-                    className={
-                      b.blocksSelection
-                        ? 'calendar-approved'
-                        : 'calendar-pending'
-                    }
+                    className={entryClass(b)}
                   >
                     <strong>
                       <span className="calendar-venue-name">{venueNames[b.venueId]}</span>{bookingLabel(b)}
@@ -344,6 +341,7 @@ function Calendar({
                       {b.requestedStartTime.slice(0, 19).replace('T', ' ')} –{' '}
                       {b.requestedEndTime.slice(0, 19).replace('T', ' ')} SGT
                     </p>
+                    <ClosureDetails entry={b} />
                   </div>
                 ))}
             </article>

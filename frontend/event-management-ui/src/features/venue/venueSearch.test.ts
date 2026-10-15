@@ -10,7 +10,7 @@ import type { VenueSearchCriteria } from './venueSearch'
 
 const FILLED: VenueSearchCriteria = {
   ...EMPTY_CRITERIA,
-  date: '2026-11-10',
+  date: '2026-11-10', endDate: '2026-11-10',
   startTime: '09:00',
   endTime: '12:00',
   expectedAttendance: '120',
@@ -19,9 +19,9 @@ const FILLED: VenueSearchCriteria = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('missingRequiredFields (AC2)', () => {
-  test('an empty form names all four required criteria, in form order', () => {
+  test('an empty form names all five required criteria, in form order', () => {
     expect(missingRequiredFields(EMPTY_CRITERIA)).toEqual([
-      'Date', 'Start time', 'End time', 'Expected attendance',
+      'Start date', 'Start time', 'End date', 'End time', 'Expected attendance',
     ])
   })
 
@@ -31,7 +31,7 @@ describe('missingRequiredFields (AC2)', () => {
 
   test('only the fields still empty are named', () => {
     expect(missingRequiredFields({ ...EMPTY_CRITERIA, date: '2026-11-10' })).toEqual([
-      'Start time', 'End time', 'Expected attendance',
+      'Start time', 'End date', 'End time', 'Expected attendance',
     ])
   })
 
@@ -42,7 +42,7 @@ describe('missingRequiredFields (AC2)', () => {
 
   test('optional criteria are never required', () => {
     const optional = { ...EMPTY_CRITERIA, location: 'Main Tower', layout: 'banquet' }
-    expect(missingRequiredFields(optional)).toHaveLength(4)
+    expect(missingRequiredFields(optional)).toHaveLength(5)
   })
 })
 

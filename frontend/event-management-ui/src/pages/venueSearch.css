@@ -1,0 +1,5 @@
+/* Keep long DEV identity labels inside this route on narrow screens. */
+@media (max-width: 700px) {
+  .main-content:has(.venue-search-form) .role-switcher { width: 100%; min-width: 0; flex-wrap: wrap; }
+  .main-content:has(.venue-search-form) .role-switcher select { width: 100%; min-width: 0; max-width: 100%; }
+}
