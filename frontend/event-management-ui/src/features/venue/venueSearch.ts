@@ -10,8 +10,9 @@ export interface VenueSearchResult extends Venue {
 }
 
 export interface VenueSearchCriteria {
-  /** AC1 required: one date with a start and end time. */
+  /** Singapore wall dates: date is the start date; endDate supports full event duration. */
   date: string
+  endDate: string
   startTime: string
   endTime: string
   expectedAttendance: string
@@ -25,6 +26,7 @@ export interface VenueSearchCriteria {
 
 export const EMPTY_CRITERIA: VenueSearchCriteria = {
   date: '',
+  endDate: '',
   startTime: '',
   endTime: '',
   expectedAttendance: '',
@@ -45,8 +47,9 @@ export const ACCESSIBILITY_OPTIONS: { key: string; label: string }[] = [
 ]
 
 const REQUIRED_FIELDS: { field: keyof VenueSearchCriteria; label: string }[] = [
-  { field: 'date', label: 'Date' },
+  { field: 'date', label: 'Start date' },
   { field: 'startTime', label: 'Start time' },
+  { field: 'endDate', label: 'End date' },
   { field: 'endTime', label: 'End time' },
   { field: 'expectedAttendance', label: 'Expected attendance' },
 ]
@@ -67,7 +70,7 @@ function toNaiveIso(date: string, time: string): string {
 export function toQuery(criteria: VenueSearchCriteria): URLSearchParams {
   const query = new URLSearchParams()
   query.set('start', toNaiveIso(criteria.date, criteria.startTime))
-  query.set('end', toNaiveIso(criteria.date, criteria.endTime))
+  query.set('end', toNaiveIso(criteria.endDate, criteria.endTime))
   query.set('expectedAttendance', criteria.expectedAttendance.trim())
   if (criteria.minCapacity.trim()) query.set('minCapacity', criteria.minCapacity.trim())
   if (criteria.location.trim()) query.set('location', criteria.location.trim())

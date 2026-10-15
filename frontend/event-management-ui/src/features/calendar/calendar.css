@@ -1,3 +1,22 @@
+@media (max-width: 700px) {
+  .calendar-route .role-switcher { width: 100%; min-width: 0; flex-wrap: wrap; }
+  .calendar-route .role-switcher select { width: 100%; min-width: 0; max-width: 100%; }
+}
+/* SCRUM-174: closures and holds have separate text, colour and border treatments. */
+.calendar-closed, .calendar-hold { display: block; padding: 5px 8px; margin-bottom: 8px; border-radius: 5px; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.calendar-closed { background: #fce8e8; color: #842828; border-left: 3px dashed #b13f3f; }
+.calendar-hold { background: #efe9fa; color: #614081; border-left: 3px solid #9270b4; }
+.calendar-month :is(.calendar-closed,.calendar-hold) { padding: 2px 5px; margin: 0; font-size: 9px; line-height: 1.2; }
+.calendar-legend-closed::before, .calendar-legend-hold::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 5px; background: #b13f3f; }
+.calendar-legend-hold::before { background: #9270b4; }
+.calendar-subbar > span { flex-wrap: wrap; }
+.calendar-closure-details summary { cursor: pointer; min-height: 44px; display: list-item; align-content: center; font-weight: 600; text-decoration: underline; }
+.calendar-closure-details dl { margin: 8px 0; }
+.calendar-closure-details dt { font-weight: 700; margin-top: 8px; }
+.calendar-closure-details dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.calendar-closure-reason { white-space: pre-wrap; }
+.calendar-result-day > div { overflow-wrap: anywhere; margin-bottom: 8px; }
+.calendar-day { min-width: 0; overflow-wrap: anywhere; }
 /* Inspection results deliberately grow vertically; never inherit the viewport-fit six-row grid. */
 .calendar-inspection-result > h2 { margin: 0; font-size: 22px; }
 .calendar-inspection-result > p { font-size: 13px; color: #53647a; }

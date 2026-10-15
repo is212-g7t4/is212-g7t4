@@ -35,7 +35,7 @@ const show = (role: venues.Venue extends never ? never : string = 'Event Coordin
   render(<VenueSearchPage role={role as never} onViewVenue={vi.fn()} />)
 
 const fillRequired = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.type(screen.getByLabelText(/^Date/), '2026-11-10')
+  await user.type(screen.getByLabelText(/^Start date/), '2026-11-10')
   await user.type(screen.getByLabelText(/^Start time/), '09:00')
   await user.type(screen.getByLabelText(/^End time/), '12:00')
   await user.type(screen.getByLabelText(/^Expected attendance/), '120')
@@ -59,9 +59,9 @@ describe('role rule', () => {
 })
 
 describe('AC1 — the criteria', () => {
-  test('the four required fields are marked required', () => {
+  test('the five required fields are marked required', () => {
     show()
-    for (const label of [/^Date/, /^Start time/, /^End time/, /^Expected attendance/]) {
+    for (const label of [/^Start date/, /^Start time/, /^End date/, /^End time/, /^Expected attendance/]) {
       expect(screen.getByLabelText(label)).toBeRequired()
     }
   })
@@ -95,14 +95,14 @@ describe('AC2 — required criteria', () => {
     await user.click(searchButton())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Please fill in the required fields: Date, Start time, End time, Expected attendance')
+      'Please fill in the required fields: Start date, Start time, End date, End time, Expected attendance')
     expect(searchSpy).not.toHaveBeenCalled()
   })
 
   test('the message narrows as fields are filled', async () => {
     const user = userEvent.setup()
     show()
-    await user.type(screen.getByLabelText(/^Date/), '2026-11-10')
+    await user.type(screen.getByLabelText(/^Start date/), '2026-11-10')
 
     await user.click(searchButton())
 
@@ -215,7 +215,7 @@ describe('AC6 — Clear all', () => {
 
     await user.click(screen.getByRole('button', { name: 'Clear all' }))
 
-    expect(screen.getByLabelText(/^Date/)).toHaveValue('')
+    expect(screen.getByLabelText(/^Start date/)).toHaveValue('')
     expect(screen.getByLabelText(/^Expected attendance/)).toHaveValue(null)
     expect(screen.getByRole('checkbox', { name: 'outdoor' })).not.toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Hearing loop' })).not.toBeChecked()
@@ -263,7 +263,7 @@ describe('failures', () => {
     resolveSearch([RESULT])
 
     // The in-flight search was abandoned, so its results must not come back.
-    await waitFor(() => expect(screen.getByLabelText(/^Date/)).toHaveValue(''))
+    await waitFor(() => expect(screen.getByLabelText(/^Start date/)).toHaveValue(''))
     expect(screen.queryByText('Rooftop Garden')).not.toBeInTheDocument()
   })
 })
