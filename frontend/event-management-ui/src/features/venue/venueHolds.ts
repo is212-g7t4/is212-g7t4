@@ -22,6 +22,7 @@ export async function placeVenueHold(
   venueId: string,
   expiresAt: string,
   user: Pick<User, 'id' | 'role'>,
+  buffer: Pick<Venue, 'setupTimeMinutes' | 'turnaroundTimeMinutes'> = {},
 ): Promise<VenueHold> {
   const response = await fetch(`${availabilityServiceUrl()}/venue-holds`, {
     method: 'POST',
@@ -30,7 +31,11 @@ export async function placeVenueHold(
       'X-Dev-User-Id': user.id,
       'X-Dev-Role': user.role,
     },
-    body: JSON.stringify({ venueId, expiresAt }),
+    body: JSON.stringify({ venueId, expiresAt, ...(
+      buffer.setupTimeMinutes !== undefined || buffer.turnaroundTimeMinutes !== undefined
+        ? { setupTimeMinutes: buffer.setupTimeMinutes ?? 0, turnaroundTimeMinutes: buffer.turnaroundTimeMinutes ?? 0 }
+        : {}
+    ) }),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to place a hold on this venue.')

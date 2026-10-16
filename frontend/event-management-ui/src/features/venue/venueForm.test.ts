@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { createVenue, emptyVenueForm, validateVenueForm } from './venueForm'
+import { createVenue, emptyVenueForm, updateVenue, validateVenueForm } from './venueForm'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -35,4 +35,14 @@ test('create sends each venue buffer with the catalogue profile', async () => {
     setupTimeMinutes: '30',
     turnaroundTimeMinutes: '45',
   })
+})
+
+test('edit uses the composite workflow so legacy conflicts are refreshed automatically', async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ venue: { id: 'venue-1' }, legacyConflicts: { conflicts: [] } })))
+  vi.stubGlobal('fetch', fetcher)
+
+  await updateVenue('venue-1', completeForm)
+
+  expect(fetcher.mock.calls[0][0]).toBe('http://localhost:5007/venues/venue-1')
+  expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
 })

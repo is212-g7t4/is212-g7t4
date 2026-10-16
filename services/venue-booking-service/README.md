@@ -47,9 +47,11 @@ every other service.
   here. The bookings come from that service's `GET /venue-bookings/window`
   (all venues, one call); its `GET /venue-bookings` is the single-venue
   calendar read SCRUM-25 added, behind a DEV-mode identity simulation a
-  composite should not impersonate. The two calls run in parallel (`ThreadPoolExecutor`, 2.5 s timeout
-  each), so the search costs the slower one rather than both, which keeps it
-  inside AC3's 3-second budget.
+  composite should not impersonate. The initial catalogue and availability
+  calls run in parallel (`ThreadPoolExecutor`, 2.5 s timeout each). When a
+  matching venue has non-zero buffers, one widened availability read includes
+  records just outside the advertised event window; the composite then applies
+  the exact per-venue padded overlap.
 
   | Parameter | Required | Notes |
   | --- | --- | --- |
@@ -105,6 +107,12 @@ every other service.
     The event's total attendance is deliberately not used for this check.
   - `201` with the persisted booking (`status: "Pending Review"`) once all
     checks pass.
+- `PUT /venues/<venueId>` — saves a Venue Staff profile edit through Venue
+  Service and then automatically reconciles legacy buffer conflicts through
+  Venue Availability Service. No booking is cancelled or rescheduled.
+- `GET /venues/<venueId>/legacy-conflicts` — returns the current conflict
+  pairs with original and effective occupancy times. It reconciles on read so
+  later booking edits or cancellations cannot leave stale buffer markers.
 - `GET /events/<eventId>/booking-requests?coordinatorId=<id>` — lists every
   venue booking for the assigned coordinator's event as a separate item,
   enriched with the venue name.

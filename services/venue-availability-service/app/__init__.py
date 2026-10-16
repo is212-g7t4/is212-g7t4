@@ -18,12 +18,15 @@ from app.models import (
     create_booking,
     create_hold,
     decide_booking,
+    get_booking,
     list_active_holds,
     list_bookings,
     list_event_bookings,
     list_window_bookings,
     list_window_closures,
+    reconcile_legacy_conflicts,
     update_booking,
+    _shift,
 )
 
 # SCRUM-26: the longest window the venue search will answer for. Same spirit
@@ -50,6 +53,21 @@ def _parse_datetime(value):
         return None
 
 
+def _parse_buffer_minutes(value, default=0):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return None
+    try:
+        text = str(value).strip()
+        if not text.isdigit():
+            return None
+        minutes = int(text)
+        return minutes if 0 <= minutes <= 2147483647 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.config["VENUE_CLOSURE_DEV_MODE"] = os.getenv("VENUE_CLOSURE_DEV_MODE") == "true"
@@ -65,7 +83,12 @@ def create_app(config=None):
     @app.after_request
     def cors(response):
         origin = request.headers.get("Origin")
-        if origin == app.config["FRONTEND_ORIGIN"]:
+        configured_origin = app.config["FRONTEND_ORIGIN"]
+        allowed_origins = {configured_origin}
+        if configured_origin:
+            allowed_origins.add(configured_origin.replace("localhost", "127.0.0.1"))
+            allowed_origins.add(configured_origin.replace("127.0.0.1", "localhost"))
+        if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             if request.path in {"/venue-bookings", "/venue-holds"} or request.path.startswith("/venue-closures"):
@@ -116,10 +139,16 @@ def create_app(config=None):
             if request.args.get("dateTo")
             else None
         )
+        setup_time = _parse_buffer_minutes(request.args.get("setupTimeMinutes"))
+        turnaround_time = _parse_buffer_minutes(
+            request.args.get("turnaroundTimeMinutes")
+        )
         if (
             not venue_id
             or not date_from
             or not date_to
+            or setup_time is None
+            or turnaround_time is None
             or not timedelta(0) < date_to - date_from <= timedelta(days=42)
         ):
             return jsonify(
@@ -131,7 +160,12 @@ def create_app(config=None):
             ), 503
         return jsonify(
             bookings=list_bookings(
-                app.config["DATABASE_URL"], venue_id, date_from, date_to
+                app.config["DATABASE_URL"],
+                venue_id,
+                date_from,
+                date_to,
+                setup_time,
+                turnaround_time,
             ),
             closures=list_window_closures(
                 app.config["DATABASE_URL"], date_from, date_to, venue_id
@@ -157,9 +191,13 @@ def create_app(config=None):
             ), 400
         date_from = parse_boundary(request.args["dateFrom"])
         date_to = parse_boundary(request.args["dateTo"])
+        padding_minutes = _parse_buffer_minutes(
+            request.args.get("paddingMinutes")
+        )
         if (
             not date_from
             or not date_to
+            or padding_minutes is None
             or not timedelta(0) < date_to - date_from <= MAX_WINDOW
         ):
             return jsonify(
@@ -171,10 +209,12 @@ def create_app(config=None):
             ), 503
         return jsonify(
             bookings=list_window_bookings(
-                app.config["DATABASE_URL"], date_from, date_to
+                app.config["DATABASE_URL"], date_from, date_to, padding_minutes
             ),
             closures=list_window_closures(
-                app.config["DATABASE_URL"], date_from, date_to
+                app.config["DATABASE_URL"],
+                _shift(date_from, -padding_minutes),
+                _shift(date_to, padding_minutes),
             ),
         )
 
@@ -200,9 +240,19 @@ def create_app(config=None):
             return jsonify(message="Send a JSON object."), 400
         venue_id = _parse_uuid(data.get("venueId"))
         expires_at = _parse_datetime(data.get("expiresAt"))
-        if not venue_id or not expires_at:
+        setup_time = _parse_buffer_minutes(data.get("setupTimeMinutes"))
+        turnaround_time = _parse_buffer_minutes(data.get("turnaroundTimeMinutes"))
+        if (
+            not venue_id
+            or not expires_at
+            or setup_time is None
+            or turnaround_time is None
+        ):
             return jsonify(
-                message="venueId must be a valid id and expiresAt a local ISO date-time."
+                message=(
+                    "venueId and expiresAt must be valid, and venue buffer times "
+                    "must be non-negative whole minutes."
+                )
             ), 400
         from app.calendar import SINGAPORE
 
@@ -215,7 +265,12 @@ def create_app(config=None):
             ), 503
         try:
             hold = create_hold(
-                app.config["DATABASE_URL"], venue_id, expires_at, staff_id
+                app.config["DATABASE_URL"],
+                venue_id,
+                expires_at,
+                staff_id,
+                setup_time,
+                turnaround_time,
             )
         except HoldVenueNotFoundError:
             return jsonify(message="Venue not found."), 404
@@ -238,6 +293,8 @@ def create_app(config=None):
         end = _parse_datetime(data.get("requestedEndTime"))
         required_capacity = data.get("requiredCapacity")
         venue_requirements = data.get("venueRequirements")
+        setup_time = _parse_buffer_minutes(data.get("setupTimeMinutes"))
+        turnaround_time = _parse_buffer_minutes(data.get("turnaroundTimeMinutes"))
         if not event_id or not venue_id or not requested_by:
             return jsonify(
                 message="eventId, venueId and requestedBy must be valid ids."
@@ -260,6 +317,10 @@ def create_app(config=None):
             ), 400
         if not isinstance(venue_requirements, str):
             return jsonify(message="venueRequirements must be text."), 400
+        if setup_time is None or turnaround_time is None:
+            return jsonify(
+                message="Venue buffer times must be non-negative whole minutes."
+            ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
@@ -275,6 +336,8 @@ def create_app(config=None):
                 required_capacity,
                 venue_requirements.strip(),
                 requested_by,
+                setup_time,
+                turnaround_time,
             )
         except BookingConflictError as error:
             return jsonify(
@@ -294,6 +357,18 @@ def create_app(config=None):
             bookings=list_event_bookings(app.config["DATABASE_URL"], str(event_id))
         )
 
+    @app.get("/venue-bookings/<uuid:booking_id>")
+    def get_booking_route(booking_id):
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        try:
+            booking = get_booking(app.config["DATABASE_URL"], str(booking_id))
+        except BookingNotFoundError:
+            return jsonify(message="Venue booking not found."), 404
+        return jsonify(booking)
+
     @app.patch("/venue-bookings/<uuid:booking_id>")
     def update_booking_route(booking_id):
         data = request.get_json(silent=True)
@@ -306,6 +381,8 @@ def create_app(config=None):
         end = _parse_datetime(data.get("requestedEndTime"))
         required_capacity = data.get("requiredCapacity")
         venue_requirements = data.get("venueRequirements")
+        setup_time = _parse_buffer_minutes(data.get("setupTimeMinutes"))
+        turnaround_time = _parse_buffer_minutes(data.get("turnaroundTimeMinutes"))
         if not event_id or not venue_id:
             return jsonify(message="eventId and venueId must be valid ids."), 400
         if not start or not end or end <= start:
@@ -322,6 +399,10 @@ def create_app(config=None):
             ), 400
         if not isinstance(venue_requirements, str):
             return jsonify(message="venueRequirements must be text."), 400
+        if setup_time is None or turnaround_time is None:
+            return jsonify(
+                message="Venue buffer times must be non-negative whole minutes."
+            ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
@@ -337,6 +418,8 @@ def create_app(config=None):
                 end,
                 required_capacity,
                 venue_requirements.strip(),
+                setup_time,
+                turnaround_time,
             )
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found for this event."), 404
@@ -381,15 +464,30 @@ def create_app(config=None):
         reviewed_by = (
             _parse_uuid(data.get("reviewedBy")) if isinstance(data, dict) else None
         )
+        setup_time = _parse_buffer_minutes(
+            data.get("setupTimeMinutes") if isinstance(data, dict) else None
+        )
+        turnaround_time = _parse_buffer_minutes(
+            data.get("turnaroundTimeMinutes") if isinstance(data, dict) else None
+        )
         if not reviewed_by:
             return jsonify(message="reviewedBy must be a valid id."), 400
+        if setup_time is None or turnaround_time is None:
+            return jsonify(
+                message="Venue buffer times must be non-negative whole minutes."
+            ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
             ), 503
         try:
             booking = decide_booking(
-                app.config["DATABASE_URL"], str(booking_id), reviewed_by, status
+                app.config["DATABASE_URL"],
+                str(booking_id),
+                reviewed_by,
+                status,
+                setup_time,
+                turnaround_time,
             )
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found."), 404
@@ -402,6 +500,31 @@ def create_app(config=None):
                 conflictTypes=error.conflict_types,
             ), 409
         return jsonify(booking), 200
+
+    @app.post("/venues/<uuid:venue_id>/legacy-conflicts/reconcile")
+    def reconcile_legacy_conflicts_route(venue_id):
+        data = request.get_json(silent=True)
+        setup_time = _parse_buffer_minutes(
+            data.get("setupTimeMinutes") if isinstance(data, dict) else None
+        )
+        turnaround_time = _parse_buffer_minutes(
+            data.get("turnaroundTimeMinutes") if isinstance(data, dict) else None
+        )
+        if not isinstance(data, dict) or setup_time is None or turnaround_time is None:
+            return jsonify(
+                message="Venue buffer times must be non-negative whole minutes."
+            ), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        result = reconcile_legacy_conflicts(
+            app.config["DATABASE_URL"],
+            str(venue_id),
+            setup_time,
+            turnaround_time,
+        )
+        return jsonify(result)
 
     from app.closures import bp as closures_bp
     app.register_blueprint(closures_bp)
