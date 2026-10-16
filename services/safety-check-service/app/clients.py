@@ -316,6 +316,23 @@ def list_equipment() -> list:
     return response.json()["equipment"]
 
 
+def reset_equipment_safety_requests(event_id: str, request_ids: list) -> list:
+    response = _ok(_send(
+        "POST",
+        f"{EQUIPMENT_REQUEST_SERVICE_URL}/events/{event_id}/equipment-requests/safety-reset",
+        json={"requestIds": request_ids},
+        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+    ))
+    return response.json()["requests"]
+
+
+def reset_venue_safety_bookings(event_id: str, booking_ids: list) -> list:
+    response = _ok(_send("POST",
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/events/{event_id}/venue-bookings/safety-reset",
+        json={"bookingIds": booking_ids}, headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""}))
+    return response.json()["bookings"]
+
+
 # --- Safety Check Record Service (atomic, 5013) -----------------------------
 
 

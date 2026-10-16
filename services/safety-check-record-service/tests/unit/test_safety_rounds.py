@@ -150,6 +150,7 @@ def test_non_text_notes_are_rejected(field, label, setup):
     cursor.execute.assert_not_called()
 
 
+# Safety revision AC5 (storage boundary): a decided review produces the next round number, not a replacement round.
 def test_round_after_a_decided_round_is_the_next_number(setup):
     """SCRUM-164's resubmission: round N+1 once round N has been decided."""
     client, _, cursor = setup
@@ -274,6 +275,7 @@ def test_database_failure_is_503(setup):
 # --- Listing rounds (AC4's response, and SCRUM-163's history) ----------------
 
 
+# Safety revision AC5 (history read): return both the new round and the earlier round's decision fields.
 def test_rounds_are_listed_newest_first(setup):
     client, _, cursor = setup
     cursor.fetchall.side_effect = [
@@ -364,6 +366,7 @@ def test_open_round_can_be_deleted(setup):
     assert 'DELETE FROM public."SafetyCheck"' in cursor.execute.call_args_list[1].args[0]
 
 
+# Safety revision AC5 (history protection): rollback cannot delete a previously decided round.
 @pytest.mark.parametrize(
     ("status", "decided"),
     [

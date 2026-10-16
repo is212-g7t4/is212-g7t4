@@ -33,13 +33,12 @@ INTERNAL_TOKEN = "test-internal-token"
 INTERNAL_HEADERS = {"X-Internal-Service-Token": INTERNAL_TOKEN}
 
 # Every status an event can hold that must not reach 'Pending Safety Check'.
-# Only 'Approved' may (SAFETY_TRANSITIONS).
+# Initial submission and requested-change resubmission are allowed.
 NON_APPROVED_STATUSES = [
     "Submitted",
     "Under Review",
     "Rejected",
     "Confirmed",
-    "Safety Changes Requested",
     "Cancelled",
 ]
 
@@ -107,11 +106,12 @@ def patch_safety_status(client, headers=INTERNAL_HEADERS, **overrides):
 # --- AC1: the move and the submission time ----------------------------------
 
 
-def test_approved_event_moves_to_pending_safety_check(setup):
+@pytest.mark.parametrize("source_status", ["Approved", "Safety Changes Requested"])
+def test_approved_or_revised_event_moves_to_pending_safety_check(setup, source_status):
     """AC1: 'Approved' -> 'Pending Safety Check' for the assigned coordinator."""
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
-        event_row("Approved"),
+        event_row(source_status),
         event_row("Pending Safety Check"),
     ]
 
@@ -238,8 +238,8 @@ def test_already_pending_event_is_a_conflict(setup):
 
 
 @pytest.mark.parametrize("current_status", NON_APPROVED_STATUSES)
-def test_only_an_approved_event_can_be_submitted(current_status, setup):
-    """Only 'Approved' is in SAFETY_TRANSITIONS, so every other status is refused."""
+def test_events_outside_submission_stages_cannot_be_submitted(current_status, setup):
+    """Only initial submission and requested-change resubmission stages are allowed."""
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(current_status)
 

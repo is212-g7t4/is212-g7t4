@@ -90,6 +90,28 @@ def create_requests(database_url, event_id, items, requester_id):
     return created
 
 
+def reset_safety_requests(database_url, event_id, request_ids):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f'''SELECT {COLUMNS} FROM public."EquipmentRequest"
+                    WHERE event_id = %s AND equipment_request_id = ANY(%s::uuid[])
+                    FOR UPDATE''',
+                [event_id, request_ids],
+            )
+            rows = cursor.fetchall()
+            if len(rows) != len(request_ids):
+                raise RequestNotFoundError
+            cursor.execute(
+                f'''UPDATE public."EquipmentRequest"
+                    SET status = 'Pending', reviewed_by = NULL
+                    WHERE event_id = %s AND equipment_request_id = ANY(%s::uuid[])
+                    RETURNING {COLUMNS}''',
+                [event_id, request_ids],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
 def review_request(database_url, request_id, status, reviewer_id):
     """Move a Pending request to Approved/Rejected; the Pending guard is in the UPDATE itself."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:

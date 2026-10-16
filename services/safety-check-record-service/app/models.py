@@ -280,10 +280,10 @@ def decide_round(database_url, safety_check_id, status, decided_by, remarks=None
             for flag in flags:
                 cursor.execute(
                     f"""INSERT INTO public."SafetyCheckFlag"
-                        (safety_check_id, area, change_required)
-                        VALUES (%s, %s, %s)
+                        (safety_check_id, area, change_required, equip_request_id, booking_id)
+                        VALUES (%s, %s, %s, %s, %s)
                         RETURNING {FLAG_COLUMNS}""",
-                    [safety_check_id, flag["area"], flag["changeRequired"]],
+                    [safety_check_id, flag["area"], flag["changeRequired"], flag.get("equipmentRequestId"), flag.get("bookingId")],
                 )
                 inserted.append(cursor.fetchone())
             return serialize(decided, inserted)

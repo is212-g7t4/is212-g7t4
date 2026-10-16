@@ -191,6 +191,7 @@ def review_safety_check(event_id):
 
 
 @bp.post("/safety-checks")
+@bp.post("/safety-checks/resubmit")
 def submit_safety_check():
     """Submit an `Approved` event for its Operational Safety Check.
 
@@ -217,7 +218,8 @@ def submit_safety_check():
     event, failure = _load_event(event_id, coordinator_id)
     if failure:
         return failure
-    failure = _status_failure(event, event_id)
+    resubmitting = request.path == "/safety-checks/resubmit"
+    failure = _status_failure(event, event_id, resubmitting=resubmitting)
     if failure:
         return failure
 
@@ -303,10 +305,9 @@ def request_safety_changes():
 
     Shares every step with approve and reject (see `_decide`): only the
     record's decided status, the event's target status and the extra
-    `areas` on the event-side history entry differ. Bookings and equipment
-    requests are left exactly as they are (AC2's "existing arrangements are
-    preserved") — this route never calls Venue Availability or Equipment
-    Request.
+    `areas` on the event-side history entry differ. Flagged active venue
+    bookings and equipment records return to staff review. Unflagged
+    arrangements and terminal booking history are retained unchanged.
     """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -601,6 +602,37 @@ def _decide(
             409,
         )
 
+    booking_ids = []
+    venue_flags = [flag for flag in flags or [] if flag["area"] == "venue arrangement"]
+    if venue_flags:
+        try:
+            bookings = clients.get_event_venue_bookings(event_id)
+        except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+            return None, None, _decide_failure(error, verb)
+        available_ids = {item["id"] for item in bookings}
+        targeted_ids = {flag.get("bookingId") for flag in venue_flags}
+        if None not in targeted_ids and not targeted_ids.issubset(available_ids):
+            return None, None, (jsonify(message="Flagged bookings must belong to this event."), 400)
+        booking_ids = [item["id"] for item in bookings
+            if item["status"] in ("Approved", "Pending", "Pending Review")
+            and (None in targeted_ids or item["id"] in targeted_ids)]
+
+    equipment_ids = []
+    technical_flags = [flag for flag in flags or [] if flag["area"] == "technical arrangement"]
+    if technical_flags:
+        try:
+            equipment = clients.get_event_equipment_requests(event_id, event["coordinatorId"])
+        except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+            return None, None, _decide_failure(error, verb)
+        available_ids = {item["id"] for item in equipment}
+        targeted_ids = {flag.get("equipmentRequestId") for flag in technical_flags}
+        if None in targeted_ids:
+            equipment_ids = [item["id"] for item in equipment]
+        elif not targeted_ids.issubset(available_ids):
+            return None, None, (jsonify(message="Flagged equipment requests must belong to this event."), 400)
+        else:
+            equipment_ids = sorted(targeted_ids)
+
     try:
         decided = clients.decide_safety_check_record(
             open_round["id"], record_status, safety_officer_id, remarks, flags or []
@@ -629,6 +661,20 @@ def _decide(
         # round left and gets stuck on NO_OPEN_SAFETY_CHECK forever.
         decided = _find_decided_round(event_id, open_round["id"], record_status)
         if decided is None:
+            return None, None, _decide_failure(error, verb)
+
+    if booking_ids:
+        try:
+            clients.reset_venue_safety_bookings(event_id, booking_ids)
+        except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+            _compensate_decision(decided["id"], decided["decidedAt"])
+            return None, None, _decide_failure(error, verb)
+
+    if equipment_ids:
+        try:
+            clients.reset_equipment_safety_requests(event_id, equipment_ids)
+        except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+            _compensate_decision(decided["id"], decided["decidedAt"])
             return None, None, _decide_failure(error, verb)
 
     try:
@@ -696,6 +742,45 @@ def _release_venue_bookings(event_id):
                 event_id,
             )
     return released, not_released
+
+
+@bp.get("/safety-checks/resubmit/readiness")
+def safety_resubmission_readiness():
+    event_id = _uuid_or_none(request.args.get("eventId"))
+    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
+    if not event_id or not coordinator_id:
+        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+    event, failure = _load_event(event_id, coordinator_id)
+    if failure:
+        return failure
+    outstanding, failure = _outstanding(event_id, coordinator_id)
+    if failure:
+        return failure
+    return jsonify(
+        ready=event.get("status") == SAFETY_CHANGES_REQUESTED and not outstanding,
+        eventStatus=event.get("status"),
+        outstanding=outstanding,
+    ), 200
+
+
+@bp.get("/safety-checks/feedback")
+def safety_check_feedback():
+    event_id = _uuid_or_none(request.args.get("eventId"))
+    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
+    if not event_id or not coordinator_id:
+        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+
+    _, failure = _load_event(event_id, coordinator_id)
+    if failure:
+        return failure
+
+    try:
+        rounds = clients.list_safety_check_records(event_id)
+    except clients.DownstreamTimeout:
+        return jsonify(message="Unable to load safety feedback right now."), 504
+    except clients.DownstreamError:
+        return jsonify(message="Unable to load safety feedback right now."), 502
+    return jsonify(safetyChecks=rounds), 200
 
 
 @bp.get("/safety-checks/readiness")
@@ -856,10 +941,10 @@ def _load_event(event_id, coordinator_id):
         return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 502)
 
 
-def _status_failure(event, event_id):
+def _status_failure(event, event_id, resubmitting=False):
     """Step 3: only an `Approved` event is at the point of being submitted."""
     status = event.get("status")
-    if status == READY_STATUS:
+    if status == (SAFETY_CHANGES_REQUESTED if resubmitting else READY_STATUS):
         return None
     if status == PENDING_SAFETY_CHECK:
         open_round, failure = _open_round(event_id)
@@ -868,7 +953,9 @@ def _status_failure(event, event_id):
         jsonify(
             code="EVENT_NOT_READY_FOR_SAFETY_CHECK",
             message=(
-                "Only an Approved event can be submitted for a safety check "
+                ("Only a Safety Changes Requested event can be resubmitted for a safety check "
+                 if resubmitting else "Only an Approved event can be submitted for a safety check ")
+                +
                 f"(current status: '{status}')."
             ),
             currentStatus=status,
@@ -1214,7 +1301,7 @@ def _change_flags(data):
             jsonify(message="Select at least one affected area."),
             400,
         )
-    if len(raw) > len(FLAG_AREAS):
+    if len(raw) > 500 or (len(raw) > len(FLAG_AREAS) and not any(isinstance(item, dict) and (item.get("equipmentRequestId") or item.get("bookingId")) for item in raw)):
         return None, None, (
             jsonify(message="Each area may be selected at most once."),
             400,
@@ -1232,12 +1319,24 @@ def _change_flags(data):
                 jsonify(message=f"area must be one of: {', '.join(FLAG_AREAS)}."),
                 400,
             )
-        if area in seen:
+        equipment_request_id = item.get("equipmentRequestId")
+        if equipment_request_id is not None:
+            equipment_request_id = _uuid_or_none(equipment_request_id)
+            if area != "technical arrangement" or not equipment_request_id:
+                return None, None, (jsonify(message="equipmentRequestId must identify a technical arrangement request."), 400)
+        booking_id = item.get("bookingId")
+        if booking_id is not None:
+            booking_id = _uuid_or_none(booking_id)
+            if area != "venue arrangement" or not booking_id:
+                return None, None, (jsonify(message="bookingId must identify a venue arrangement."), 400)
+        target_id = equipment_request_id or booking_id
+        identity = (area, target_id)
+        if identity in seen or (area, None) in seen or (target_id is None and any(previous[0] == area for previous in seen)):
             return None, None, (
                 jsonify(message="Each area may be selected at most once."),
                 400,
             )
-        seen.add(area)
+        seen.add(identity)
         change_required = item.get("changeRequired")
         if not isinstance(change_required, str) or not change_required.strip():
             return None, None, (
@@ -1251,6 +1350,12 @@ def _change_flags(data):
                 ),
                 400,
             )
-        flags.append({"area": area, "changeRequired": change_required.strip()})
-        areas.append(area)
+        flag = {"area": area, "changeRequired": change_required.strip()}
+        if equipment_request_id:
+            flag["equipmentRequestId"] = equipment_request_id
+        if booking_id:
+            flag["bookingId"] = booking_id
+        flags.append(flag)
+        if area not in areas:
+            areas.append(area)
     return flags, areas, None

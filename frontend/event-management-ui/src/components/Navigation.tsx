@@ -49,6 +49,9 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         {canViewCalendar(role) && (
           <NavButton active={route === 'venueCalendar'} onClick={() => onNavigate('venueCalendar')} icon={<ListIcon size={17} />}>Venue availability calendar</NavButton>
         )}
+        {role === 'Venue Staff' && (
+          <NavButton active={route === 'venueRequests'} onClick={() => onNavigate('venueRequests')} icon={<CheckIcon size={17} />}>Venue requests</NavButton>
+        )}
         {canManageEquipment(role) && (
           <NavButton active={route === 'equipment'} onClick={() => onNavigate('equipment')} icon={<ListIcon size={17} />}>Equipment</NavButton>
         )}

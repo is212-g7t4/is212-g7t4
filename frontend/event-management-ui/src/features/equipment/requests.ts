@@ -5,7 +5,7 @@ import type { SubmittedEvent } from '../event/submission'
 export const REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected'] as const
 export type EquipmentRequestStatus = (typeof REQUEST_STATUSES)[number]
 
-export const REQUESTABLE_EVENT_STATUSES = ['Under Review'] as const
+export const REQUESTABLE_EVENT_STATUSES = ['Under Review', 'Safety Changes Requested'] as const
 
 export interface RequestAvailability {
   reservedQuantity: number
@@ -21,6 +21,7 @@ export interface EquipmentRequest {
   technicalRequirements: string
   status: EquipmentRequestStatus
   reviewedBy: string | null
+  safetyFeedback?: { reason: string | null; requestedChanges: string[] } | null
   equipment: { description: string; type: string; totalQuantity: number; status: string } | null
   /** Only Pending lines are checked for availability. */
   availability: RequestAvailability | null

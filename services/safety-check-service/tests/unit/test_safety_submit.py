@@ -150,6 +150,96 @@ def submit(client, **overrides):
     return client.post("/safety-checks", json=body)
 
 
+def resubmit(client, **overrides):
+    return client.post("/safety-checks/resubmit", json={
+        "eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID, **overrides,
+    })
+
+
+# Safety revision AC5 (mocked orchestration): approved arrangements open round 2 and move to Pending Safety Check.
+# The old stub round remains unchanged; database history persistence is covered by Record Service tests.
+def test_resubmission_opens_next_round_only_with_approved_arrangements(client, downstream):
+    downstream.event = event("Safety Changes Requested")
+    downstream.rounds = [record(1, "Changes Requested")]
+    downstream.created = record(2)
+    downstream.requests = [equipment_request("Approved")]
+    response = resubmit(client, equipmentPlacementNotes=PLACEMENT, crowdMovementNotes=CROWD)
+    assert response.status_code == 201
+    assert response.json["safetyCheck"]["roundNumber"] == 2
+    assert response.json["event"]["status"] == "Pending Safety Check"
+    assert downstream.call("create") == ("create", EVENT_ID, COORDINATOR_ID, PLACEMENT, CROWD)
+    assert "bookings" in downstream.names()
+    assert "delete" not in downstream.names()
+    assert downstream.rounds[0]["status"] == "Changes Requested"
+
+
+# Safety revision AC3: pending equipment blocks resubmission before a new review round can be written.
+def test_resubmission_with_pending_equipment_is_blocked_before_writes(client, downstream):
+    downstream.event = event("Safety Changes Requested")
+    downstream.requests = [equipment_request("Pending")]
+    response = resubmit(client)
+    assert response.status_code == 422
+    assert response.json["outstanding"][0]["status"] == "Pending"
+    assert "create" not in downstream.names()
+    assert "bookings" in downstream.names()
+
+
+# Safety revision AC5 (readiness): approved venue plus approved equipment, or no equipment, permits resubmission.
+@pytest.mark.parametrize("requests", [[], [equipment_request("Approved")]])
+def test_resubmission_readiness_requires_both_approved_arrangements(client, downstream, requests):
+    downstream.event = event("Safety Changes Requested")
+    downstream.requests = requests
+    response = client.get("/safety-checks/resubmit/readiness", query_string={"eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID})
+    assert response.status_code == 200
+    assert response.json == {"ready": True, "eventStatus": "Safety Changes Requested", "outstanding": []}
+    assert "bookings" in downstream.names()
+
+
+# Safety revision AC2/AC3: unresolved venue or equipment arrangements block both readiness and submission.
+@pytest.mark.parametrize("venue_status,equipment_status", [("Pending Review", "Approved"), ("Approved", "Rejected"), ("Rejected", "Approved")])
+def test_resubmission_blocks_unready_venue_or_equipment(client, downstream, venue_status, equipment_status):
+    downstream.event = event("Safety Changes Requested")
+    downstream.bookings = [booking(venue_status)]
+    downstream.requests = [equipment_request(equipment_status)]
+    assert resubmit(client).status_code == 422
+    response = client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}")
+    assert response.json["ready"] is False
+    assert "create" not in downstream.names()
+
+
+def test_resubmission_readiness_blocks_pending_equipment_and_other_event_stages(client, downstream):
+    downstream.event = event("Safety Changes Requested")
+    downstream.requests = [equipment_request("Pending")]
+    url = f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}"
+    assert client.get(url).json["ready"] is False
+    downstream.event = event("Approved")
+    downstream.requests = []
+    assert client.get(url).json["ready"] is False
+    assert resubmit(client).status_code == 409
+
+
+def test_resubmission_readiness_rejects_invalid_identifiers(client, downstream):
+    assert client.get("/safety-checks/resubmit/readiness?eventId=bad").status_code == 400
+    assert downstream.calls == []
+
+
+@pytest.mark.parametrize("error,code", [(clients.EventNotAssignedError(), 403), (clients.EventNotFoundError(), 404)])
+def test_resubmission_access_denied_before_equipment_read(client, downstream, error, code):
+    downstream.fail["get_event"] = error
+    assert resubmit(client).status_code == code
+    assert client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}").status_code == code
+    assert "requests" not in downstream.names()
+
+
+@pytest.mark.parametrize("error,code", [(clients.DownstreamError(), 502), (clients.DownstreamTimeout(), 504)])
+def test_resubmission_equipment_failure_is_closed(client, downstream, error, code):
+    downstream.event = event("Safety Changes Requested")
+    downstream.fail["requests"] = error
+    assert resubmit(client).status_code == code
+    assert client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}").status_code == code
+    assert "create" not in downstream.names()
+
+
 # --- AC1, AC3: the happy path ------------------------------------------------
 
 

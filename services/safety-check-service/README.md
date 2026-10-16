@@ -39,6 +39,42 @@ does not record them, so the UI displays **Not provided**.
 No notification in this story: Notification Service and RabbitMQ aren't built,
 and the "decision" notification is SCRUM-168.
 
+## `GET /safety-checks/feedback`
+
+Query: `eventId=<uuid>&coordinatorId=<uuid>`. Checks assignment through Event
+Service before reading any safety records. Returns `{ "safetyChecks": [...] }`
+with complete review rounds, including decision, reason (`remarks`), affected
+areas and requested changes (`flags`), newest first. An event with no rounds
+returns an empty list. This endpoint is read-only and does not reset any
+arrangements. Invalid identifiers return 400, inaccessible events 403/404,
+and downstream failures 502/504.
+
+The assigned coordinator's event details page displays this feedback while the
+event is `Safety Changes Requested`, with earlier rounds available separately.
+Arrangement revision and resubmission are separate increments of the story.
+
+## Safety Resubmission
+
+`GET /safety-checks/resubmit/readiness?eventId=<uuid>&coordinatorId=<uuid>`
+returns `{ready, eventStatus, outstanding}` for the assigned coordinator.
+`ready` requires `Safety Changes Requested`, at least one active approved
+venue booking, and no outstanding venue or equipment arrangements. Pending
+and rejected equipment block; rejected venue history is ignored when an
+approved replacement exists. Loading failures leave the button disabled.
+
+`POST /safety-checks/resubmit` accepts the same body as initial submission,
+but requires `Safety Changes Requested` and rechecks venue and equipment readiness
+before creating the next round. It moves the event to `Pending Safety Check`,
+preserves earlier rounds, and deletes the new undecided round if the event
+update fails. Duplicate submissions retain the existing open-round guard.
+The feedback section's **Resubmit Safety Check** button carries forward the
+previous review's planning notes and reloads the event after success.
+
+Initial submission and resubmission use the same full arrangement rules.
+Coordinator venue edits refresh readiness and disable resubmission until
+Venue Staff has reviewed the edited arrangement.
+Save progress remains a separate notes/progress action, not resubmission.
+
 ## `POST /safety-checks`
 
 ```json
@@ -197,10 +233,11 @@ curl -X POST localhost:5013/safety-check-records/<id>/reopen \
 }
 ```
 
-`reason` is required text, up to 2000 characters (AC1). `flags` is 1 to 3
-entries, each a distinct `area` (`"venue arrangement"`, `"technical
-arrangement"`, `"event details"`) with its own non-blank `changeRequired`
-(AC1). Shares every step with approve and reject — see `_decide` in
+`reason` is required text, up to 2000 characters (AC1). Area-wide `flags`
+use distinct areas (`"venue arrangement"`, `"technical arrangement"`,
+`"event details"`), each with non-blank `changeRequired`. Targeted technical
+flags may also include `equipmentRequestId`; see the scope rules below.
+Shares the decision steps with approve and reject — see `_decide` in
 `app/routes.py`:
 
 ```
@@ -218,9 +255,25 @@ UI ──POST /safety-checks/request-changes──► Safety Check Service (comp
  7. 200 {safetyCheck, event}
 ```
 
-Bookings and equipment requests are never read or written here (AC2's
-"existing arrangements are preserved") — Venue Availability and Equipment
-Request Service aren't called at all. Responses follow the same shape as
+Technical flags may include an `equipmentRequestId`. Distinct requests can
+have separate technical flags (up to 500 flags); an area-wide flag cannot
+be mixed with individual flags for the same area. Request IDs are checked
+against this event before deciding the round. After the decision is saved,
+flagged equipment is reset to `Pending` through Equipment Request Service's
+internal `safety-reset` endpoint, before moving the event. A technical flag
+without an ID resets the whole event's equipment arrangement. Unflagged
+requests remain approved. Both services must share `INTERNAL_SERVICE_TOKEN`.
+If reset fails, the safety decision is reopened and no success is reported.
+If the event update fails after reset, requests stay Pending (fail closed)
+while the safety decision is reopened; retrying the decision can complete it.
+
+Venue flags may include `bookingId`; without one, the venue area covers all
+active event bookings. Flagged active bookings return to `Pending Review`
+through Venue Availability Service's internal safety-reset endpoint.
+Terminal bookings are preserved, and unaffected bookings remain approved.
+Venue Availability must share `INTERNAL_SERVICE_TOKEN` with this composite.
+Arrangement reset failures reopen the decision and do not report success.
+Responses follow the same shape as
 approve (`403 NOT_SAFETY_OFFICER`, `404`, `409
 EVENT_NOT_PENDING_SAFETY_CHECK` / `NO_OPEN_SAFETY_CHECK` / `SAFETY_CHECK_ALREADY_DECIDED`,
 `502`/`504`), plus `400` when `reason` or `flags` break any rule above.

@@ -4,6 +4,12 @@ import { assignmentApi, eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { fetchRegistrations } from '../features/registration/registrations'
 import { EventDetailPage } from './EventDetailPage'
+import { fetchSafetyFeedback, fetchSafetyResubmissionReadiness } from '../features/safety/safetyCheck'
+
+vi.mock('../features/safety/safetyCheck', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../features/safety/safetyCheck')>(), fetchSafetyFeedback: vi.fn(),
+  fetchSafetyResubmissionReadiness: vi.fn(),
+}))
 
 vi.mock('../features/event/submission', () => ({ eventApi: vi.fn(), assignmentApi: vi.fn() }))
 vi.mock('../features/registration/registrations', () => ({ fetchRegistrations: vi.fn() }))
@@ -68,6 +74,8 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(eventApi).mockResolvedValue(event)
   vi.mocked(fetchRegistrations).mockResolvedValue([])
+  vi.mocked(fetchSafetyFeedback).mockResolvedValue([])
+  vi.mocked(fetchSafetyResubmissionReadiness).mockResolvedValue({ ready: false, eventStatus: 'Safety Changes Requested', outstanding: [] })
 })
 
 test('shows the selected event status and full recorded details', async () => {
@@ -458,6 +466,22 @@ test('SCRUM-151 AC6: action history shows the reason and areas for a change requ
 
   expect(screen.getByText('Areas: venue arrangement, event details')).toBeInTheDocument()
   expect(screen.getByText('Reason: Needs another look.')).toBeInTheDocument()
+})
+
+test.each([
+  ['Event Coordinator', coordinatorId, 'Safety Changes Requested', true],
+  ['Event Coordinator', 'other-coordinator', 'Safety Changes Requested', false],
+  ['Event Coordinator Lead', coordinatorId, 'Safety Changes Requested', true],
+  ['Event Coordinator Lead', 'other-lead', 'Safety Changes Requested', false],
+  ['Safety Officer', coordinatorId, 'Safety Changes Requested', false],
+  ['Event Coordinator', coordinatorId, 'Approved', false],
+] as const)('feedback access: %s / %s / %s', async (role, viewerId, status, visible) => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status })
+  render(<EventDetailPage eventId={event.id} role={role} currentCoordinatorId={viewerId} backLabel="events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: event.eventName })
+  expect(Boolean(screen.queryByRole('region', { name: 'Safety Officer feedback' }))).toBe(visible)
+  if (visible) await waitFor(() => expect(fetchSafetyFeedback).toHaveBeenCalledWith(event.id, coordinatorId))
+  else expect(fetchSafetyFeedback).not.toHaveBeenCalled()
 })
 
 test('SCRUM-151 AC6: action history shows the reason for a rejection, with no areas', async () => {

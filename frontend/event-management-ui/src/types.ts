@@ -1,7 +1,7 @@
 // The Event Coordinator Lead assigns coordinators and otherwise works as an
 // Event Coordinator (docs/db-structure.md, User.role).
 export type Role = 'Event Organiser' | 'Event Coordinator' | 'Event Coordinator Lead' | 'Venue Staff' | 'Technical Support' | 'Safety Officer' | 'Attendee'
-export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'queue' | 'workload' | 'detail' | 'myEvents' | 'browseEvents' | 'myRegistrations' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests' | 'safetyChecks' | 'newEquipmentRequest'
+export type Route = 'dashboard' | 'submit' | 'manage' | 'review' | 'queue' | 'workload' | 'detail' | 'myEvents' | 'browseEvents' | 'myRegistrations' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests' | 'safetyChecks' | 'newEquipmentRequest' | 'venueRequests'
 
 export const routeTitles: Record<Route, string> = {
   dashboard: 'Overview',
@@ -17,6 +17,7 @@ export const routeTitles: Record<Route, string> = {
   venues: 'Venue catalogue',
   venueDetail: 'Venue details',
   venueCalendar: 'Venue availability calendar',
+  venueRequests: 'Venue requests',
   venueSearch: 'Find a venue',
   addVenue: 'Add venue',
   editVenue: 'Edit venue',

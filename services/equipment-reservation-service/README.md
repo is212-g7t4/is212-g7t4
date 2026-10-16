@@ -9,6 +9,7 @@ orchestrates three atomics and never reads their databases.
 | Event Service | the event's `startTime`/`endTime`, and other events overlapping that window |
 | Equipment Service | the catalogue: `totalQuantity` and physical `status` |
 | Equipment Request Service | the requests, and recording approve/reject |
+| Safety Check Record Service | latest-round feedback for equipment in safety revision |
 
 ## Availability rules
 
@@ -18,7 +19,8 @@ polled or stored, and `Equipment.operational_status` is never changed.
 1. **Physical check** — equipment that is not `Available` has effective stock `0`.
 2. **Temporal check** — stock is a shared pool. `reserved` is the sum of
    `quantityRequested` over **Approved** requests belonging to *other* events
-  whose status is `Approved`, `Confirmed` or `Under Review`
+  whose status is `Approved`, `Confirmed`, `Under Review`,
+  `Pending Safety Check` or `Safety Changes Requested`
   (Submitted events do not reserve stock) and whose window overlaps:
    `other.start < target.end AND other.end > target.start`.
    `availableStock = max(0, totalQuantity - reserved)`.
@@ -44,7 +46,7 @@ DEV `X-Dev-User-Id` / `X-Dev-Role` headers are forwarded to the atomics.
 - `POST /equipment-reservations/events/<event_id>/requests` — Event Coordinator
   only; body `{"items": [{"equipmentId", "quantityRequested",
   "technicalRequirements"?}]}`. `403` unless the event is assigned to the
-  caller, `409` unless it is Under Review, `409` if any item's
+  caller, `409` unless it is Under Review or Safety Changes Requested, `409` if any item's
   physical status is Unavailable, `404` if an item is not in the catalogue.
   Stock over the event's window is not checked here — that happens at review.
   Forwards to Equipment Request Service and returns `201 {"requests": [...]}`.
@@ -52,8 +54,17 @@ DEV `X-Dev-User-Id` / `X-Dev-Role` headers are forwarded to the atomics.
 
 ## Configuration
 
+For events at `Safety Changes Requested`, each request includes
+`safetyFeedback: {reason, requestedChanges}` when it matches a technical flag
+in the latest Changes Requested round, or `null` when unflagged. Individual
+flags match `equipmentRequestId`; area-wide technical flags apply to every
+equipment request for that event. Earlier-round feedback is not reused.
+Technical Support sees this in the final Safety change reason column of the
+horizontally scrollable equipment-review table.
+
 `EQUIPMENT_REQUEST_SERVICE_URL`, `EVENT_SERVICE_URL`, `EQUIPMENT_SERVICE_URL`,
-`FRONTEND_ORIGIN` — see `.env.example`. Port 5010 under docker compose.
+`SAFETY_CHECK_RECORD_SERVICE_URL`, `FRONTEND_ORIGIN` — see `.env.example`.
+Port 5010 under docker compose.
 
 ## Commands
 

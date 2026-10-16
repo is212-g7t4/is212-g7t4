@@ -77,7 +77,7 @@ export interface RequestSafetyChanges {
   eventId: string
   safetyOfficerId: string
   reason: string
-  flags: { area: SafetyFlagArea; changeRequired: string }[]
+  flags: { area: SafetyFlagArea; changeRequired: string; equipmentRequestId?: string; bookingId?: string }[]
 }
 
 export interface RejectSafetyCheck {
@@ -182,6 +182,25 @@ async function request(path: string, init?: RequestInit) {
     )
   }
   return body
+}
+
+export async function fetchSafetyFeedback(eventId: string, coordinatorId: string): Promise<SafetyCheckRecord[]> {
+  const params = new URLSearchParams({ eventId, coordinatorId })
+  const body = await request(`/safety-checks/feedback?${params.toString()}`)
+  return body.safetyChecks as SafetyCheckRecord[]
+}
+
+export type SafetyResubmissionReadiness = Pick<SafetyReadiness, 'ready' | 'eventStatus' | 'outstanding'>
+
+export async function fetchSafetyResubmissionReadiness(eventId: string, coordinatorId: string): Promise<SafetyResubmissionReadiness> {
+  const params = new URLSearchParams({ eventId, coordinatorId })
+  return request(`/safety-checks/resubmit/readiness?${params.toString()}`)
+}
+
+export async function resubmitSafetyCheck(details: SubmitSafetyCheck): Promise<{ safetyCheck: SafetyCheckRecord; event: SubmittedEvent }> {
+  return request('/safety-checks/resubmit', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(details),
+  })
 }
 
 /** Can this event be submitted yet, and if not, what's outstanding (AC2)? */

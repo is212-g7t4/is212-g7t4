@@ -1145,6 +1145,24 @@ td small {
   width: 100%;
 }
 
+.equipment-request-table.with-safety-feedback {
+  min-width: 1240px;
+}
+
+.venue-request-table {
+  min-width: 940px;
+}
+
+.equipment-safety-feedback {
+  display: grid;
+  gap: 8px;
+  white-space: pre-wrap;
+}
+
+.equipment-safety-feedback p {
+  margin: 0;
+}
+
 .equipment-request-table th,
 .equipment-request-table td {
   white-space: normal;

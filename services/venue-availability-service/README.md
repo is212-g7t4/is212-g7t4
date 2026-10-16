@@ -7,6 +7,21 @@ Service, and Venue Staff hold writes use the DEV identity simulation below.
 No calls to User/Venue/Event services or their tables are added.
 `GET /venues` remains owned by Venue Service.
 
+## Safety Re-Review
+
+If the local database has not applied the closure-rejection migration,
+`VENUE_BOOKING_LEGACY_SCHEMA=true` makes ordinary booking reads and decisions
+project missing optional closure-history fields as null. It does not alter
+the database schema. Closure-rejection writes still require their existing
+migration; normal mode remains the default for migrated databases.
+
+`POST /events/<event_id>/venue-bookings/safety-reset` accepts
+`{"bookingIds": ["<uuid>"]}` and requires `X-Internal-Service-Token` matching
+`INTERNAL_SERVICE_TOKEN`. All selected bookings must belong to the event.
+Selected active bookings return to `Pending Review` and clear their reviewer;
+Cancelled, Expired and Rejected history is not reopened. Other bookings are
+unchanged. Only the safety composite calls this internal operation.
+
 ## Local setup (from repository root)
 
 Python 3.12+ and `uv` are required. Keep the real root `.env` git-ignored;
