@@ -223,3 +223,134 @@ def test_place_hold_database_unconfigured(setup):
 
     assert response.status_code == 503
     cursor.execute.assert_not_called()
+
+COORDINATOR_HEADERS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
+HOLD_ROW = {
+    "hold_id": "00000000-0000-0000-0000-000000000010",
+    "venue_id": VENUE_ID,
+    "created_at": datetime(2026, 10, 8, 9),
+    "expires_at": datetime(2026, 10, 19, 12),
+    "held_by": USER_ID,
+}
+
+
+def test_place_hold_stores_the_coordinator_it_is_held_for(setup):
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+    cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, None, HOLD_ROW]
+
+    response = client.post(
+        "/venue-holds",
+        json={
+            "venueId": VENUE_ID,
+            "expiresAt": "2099-10-01T12:00",
+            "coordinatorId": USER_ID,
+        },
+        headers=HOLD_HEADERS,
+    )
+
+    assert response.status_code == 201
+    sql, params = cursor.execute.call_args.args
+    assert "held_for" in sql
+    assert params[-1] == USER_ID
+
+
+def test_place_hold_rejects_malformed_coordinator_id(setup):
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+
+    response = client.post(
+        "/venue-holds",
+        json={
+            "venueId": VENUE_ID,
+            "expiresAt": "2099-10-01T12:00",
+            "coordinatorId": "nope",
+        },
+        headers=HOLD_HEADERS,
+    )
+
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_reminders_return_the_coordinators_holds_expiring_in_three_days(setup):
+    """Coordinator is told which venue and when the hold expires."""
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+    cursor.fetchall.return_value = [HOLD_ROW]
+
+    response = client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
+
+    assert response.status_code == 200
+    reminder = response.json["reminders"][0]
+    assert reminder["venueId"] == VENUE_ID
+    assert reminder["expiresAt"] == "2026-10-19T12:00:00"
+    sql, params = cursor.execute.call_args.args
+    assert params == [USER_ID]
+
+
+def test_reminders_exclude_expired_and_no_longer_active_holds(setup):
+    """No reminder once the hold has expired or is no longer 'On Hold'."""
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+    cursor.fetchall.return_value = []
+
+    client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
+
+    sql = cursor.execute.call_args.args[0]
+    assert "status = 'On Hold'" in sql
+    assert "hold_expires_at > now()" in sql
+    assert "hold_expires_at <= now() + interval '3 days'" in sql
+    assert "held_for = %s" in sql
+
+
+def test_reminders_accept_the_coordinator_lead(setup):
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+    cursor.fetchall.return_value = []
+
+    response = client.get(
+        "/venue-holds/reminders",
+        headers={**COORDINATOR_HEADERS, "X-Dev-Role": "Event Coordinator Lead"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_reminders_require_coordinator_role(setup):
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+
+    response = client.get("/venue-holds/reminders", headers=HOLD_HEADERS)
+
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
+
+
+def test_reminders_require_identity_headers(setup):
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+
+    response = client.get("/venue-holds/reminders")
+
+    assert response.status_code == 401
+    cursor.execute.assert_not_called()
+
+
+def test_reminders_are_disabled_without_dev_mode(setup):
+    client, cursor = setup
+
+    response = client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
+
+    assert response.status_code == 503
+    cursor.execute.assert_not_called()
+
+
+def test_reminders_database_unconfigured(setup):
+    client, cursor = setup
+    client.application.config.update(CALENDAR_DEV_MODE=True, DATABASE_URL=None)
+
+    response = client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
+
+    assert response.status_code == 503
+    cursor.execute.assert_not_called()

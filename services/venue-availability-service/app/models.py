@@ -192,7 +192,16 @@ def _has_conflict(cursor, venue_id, start, end, exclude_booking_id=None):
     return bool(_conflict_types(cursor, venue_id, start, end, exclude_booking_id))
 
 
-def create_booking(database_url, event_id, venue_id, start, end, required_capacity, venue_requirements, requested_by):
+def create_booking(
+    database_url,
+    event_id,
+    venue_id,
+    start,
+    end,
+    required_capacity,
+    venue_requirements,
+    requested_by,
+):
     booking_id = str(uuid4())
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -322,7 +331,7 @@ def list_event_bookings(database_url, event_id):
             return [serialize(_localize(row)) for row in cursor.fetchall()]
 
 
-def create_hold(database_url, venue_id, expires_at, held_by):
+def create_hold(database_url, venue_id, expires_at, held_by, held_for=None):
     hold_now = datetime.now(SINGAPORE)
     expires_at = _aware(expires_at)
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -349,10 +358,19 @@ def create_hold(database_url, venue_id, expires_at, held_by):
             cursor.execute(
                 f"""INSERT INTO public."VenueBooking"
                     (venue_id, requested_start_time, requested_end_time,
-                     required_capacity, status, held_by, held_at, hold_expires_at)
-                    VALUES (%s, %s, %s, 1, 'On Hold', %s, %s, %s)
+                     required_capacity, status, held_by, held_at, hold_expires_at,
+                     held_for)
+                    VALUES (%s, %s, %s, 1, 'On Hold', %s, %s, %s, %s)
                     RETURNING {HOLD_COLUMNS}""",
-                [venue_id, hold_now, expires_at, held_by, hold_now, expires_at],
+                [
+                    venue_id,
+                    hold_now,
+                    expires_at,
+                    held_by,
+                    hold_now,
+                    expires_at,
+                    held_for,
+                ],
             )
             saved = _localize(cursor.fetchone())
     return serialize_hold(saved)
@@ -365,6 +383,25 @@ def list_active_holds(database_url):
                 f"""SELECT {HOLD_COLUMNS} FROM public."VenueBooking"
                     WHERE status = 'On Hold' AND hold_expires_at > now()
                     ORDER BY hold_expires_at ASC, booking_id ASC"""
+            )
+            return [serialize_hold(_localize(row)) for row in cursor.fetchall()]
+
+
+def list_hold_reminders(database_url, coordinator_id):
+    """Active holds placed for this coordinator that expire within 3 days.
+
+    Computed at read time from hold_expires_at: a hold that has expired, or
+    whose status is no longer 'On Hold', is never returned.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {HOLD_COLUMNS} FROM public."VenueBooking"
+                    WHERE status = 'On Hold' AND held_for = %s
+                      AND hold_expires_at > now()
+                      AND hold_expires_at <= now() + interval '3 days'
+                    ORDER BY hold_expires_at ASC, booking_id ASC""",
+                [coordinator_id],
             )
             return [serialize_hold(_localize(row)) for row in cursor.fetchall()]
 
