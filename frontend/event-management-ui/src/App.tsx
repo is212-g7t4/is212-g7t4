@@ -21,6 +21,7 @@ import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Role, Route, User } from './types'
 import { AlertIcon, CheckIcon } from './components/Icon'
+import { HoldReminderAlert } from './features/venue/HoldReminderAlert'
 
 const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
 
@@ -183,6 +184,7 @@ function App() {
     <main className={`main-content${route === 'venueCalendar' ? ' calendar-route' : ''}`}>
       <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
+      <HoldReminderAlert user={activeUser} />
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
       {route === 'submit' && <SubmissionPage role={role} currentOrganiserId={activeUser?.id} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
@@ -196,7 +198,7 @@ function App() {
       {route === 'safetyChecks' && <SafetyChecksPage key={activeUser?.id} role={role} safetyOfficerId={activeUser?.id} onViewDetails={navigateToEvent} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
-      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
+      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} coordinators={users.filter((u) => u.role === 'Event Coordinator' || u.role === 'Event Coordinator Lead')} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
       {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
