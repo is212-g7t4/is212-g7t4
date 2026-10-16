@@ -20,6 +20,7 @@ the other.
 | Equipment Request Service (5011) | every equipment request for the event |
 | Safety Check Record Service (5013) | creating, deciding, listing and rolling back a round |
 | User Service (5001) | the caller's role (SCRUM-150: is this a Safety Officer?) |
+| Venue Service (5006) | venue names for the Safety Officer's queue (SCRUM-162) |
 
 No notification in this story: Notification Service and RabbitMQ aren't built,
 and the "decision" notification is SCRUM-168.
@@ -289,6 +290,63 @@ coordinator sees what's outstanding before clicking rather than after.
 
 `openSafetyCheck` is filled only when the event is `Pending Safety Check`.
 Same `400`/`403`/`404`/`502`/`504` as above.
+
+## `GET /safety-checks/queue?safetyOfficerId=<uuid>`
+
+SCRUM-162: the Safety Officer's queue of events awaiting an Operational
+Safety Check. Read-only.
+
+```
+UI ──GET /safety-checks/queue──► Safety Check Service (composite, 5012)
+ 1. validate safetyOfficerId                                                400
+ 2. GET  User Service   /users/<safetyOfficerId>                            403 NOT_SAFETY_OFFICER
+ 3. in parallel: GET Event Service /events?status=Pending Safety Check
+                     &viewerRole=Safety Officer&coordinatorId=<officer>     (AC1)
+                 GET Venue Service /venues                       (names only)
+ 4. per event, in parallel:
+       GET Record Service     /safety-check-records?eventId=<id>&status=Pending
+       GET Venue Availability /events/<id>/venue-bookings
+ 5. 200 {events: [...]}, nearest event date first                           (AC2)
+```
+
+```json
+{
+  "events": [
+    {
+      "eventId": "<uuid>", "eventName": "Community Workshop",
+      "preferredStartDate": "2026-11-12T09:00:00+08:00",
+      "preferredEndDate": "2026-11-12T17:00:00+08:00",
+      "expectedAttendance": "120",
+      "venues": [{"id": "<uuid>", "name": "Main Hall"}],
+      "safetyCheckId": "<uuid>",
+      "submittedAt": "2026-11-01T02:30:00+00:00",
+      "roundNumber": 2,
+      "resubmission": true
+    }
+  ]
+}
+```
+
+- **Submission date** is the open round's `submittedAt`, so a resubmission
+  shows when it was resubmitted, not when it was first submitted.
+- **Resubmission** (AC3) is `roundNumber > 1`: every round after the first
+  follows an earlier decision. Nothing creates a round 2 until resubmit
+  (SCRUM-164) is built.
+- **Venues** are the event's bookings that still hold a venue (not
+  `Cancelled`, `Expired` or `Rejected`), one entry per venue. A venue missing
+  from the catalogue is shown as `"Unknown venue"`.
+- **Order** (AC2): `preferredStartDate` ascending, ties by `eventId`, undated
+  events last.
+- **Decided events drop out** (AC4) with no extra rule: every decision moves
+  the event out of `Pending Safety Check`, and step 3 lists only that status.
+- **An event with no open round** (data out of step) is left out and logged
+  at `WARNING`, rather than shown with no submission date.
+- **Fails closed:** if any read fails, the whole queue is `502`/`504`. A
+  partial list could silently hide an event the officer has to review.
+
+The per-event reads are two calls per queued event. That is fine at this
+queue's size. If it ever isn't, the fix is batch reads (`eventIds=`) on the
+record and booking services.
 
 ## The readiness rule — `app/readiness.py`
 
