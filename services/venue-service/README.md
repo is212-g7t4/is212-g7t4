@@ -1,10 +1,10 @@
 # Venue Service (atomic)
 
-The venue catalogue. Read-only lookups against `public."Venue"` — no add,
-edit or booking logic (SCRUM-22, SCRUM-23 and the Venue Availability Service
-own those). Called directly by the frontend for a "simple read" (per
-`AGENTS.md`: the UI may call an owning atomic directly without a composite in
-between), and by `venue-booking-service` when it validates a booking request.
+The venue catalogue. It owns lookups and Venue Staff profile creation/editing
+against `public."Venue"`, including each venue's setup and turnaround minutes.
+It contains no booking logic (Venue Availability Service owns that). The
+frontend calls it directly because Venue Service owns this catalogue concern,
+and `venue-booking-service` calls it when validating a booking request.
 
 Being an atomic, it calls no other service.
 

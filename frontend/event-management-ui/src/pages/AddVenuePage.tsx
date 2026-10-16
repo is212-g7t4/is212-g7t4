@@ -45,6 +45,8 @@ function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps)
         accessibility: venue.accessibility,
         supportedLayouts: venue.supportedLayouts.join(', '),
         status: venue.status,
+        setupTimeMinutes: String(venue.setupTimeMinutes ?? 0),
+        turnaroundTimeMinutes: String(venue.turnaroundTimeMinutes ?? 0),
       })
     }).catch((cause: Error) => {
       if (active) setLoadError(cause.message)
@@ -121,6 +123,9 @@ function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps)
                 {VENUE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
             </label>
+
+            <Field label="Setup Time (minutes)" type="number" min="0" value={form.setupTimeMinutes} onChange={(value) => update('setupTimeMinutes', value)} placeholder="e.g. 30" required />
+            <Field label="Turnaround Time (minutes)" type="number" min="0" value={form.turnaroundTimeMinutes} onChange={(value) => update('turnaroundTimeMinutes', value)} placeholder="e.g. 45" required />
           </FormSection>
 
           <div className="form-actions">

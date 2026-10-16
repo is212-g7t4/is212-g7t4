@@ -150,6 +150,8 @@ def create_app(config=None):
             "accessibility": (data.get("accessibility") or "").strip(),
             "supportedLayouts": [item.strip() for item in data["supportedLayouts"]],
             "status": data["status"].strip(),
+            "setupTimeMinutes": int(str(data.get("setupTimeMinutes", 0)).strip()),
+            "turnaroundTimeMinutes": int(str(data.get("turnaroundTimeMinutes", 0)).strip()),
         }
         try:
             venue = create_venue(app.config["DATABASE_URL"], details)
@@ -183,6 +185,14 @@ def create_app(config=None):
             "accessibility": (data.get("accessibility") or "").strip(),
             "supportedLayouts": [item.strip() for item in data["supportedLayouts"]],
             "status": data["status"].strip(),
+            "setupTimeMinutes": (
+                int(str(data["setupTimeMinutes"]).strip())
+                if "setupTimeMinutes" in data else None
+            ),
+            "turnaroundTimeMinutes": (
+                int(str(data["turnaroundTimeMinutes"]).strip())
+                if "turnaroundTimeMinutes" in data else None
+            ),
         }
         try:
             venue = update_venue(app.config["DATABASE_URL"], str(venue_id), details)
