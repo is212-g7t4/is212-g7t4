@@ -1,7 +1,8 @@
 import type { SubmittedEvent } from './submission'
 import { formatDateTime, formatTimestamp } from './formatDates'
 
-export function EventOverview({ event, coordinatorName, assignedByName }: { event: SubmittedEvent; coordinatorName?: string | null; assignedByName?: string | null }) {
+export function EventOverview({ event, coordinatorName, assignedByName, previousCoordinatorName }: { event: SubmittedEvent; coordinatorName?: string | null; assignedByName?: string | null; previousCoordinatorName?: string | null }) {
+  const reassigned = Boolean(event.coordinatorId && event.previousCoordinatorId)
   return (
     <>
       <div className="event-facts">
@@ -20,7 +21,9 @@ export function EventOverview({ event, coordinatorName, assignedByName }: { even
       </dl>
 
       <p className="event-footnote muted">
-        Assigned to <strong>{coordinatorName || 'Not assigned'}</strong>
+        {reassigned
+          ? <>Reassigned from <strong>{previousCoordinatorName || 'a previous coordinator'}</strong> to <strong>{coordinatorName || 'Unknown coordinator'}</strong></>
+          : <>Assigned to <strong>{coordinatorName || 'Not assigned'}</strong></>}
         {event.coordinatorId && event.assignedBy && assignedByName && <> by <strong>{assignedByName}</strong></>}
         {event.coordinatorId && event.assignedAt && <> on {formatTimestamp(event.assignedAt)}</>}
         {event.submittedAt && <> · Submitted {formatTimestamp(event.submittedAt)}</>}

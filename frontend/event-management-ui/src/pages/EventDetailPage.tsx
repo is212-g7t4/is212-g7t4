@@ -3,8 +3,9 @@ import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { EventStatus, SubmittedEvent } from '../features/event/submission'
-import { ALLOWED_TRANSITIONS, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
+import { ALLOWED_TRANSITIONS, canReassign, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
+import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorPanel'
 import { canViewAllInternalEvents, canViewInternalEvents, INTERNAL_EVENT_ACCESS_MESSAGE } from '../features/event/permissions'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
@@ -17,7 +18,7 @@ import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
 import { SafetySubmitPanel } from '../features/safety/SafetySubmitPanel'
 import { SafetyDecisionPanel } from '../features/safety/SafetyDecisionPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
-import { isCoordinator } from '../roles'
+import { isCoordinator, isLead } from '../roles'
 
 type EventDetailProps = { eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
@@ -128,7 +129,19 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
-      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} />
+      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
+      {/* Reassignment: Lead-only, and never on a Rejected or Cancelled event.
+          Taking the event away from a coordinator needs nothing else here —
+          canUpdate below, venue bookings, equipment and safety checks all
+          follow event.coordinatorId. */}
+      {isLead(role) && canReassign(event) && <section className="event-card-section">
+        <h3>Coordinator</h3>
+        <ReassignCoordinatorPanel
+          event={event}
+          leadId={currentCoordinator.id}
+          onReassigned={(updated) => { setEvent(updated); setDraftStatus(updated.status); setActionDetails(updated.actionDetails || '') }}
+        />
+      </section>}
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
 
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel
