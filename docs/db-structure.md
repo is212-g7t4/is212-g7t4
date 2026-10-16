@@ -231,11 +231,24 @@ One row per review round, so earlier decisions stay visible as history.
 | submitted_at | TIMESTAMPTZ | changed | When it was submitted, shown in the Safety Officer's queue. |
 | equipment_placement_notes | TEXT | | The coordinator's notes on where equipment will go, read by the Safety Officer. |
 | crowd_movement_notes | TEXT | | The coordinator's notes on expected crowd flow, read by the Safety Officer. |
-| status | VARCHAR(50) | | The round's outcome: Pending, Safety Approved, Changes Requested or Safety Rejected (`RECORD_STATUSES` in `safety-check-record-service`). Deliberately not `Approved` — that is only ever an *event* status, the one an event holds before its safety check. |
+| status | VARCHAR(50) | | The round's outcome: Pending, Safety Approved, Changes Requested, Safety Rejected or Approval Withdrawn (`RECORD_STATUSES` in `safety-check-record-service`). Deliberately not `Approved` — that is only ever an *event* status, the one an event holds before its safety check. |
 | decided_by | UUID (FK User) | | The Safety Officer who decided, taken from the verified login. |
 | decided_at | TIMESTAMPTZ | changed | When the decision was made. |
 | remarks | TEXT | | The Safety Officer's overall reason or comments, shown to the coordinator. |
+| withdrawn_at | TIMESTAMPTZ | new (SCRUM-153) | When the approval was withdrawn, after a high-impact change to the event. Null on every round that was never withdrawn. |
+| withdrawn_by | UUID (FK User) | new (SCRUM-153) | The coordinator whose change withdrew the approval. |
+| withdrawal_reason | TEXT | new (SCRUM-153) | Which details changed, in the coordinator's own words from the UI — what the event's history quotes (SCRUM-153 AC1's "told why"). |
 | UNIQUE (event_id, round_number) | table rule | new | Stops duplicate safety checks for the same round, such as from a double submit. |
+
+**A withdrawn approval is kept, not overwritten (SCRUM-153 AC3).** When a
+high-impact change to a `Confirmed` event invalidates its safety review, round
+N's `status` becomes `Approval Withdrawn` and the three `withdrawn_*` columns
+are set, but `decided_by`, `decided_at` and `remarks` stay exactly as the
+Safety Officer left them — so the history still shows who approved the round,
+when, and why that approval no longer stands. Round N+1 is inserted as
+`Pending` in the same transaction, carrying round N's two note columns
+forward. All three columns are nullable with no backfill
+(`20261016142813_safety_check_withdrawal.sql`).
 
 Removed: `flagged_areas` (replaced by `SafetyCheckFlag`).
 

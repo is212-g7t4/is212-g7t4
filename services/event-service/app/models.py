@@ -7,6 +7,9 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Safe both ways: validation.py imports nothing from here.
+from app import validation
+
 # Only columns owned by Event Service; no queries to other services' tables.
 FIELDS = {
     "eventName": "event_name",
@@ -91,7 +94,90 @@ ALLOWED_TRANSITIONS = {
 SAFETY_TRANSITIONS = {
     "Approved": {"Pending Safety Check"},
     "Pending Safety Check": {"Confirmed", "Safety Changes Requested", "Cancelled"},
+    # SCRUM-153 AC1: a high-impact change withdraws the approval, so
+    # 'Confirmed' gains exactly one way out. It is legal only together with
+    # the edit that justifies it, which is why it is listed in
+    # RECHECK_ONLY_MOVES below and `/safety-status` refuses it on its own.
+    "Confirmed": {"Pending Safety Check"},
 }
+
+# Moves that are in SAFETY_TRANSITIONS but reachable only through
+# `update_event_details` — the edit and the status move are one transaction, so
+# the event can never go back to 'Pending Safety Check' without the
+# high-impact change that caused it. `/safety-status` refuses these.
+RECHECK_ONLY_MOVES = {("Confirmed", "Pending Safety Check")}
+
+# SCRUM-153's field classification, shared with SCRUM-20 (which defines the
+# same split and owns "edit event details"): its names are used here so its
+# later contradiction checks reuse them rather than re-typing the strings.
+# High-impact fields are the five details in SCRUM-153 AC1 whose change
+# invalidates a safety review; low-impact ones are AC2's.
+LOW_IMPACT_FIELDS = ("eventName", "description", "purpose", "registrationNeeds")
+HIGH_IMPACT_FIELDS = (
+    "preferredStartDate",
+    "preferredEndDate",
+    "expectedAttendance",
+    "venueRequirements",
+    "equipmentRequirements",
+    "accessibilityNeeds",
+)
+EDITABLE_FIELDS = (*LOW_IMPACT_FIELDS, *HIGH_IMPACT_FIELDS)
+
+# Human labels for the history line and the UI (AC1's "told why"). Both date
+# fields map to one label deliberately, so changing start and end together
+# says "Date/time" once rather than twice.
+FIELD_LABELS = {
+    "preferredStartDate": "Date/time",
+    "preferredEndDate": "Date/time",
+    "expectedAttendance": "Expected attendance",
+    "venueRequirements": "Venue requirements",
+    "equipmentRequirements": "Equipment requirements",
+    "accessibilityNeeds": "Accessibility needs",
+    "eventName": "Event name",
+    "description": "Description",
+    "purpose": "Purpose",
+    "registrationNeeds": "Registration needs",
+}
+
+# Statuses whose details a coordinator may still edit. 'Rejected' and
+# 'Cancelled' are terminal — there is nothing left to prepare. 'Pending Safety
+# Check' allows low-impact edits only: a high-impact change while the Safety
+# Officer is mid-review would move the goalposts under them (SCRUM-153 Q3).
+EDITABLE_STATUSES = (
+    "Submitted",
+    "Under Review",
+    "Approved",
+    "Safety Changes Requested",
+    "Confirmed",
+    "Pending Safety Check",
+)
+
+UNDER_SAFETY_REVIEW_MESSAGE = (
+    "This event is waiting for its Operational Safety Check. Change date/time, "
+    "attendance, venue, equipment or accessibility details after the Safety "
+    "Officer's decision."
+)
+
+
+def field_labels(fields):
+    """The distinct human labels for `fields`, in HIGH/LOW declaration order.
+
+    Deduplicated, so a change to both date fields reads "Date/time" once
+    (AC1's "told why"), and ordered by `EDITABLE_FIELDS` rather than by what
+    the caller happened to send, so the same edit always reads the same way.
+    """
+    labels = []
+    for field in EDITABLE_FIELDS:
+        if field in fields and FIELD_LABELS[field] not in labels:
+            labels.append(FIELD_LABELS[field])
+    return labels
+
+
+def _sentence_list(labels):
+    """"A", "A and B", "A, B and C" — for the message AC1 shows the coordinator."""
+    if len(labels) <= 1:
+        return "".join(labels)
+    return f"{', '.join(labels[:-1])} and {labels[-1]}"
 
 # Stored verbatim in action-history entries' "areas"; mirrors the Safety
 # Check Record Service's FLAG_AREAS (SCRUM-151).
@@ -402,6 +488,44 @@ class EventClosedError(Exception):
         self.current_status = current_status
 
 
+class SafetyRecheckRequiredError(Exception):
+    """SCRUM-153 AC1: this high-impact edit would withdraw the event's safety approval.
+
+    The gate. A high-impact change to a `Confirmed` event is refused unless it
+    arrives through the safety workflow, which withdraws the approval and
+    opens the next round in the same request. So a client that skips the UI
+    still can't leave an event `Confirmed` on the basis of an outdated review.
+    """
+
+    def __init__(self, changed_fields, high_impact_fields):
+        super().__init__(high_impact_fields)
+        self.changed_fields = changed_fields
+        self.high_impact_fields = high_impact_fields
+
+    @property
+    def labels(self):
+        return field_labels(self.high_impact_fields)
+
+    @property
+    def message(self):
+        return (
+            f"Changing {_sentence_list(self.labels)} will withdraw this event's "
+            "safety approval. It will return to Pending Safety Check."
+        )
+
+
+class EventUnderSafetyReviewError(Exception):
+    """SCRUM-153 Q3: no high-impact edits while the Safety Officer is mid-review."""
+
+
+class EventNotEditableError(Exception):
+    """The event is 'Rejected' or 'Cancelled', so its details are history."""
+
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
 class NoCoordinatorChangeError(Exception):
     """Reassignment: the selected coordinator is already the assigned one."""
 
@@ -706,7 +830,15 @@ def update_event_safety_status(
                 and event["status"] == "Pending Safety Check"
             ):
                 raise SafetyCheckAlreadyPendingError
-            if status not in SAFETY_TRANSITIONS.get(event["status"], set()):
+            # SCRUM-153: 'Confirmed -> Pending Safety Check' is in
+            # SAFETY_TRANSITIONS, but only `update_event_details` may make it —
+            # the move is legal solely as part of the high-impact edit that
+            # justifies it. Belt and braces: the route refuses this before
+            # connecting at all, and this refuses it again under the lock, in
+            # case the event moved to 'Confirmed' in between.
+            if (event["status"], status) in RECHECK_ONLY_MOVES or status not in (
+                SAFETY_TRANSITIONS.get(event["status"], set())
+            ):
                 raise InvalidStatusTransitionError(event["status"])
 
             (
@@ -788,6 +920,230 @@ def update_event_safety_status(
                     WHERE event_id = %s
                     RETURNING {ROW_COLUMNS}""",
                 [status, json.dumps(metadata, ensure_ascii=False), event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+# The editable fields that are columns of their own. `description` and
+# `purpose` live inside the `description` JSON instead, so they are rebuilt
+# with the rest of the metadata rather than written as columns.
+DETAIL_COLUMNS = {
+    field: FIELDS[field]
+    for field in EDITABLE_FIELDS
+    if field not in ("description", "purpose")
+}
+
+
+def _normalised(field, value):
+    """`value` reduced to what "changed" means for its field (SCRUM-153 AC2).
+
+    Compared after the same normalisation `serialize` applies, so resending
+    the current value is never a change: `"120"` and `120` are the same
+    attendance, `" Hall A "` and `"Hall A"` the same requirement, and the same
+    moment in two ISO spellings the same date. That is what stops a coordinator
+    re-saving the form without edits from withdrawing a safety approval.
+    """
+    text = str(value).strip()
+    if field == "expectedAttendance":
+        return int(text) if text.isascii() and text.isdigit() else text
+    if field in ("preferredStartDate", "preferredEndDate"):
+        # Safe without a guard for an unparseable date: `validation.validate`
+        # has already run on the merged event, so every date here is either a
+        # valid local ISO date-time or empty (an event submitted before the
+        # dates were required).
+        return _local(_aware(text)) if text else ""
+    return text
+
+
+def _changed_fields(changes, current):
+    """Which of `changes` really differ from `current`, and which of those are high-impact."""
+    changed = [
+        field
+        for field, value in changes.items()
+        if _normalised(field, value) != _normalised(field, current.get(field))
+    ]
+    return changed, [field for field in changed if field in HIGH_IMPACT_FIELDS]
+
+
+def _latest_approval_entry(action_history):
+    """The entry that confirmed this event: the latest 'Confirmed' action with a round id.
+
+    SCRUM-150 writes it when the Safety Officer approves. Matching the round
+    being withdrawn against it is how this service checks, with no call to
+    another service, that the composite withdrew the approval the event
+    actually holds (and not a stale or made-up round).
+    """
+    return next(
+        (
+            entry
+            for entry in reversed(action_history)
+            if entry.get("status") == "Confirmed" and entry.get("safetyCheckId")
+        ),
+        None,
+    )
+
+
+def update_event_details(
+    database_url,
+    event_id,
+    coordinator_id,
+    changes,
+    safety_recheck=None,
+    internal=False,
+):
+    """Save an edit to an event's details (SCRUM-153 AC1, AC2; SCRUM-20's edit write).
+
+    This service is the single authority on what counts as high-impact, so the
+    classification and the gate live here rather than in the composite. A
+    low-impact edit saves in place and the status is untouched (AC2). A
+    high-impact edit of a `Confirmed` event is refused with
+    `SafetyRecheckRequiredError` unless `safety_recheck` arrives with the
+    internal token — and with them, the fields are saved **and** the event
+    moves back to 'Pending Safety Check' in this same `FOR UPDATE`
+    transaction (AC1), so the two can never come apart.
+
+    Everything the composite already checked is re-checked here under the
+    lock: its read can be stale by the time it calls, and an atomic never
+    trusts its caller's homework.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            # Assignment first, as everywhere else: a caller who isn't the
+            # assigned coordinator gets 403 and learns nothing about the event.
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
+                raise EventNotAssignedError
+            status = event["status"]
+            if status not in EDITABLE_STATUSES:
+                raise EventNotEditableError(status)
+
+            current = serialize(event)
+            merged = {**current, **changes}
+            missing, errors = validation.validate(merged)
+            if missing or errors:
+                raise ValueError({"missingFields": missing, "errors": errors})
+
+            changed, high = _changed_fields(changes, current)
+            if not changed:
+                # Nothing actually differs, so there is nothing to record and
+                # no approval to withdraw (AC2).
+                return current
+
+            recheck = False
+            if high and status == PREPARATION_STATUS:
+                # The gate (AC1). `internal` proves the call came through the
+                # safety workflow, which has already withdrawn the approval
+                # and opened round N+1.
+                if not safety_recheck or not internal:
+                    raise SafetyRecheckRequiredError(changed, high)
+                approval = _latest_approval_entry(current["actionHistory"])
+                if (
+                    not approval
+                    or approval["safetyCheckId"]
+                    != safety_recheck["withdrawnSafetyCheckId"]
+                ):
+                    raise StaleSafetyCheckError
+                recheck = True
+            elif high and status == "Pending Safety Check":
+                # Q3: the Safety Officer is mid-review; don't move the
+                # goalposts under them. Low-impact edits still save.
+                raise EventUnderSafetyReviewError
+
+            (
+                description,
+                purpose,
+                decision,
+                decision_history,
+                action_details,
+                action_history,
+            ) = unpack_metadata(event["description"])
+            description = merged["description"]
+            purpose = merged["purpose"]
+            recorded_at = datetime.now(UTC).isoformat()
+            labels = field_labels(changed)
+
+            if recheck:
+                new_status = "Pending Safety Check"
+                action = {
+                    "status": new_status,
+                    "details": (
+                        f"Safety approval withdrawn because "
+                        f"{_sentence_list(field_labels(high))} changed after "
+                        "approval. The event needs a new Operational Safety "
+                        f"Check (round {safety_recheck['roundNumber']}) before "
+                        "it can proceed to preparation."
+                    ),
+                    "changedFields": changed,
+                    "highImpactFields": high,
+                    "coordinatorId": coordinator_id,
+                    "withdrawnSafetyCheckId": safety_recheck["withdrawnSafetyCheckId"],
+                    # Round N+1, deliberately: SCRUM-150/151's stale-round
+                    # check identifies the open round as the latest 'Pending
+                    # Safety Check' entry carrying a safetyCheckId, so the
+                    # Safety Officer can decide round N+1 with no change to
+                    # those code paths.
+                    "safetyCheckId": safety_recheck["safetyCheckId"],
+                    "recordedAt": recorded_at,
+                }
+            else:
+                new_status = status
+                action = {
+                    "status": new_status,
+                    "details": f"Event details updated: {', '.join(labels)}.",
+                    "changedFields": changed,
+                    "coordinatorId": coordinator_id,
+                    "recordedAt": recorded_at,
+                }
+
+            # `decision`, `decisionHistory` and `actionDetails` are carried
+            # through untouched: an edit is not a coordinator decision, and
+            # losing them would erase the approve/reject history.
+            metadata = {
+                "_connectsphere": "event-submission-v1",
+                "description": description,
+                "purpose": purpose,
+                "decision": decision,
+                "decisionHistory": decision_history,
+                "actionDetails": action_details,
+                "actionHistory": [*action_history, action],
+            }
+            assignments = ", ".join(f"{column} = %s" for column in DETAIL_COLUMNS.values())
+            values = []
+            for field, _column in DETAIL_COLUMNS.items():
+                value = merged[field]
+                if field == "expectedAttendance":
+                    values.append(int(str(value).strip()))
+                elif field in ("preferredStartDate", "preferredEndDate"):
+                    values.append(_aware(value))
+                else:
+                    values.append(value)
+            # The fields and the status move in one UPDATE, so AC1's "its
+            # status returns to 'Pending Safety Check'" can't land without the
+            # change that caused it, or the other way round.
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET {assignments}, description = %s, status = %s
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [
+                    *values,
+                    json.dumps(metadata, ensure_ascii=False),
+                    new_status,
+                    event_id,
+                ],
             )
             updated = cursor.fetchone()
     return serialize(updated)

@@ -32,6 +32,12 @@ export interface EventAction {
   remarks?: string | null
   /** Set only on a 'Safety Changes Requested' entry (SCRUM-151 AC1, AC6). */
   areas?: string[]
+  /** Set on an edit entry (SCRUM-153): the fields the coordinator changed, and
+   * — on a re-check — which of them withdrew the safety approval, plus the
+   * round that approval belonged to (AC1, AC3). */
+  changedFields?: string[]
+  highImpactFields?: string[]
+  withdrawnSafetyCheckId?: string
 }
 
 export interface EventProgressUpdate {

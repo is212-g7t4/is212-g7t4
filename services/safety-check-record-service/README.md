@@ -21,6 +21,8 @@ this service calls no other service (AGENTS.md).
 | `DELETE` | `/safety-check-records/<id>` | Removes an undecided round — compensation only, see below |
 | `PATCH` | `/safety-check-records/<id>/decision` | Decides the open round (SCRUM-150) |
 | `POST` | `/safety-check-records/<id>/reopen` | Undoes a decision — compensation only, see below |
+| `POST` | `/safety-check-records/<id>/withdraw` | Withdraws an approval and opens the next round (SCRUM-153) |
+| `POST` | `/safety-check-records/<id>/restore` | Undoes a withdrawal — compensation only, see below |
 
 ### `POST /safety-check-records`
 
@@ -90,6 +92,57 @@ to the decision being undone.
 `409` if the round isn't decided or `decidedAt` doesn't match; `404` if
 missing.
 
+### `POST /safety-check-records/<id>/withdraw`
+
+Body: `{withdrawnBy, reason}`. `reason` is required, non-blank text up to 2000
+characters — it is what SCRUM-153 AC1's "the coordinator is told why" quotes.
+
+A high-impact change to a `Confirmed` event invalidates its safety approval
+(SCRUM-153). In **one transaction** this:
+
+1. turns round N from `Safety Approved` into `Approval Withdrawn`, setting
+   `withdrawn_at = now()`, `withdrawn_by` and `withdrawal_reason`, and
+   **keeping** `decided_by`, `decided_at` and `remarks` — AC3's "the approval
+   stays visible in the event's safety history" means the Safety Officer's
+   original decision is still readable, with the withdrawal recorded next to it;
+2. inserts round N+1 as `Pending`, carrying round N's
+   `equipment_placement_notes` / `crowd_movement_notes` forward and recording
+   the withdrawing coordinator as its `submitted_by`.
+
+The round is selected `FOR UPDATE`, and the latest-round check runs under the
+same lock, so two simultaneous re-checks can't both open round N+1 — the second
+finds round N no longer `Safety Approved`.
+
+- `201 {"withdrawn": {...}, "opened": {...}}`.
+- `404` when the round doesn't exist.
+- `409 {"code": "ROUND_NOT_APPROVED", "currentStatus", "safetyCheck"}` when the
+  round isn't `Safety Approved` — including when it is already
+  `Approval Withdrawn`, which is the race's loser.
+- `409 {"code": "NOT_LATEST_ROUND"}` when a later round exists: an older
+  round's approval is history, not the one in force.
+- `400` for a bad UUID, a missing/blank `reason` or one over 2000 characters.
+- `503` when `DATABASE_URL` is unset or the database is unreachable.
+
+Safety Check Service is the only caller — it is the service that checks the
+caller is the assigned coordinator, that the event is `Confirmed`, and that a
+high-impact field really changed.
+
+### `POST /safety-check-records/<id>/restore` is for compensation only
+
+Body: `{openedSafetyCheckId}`, the round N+1 `withdraw` returned. Safety Check
+Service calls this when it withdrew an approval and then could not save the
+edit and move the event — otherwise the event would read `Confirmed` with its
+approval withdrawn.
+
+It deletes round N+1 only while that round is still `Pending` and really is
+round N+1 of the same event, then sets round N back to `Safety Approved` with
+the three withdrawal columns cleared. Idempotent: a second call, where round N
+is already approved and N+1 is gone, returns round N unchanged.
+
+`409 {"code": "NOT_RESTORABLE"}` if round N isn't withdrawn, or the round named
+has since been decided or isn't the one this withdrawal opened; `404` if round N
+is missing. It is not a general "un-withdraw" endpoint.
+
 ### `DELETE /safety-check-records/<id>` is for compensation only
 
 There is no distributed transaction across services. Safety Check Service
@@ -99,7 +152,7 @@ left with an open round it doesn't know about. That is the only caller.
 
 It refuses anything else: a round that has been decided returns `409`, and a
 missing one `404`. Nothing here is a user-facing "withdraw my safety check" —
-withdrawal, if it is ever wanted, is a new story.
+that is `withdraw` above, which keeps the round rather than deleting it.
 
 ## Record JSON
 
@@ -110,8 +163,21 @@ withdrawal, if it is ever wanted, is a new story.
   "equipmentPlacementNotes": "Speakers either side of the stage.",
   "crowdMovementNotes": "Entry through Door A.",
   "status": "Pending", "decidedBy": null, "decidedAt": null, "remarks": null,
+  "withdrawnAt": null, "withdrawnBy": null, "withdrawalReason": null,
   "flags": []
 }
+```
+
+The three `withdrawn*` fields are on **every** round (null unless that round's
+approval was withdrawn), which is what SCRUM-163 AC4 reads. A withdrawn round
+keeps its decision fields alongside them:
+
+```json
+{"roundNumber": 2, "status": "Approval Withdrawn",
+ "decidedBy": "<uuid>", "decidedAt": "2026-10-14T02:00:00+00:00",
+ "remarks": "Looks safe.",
+ "withdrawnAt": "2026-10-16T06:00:00+00:00", "withdrawnBy": "<uuid>",
+ "withdrawalReason": "Date/time and Expected attendance changed after safety approval."}
 ```
 
 A decided `Changes Requested` round carries one flag per selected area:
@@ -122,8 +188,12 @@ A decided `Changes Requested` round carries one flag per selected area:
 ```
 
 `status` is one of `Pending`, `Safety Approved`, `Changes Requested`,
-`Safety Rejected` (`RECORD_STATUSES` in [`app/models.py`](app/models.py)).
-SCRUM-149 writes only `Pending`; SCRUM-150 and SCRUM-151 write the rest.
+`Safety Rejected`, `Approval Withdrawn` (`RECORD_STATUSES` in
+[`app/models.py`](app/models.py)). SCRUM-149 writes only `Pending`; SCRUM-150
+and SCRUM-151 write the three decisions; SCRUM-153 writes `Approval Withdrawn`.
+`Approval Withdrawn` is not a decision — it is an approval that a later
+high-impact change invalidated, so it is absent from `DECISION_STATUSES` and
+`PATCH .../decision` refuses it.
 `Approved` is deliberately **not** one of them — that is only ever an *event*
 status, the one an event holds before its safety check.
 
@@ -144,6 +214,10 @@ uv run pytest
 ## Schema
 
 Created by `database/supabase/migrations/20261011140000_baseline_schema.sql`
-(SCRUM-169). This service applies no migrations of its own. It writes
+(SCRUM-169), plus
+`database/supabase/migrations/20261016142813_safety_check_withdrawal.sql`
+(SCRUM-153), which adds the three nullable `withdrawn_at` / `withdrawn_by` /
+`withdrawal_reason` columns — no backfill, so existing rows are untouched.
+This service applies no migrations of its own. It writes
 `SafetyCheckFlag` rows for a `Changes Requested` decision (SCRUM-151),
 area-level only: `bookingId` and `equipmentRequestId` stay `NULL`.

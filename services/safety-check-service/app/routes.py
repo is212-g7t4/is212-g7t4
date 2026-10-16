@@ -7,7 +7,9 @@ owned by `safety-check-record-service`, and the event's status by
 """
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, jsonify, request
 
@@ -16,6 +18,10 @@ from app.readiness import outstanding_arrangements
 
 bp = Blueprint("safety_check_service", __name__)
 logger = logging.getLogger(__name__)
+
+# Event Service's API works in naive Singapore local time (its `SINGAPORE`),
+# so a date is compared the same way on both sides of the call.
+SINGAPORE = ZoneInfo("Asia/Singapore")
 
 NOTES_LIMIT = 2000
 NOTE_FIELDS = (
@@ -33,6 +39,33 @@ CHANGES_REQUESTED = "Changes Requested"
 SAFETY_REJECTED = "Safety Rejected"
 FLAG_AREAS = ("venue arrangement", "technical arrangement", "event details")
 RELEASED_BOOKING_STATUSES = ("Cancelled", "Expired", "Rejected")
+
+# SCRUM-153. These mirror `event-service/app/models.py` — there is no shared
+# package by design (AGENTS.md), so they are copied, and Event Service stays
+# the authority: the check below is an early, friendly one, and its gate on
+# PATCH /events/<id>/details is what actually decides.
+LOW_IMPACT_FIELDS = ("eventName", "description", "purpose", "registrationNeeds")
+HIGH_IMPACT_FIELDS = (
+    "preferredStartDate",
+    "preferredEndDate",
+    "expectedAttendance",
+    "venueRequirements",
+    "equipmentRequirements",
+    "accessibilityNeeds",
+)
+EDITABLE_FIELDS = (*LOW_IMPACT_FIELDS, *HIGH_IMPACT_FIELDS)
+FIELD_LABELS = {
+    "preferredStartDate": "Date/time",
+    "preferredEndDate": "Date/time",
+    "expectedAttendance": "Expected attendance",
+    "venueRequirements": "Venue requirements",
+    "equipmentRequirements": "Equipment requirements",
+    "accessibilityNeeds": "Accessibility needs",
+    "eventName": "Event name",
+    "description": "Description",
+    "purpose": "Purpose",
+    "registrationNeeds": "Registration needs",
+}
 
 NOT_ASSIGNED = (
     "Only the event's assigned coordinator can submit it for a safety check."
@@ -245,6 +278,180 @@ def reject_safety_check():
             ),
         },
     ), 200
+
+
+@bp.post("/safety-checks/recheck")
+def recheck_safety():
+    """Withdraw a safety approval after a high-impact change (SCRUM-153).
+
+    Body: `eventId`, `coordinatorId`, `changes: {<EDITABLE_FIELDS>: text}` —
+    the same `changes` the UI already sent to Event Service and got
+    `409 SAFETY_RECHECK_REQUIRED` for, now confirmed by the coordinator.
+
+    **Record first, then event**, as in SCRUM-149 to 151: the record service's
+    row lock on the event's latest round is the race guard, so two concurrent
+    re-checks can't both open round N+1 — the second gets
+    `409 ROUND_NOT_APPROVED`. If the event write then fails, the withdrawal is
+    undone, so the event never reads 'Confirmed' with its approval withdrawn,
+    nor 'Pending Safety Check' with the old approval still standing.
+
+    The withdrawal and the edit are deliberately one request: the event's
+    details and its safety status must change together, or AC1's guarantee
+    (never prepared on an outdated review) doesn't hold.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    event_id = _uuid_or_none(data.get("eventId"))
+    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
+    if not event_id or not coordinator_id:
+        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+    changes, failure = _changes(data)
+    if failure:
+        return failure
+
+    event, failure = _load_event(event_id, coordinator_id)
+    if failure:
+        return failure
+    if event.get("status") != CONFIRMED:
+        return _recheck_not_needed(
+            "Only a Confirmed event has a safety approval to withdraw "
+            f"(current status: '{event.get('status')}').",
+            event.get("status"),
+        )
+    high = [
+        field
+        for field in changes
+        if field in HIGH_IMPACT_FIELDS
+        and _normalised(field, changes[field]) != _normalised(field, event.get(field))
+    ]
+    if not high:
+        # An early, friendly check only — Event Service decides for real under
+        # its lock. Catching it here keeps a no-op edit from withdrawing an
+        # approval and then having to be compensated back.
+        return _recheck_not_needed(
+            "None of these changes affects the event's safety review, so its "
+            "approval stands. Save them as an ordinary edit.",
+            event.get("status"),
+        )
+
+    latest_round, failure = _latest_round(event_id)
+    if failure:
+        return failure
+    if not latest_round or latest_round.get("status") != SAFETY_APPROVED:
+        return jsonify(
+            code="NO_APPROVED_SAFETY_CHECK",
+            message="This event has no approved safety check to withdraw.",
+            safetyCheck=latest_round,
+        ), 409
+
+    reason = (
+        f"{_sentence_list([FIELD_LABELS[field] for field in high])} changed "
+        "after safety approval."
+    )
+    try:
+        withdrawn, opened = clients.withdraw_safety_approval(
+            latest_round["id"], coordinator_id, reason
+        )
+    except clients.RoundNotApprovedError as refused:
+        # The race's loser: another re-check withdrew this approval between
+        # our read and this call. Nothing has been written by us.
+        return jsonify(
+            code=refused.code or "ROUND_NOT_APPROVED",
+            message=(
+                refused.body.get("message")
+                or "This event's safety approval has already been withdrawn."
+            ),
+            safetyCheck=refused.body.get("safetyCheck"),
+        ), 409
+    except clients.RecordNotFoundError:
+        return jsonify(
+            code="NO_APPROVED_SAFETY_CHECK",
+            message="This event has no approved safety check to withdraw.",
+        ), 409
+    except clients.DownstreamTimeout:
+        return jsonify(message="The re-check took too long. Please try again."), 504
+    except clients.DownstreamError:
+        return jsonify(message="Unable to re-check this event's safety right now."), 502
+
+    try:
+        updated = clients.update_event_details(
+            event_id,
+            coordinator_id,
+            changes,
+            {
+                "withdrawnSafetyCheckId": withdrawn["id"],
+                "safetyCheckId": opened["id"],
+                "roundNumber": opened["roundNumber"],
+            },
+        )
+    except Exception as error:  # noqa: BLE001 — every failure compensates alike
+        _compensate_withdrawal(withdrawn["id"], opened["id"])
+        return _recheck_event_update_failure(error)
+
+    return jsonify(
+        event=updated,
+        safetyCheck=opened,
+        withdrawnSafetyCheck=withdrawn,
+        changedFields=high,
+        reason=reason,
+    ), 200
+
+
+def _recheck_not_needed(message, current_status):
+    return jsonify(
+        code="RECHECK_NOT_NEEDED", message=message, currentStatus=current_status
+    ), 409
+
+
+def _latest_round(event_id):
+    """The event's newest round — `list_rounds` returns them newest first."""
+    try:
+        rounds = clients.list_safety_check_records(event_id)
+    except clients.DownstreamTimeout:
+        return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 504)
+    except clients.DownstreamError:
+        return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 502)
+    return (rounds[0] if rounds else None), None
+
+
+def _compensate_withdrawal(withdrawn_id, opened_id):
+    """Undo the withdrawal when the edit couldn't then be saved.
+
+    If this also fails there is nothing left to try, so both ids go to the log
+    at ERROR and the caller still gets the original error. The event then
+    reads 'Confirmed' with its approval withdrawn and a round waiting, which
+    the README says how to clear by hand.
+    """
+    try:
+        clients.restore_safety_approval(withdrawn_id, opened_id)
+    except Exception:  # noqa: BLE001 — the original error is what matters
+        logger.error(
+            "Could not restore safety approval %s (and remove the round %s it "
+            "opened) after the event update failed; the event is left Confirmed "
+            "with its approval withdrawn and must be fixed by hand.",
+            withdrawn_id,
+            opened_id,
+        )
+
+
+def _recheck_event_update_failure(error):
+    """Map Event Service's refusal of the edit, after the withdrawal has been undone."""
+    if isinstance(error, clients.ServiceCredentialsError):
+        return jsonify(message="Event Service refused this service's credentials."), 502
+    if isinstance(error, clients.EventNotAssignedError):
+        # Reassigned between the read and the write.
+        return jsonify(code="NOT_ASSIGNED_COORDINATOR", message=NOT_ASSIGNED), 403
+    if isinstance(error, clients.EventNotFoundError):
+        return jsonify(message="Event request not found."), 404
+    if isinstance(error, clients.EventDetailsRejectedError):
+        # Passed through as Event Service sent it: it is the authority on the
+        # fields, the gate and the event's status, and its body already says
+        # what the coordinator has to fix.
+        return jsonify(error.body), error.status
+    if isinstance(error, clients.DownstreamTimeout):
+        return jsonify(message="The re-check took too long. Please try again."), 504
+    return jsonify(message="Unable to re-check this event's safety right now."), 502
 
 
 def _decide(
@@ -824,6 +1031,55 @@ def _notes(data):
             )
         cleaned.append(value if isinstance(value, str) and value.strip() else None)
     return cleaned, None
+
+
+def _changes(data):
+    """The edited fields (SCRUM-153). Shape only — Event Service validates the values."""
+    raw = data.get("changes")
+    if not isinstance(raw, dict) or not raw:
+        return None, (
+            jsonify(message="changes must be a non-empty object of fields to update."),
+            400,
+        )
+    unknown = sorted(set(raw) - set(EDITABLE_FIELDS))
+    if unknown:
+        return None, (
+            jsonify(message=f"These fields can't be edited: {', '.join(unknown)}."),
+            400,
+        )
+    if any(not isinstance(value, str) for value in raw.values()):
+        return None, (jsonify(message="Every value in changes must be text."), 400)
+    return raw, None
+
+
+def _normalised(field, value):
+    """`value` reduced to what "changed" means for its field.
+
+    Mirrors `_normalised` in `event-service/app/models.py`: strings stripped,
+    attendance compared as an int, dates as naive Singapore-local date-times.
+    So resending the current value is not a change here either, and this
+    service's early check agrees with the gate's verdict.
+    """
+    text = str(value or "").strip()
+    if field == "expectedAttendance":
+        return int(text) if text.isascii() and text.isdigit() else text
+    if field in ("preferredStartDate", "preferredEndDate") and text:
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return text
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(SINGAPORE).replace(tzinfo=None)
+        return parsed
+    return text
+
+
+def _sentence_list(labels):
+    """"A", "A and B", "A, B and C" — deduplicated, so both dates read "Date/time" once."""
+    distinct = list(dict.fromkeys(labels))
+    if len(distinct) <= 1:
+        return "".join(distinct)
+    return f"{', '.join(distinct[:-1])} and {distinct[-1]}"
 
 
 def _required_reason(data):

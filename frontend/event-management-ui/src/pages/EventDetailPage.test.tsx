@@ -20,6 +20,14 @@ vi.mock('../features/safety/SafetySubmitPanel', () => ({
 vi.mock('../features/safety/SafetyDecisionPanel', () => ({
   SafetyDecisionPanel: () => <h4>Operational Safety Check</h4>,
 }))
+// SCRUM-153: and likewise, this file covers *who* gets the Edit details button
+// and what the action history renders; the dialog's two-step save is
+// EventEditDialog.test.tsx.
+vi.mock('../features/event/EventEditDialog', () => ({
+  EventEditDialog: ({ onCancel }: { onCancel: () => void }) => <div role="dialog" aria-label="Edit event details">
+    <button type="button" onClick={onCancel}>Cancel</button>
+  </div>,
+}))
 
 const coordinatorId = '11111111-1111-4111-8111-111111111111'
 const event: SubmittedEvent = {
@@ -464,4 +472,116 @@ test('SCRUM-151 AC6: action history shows the reason for a rejection, with no ar
 
   expect(screen.getByText('Reason: Unsafe egress plan.')).toBeInTheDocument()
   expect(screen.queryByText(/^Areas:/)).not.toBeInTheDocument()
+})
+
+// --- SCRUM-153: the Edit details button and the withdrawal in the history ----
+// This file covers *who* gets the button and what the history renders; the
+// dialog's own behaviour is EventEditDialog.test.tsx.
+
+const renderPage = (role: Parameters<typeof EventDetailPage>[0]['role'] = 'Event Coordinator') =>
+  render(<EventDetailPage eventId={event.id} role={role} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+
+const editButton = () => screen.queryByRole('button', { name: 'Edit details' })
+
+test.each(['Submitted', 'Under Review', 'Approved', 'Pending Safety Check', 'Confirmed', 'Safety Changes Requested'] as const)(
+  'SCRUM-153: the assigned coordinator can edit a %s event',
+  async (status) => {
+    vi.mocked(eventApi).mockResolvedValue({ ...event, status })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Community Workshop' })
+
+    expect(editButton()).toBeInTheDocument()
+  },
+)
+
+test.each(['Rejected', 'Cancelled'] as const)(
+  'SCRUM-153: a %s event has no details left to edit',
+  async (status) => {
+    vi.mocked(eventApi).mockResolvedValue({ ...event, status })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Community Workshop' })
+
+    expect(editButton()).not.toBeInTheDocument()
+  },
+)
+
+test('SCRUM-153: only the assigned coordinator is offered the edit', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Confirmed',
+    coordinatorId: '22222222-2222-4222-8222-222222222222',
+  })
+  renderPage()
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(editButton()).not.toBeInTheDocument()
+})
+
+test('SCRUM-153: a Safety Officer does not edit the event details', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
+  renderPage('Safety Officer')
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(editButton()).not.toBeInTheDocument()
+})
+
+test('SCRUM-153: Edit details opens the dialog and Cancel closes it again', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
+  renderPage()
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  fireEvent.click(editButton() as HTMLElement)
+  expect(screen.getByRole('dialog', { name: 'Edit event details' })).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog', { name: 'Edit event details' })).not.toBeInTheDocument()
+  expect(editButton()).toBeInTheDocument()
+})
+
+test('SCRUM-153 AC3: a withdrawal entry is tagged and lists what changed', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Pending Safety Check',
+    actionHistory: [{
+      status: 'Pending Safety Check',
+      details: 'Safety approval withdrawn because Date/time and Expected attendance changed after approval.',
+      changedFields: ['preferredStartDate', 'preferredEndDate', 'expectedAttendance'],
+      highImpactFields: ['preferredStartDate', 'preferredEndDate', 'expectedAttendance'],
+      withdrawnSafetyCheckId: '55555555-5555-4555-8555-555555555555',
+      coordinatorId,
+      recordedAt: '2026-10-16T06:00:00+08:00',
+    }],
+  })
+  renderPage()
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByText('Safety approval withdrawn')).toBeInTheDocument()
+  // Both date fields read as one "Date/time", as the backend's labels do.
+  expect(screen.getByText('Changed: Date/time, Expected attendance')).toBeInTheDocument()
+  expect(screen.getByText(/Safety approval withdrawn because Date\/time/)).toBeInTheDocument()
+})
+
+test('SCRUM-153 AC2: a plain edit entry lists its fields without the withdrawal tag', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Confirmed',
+    actionHistory: [{
+      status: 'Confirmed',
+      details: 'Event details updated: Event name, Purpose.',
+      changedFields: ['eventName', 'purpose'],
+      coordinatorId,
+      recordedAt: '2026-10-16T06:00:00+08:00',
+    }],
+  })
+  renderPage()
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByText('Changed: Event name, Purpose')).toBeInTheDocument()
+  expect(screen.queryByText('Safety approval withdrawn')).not.toBeInTheDocument()
 })

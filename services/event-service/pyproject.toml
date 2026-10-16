@@ -38,5 +38,5 @@ source = ["app"]
 [tool.coverage.report]
 # Coverage floor (a ratchet): today's measured level, so a PR cannot lower it.
 # Raise this in the PR that adds the tests which push it higher.
-fail_under = 97
+fail_under = 97.8
 show_missing = true

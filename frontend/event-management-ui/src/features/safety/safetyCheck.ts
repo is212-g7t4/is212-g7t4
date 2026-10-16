@@ -1,3 +1,4 @@
+import type { EventChanges } from '../event/eventDetails'
 import type { SubmittedEvent } from '../event/submission'
 
 // SCRUM-149: the Operational Safety Check submit flow. Calls Safety Check
@@ -39,10 +40,16 @@ export interface SafetyCheckRecord {
   submittedAt: string
   equipmentPlacementNotes: string | null
   crowdMovementNotes: string | null
-  status: 'Pending' | 'Safety Approved' | 'Changes Requested' | 'Safety Rejected'
+  status: 'Pending' | 'Safety Approved' | 'Changes Requested' | 'Safety Rejected' | 'Approval Withdrawn'
   decidedBy: string | null
   decidedAt: string | null
   remarks: string | null
+  /** SCRUM-153 AC3: set on a round whose approval a later high-impact change
+   * withdrew. Its decision fields above are kept, so the history still shows
+   * who approved it and when. Null on every other round. */
+  withdrawnAt: string | null
+  withdrawnBy: string | null
+  withdrawalReason: string | null
   flags: SafetyCheckFlag[]
 }
 
@@ -77,6 +84,12 @@ export interface RejectSafetyCheck {
   eventId: string
   safetyOfficerId: string
   reason: string
+}
+
+export interface RecheckSafety {
+  eventId: string
+  coordinatorId: string
+  changes: EventChanges
 }
 
 /** The venue bookings a rejection released, and any it couldn't (SCRUM-151 AC5). */
@@ -207,6 +220,30 @@ export async function rejectSafetyCheck(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...details, confirmed: true }),
+  })
+}
+
+/**
+ * Withdraw the event's safety approval after a high-impact change (SCRUM-153).
+ *
+ * Call this **only** after `updateEventDetails` threw `SafetyRecheckRequired`
+ * and the coordinator confirmed, with the same `changes`: this one request
+ * withdraws the approval, opens the next round, saves the edit and moves the
+ * event back to 'Pending Safety Check'.
+ */
+export async function recheckSafety(
+  details: RecheckSafety,
+): Promise<{
+  event: SubmittedEvent
+  safetyCheck: SafetyCheckRecord
+  withdrawnSafetyCheck: SafetyCheckRecord
+  changedFields: string[]
+  reason: string
+}> {
+  return request('/safety-checks/recheck', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(details),
   })
 }
 

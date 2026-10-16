@@ -9,18 +9,30 @@ from psycopg2.extras import RealDictCursor
 COLUMNS = (
     "safety_check_id, event_id, round_number, submitted_by, submitted_at, "
     "equipment_placement_notes, crowd_movement_notes, status, decided_by, "
-    "decided_at, remarks"
+    "decided_at, remarks, withdrawn_at, withdrawn_by, withdrawal_reason"
 )
 
 # Values of SafetyCheck.status. SCRUM-149 writes only PENDING; SCRUM-150 writes
 # SAFETY_APPROVED, SCRUM-151 writes CHANGES_REQUESTED / SAFETY_REJECTED (Jira
-# wording). 'Approved' is deliberately absent: that is only ever an *event*
-# status, the one an event holds before its safety check.
+# wording). SCRUM-153 writes APPROVAL_WITHDRAWN. 'Approved' is deliberately
+# absent: that is only ever an *event* status, the one an event holds before
+# its safety check.
 PENDING = "Pending"
 SAFETY_APPROVED = "Safety Approved"
 CHANGES_REQUESTED = "Changes Requested"
 SAFETY_REJECTED = "Safety Rejected"
-RECORD_STATUSES = (PENDING, SAFETY_APPROVED, CHANGES_REQUESTED, SAFETY_REJECTED)
+# SCRUM-153 AC1/AC3: the approval was withdrawn after a high-impact change to
+# the event. Not a decision status — the Safety Officer's original decision
+# fields are kept alongside it, which is how the history still shows who
+# approved the round and when (AC3).
+APPROVAL_WITHDRAWN = "Approval Withdrawn"
+RECORD_STATUSES = (
+    PENDING,
+    SAFETY_APPROVED,
+    CHANGES_REQUESTED,
+    SAFETY_REJECTED,
+    APPROVAL_WITHDRAWN,
+)
 
 DECISION_STATUSES = (SAFETY_APPROVED, CHANGES_REQUESTED, SAFETY_REJECTED)
 
@@ -64,6 +76,18 @@ class RoundNotReopenableError(Exception):
     """Compensation only: the round isn't decided, or `decidedAt` doesn't match the decision being undone."""
 
 
+class RoundNotApprovedError(Exception):
+    """SCRUM-153: only a 'Safety Approved' round has an approval to withdraw."""
+
+    def __init__(self, existing):
+        super().__init__(existing)
+        self.existing = existing
+
+
+class RoundNotRestorableError(Exception):
+    """Compensation only: round N isn't withdrawn, or the round to delete isn't the N+1 it opened."""
+
+
 def _utc(value):
     return value.astimezone(UTC).isoformat() if value else None
 
@@ -81,6 +105,11 @@ def serialize(row, flags=()):
         "decidedBy": str(row["decided_by"]) if row["decided_by"] else None,
         "decidedAt": _utc(row["decided_at"]),
         "remarks": row["remarks"],
+        # SCRUM-153 AC3: null on every round that was never withdrawn. Carried
+        # on every round response, which is what SCRUM-163 AC4 reads.
+        "withdrawnAt": _utc(row["withdrawn_at"]),
+        "withdrawnBy": str(row["withdrawn_by"]) if row["withdrawn_by"] else None,
+        "withdrawalReason": row["withdrawal_reason"],
         "flags": [serialize_flag(flag) for flag in flags],
     }
 
@@ -290,6 +319,134 @@ def reopen_round(database_url, safety_check_id, decided_at):
                     WHERE safety_check_id = %s
                     RETURNING {COLUMNS}""",
                 [PENDING, safety_check_id],
+            )
+            return serialize(cursor.fetchone())
+
+
+def withdraw_approval(database_url, safety_check_id, withdrawn_by, reason):
+    """Withdraw round N's approval and open round N+1 (SCRUM-153 AC1, AC3).
+
+    One transaction, so the event's safety history can never show an approval
+    withdrawn with no new round waiting, or a new round with the old approval
+    still standing.
+
+    Round N keeps `decided_by`, `decided_at` and `remarks` — AC3's "it stays
+    visible in the event's safety history" means the Safety Officer's original
+    decision is still readable, with the withdrawal recorded next to it.
+
+    `FOR UPDATE` on the round, plus the latest-round check under the same
+    lock, is the race guard: two simultaneous re-checks can't both open round
+    N+1. The second finds round N no longer 'Safety Approved'.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."SafetyCheck"
+                    WHERE safety_check_id = %s
+                    FOR UPDATE""",
+                [safety_check_id],
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                raise RecordNotFoundError
+            latest = _latest_round(cursor, existing["event_id"], lock=True)
+            if latest and latest["round_number"] != existing["round_number"]:
+                raise RoundNotLatestError
+            if existing["status"] != SAFETY_APPROVED:
+                raise RoundNotApprovedError(serialize(existing))
+            cursor.execute(
+                f"""UPDATE public."SafetyCheck"
+                    SET status = %s, withdrawn_at = now(), withdrawn_by = %s,
+                        withdrawal_reason = %s
+                    WHERE safety_check_id = %s
+                    RETURNING {COLUMNS}""",
+                [APPROVAL_WITHDRAWN, withdrawn_by, clean_notes(reason), safety_check_id],
+            )
+            withdrawn = cursor.fetchone()
+            # Round N's notes carry forward: the coordinator described the
+            # same event, and the Safety Officer reviewing round N+1 needs
+            # them as a starting point rather than a blank round.
+            cursor.execute(
+                f"""INSERT INTO public."SafetyCheck"
+                    (event_id, round_number, submitted_by, submitted_at,
+                     equipment_placement_notes, crowd_movement_notes, status)
+                    VALUES (%s, %s, %s, now(), %s, %s, %s)
+                    RETURNING {COLUMNS}""",
+                [
+                    existing["event_id"],
+                    existing["round_number"] + 1,
+                    withdrawn_by,
+                    existing["equipment_placement_notes"],
+                    existing["crowd_movement_notes"],
+                    PENDING,
+                ],
+            )
+            return serialize(withdrawn), serialize(cursor.fetchone())
+
+
+def restore_approval(database_url, safety_check_id, opened_safety_check_id):
+    """Compensation only: undo the withdrawal this request itself just made.
+
+    Safety Check Service calls this when it withdrew the approval but could
+    not then save the edit and move the event, so the event would otherwise
+    read 'Confirmed' with its approval withdrawn and a round waiting.
+
+    Deletes round N+1 only while it is still 'Pending' and still the latest
+    round, then puts round N back to 'Safety Approved' with the three
+    withdrawal columns cleared. Idempotent: a second call, where round N is
+    already approved and N+1 is gone, returns round N unchanged rather than
+    failing — the composite may retry.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."SafetyCheck"
+                    WHERE safety_check_id = %s
+                    FOR UPDATE""",
+                [safety_check_id],
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                raise RecordNotFoundError
+            if existing["status"] == SAFETY_APPROVED:
+                # Already restored. Only safe to call this the second time:
+                # a round that was never withdrawn has no round N+1 of ours
+                # to delete, so refuse unless N+1 is already gone.
+                latest = _latest_round(cursor, existing["event_id"], lock=False)
+                if latest and latest["round_number"] != existing["round_number"]:
+                    raise RoundNotRestorableError
+                return serialize(existing)
+            if existing["status"] != APPROVAL_WITHDRAWN:
+                raise RoundNotRestorableError
+
+            cursor.execute(
+                f"""SELECT {COLUMNS} FROM public."SafetyCheck"
+                    WHERE safety_check_id = %s
+                    FOR UPDATE""",
+                [opened_safety_check_id],
+            )
+            opened = cursor.fetchone()
+            if (
+                not opened
+                or opened["event_id"] != existing["event_id"]
+                or opened["round_number"] != existing["round_number"] + 1
+                or opened["status"] != PENDING
+                or opened["decided_at"] is not None
+            ):
+                # The round we opened has since been decided, or isn't the one
+                # we opened at all. Either way this must not touch it.
+                raise RoundNotRestorableError
+            cursor.execute(
+                'DELETE FROM public."SafetyCheck" WHERE safety_check_id = %s',
+                [opened_safety_check_id],
+            )
+            cursor.execute(
+                f"""UPDATE public."SafetyCheck"
+                    SET status = %s, withdrawn_at = NULL, withdrawn_by = NULL,
+                        withdrawal_reason = NULL
+                    WHERE safety_check_id = %s
+                    RETURNING {COLUMNS}""",
+                [SAFETY_APPROVED, safety_check_id],
             )
             return serialize(cursor.fetchone())
 

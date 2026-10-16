@@ -3,8 +3,9 @@
 Composite service (port **5012**) that coordinates the Operational Safety
 Check workflow (change #6). SCRUM-149 builds the first step, **submit**;
 SCRUM-150 the second, **approve**; SCRUM-151 the other two, **request
-changes** and **reject**. SCRUM-163 (review) and SCRUM-164 (resubmit) extend
-it further.
+changes** and **reject**; SCRUM-153 adds **re-check**, which withdraws an
+approval after a high-impact change. SCRUM-163 (review) and SCRUM-164
+(resubmit) extend it further.
 
 Submitting and approving each need facts from more than one atomic and write
 to two, which is exactly what a composite is for (AGENTS.md;
@@ -15,10 +16,10 @@ the other.
 
 | Calls | For |
 |---|---|
-| Event Service (5003) | the event and its coordinator; the lifecycle move |
+| Event Service (5003) | the event and its coordinator; the lifecycle move; the edit write on a re-check |
 | Venue Availability Service (5008) | every venue booking for the event |
 | Equipment Request Service (5011) | every equipment request for the event |
-| Safety Check Record Service (5013) | creating, deciding, listing and rolling back a round |
+| Safety Check Record Service (5013) | creating, deciding, listing, withdrawing and rolling back a round |
 | User Service (5001) | the caller's role (SCRUM-150: is this a Safety Officer?) |
 | Venue Service (5006) | venue names for the Safety Officer's queue (SCRUM-162) |
 
@@ -269,6 +270,86 @@ curl -X PATCH localhost:5008/venue-bookings/<id>/cancel \
 **AC4: `Cancelled` is terminal.** Event Service's `SAFETY_TRANSITIONS` has no
 entry for `Cancelled`, so nothing — not a resubmit, not another decision —
 can move the event again.
+
+## `POST /safety-checks/recheck`
+
+```json
+{
+  "eventId": "<uuid>",
+  "coordinatorId": "<uuid>",
+  "changes": {"expectedAttendance": "400", "eventName": "Community Workshop"}
+}
+```
+
+SCRUM-153: a **high-impact** change to a `Confirmed` event withdraws its
+safety approval, so the event is never prepared on the basis of an outdated
+safety review. The five details in AC1 are high-impact — date/time, expected
+attendance, venue requirements, equipment requirements, accessibility needs;
+the rest (name, description, purpose, registration needs) are low-impact and
+never come here.
+
+The UI calls **Event Service first**, with the same `changes`. A low-impact
+edit saves there and the event stays `Confirmed` (AC2). A high-impact one gets
+`409 SAFETY_RECHECK_REQUIRED`, the coordinator confirms, and the UI calls this
+route — the `changes` unchanged.
+
+The order of writes:
+
+1. validate the body: UUIDs, `changes` a non-empty object of editable fields,
+   every value text — `400`, nothing written;
+2. `GET` the event as the coordinator — `403` for a stranger, `404` if missing;
+3. the event must be `Confirmed` — else
+   `409 {"code": "RECHECK_NOT_NEEDED", "currentStatus"}`;
+4. at least one high-impact field must really change, compared on **normalised**
+   values exactly as Event Service compares them (strings stripped, attendance
+   as an int, dates as naive Singapore-local date-times) — else the same `409`.
+   This is an early, friendly check only: Event Service's gate decides for
+   real. Catching it here keeps a no-op edit from withdrawing an approval that
+   then has to be compensated back;
+5. the event's latest round must be `Safety Approved` — else
+   `409 {"code": "NO_APPROVED_SAFETY_CHECK"}` (data drift);
+6. `POST .../safety-check-records/<round N>/withdraw`, which in one
+   transaction marks round N `Approval Withdrawn` (keeping its decision, AC3)
+   and opens round N+1 as `Pending`;
+7. `PATCH /events/<id>/details` with `changes`, the `safetyRecheck` block
+   naming both rounds, and the internal token. Event Service saves the fields
+   **and** moves the event to `Pending Safety Check` in one transaction, and
+   writes the "approval withdrawn because …" history line (AC1's "told why").
+   **Any failure here restores the withdrawal** (step 8);
+8. `200 {event, safetyCheck, withdrawnSafetyCheck, changedFields, reason}`.
+
+**Record first, then event**, as submit and approve do: the record service's
+row lock on the event's latest round is the race guard, so two concurrent
+re-checks can't both open round N+1 — the second gets
+`409 ROUND_NOT_APPROVED`, passed through, with the event untouched.
+
+**Event Service re-checks everything under its own lock**: the status is still
+`Confirmed`, the withdrawn round really is the approval the event holds (else
+`409 STALE_SAFETY_CHECK`), and a high-impact field still changes. So an edit
+landing between steps 2 and 7 can't leave a mismatched state, and a made-up
+round id can't move the event. Its refusals — a validation `400`,
+`STALE_SAFETY_CHECK`, `EVENT_UNDER_SAFETY_REVIEW` — are passed back verbatim
+with their own status: it is the authority on the fields, the gate and the
+status, and its body already says what the coordinator has to fix.
+
+**No readiness re-check of bookings or equipment.** Round N+1 is reviewed by
+the Safety Officer as it stands; if the change makes a booking unsuitable the
+officer requests changes (SCRUM-151) and SCRUM-164 takes over. This route
+never calls Venue Availability, Equipment Request or User Service.
+
+### The compensation edge case, re-check's version
+
+If step 7 fails and the restoring `POST .../restore` **also** fails, both ids
+go to the log at `ERROR` and the caller gets the original error. The event
+then reads `Confirmed` with its approval withdrawn and round N+1 waiting —
+the worst of both. To clear it, find the ids in the log:
+
+```
+curl -X POST localhost:5013/safety-check-records/<round N id>/restore \
+  -H "Content-Type: application/json" -d '{"openedSafetyCheckId": "<round N+1 id>"}'
+```
+
+`restore` is idempotent, so this is safe to repeat.
 
 ## `GET /safety-checks/readiness?eventId=<uuid>&coordinatorId=<uuid>`
 

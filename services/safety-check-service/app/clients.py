@@ -57,6 +57,29 @@ class EventTransitionError(Exception):
         self.body = body
 
 
+class EventDetailsRejectedError(Exception):
+    """Event Service refused the edit itself (SCRUM-153): `status` is what to pass on."""
+
+    def __init__(self, code, body, status):
+        super().__init__(code)
+        self.code = code
+        self.body = body
+        self.status = status
+
+
+class RoundNotApprovedError(Exception):
+    """SCRUM-153: the round's approval can't be withdrawn — it isn't in force any more.
+
+    Either it was never 'Safety Approved', or a concurrent re-check won the
+    race and withdrew it first.
+    """
+
+    def __init__(self, code, body):
+        super().__init__(code)
+        self.code = code
+        self.body = body
+
+
 class SafetyCheckAlreadyPendingError(Exception):
     """A round for this event is still awaiting a decision (SCRUM-149 AC4)."""
 
@@ -201,6 +224,45 @@ def set_event_safety_status(
     return _ok(response).json()
 
 
+def update_event_details(
+    event_id: str, coordinator_id: str, changes: dict, safety_recheck: dict
+) -> dict:
+    """Save the edit and move the event back for re-review (SCRUM-153 AC1).
+
+    `safety_recheck` names the round whose approval we just withdrew and the
+    round we opened in its place. Event Service re-checks both under its own
+    row lock, and the shared internal token is what lets it accept them at
+    all — without it the same call is gated like any browser edit.
+    """
+    response = _send(
+        "PATCH",
+        f"{EVENT_SERVICE_URL}/events/{event_id}/details",
+        json={
+            "coordinatorId": coordinator_id,
+            "changes": changes,
+            "safetyRecheck": safety_recheck,
+        },
+        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+    )
+    if response.status_code == 404:
+        raise EventNotFoundError
+    if response.status_code == 403:
+        body_data = _body(response)
+        if body_data.get("code") == "INTERNAL_ONLY":
+            raise ServiceCredentialsError
+        raise EventNotAssignedError
+    if response.status_code in (400, 409):
+        # Both are definite refusals the caller should see verbatim: a
+        # validation failure on the merged event, or a conflict Event Service
+        # found under its lock (a stale round, the status having moved). The
+        # status is carried so the route can pass it straight through.
+        body_data = _body(response)
+        raise EventDetailsRejectedError(
+            body_data.get("code"), body_data, response.status_code
+        )
+    return _ok(response).json()
+
+
 # --- Venue Availability Service (atomic, 5008) ------------------------------
 
 
@@ -311,6 +373,39 @@ def decide_safety_check_record(
         raise RecordNotFoundError
     if response.status_code == 409:
         raise SafetyCheckAlreadyDecidedError(_body(response).get("safetyCheck"))
+    return _ok(response).json()
+
+
+def withdraw_safety_approval(round_id: str, withdrawn_by: str, reason: str) -> tuple:
+    """Withdraw round N's approval and open round N+1 (SCRUM-153 AC1, AC3).
+
+    One call, because the record service does both in one transaction — and
+    its row lock is this workflow's race guard, which is why this runs before
+    the event is touched. Returns `(withdrawn, opened)`.
+    """
+    response = _send(
+        "POST",
+        f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{round_id}/withdraw",
+        json={"withdrawnBy": withdrawn_by, "reason": reason},
+    )
+    if response.status_code == 404:
+        raise RecordNotFoundError
+    if response.status_code == 409:
+        body_data = _body(response)
+        raise RoundNotApprovedError(body_data.get("code"), body_data)
+    body = _ok(response).json()
+    return body["withdrawn"], body["opened"]
+
+
+def restore_safety_approval(round_id: str, opened_round_id: str) -> dict:
+    """Undo the withdrawal this service's own request just made — compensation only."""
+    response = _send(
+        "POST",
+        f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{round_id}/restore",
+        json={"openedSafetyCheckId": opened_round_id},
+    )
+    if response.status_code == 404:
+        raise RecordNotFoundError
     return _ok(response).json()
 
 
