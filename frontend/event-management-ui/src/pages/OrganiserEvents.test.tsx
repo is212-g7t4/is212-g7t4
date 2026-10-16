@@ -28,7 +28,7 @@ beforeEach(() => {
 })
 
 function renderList(onViewDetails = vi.fn()) {
-  render(<MyEventsPage role="Event Organiser" isManager={false} currentCoordinatorId={ORGANISER_ID} currentCoordinatorName="Michael" onViewDetails={onViewDetails} />)
+  render(<MyEventsPage role="Event Organiser" currentCoordinatorId={ORGANISER_ID} currentCoordinatorName="Michael" onViewDetails={onViewDetails} />)
   return onViewDetails
 }
 
@@ -79,7 +79,7 @@ test('organiser list shows the service error', async () => {
 })
 
 function renderDetail() {
-  render(<EventDetailPage eventId="approved-1" role="Event Organiser" isManager={false} currentCoordinatorId={ORGANISER_ID} backLabel="My events" onBack={vi.fn()} />)
+  render(<EventDetailPage eventId="approved-1" role="Event Organiser" currentCoordinatorId={ORGANISER_ID} backLabel="My events" onBack={vi.fn()} />)
 }
 
 test('organiser detail lists attendees with status and totals', async () => {

@@ -33,12 +33,36 @@ this up alongside every other service.
 - `GET /coordinators` — everyone an event can be assigned to: the Event
   Coordinator Lead (so the Lead can take an event on themselves) and every
   Event Coordinator, fetched from `user-service`.
+- `GET /queue?actingUserId=<user id>` — the Lead's queue: submitted events
+  with no coordinator assigned yet, oldest submission first (from
+  `event-service`'s `GET /events/unassigned`). Only the Event Coordinator Lead
+  may view it — `403` for everyone else, `400` without `actingUserId`. An
+  event leaves the queue once assigned, because assignment moves it to
+  `Under Review`.
+- `GET /workload?actingUserId=<user id>` — the Lead's read-only workload
+  view: every coordinator from `GET /coordinators` (the Lead included, and
+  those with nothing assigned) with their active events under `events`, plus
+  `unassigned` (active events with no coordinator) and `otherAssigned`
+  (events whose coordinator is no longer an Event Coordinator, so they don't
+  silently vanish). Events come from `event-service`'s `GET /events/active`,
+  which leaves out `Confirmed`, `Rejected` and `Cancelled`. Only the Event
+  Coordinator Lead may view it — `403` for everyone else, `400` without
+  `actingUserId`.
 - `POST /events/<event_id>/assign-coordinator/<coordinator_id>` — assigns or
   reassigns the coordinator on an event. Body must include
   `{"actingUserId": "<user id>"}`; only the Event Coordinator Lead (role
   `Event Coordinator Lead`) may do this — `403` otherwise.
   Validates `coordinator_id` is a real, available Event Coordinator before
-  calling `event-service` to persist the change.
+  calling `event-service` to persist the change. The acting Lead is sent as
+  `assignedBy`; `event-service` stores it with the assignment time
+  (`assigned_by`/`assigned_at`) and returns both as `assignedBy`/`assignedAt`
+  for the event's detail page. On a reassignment it also keeps the
+  outgoing coordinator as `previousCoordinatorId` (latest handover only).
+  `event-service` refuses with `409` — passed through with its message —
+  when the event is `Rejected`/`Cancelled` or the coordinator is already the
+  assigned one (no change). Venue bookings, equipment requests and safety
+  checks authorise against the event's current coordinator, so they move to
+  the new coordinator with no further calls.
 
 ## Known limitation
 

@@ -50,7 +50,7 @@ beforeEach(() => {
 })
 
 test('shows the coordinator events and filters them by status', async () => {
-  render(<MyEventsPage role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+  render(<MyEventsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
   expect(await screen.findByText('Community Workshop')).toBeInTheDocument()
   expect(screen.getByText('Approved Conference')).toBeInTheDocument()
@@ -72,7 +72,7 @@ test('shows the coordinator events and filters them by status', async () => {
 
 test('opens the selected event details', async () => {
   const onViewDetails = vi.fn()
-  render(<MyEventsPage role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={onViewDetails} />)
+  render(<MyEventsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={onViewDetails} />)
 
   fireEvent.click(await screen.findByRole('button', { name: /Community Workshop/ }))
 
@@ -80,23 +80,23 @@ test('opens the selected event details', async () => {
 })
 
 test.each(['Venue Staff', 'Technical Support'] as const)('%s sees all events and can use the existing filters', async (role) => {
-  render(<MyEventsPage role={role} isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+  render(<MyEventsPage role={role} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
   expect(await screen.findByText('Community Workshop')).toBeInTheDocument()
   expect(screen.getByText(/Showing all events in the planning process/)).toBeInTheDocument()
   expect(eventApi).toHaveBeenCalledWith(
-    `/events?coordinatorId=${coordinatorId}&isManager=true&viewerRole=${role.replace(' ', '+')}`,
+    `/events?coordinatorId=${coordinatorId}&viewerRole=${role.replace(' ', '+')}`,
   )
 
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'Approved' } })
   fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
   await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
-    `/events?coordinatorId=${coordinatorId}&isManager=true&viewerRole=${role.replace(' ', '+')}&status=Approved`,
+    `/events?coordinatorId=${coordinatorId}&viewerRole=${role.replace(' ', '+')}&status=Approved`,
   ))
 })
 
 test('filters events by their venue requirements text', async () => {
-  render(<MyEventsPage role="Event Coordinator" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+  render(<MyEventsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
   await screen.findByText('Community Workshop')
   fireEvent.change(screen.getByLabelText('Venue'), { target: { value: ' Seminar room ' } })
@@ -108,7 +108,7 @@ test('filters events by their venue requirements text', async () => {
 })
 
 test('does not load internal events for an attendee', () => {
-  render(<MyEventsPage role="Attendee" isManager={false} currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+  render(<MyEventsPage role="Attendee" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
 
   expect(screen.getByText('Event information is visible to Event Coordinators, Venue Staff, Technical Support, and Safety Officers.')).toBeInTheDocument()
   expect(eventApi).not.toHaveBeenCalled()
