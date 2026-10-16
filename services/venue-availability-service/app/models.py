@@ -17,7 +17,8 @@ register_uuid()
 # overlap/conflict computation over them (merged design — see AGENTS.md).
 COLUMNS = (
     "booking_id, event_id, venue_id, requested_start_time, requested_end_time, "
-    "required_capacity, venue_requirements, status, requested_by, reviewed_by"
+    "required_capacity, venue_requirements, status, requested_by, reviewed_by, "
+    "rejection_closure_id, rejection_closure_start, rejection_closure_end, rejection_closure_reason, rejected_at"
 )
 FLAG_COLUMNS = f"{COLUMNS}, conflict_reason"
 # A hold is an 'On Hold' VenueBooking row spanning held_at .. hold_expires_at.
@@ -92,6 +93,21 @@ def serialize(row):
         "requestedBy": str(row["requested_by"]) if row["requested_by"] else None,
         "reviewedBy": str(row["reviewed_by"]) if row["reviewed_by"] else None,
         "conflictReason": row.get("conflict_reason"),
+        "closureRejection": (
+            dict(
+                closureId=str(row["rejection_closure_id"]),
+                startDateTime=_aware(row["rejection_closure_start"])
+                .astimezone(SINGAPORE)
+                .isoformat(),
+                endDateTime=_aware(row["rejection_closure_end"])
+                .astimezone(SINGAPORE)
+                .isoformat(),
+                reason=row["rejection_closure_reason"],
+                rejectedAt=_aware(row["rejected_at"]).astimezone(SINGAPORE).isoformat(),
+            )
+            if row.get("rejection_closure_id")
+            else None
+        ),
     }
 
 
@@ -323,6 +339,15 @@ def _has_conflict(
     )
 
 
+def lock_booking_writes(cursor):
+    # All application writers take this transaction gate BEFORE any row lock.
+    # Existing edit/approve lock booking then venue; closure locks venue then
+    # bookings. Serializing this small write domain avoids that lock inversion
+    # (including edits moving between venues), while reads remain concurrent.
+    # Any future booking/closure writer must join this protocol.
+    cursor.execute("SELECT pg_advisory_xact_lock(171, 1)")
+
+
 def create_booking(
     database_url,
     event_id,
@@ -338,6 +363,7 @@ def create_booking(
     booking_id = str(uuid4())
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            lock_booking_writes(cursor)
             # A venue-row lock serializes bookings and holds, even when no
             # booking row exists yet.
             cursor.execute(
@@ -391,6 +417,7 @@ def update_booking(
     """Update one booking and resubmit only that row for review."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            lock_booking_writes(cursor)
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."VenueBooking"
                     WHERE booking_id = %s AND event_id = %s FOR UPDATE""",
@@ -399,7 +426,7 @@ def update_booking(
             booking = cursor.fetchone()
             if not booking:
                 raise BookingNotFoundError
-            if booking["status"] == "Cancelled":
+            if booking["status"] in {"Cancelled", "Rejected"}:
                 raise BookingStateError
 
             cursor.execute(
@@ -444,6 +471,7 @@ def cancel_booking(database_url, booking_id, event_id):
     """Retain one booking as Cancelled without touching sibling bookings."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            lock_booking_writes(cursor)
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."VenueBooking"
                     WHERE booking_id = %s AND event_id = %s FOR UPDATE""",
@@ -452,6 +480,8 @@ def cancel_booking(database_url, booking_id, event_id):
             booking = cursor.fetchone()
             if not booking:
                 raise BookingNotFoundError
+            if booking["status"] == "Rejected":
+                raise BookingStateError
             if booking["status"] == "Cancelled":
                 return serialize(booking)
 
@@ -507,6 +537,7 @@ def create_hold(
     expires_at = _aware(expires_at)
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            lock_booking_writes(cursor)
             cursor.execute(
                 'SELECT venue_id FROM public."Venue" WHERE venue_id = %s FOR UPDATE',
                 [venue_id],
@@ -592,6 +623,7 @@ def decide_booking(
 ):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            lock_booking_writes(cursor)
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."VenueBooking"
                     WHERE booking_id = %s FOR UPDATE""",
@@ -601,7 +633,7 @@ def decide_booking(
             booking = _localize(booking) if booking else booking
             if not booking:
                 raise BookingNotFoundError
-            if booking["status"] == "Cancelled":
+            if booking["status"] in {"Cancelled", "Rejected"}:
                 raise BookingStateError
             if status == "Approved":
                 # Re-check — another booking may have been approved since this one was requested.
@@ -717,6 +749,8 @@ def reconcile_legacy_conflicts(
     """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Buffer reconciliation is also a multi-row booking writer.
+            lock_booking_writes(cursor)
             cursor.execute(
                 f"""SELECT {FLAG_COLUMNS}, hold_expires_at
                     FROM public."VenueBooking"

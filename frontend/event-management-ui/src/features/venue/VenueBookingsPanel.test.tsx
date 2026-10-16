@@ -1,3 +1,18 @@
+/**
+ * # Test scope and acceptance mapping — SCRUM-171 integration
+ *
+ * - **SCRUM-171 AC3 — request details:** the automatic-rejection case renders closure cause, full SGT closure period and operational reason; manual-null history remains readable.
+ * - **Separately approved immutability/replacement rule:** rejected controls are absent, stale writes refresh history, replacement drafts survive; failed cancellation of A preserves an update draft for B. These are not AC2 closure-time assertions.
+ * - **Supporting timezone regression:** naive, explicit-offset and fractional booking timestamps display/edit in SGT, not direct AC3.
+ * - **Existing booking/SCRUM-30 regressions (no direct SCRUM-171 AC):** sibling CRUD, request-level capacity, validation, failed/conflicting requests, cancellation and generic feedback retain their original scope.
+ *
+ * ## Case/group traceability
+ *
+ * - `booking dates render and edit in SGT for naive and explicit UTC timestamps`: Generic booking timezone display/edit regression — UTC/naive SGT values; no direct AC3 closure-rejection detail assertion.
+ * - `stale edit refreshes immutable request while retaining replacement draft`: Separate approved immutability/replacement rule — stale edit/cancel handling and retained draft; no direct closure AC.
+ * - `stale cancel refreshes immutable request while retaining replacement draft`: Separate approved immutability/replacement rule — stale edit/cancel handling and retained draft; no direct closure AC.
+ * - `all rejected requests are immutable and automatic rejection shows full SGT period and reason`: AC3 — rejected-request full SGT period/reason rendered; separate immutability rule and manual-null compatibility.
+ */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetchVenues } from './venues'
@@ -50,6 +65,70 @@ beforeEach(() => {
   vi.mocked(fetchVenueBookings).mockResolvedValue(bookings)
 })
 
+test('immutable cancellation preserves an unrelated edit and submits an update, not a replacement', async () => {
+ renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+ fireEvent.click(screen.getAllByRole('button', { name: 'Edit booking' })[1])
+ fireEvent.change(screen.getByLabelText('Venue requirements'), { target: { value: 'Keep sibling edit' } })
+ vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[0], status: 'Rejected' }, bookings[1]])
+ vi.mocked(cancelVenueBooking).mockRejectedValue(new VenueBookingError(409, { code: 'BOOKING_IMMUTABLE', message: 'Immutable' }))
+ fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+ await screen.findByText('Rejected', { selector: '.status-badge' })
+ expect(screen.getByRole('heading', { name: 'Edit venue booking' })).toBeInTheDocument()
+ expect(screen.getByRole('alert')).toHaveTextContent('This request is now read-only. Your other booking draft is unchanged.')
+ expect(screen.getByLabelText('Venue requirements')).toHaveValue('Keep sibling edit')
+ vi.mocked(updateVenueBooking).mockResolvedValue({ ...bookings[1], venueRequirements: 'Keep sibling edit' })
+ fireEvent.click(screen.getByRole('button', { name: 'Save venue booking' }))
+ await waitFor(() => expect(updateVenueBooking).toHaveBeenCalledWith('booking-b', expect.objectContaining({ venueRequirements: 'Keep sibling edit' })))
+ expect(createVenueBooking).not.toHaveBeenCalled()
+ expect(await screen.findByText('Breakout Room B booking updated and returned to pending review.')).toBeInTheDocument()
+})
+
+test.each([
+ ['2099-01-01T09:00:00.123456', '2099-01-01T12:00:00.654321'],
+ ['2099-01-01T01:00:00.123456Z', '2099-01-01T05:00:00.654321+01:00'],
+])('fractional booking timestamps display and edit the same SGT period: %s', async (requestedStartTime, requestedEndTime) => {
+ vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[0], requestedStartTime, requestedEndTime }])
+ renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+ expect(screen.getByText('1 Jan 2099, 09:00 SGT – 1 Jan 2099, 12:00 SGT')).toBeInTheDocument()
+ fireEvent.click(screen.getByRole('button', { name: 'Edit booking' }))
+ expect(screen.getByLabelText('Booking start *')).toHaveValue('2099-01-01T09:00')
+ expect(screen.getByLabelText('Booking end *')).toHaveValue('2099-01-01T12:00')
+})
+
+test('booking dates render and edit in SGT for naive and explicit UTC timestamps', async () => {
+ vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[0], requestedStartTime: '2099-01-01T02:00:00Z', requestedEndTime: '2099-01-01T12:00:00' }])
+ renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+ expect(screen.getByText(/1 Jan 2099, 10:00 SGT/)).toHaveTextContent('1 Jan 2099, 12:00 SGT')
+ fireEvent.click(screen.getByRole('button', { name: 'Edit booking' }))
+ expect(screen.getByLabelText('Booking start *')).toHaveValue('2099-01-01T10:00')
+ expect(screen.getByLabelText('Booking end *')).toHaveValue('2099-01-01T12:00')
+})
+test.each(['edit', 'cancel'])('stale %s refreshes immutable request while retaining replacement draft', async action => {
+ renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+ fireEvent.click(screen.getAllByRole('button', { name: 'Edit booking' })[0])
+ fireEvent.change(screen.getByLabelText('Venue requirements'), { target: { value: 'Keep this draft' } })
+ vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[0], status: 'Rejected' }, bookings[1]])
+ const error = new VenueBookingError(409, { code: 'BOOKING_IMMUTABLE', message: 'Immutable' })
+ vi.mocked(updateVenueBooking).mockRejectedValue(error); vi.mocked(cancelVenueBooking).mockRejectedValue(error)
+ fireEvent.click(action === 'edit' ? screen.getByRole('button', { name: 'Save venue booking' }) : screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+ expect(await screen.findByRole('alert')).toHaveTextContent('This request is now read-only')
+ expect(await screen.findByText('Rejected', { selector: '.status-badge' })).toBeInTheDocument()
+ expect(screen.getByLabelText('Venue requirements')).toHaveValue('Keep this draft')
+ expect(screen.getByRole('heading', { name: 'Add venue booking' })).toBeInTheDocument()
+})
+test('all rejected requests are immutable and automatic rejection shows full SGT period and reason', async () => {
+ vi.mocked(fetchVenueBookings).mockResolvedValue([
+  { ...bookings[0], status: 'Rejected', closureRejection: { closureId: 'c', startDateTime: '2099-01-01T02:00:00Z', endDateTime: '2099-01-02T04:00:00Z', reason: '<Maintenance>\nSafety inspection', rejectedAt: '2098-12-01T02:00:00Z' } },
+  { ...bookings[1], status: 'Rejected', closureRejection: null },
+ ])
+ renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+ expect(screen.queryByRole('button', { name: 'Edit booking' })).not.toBeInTheDocument()
+ expect(screen.queryByRole('button', { name: 'Cancel booking' })).not.toBeInTheDocument()
+ expect(screen.getAllByText('Rejected due to temporary venue closure')).toHaveLength(1)
+ expect(screen.getByText(/<Maintenance>/)).toHaveTextContent('Safety inspection')
+ expect(screen.getByText(/1 Jan 2099, 10:00 SGT/)).toHaveTextContent('2 Jan 2099, 12:00 SGT')
+ expect(screen.getByRole('heading', { name: 'Add venue booking' })).toBeInTheDocument()
+})
 test('displays multiple bookings for one event as separate records', async () => {
   renderPanel()
 

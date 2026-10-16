@@ -1,10 +1,25 @@
-"""SCRUM-170 closure contract (independent of booking timestamp contracts)."""
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-170 closure regressions:** staff/configuration/CORS guards, validation, ongoing and offset dates, parameterized reason, pagination, nullable legacy data and controlled database errors. These retain SCRUM-170 scope.
+- **SCRUM-171 AC4 backend support:** a signed zero-impact confirmation preserves the existing closure contract; no full-list UI claim.
+- **Supporting AC5 failure handling:** mocked connection rollback/close checks do not prove real all-row atomicity; that is tested in the PostgreSQL harness.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+SCRUM-170 closure contract (independent of booking timestamp contracts)."""
 
 from unittest.mock import MagicMock
 from datetime import datetime, timezone
 import psycopg2
 import pytest
 from app import create_app
+from app.closure_store import sign_preview
+from app.closure_contract import create_input
 
 
 @pytest.mark.parametrize(
@@ -28,7 +43,7 @@ HEADERS = {"X-Dev-User-Id": UID, "X-Dev-Role": "Venue Staff"}
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("VENUE_CLOSURE_DEV_MODE", "true")
-    return create_app().test_client()
+    return create_app({"CLOSURE_CONFIRMATION_KEY": KEY}).test_client()
 
 
 @pytest.mark.parametrize(
@@ -85,12 +100,27 @@ def test_invalid_read(client, path):
     assert client.get(path, headers=HEADERS).status_code == 400
 
 
+KEY = "test-only-signing-key-not-a-production-default"
+
 BODY = {
     "venueId": UID,
     "startDateTime": "2099-01-01T10:00:00+08:00",
     "endDateTime": "2099-01-01T11:00:00+08:00",
     "reason": "  Maintenance  ",
 }
+
+
+def confirmed(body):
+    clean = {
+        k: v for k, v in body.items() if k not in {"confirmed", "confirmationToken"}
+    }
+    return clean | {
+        "confirmed": True,
+        "confirmationToken": sign_preview(create_input(clean), UID, [], KEY),
+    }
+
+
+BODY = confirmed(BODY)
 
 
 @pytest.mark.parametrize(
@@ -213,12 +243,14 @@ def database(monkeypatch):
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     cursor.fetchone.return_value = row
+    cursor.fetchall.return_value = []
+    cursor.rowcount = 0
     connect = MagicMock(return_value=connection)
     monkeypatch.setattr(psycopg2, "connect", connect)
     return connect, connection, cursor, row
 
 
-def test_create_persists_only_closure(client, database):
+def test_confirmed_zero_impact_preserves_closure_contract(client, database):
     connect, conn, cur, row = database
     client.application.config["DATABASE_URL"] = "fake-dsn"
     response = client.post("/venue-closures", json=BODY, headers=HEADERS)
@@ -233,7 +265,8 @@ def test_create_persists_only_closure(client, database):
         createdBy=UID,
         createdAt="2026-01-01T08:00:00+08:00",
     )
-    sql, params = cur.execute.call_args.args
+    assert response.json["rejectedCount"] == 0
+    sql, params = cur.execute.call_args_list[-2].args
     assert 'INSERT INTO public."VenueClosure"' in sql
     assert "VenueBooking" not in sql and "VenueHold" not in sql
     assert params[:5] == (
@@ -254,11 +287,13 @@ def test_ongoing_and_offset_create(client, database):
     client.application.config["DATABASE_URL"] = "fake-dsn"
     r = client.post(
         "/venue-closures",
-        json={
-            **BODY,
-            "startDateTime": "2000-01-01T00:00:00Z",
-            "endDateTime": "2099-01-01T03:00:00Z",
-        },
+        json=confirmed(
+            {
+                **BODY,
+                "startDateTime": "2000-01-01T00:00:00Z",
+                "endDateTime": "2099-01-01T03:00:00Z",
+            }
+        ),
         headers=HEADERS,
     )
     assert r.status_code == 201
@@ -303,10 +338,12 @@ def test_overlapping_creates_are_not_rejected(client, database):
             client.post("/venue-closures", json=BODY, headers=HEADERS).status_code
             == 201
         )
-    assert database[2].execute.call_count == 2
-    assert all(
-        'INSERT INTO public."VenueClosure"' in call.args[0]
-        for call in database[2].execute.call_args_list
+    assert (
+        sum(
+            'INSERT INTO public."VenueClosure"' in call.args[0]
+            for call in database[2].execute.call_args_list
+        )
+        == 2
     )
 
 
@@ -315,11 +352,13 @@ def test_reason_is_parameterized(client, database):
     reason = '\'); DROP TABLE public."VenueClosure"; --'
     assert (
         client.post(
-            "/venue-closures", json={**BODY, "reason": reason}, headers=HEADERS
+            "/venue-closures",
+            json=confirmed({**BODY, "reason": reason}),
+            headers=HEADERS,
         ).status_code
         == 201
     )
-    sql, params = database[2].execute.call_args.args
+    sql, params = database[2].execute.call_args_list[-2].args
     assert reason not in sql and params[3] == reason
 
 
