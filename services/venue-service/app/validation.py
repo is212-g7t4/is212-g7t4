@@ -8,6 +8,8 @@ LABELS = {
     "facilities": "Facilities",
     "supportedLayouts": "Supported Room Layouts",
     "status": "Operating Status",
+    "setupTimeMinutes": "Setup Time",
+    "turnaroundTimeMinutes": "Turnaround Time",
 }
 REQUIRED = {key: LABELS[key] for key in ("name", "location", "capacity", "facilities", "supportedLayouts", "status")}
 LIST_FIELDS = ("facilities", "supportedLayouts")
@@ -42,6 +44,26 @@ def validate(data):
 
     if isinstance(data.get("status"), str) and data["status"].strip() and data["status"] not in VALID_STATUSES:
         errors.append(f"Operating Status must be one of: {', '.join(VALID_STATUSES)}.")
+
+    for key in ("setupTimeMinutes", "turnaroundTimeMinutes"):
+        if key not in data:
+            continue
+        value = data[key]
+        valid = (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and 0 <= value <= 2147483647
+        ) or (
+            isinstance(value, str)
+            and value.strip().isdigit()
+            and len(value.strip()) <= 10
+            and 0 <= int(value.strip()) <= 2147483647
+        )
+        if not valid:
+            errors.append(
+                f"{LABELS[key]} must be a non-negative whole number of minutes "
+                "(maximum 2147483647)."
+            )
 
     if missing or errors:
         return missing, errors

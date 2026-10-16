@@ -104,6 +104,8 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
         <div className="event-detail"><dt>Capacity</dt><dd>{venue.capacity === null ? 'Not specified' : `${venue.capacity} people`}</dd></div>
         <div className="event-detail"><dt>Accessibility</dt><dd>{venue.accessibility || 'Not specified'}</dd></div>
         <div className="event-detail"><dt>Operating status</dt><dd>{venue.status || 'Not specified'}</dd></div>
+        <div className="event-detail"><dt>Setup time</dt><dd>{venue.setupTimeMinutes ?? 0} minutes</dd></div>
+        <div className="event-detail"><dt>Turnaround time</dt><dd>{venue.turnaroundTimeMinutes ?? 0} minutes</dd></div>
         <div className="event-detail"><dt>Facilities</dt><dd><Chips values={venue.facilities} /></dd></div>
         <div className="event-detail"><dt>Supported layouts</dt><dd><Chips values={venue.supportedLayouts} /></dd></div>
         {hold && <div className="event-detail"><dt>Hold expires</dt><dd>{formatExpiry(hold.expiresAt)}</dd></div>}

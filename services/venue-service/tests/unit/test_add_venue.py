@@ -45,6 +45,8 @@ def test_ac3_valid_submission_is_saved_and_visible_in_catalogue(setup):
         "accessibility": "Wheelchair accessible",
         "supportedLayouts": ["theatre", "classroom"],
         "status": "Available",
+        "setupTimeMinutes": 30,
+        "turnaroundTimeMinutes": 45,
     }
 
 
@@ -58,6 +60,7 @@ def test_ac3_facilities_are_saved_as_a_jsonb_object(setup):
     insert_query, insert_params = cursor.execute.call_args_list[-1].args
     assert 'INSERT INTO public."Venue"' in insert_query
     assert insert_params[3].adapted == {"wifi": True, "projector": True}
+    assert insert_params[-2:] == [30, 45]
 
 
 @pytest.mark.parametrize(

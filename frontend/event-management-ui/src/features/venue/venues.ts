@@ -7,6 +7,8 @@ export interface Venue {
   accessibility: string
   supportedLayouts: string[]
   status: string
+  setupTimeMinutes?: number
+  turnaroundTimeMinutes?: number
 }
 
 const venueServiceUrl = () => import.meta.env.VITE_VENUE_SERVICE_URL || 'http://localhost:5006'
