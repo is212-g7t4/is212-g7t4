@@ -54,6 +54,22 @@ export const test = base.extend<{ mockApi: (page: Page) => Promise<void>; unmock
       }
       // App-shell poll that runs on every page for coordinators; tests override it to show an alert.
       await mock(page, 'availability', '/venue-holds/reminders', (route) => json(route, { reminders: [] }))
+      // Safety Officer event details read their consolidated review context
+      // before rendering the decision controls.
+      await page.route(
+        (url) => url.origin === port(SERVICE_PORTS.safetyCheck)
+          && /^\/safety-checks\/[^/]+\/review$/.test(url.pathname),
+        (route) => json(route, {
+          event: makeEvent({ status: 'Pending Safety Check' }),
+          safetyCheck: {
+            id: 'review-round', eventId: '', roundNumber: 1, submittedBy: '',
+            submittedAt: '', equipmentPlacementNotes: null, crowdMovementNotes: null,
+            status: 'Pending', decidedBy: null, decidedAt: null, remarks: null,
+            withdrawnAt: null, withdrawnBy: null, withdrawalReason: null, flags: [],
+          },
+          venues: [], equipment: [], history: [],
+        }),
+      )
       // Venue Staff detail pages always check whether existing bookings conflict
       // under the venue's buffer rules. Individual tests can register a later
       // route when they need to display a conflict.
