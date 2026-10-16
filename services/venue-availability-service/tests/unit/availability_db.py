@@ -1,4 +1,16 @@
-"""Hermetic SQL write harness: actual predicates/inserts, not PostgreSQL locking.
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **Test infrastructure (no direct acceptance case):** SQLite executes existing SCRUM-30 availability predicates and inserts with fixed time. New nullable closure snapshot columns and advisory-lock adaptation keep those tests compatible.
+- **Limit:** SQLite does not establish PostgreSQL lock ordering, rollback or SCRUM-171 AC5; use the isolated PostgreSQL harness.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+Hermetic SQL write harness: actual predicates/inserts, not PostgreSQL locking.
 
 Adapt only schema qualifiers, placeholders, FOR UPDATE and timestamp transport.
 All timestamps are normalized to UTC; now() is fixed for expiry boundaries.
@@ -72,8 +84,10 @@ class AvailabilityDB:
     def cursor(self, **kwargs):
         yield self
 
-    def execute(self, sql, params):
+    def execute(self, sql, params=()):
         self.statements.append(sql)
+        if "pg_advisory_xact_lock" in sql:
+            return
         self.result = self.db.execute(
             sql.replace("public.", "").replace("%s", "?").replace(" FOR UPDATE", ""),
             [sql_value(v) for v in params],

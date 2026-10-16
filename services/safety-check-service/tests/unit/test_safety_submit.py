@@ -1,4 +1,16 @@
-"""SCRUM-149: POST /safety-checks and GET /safety-checks/readiness.
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-149 submission/readiness regression; no direct SCRUM-171 AC:** original numbered criteria below belong to SCRUM-149, not SCRUM-171.
+- **Separately approved venue-only compatibility:** `test_rejected_venue_history_uses_live_replacement_readiness` checks GET readiness and POST with approved replacement (allowed), no replacement (blocked), and pending replacement (blocked). Mocked downstreams do not prove real safety/database integration; equipment still blocks.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+SCRUM-149: POST /safety-checks and GET /safety-checks/readiness.
 
 AC1 Given an event assigned to the Event Coordinator has every venue booking
     approved and every equipment request approved/reserved (or no equipment
@@ -8,6 +20,9 @@ AC1 Given an event assigned to the Event Coordinator has every venue booking
 AC2 Given any venue booking or equipment request for the event is still
     pending or rejected, when the Event Coordinator tries to submit, then
     submission is blocked and the outstanding arrangements are listed.
+
+SCRUM-171 authorised compatibility exception: rejected VENUE requests are
+immutable history; require a live approved replacement. Equipment is unchanged.
 AC3 Given the Event Coordinator is submitting, when they enter equipment
     placement and expected crowd movement notes, then the notes are saved with
     the safety check.
@@ -136,6 +151,28 @@ def submit(client, **overrides):
 
 
 # --- AC1, AC3: the happy path ------------------------------------------------
+
+
+@pytest.mark.parametrize("replacement, ready, status", [
+    ("Approved", True, 201), (None, False, 422), ("Pending Review", False, 422),
+])
+def test_rejected_venue_history_uses_live_replacement_readiness(client, downstream, replacement, ready, status):
+    """Separately approved SCRUM-171 compatibility rule, not a sixth ticket AC."""
+    downstream.bookings = [booking("Rejected")]
+    if replacement:
+        downstream.bookings.append(booking(replacement, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+    result = readiness(client)
+    assert result.json["ready"] is ready
+    if replacement is None:
+        assert result.json["outstanding"][0]["label"] == "No venue booking"
+    elif not ready:
+        assert [item["status"] for item in result.json["outstanding"]] == [replacement]
+    response = submit(client)
+    assert response.status_code == status
+    if not ready:
+        assert response.json["code"] == "ARRANGEMENTS_OUTSTANDING"
+        assert "create" not in downstream.names()
+        assert "patch_event" not in downstream.names()
 
 
 def test_submission_creates_a_round_and_moves_the_event(client, downstream):

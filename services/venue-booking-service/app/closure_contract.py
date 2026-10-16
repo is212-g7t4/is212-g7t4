@@ -42,6 +42,18 @@ def create_input(data):
     )
 
 
+def confirmation_input(body):
+    if not isinstance(body, dict) or body.get("confirmed") is not True:
+        raise ValueError("Explicit confirmation is required.")
+    token = body.get("confirmationToken")
+    if not isinstance(token, str) or not token or len(token) > 256:
+        raise ValueError("A preview confirmationToken is required.")
+    data = create_input(
+        {k: v for k, v in body.items() if k not in {"confirmed", "confirmationToken"}}
+    )
+    return data, token
+
+
 def list_input(args):
     import base64
     import json

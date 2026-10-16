@@ -1,4 +1,16 @@
-"""SCRUM-170 closure contract (independent of booking timestamp contracts)."""
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-170 composite closure regressions:** staff/configuration/validation guards, venue existence across operational states, identity forwarding, cursor completeness, ongoing dates and upstream/transport error contracts.
+- **Supporting SCRUM-171 AC4 compatibility:** confirmed saves carry the token while preserving these original contracts; mocks do not prove atomic AC5 writes.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+SCRUM-170 closure contract (independent of booking timestamp contracts)."""
 
 from unittest.mock import MagicMock
 import httpx
@@ -89,6 +101,8 @@ BODY = {
     "startDateTime": "2099-01-01T10:00:00+08:00",
     "endDateTime": "2099-01-01T11:00:00+08:00",
     "reason": "  Maintenance  ",
+    "confirmed": True,
+    "confirmationToken": "test-token",
 }
 
 

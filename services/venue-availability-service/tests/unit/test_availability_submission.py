@@ -1,4 +1,16 @@
-"""SCRUM-30: exercise submission through Flask, models and actual SQL."""
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-30 submission regression (no direct SCRUM-171 AC):** real route/model SQL rejects approved/hold/closure blockers, preserves no-insert failure behavior, half-open boundaries, venue isolation and UTC-equivalent instants.
+- **SCRUM-171 compatibility only:** closure snapshot columns and the transaction gate are accommodated without weakening these original assertions. Submission overlap is not closure-triggered AC1/AC2 evidence.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+SCRUM-30: exercise submission through Flask, models and actual SQL."""
 
 from datetime import datetime
 
@@ -44,7 +56,7 @@ def test_approved_overlap_returns_type_without_insert(submit):
     assert response.json["conflictTypes"] == ["APPROVED_BOOKING"]
     assert db.count() == 1
     assert not any("INSERT" in sql for sql in db.statements)
-    assert "FOR UPDATE" in db.statements[0]
+    assert "FOR UPDATE" in db.statements[1]
 
 
 def test_active_tentative_hold_returns_its_type_without_insert(submit):
@@ -216,7 +228,7 @@ def test_database_failure_never_reports_availability_or_persists(monkeypatch, st
     db = AvailabilityDB()
     execute = db.execute
 
-    def failing_execute(sql, params):
+    def failing_execute(sql, params=()):
         if (stage == "check" and "conflict_type" in sql) or (
             stage == "insert" and "INSERT" in sql
         ):

@@ -10,6 +10,7 @@ export interface VenueBooking {
   status: string
   requestedBy: string
   reviewedBy: string | null
+  closureRejection?: { closureId: string; startDateTime: string; endDateTime: string; reason: string; rejectedAt: string } | null
 }
 
 export interface CreateVenueBooking {
