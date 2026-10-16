@@ -109,23 +109,23 @@ def test_ac1_missing_database_configuration():
     assert response.status_code == 503
 
 
-def test_manager_can_view_event_assigned_to_a_different_coordinator(setup):
+def test_lead_can_view_event_assigned_to_a_different_coordinator(setup):
     client, _, cursor = setup
     assigned = saved_row()
     assigned["coordinator_id"] = OTHER_COORDINATOR_ID
     cursor.fetchone.return_value = assigned
 
-    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
+    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead")
 
     assert response.status_code == 200
     assert response.json["coordinatorId"] == OTHER_COORDINATOR_ID
 
 
-def test_manager_can_view_unassigned_event(setup):
+def test_lead_can_view_unassigned_event(setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = saved_row()
 
-    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
+    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead")
 
     assert response.status_code == 200
 
@@ -208,3 +208,14 @@ def test_organiser_event_reports_missing_database_url(setup):
     client, _, _ = setup
     client.application.config["DATABASE_URL"] = None
     assert client.get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}").status_code == 503
+
+
+def test_retired_is_manager_flag_no_longer_opens_other_coordinators_events(setup):
+    client, _, cursor = setup
+    assigned = saved_row()
+    assigned["coordinator_id"] = OTHER_COORDINATOR_ID
+    cursor.fetchone.return_value = assigned
+
+    response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
+
+    assert response.status_code == 403

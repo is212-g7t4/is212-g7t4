@@ -169,11 +169,11 @@ def test_ac2_rejects_invalid_date_range(query_string, setup):
     cursor.execute.assert_not_called()
 
 
-def test_manager_sees_events_regardless_of_coordinator(setup):
+def test_lead_sees_events_regardless_of_coordinator(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [saved_row(), saved_row(event_id="00000000-0000-0000-0000-000000000002", coordinator_id=None)]
 
-    response = client.get(f"/events?coordinatorId={COORDINATOR_ID}&isManager=true")
+    response = client.get(f"/events?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead")
 
     assert response.status_code == 200
     assert len(response.json["events"]) == 2
@@ -183,11 +183,11 @@ def test_manager_sees_events_regardless_of_coordinator(setup):
     assert params == []
 
 
-def test_manager_can_still_combine_with_optional_filters(setup):
+def test_lead_can_still_combine_with_optional_filters(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = []
 
-    response = client.get(f"/events?coordinatorId={COORDINATOR_ID}&isManager=true&status=Approved")
+    response = client.get(f"/events?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead&status=Approved")
 
     assert response.status_code == 200
     query, params = cursor.execute.call_args.args
@@ -266,3 +266,15 @@ def test_organiser_list_reports_missing_database_url(setup):
     client, _, _ = setup
     client.application.config["DATABASE_URL"] = None
     assert client.get(f"/events?organiserId={ORGANISER_ID}").status_code == 503
+
+
+def test_retired_is_manager_flag_no_longer_widens_the_list(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = []
+
+    response = client.get(f"/events?coordinatorId={COORDINATOR_ID}&isManager=true")
+
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" in query
+    assert params == [COORDINATOR_ID]

@@ -1,18 +1,8 @@
 import type { SubmittedEvent } from './submission'
+import { formatDateTime, formatTimestamp } from './formatDates'
 
-function formatDateTime(value: string): string {
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value.replace('T', ' ')
-  return parsed.toLocaleString('en-SG', {
-    timeZone: 'Asia/Singapore', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
-}
-
-function formatTimestamp(value: string): string {
-  return new Date(value).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT'
-}
-
-export function EventOverview({ event, coordinatorName }: { event: SubmittedEvent; coordinatorName?: string | null }) {
+export function EventOverview({ event, coordinatorName, assignedByName, previousCoordinatorName }: { event: SubmittedEvent; coordinatorName?: string | null; assignedByName?: string | null; previousCoordinatorName?: string | null }) {
+  const reassigned = Boolean(event.coordinatorId && event.previousCoordinatorId)
   return (
     <>
       <div className="event-facts">
@@ -31,7 +21,11 @@ export function EventOverview({ event, coordinatorName }: { event: SubmittedEven
       </dl>
 
       <p className="event-footnote muted">
-        Assigned to <strong>{coordinatorName || 'Not assigned'}</strong>
+        {reassigned
+          ? <>Reassigned from <strong>{previousCoordinatorName || 'a previous coordinator'}</strong> to <strong>{coordinatorName || 'Unknown coordinator'}</strong></>
+          : <>Assigned to <strong>{coordinatorName || 'Not assigned'}</strong></>}
+        {event.coordinatorId && event.assignedBy && assignedByName && <> by <strong>{assignedByName}</strong></>}
+        {event.coordinatorId && event.assignedAt && <> on {formatTimestamp(event.assignedAt)}</>}
         {event.submittedAt && <> · Submitted {formatTimestamp(event.submittedAt)}</>}
         {event.decision?.decidedAt && <> · {event.decision.status} on {formatTimestamp(event.decision.decidedAt)}</>}
       </p>

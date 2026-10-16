@@ -29,5 +29,5 @@ Alternatively, after creating `services/user-service/.env`, run
 - `GET /users` — all users, or `GET /users?role=Event+Coordinator` to filter.
 - `GET /users/<uuid:user_id>` — a single user, 404 if not found.
 
-The coordinator manager is identified by role: `Event Coordinator Lead`
-(e.g. Alice Tan). Users carry no manager link.
+The Event Coordinator Lead is identified by role: `Event Coordinator Lead`
+(e.g. Alice Tan). Users carry no link to a Lead.

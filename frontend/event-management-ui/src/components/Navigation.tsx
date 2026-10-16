@@ -3,7 +3,8 @@ import type { Role, Route, User } from '../types'
 import { routeTitles } from '../types'
 import { canViewCalendar } from '../features/calendar/permissions'
 import { canManageEquipment } from '../features/equipment/permissions'
-import { canViewMyEvents } from '../features/event/permissions'
+import { canViewMyEvents, coordinatorEventTabs } from '../features/event/permissions'
+import { isCoordinator } from '../roles'
 import { canSearchVenues, canViewVenues } from '../features/venue/permissions'
 import { BuildingIcon, CheckIcon, EditIcon, HomeIcon, ListIcon, PlusIcon, SearchIcon } from './Icon'
 
@@ -21,11 +22,17 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         <NavButton active={route === 'dashboard'} onClick={() => onNavigate('dashboard')} icon={<HomeIcon size={17} />}>Overview</NavButton>
         <NavButton active={route === 'submit'} onClick={() => onNavigate('submit')} icon={<PlusIcon size={17} />}>Submit event</NavButton>
         <NavButton active={route === 'manage'} onClick={() => onNavigate('manage')} icon={<EditIcon size={17} />}>Event details</NavButton>
-        {role !== 'Event Organiser' && (
-          <NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon={<CheckIcon size={17} />}>Request review</NavButton>
-        )}
-        {canViewMyEvents(role) && (
-          <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
+        {isCoordinator(role) ? (
+          <NavButton active={coordinatorEventTabs(role).includes(route)} onClick={() => onNavigate(coordinatorEventTabs(role)[0])} icon={<ListIcon size={17} />}>Events</NavButton>
+        ) : (
+          <>
+            {role !== 'Event Organiser' && (
+              <NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon={<CheckIcon size={17} />}>Request review</NavButton>
+            )}
+            {canViewMyEvents(role) && (
+              <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
+            )}
+          </>
         )}
         {role === 'Attendee' && (
           <>
@@ -45,7 +52,7 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         {canManageEquipment(role) && (
           <NavButton active={route === 'equipment'} onClick={() => onNavigate('equipment')} icon={<ListIcon size={17} />}>Equipment</NavButton>
         )}
-        {(canManageEquipment(role) || role === 'Event Coordinator') && (
+        {(canManageEquipment(role) || isCoordinator(role)) && (
           <NavButton active={route === 'equipmentRequests' || route === 'newEquipmentRequest'} onClick={() => onNavigate('equipmentRequests')} icon={<CheckIcon size={17} />}>Equipment requests</NavButton>
         )}
         {role === 'Safety Officer' && (
@@ -70,10 +77,10 @@ function NavButton({ active, onClick, icon, children }: { active: boolean; onCli
   )
 }
 
-export function Topbar({ route, users, activeUserId, onUserChange }: { route: Route; users: User[]; activeUserId: string; onUserChange: (userId: string) => void }) {
+export function Topbar({ route, title, users, activeUserId, onUserChange }: { route: Route; title?: string; users: User[]; activeUserId: string; onUserChange: (userId: string) => void }) {
   return (
     <header className="topbar">
-      <h1>{routeTitles[route]}</h1>
+      <h1>{title ?? routeTitles[route]}</h1>
 
       <label className="role-switcher">
         Viewing as
