@@ -71,14 +71,14 @@ function Chips({ values }: { values: string[] }) {
   return <span className="chip-list">{values.map((value) => <span key={value} className="chip">{value}</span>)}</span>
 }
 
-type VenueDetailPageProps = { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; onBack: () => void; onEdit: () => void }
+type VenueDetailPageProps = { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; coordinators?: Pick<User, 'id' | 'username'>[]; onBack: () => void; onEdit: () => void }
 
 export function VenueDetailPage(props: VenueDetailPageProps) {
   // Route changes reset cached detail and drafts; refreshes keep the same mounted panel.
   return <VenueDetailContent key={props.venueId} {...props} />
 }
 
-function VenueDetailContent({ venueId, role, user, onBack, onEdit }: VenueDetailPageProps) {
+function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, onEdit }: VenueDetailPageProps) {
   const [venue, setVenue] = useState<Venue | null>(null)
   const [hold, setHold] = useState<VenueHold | null>(null)
   const [error, setError] = useState('')
@@ -86,6 +86,7 @@ function VenueDetailContent({ venueId, role, user, onBack, onEdit }: VenueDetail
   const [refresh, setRefresh] = useState(0)
   const [holdFormOpen, setHoldFormOpen] = useState(false)
   const [holdExpiry, setHoldExpiry] = useState('')
+  const [holdCoordinator, setHoldCoordinator] = useState('')
   const [holdError, setHoldError] = useState('')
   const [holdSaving, setHoldSaving] = useState(false)
   const [legacyConflicts, setLegacyConflicts] = useState<LegacyConflict[]>([])
@@ -130,10 +131,11 @@ function VenueDetailContent({ venueId, role, user, onBack, onEdit }: VenueDetail
     setHoldSaving(true)
     setHoldError('')
     try {
-      setHold(await placeVenueHold(venueId, holdExpiry, user, venue ?? {}))
+      setHold(await (holdCoordinator ? placeVenueHold(venueId, holdExpiry, user, holdCoordinator) : placeVenueHold(venueId, holdExpiry, user, venue ?? {})))
       setVenue((current) => current ? { ...current, status: 'On Hold' } : current)
       setHoldFormOpen(false)
       setHoldExpiry('')
+      setHoldCoordinator('')
     } catch (cause) {
       setHoldError(cause instanceof Error ? cause.message : 'Unable to place a hold on this venue.')
     } finally {
@@ -194,6 +196,13 @@ function VenueDetailContent({ venueId, role, user, onBack, onEdit }: VenueDetail
       {role === 'Venue Staff' && holdFormOpen && <form className="venue-hold-form" onSubmit={submitHold}>
         <label htmlFor="venue-hold-expiry">Hold expiry date and time</label>
         <input id="venue-hold-expiry" type="datetime-local" required value={holdExpiry} onChange={(event) => setHoldExpiry(event.target.value)} />
+        {coordinators.length > 0 && <>
+          <label htmlFor="venue-hold-coordinator">Event Coordinator to remind (optional)</label>
+          <select id="venue-hold-coordinator" value={holdCoordinator} onChange={(event) => setHoldCoordinator(event.target.value)}>
+            <option value="">No reminder</option>
+            {coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.username}</option>)}
+          </select>
+        </>}
         <div className="venue-detail-action-buttons">
           <button className="button" type="button" onClick={() => setHoldFormOpen(false)}>Cancel</button>
           <button className="button hold" type="submit" disabled={holdSaving}>{holdSaving ? 'Placing hold…' : 'Confirm hold'}</button>

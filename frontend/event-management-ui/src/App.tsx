@@ -12,6 +12,7 @@ import { SubmissionPage } from './pages/SubmissionPage'
 import { EquipmentPage } from './pages/EquipmentPage'
 import { EquipmentRequestsPage } from './pages/EquipmentRequestsPage'
 import { SafetyChecksPage } from './pages/SafetyChecksPage'
+import { NewEquipmentRequestPage } from './pages/NewEquipmentRequestPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
@@ -21,6 +22,7 @@ import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
 import type { EventData, Role, Route, User } from './types'
 import { AlertIcon, CheckIcon } from './components/Icon'
+import { HoldReminderAlert } from './features/venue/HoldReminderAlert'
 
 const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
 
@@ -44,6 +46,7 @@ const paths: Record<Route, string> = {
   equipment: '/equipment',
   equipmentRequests: '/equipment-requests',
   safetyChecks: '/safety-checks',
+  newEquipmentRequest: '/equipment-requests/new',
 }
 
 function getRoute(): Route {
@@ -60,6 +63,7 @@ function getRoute(): Route {
   if (path === '/equipment') return 'equipment'
   if (path === '/equipment-requests') return 'equipmentRequests'
   if (path === '/safety-checks') return 'safetyChecks'
+  if (path === '/equipment-requests/new') return 'newEquipmentRequest'
   if (path === '/venues') return 'venues'
   if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
@@ -183,6 +187,7 @@ function App() {
     <main className={`main-content${route === 'venueCalendar' ? ' calendar-route' : ''}`}>
       <Topbar route={route} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
+      <HoldReminderAlert user={activeUser} />
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
       {route === 'submit' && <SubmissionPage role={role} currentOrganiserId={activeUser?.id} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
@@ -192,11 +197,12 @@ function App() {
       {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
-      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'safetyChecks' && <SafetyChecksPage key={activeUser?.id} role={role} safetyOfficerId={activeUser?.id} onViewDetails={navigateToEvent} />}
+      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} onCreate={() => navigate('newEquipmentRequest')} />}
+      {route === 'newEquipmentRequest' && <NewEquipmentRequestPage key={activeUser?.id} role={role} user={activeUser ?? null} onBack={() => navigate('equipmentRequests')} onCreated={(message) => { navigate('equipmentRequests'); setNotice({ message, tone: 'success' }) }} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
-      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
+      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} coordinators={users.filter((u) => u.role === 'Event Coordinator' || u.role === 'Event Coordinator Lead')} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
       {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} isManager={isManager} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}

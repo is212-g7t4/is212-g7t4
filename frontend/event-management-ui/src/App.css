@@ -1146,6 +1146,31 @@ td small {
   border-top: 1px solid var(--color-border);
 }
 
+.equipment-added-list {
+  margin-bottom: var(--space-4);
+}
+
+.equipment-draft {
+  margin-bottom: var(--space-3);
+}
+
+.equipment-draft-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 2fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.equipment-draft-row .field {
+  margin-bottom: 0;
+}
+
+.equipment-draft-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: 4px;
+}
+
 .reject-box {
   display: grid;
   gap: 7px;

@@ -13,7 +13,6 @@ the quantity other non-rejected events hold over an overlapping window.
 RESERVING_EVENT_STATUSES = (
     "Approved",
     "Confirmed",
-    "Submitted",
     "Under Review",
     "Pending Safety Check",
     "Safety Changes Requested",
