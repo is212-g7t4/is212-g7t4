@@ -11,6 +11,7 @@ REQUEST_ID = "2a1bfb57-a3c0-4450-897e-cc5c73690000"
 EVENT_ID = "4a569df8-b7e4-44a2-af9f-d60000000000"
 TS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}
 COORDINATOR = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
+SAFETY_OFFICER = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Safety Officer"}
 ORIGIN = "http://localhost:5174"
 
 
@@ -141,6 +142,14 @@ def test_ac3_event_coordinator_can_read_but_not_review(setup):
 
     assert client.get("/equipment-requests", headers=COORDINATOR).json["requests"][0]["status"] == "Approved"
     assert client.patch(f"/equipment-requests/{REQUEST_ID}", headers=COORDINATOR, json={"status": "Approved"}).status_code == 403
+
+
+def test_safety_officer_can_read_event_requests_but_cannot_review(setup):
+    client, cursor, _ = setup
+    cursor.fetchall.return_value = [db_row(status="Approved")]
+
+    assert client.get("/equipment-requests", headers=SAFETY_OFFICER).json["requests"][0]["status"] == "Approved"
+    assert client.patch(f"/equipment-requests/{REQUEST_ID}", headers=SAFETY_OFFICER, json={"status": "Approved"}).status_code == 403
 
 
 @pytest.mark.parametrize("query", ["?status=Broken", "?eventId=not-a-uuid"])

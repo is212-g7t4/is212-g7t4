@@ -21,7 +21,7 @@ from app.models import (
 STATUSES = ("Pending", "Approved", "Rejected")
 DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
-READ_ROLES = REVIEW_ROLES | {"Event Coordinator"}
+READ_ROLES = REVIEW_ROLES | {"Event Coordinator", "Safety Officer"}
 CREATE_ROLES = {"Event Coordinator"}
 MAX_ITEMS = 50
 MAX_REQUIREMENTS_LENGTH = 1000
@@ -113,7 +113,7 @@ def create_app(config=None):
 
     @app.get("/equipment-requests")
     def requests_list():
-        _, failure = authorise(READ_ROLES, "Only Technical Support or Event Coordinators can view equipment requests.")
+        _, failure = authorise(READ_ROLES, "Only Technical Support, Event Coordinators or Safety Officers can view equipment requests.")
         if failure:
             return failure
         status = request.args.get("status")
@@ -134,7 +134,7 @@ def create_app(config=None):
 
     @app.get("/equipment-requests/<request_id>")
     def request_get(request_id):
-        _, failure = authorise(READ_ROLES, "Only Technical Support or Event Coordinators can view equipment requests.")
+        _, failure = authorise(READ_ROLES, "Only Technical Support, Event Coordinators or Safety Officers can view equipment requests.")
         if failure:
             return failure
         request_id = _uuid_or_none(request_id)

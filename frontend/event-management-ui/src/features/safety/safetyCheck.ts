@@ -114,6 +114,34 @@ export interface SafetyQueueItem {
   resubmission: boolean
 }
 
+export interface SafetyReview {
+  event: SubmittedEvent
+  safetyCheck: SafetyCheckRecord
+  venues: {
+    bookingId: string
+    venueId: string
+    name: string | null
+    expectedAttendance: string | null
+    capacity: number | null
+    overCapacity: boolean
+    layout: string | null
+    emergencyAccess: string | null
+    accessibility: string | null
+    restrictions: string | null
+    venueRequirements: string | null
+    status: string | null
+  }[]
+  equipment: {
+    requestId: string
+    name: string | null
+    description: string | null
+    quantity: number | null
+    technicalRequirements: string | null
+    status: string | null
+  }[]
+  history: SafetyCheckRecord[]
+}
+
 export const NOTES_LIMIT = 2000
 
 /**
@@ -173,6 +201,15 @@ export async function fetchSafetyQueue(safetyOfficerId: string): Promise<SafetyQ
   const params = new URLSearchParams({ safetyOfficerId })
   const body = await request(`/safety-checks/queue?${params.toString()}`)
   return body.events as SafetyQueueItem[]
+}
+
+/** Load event, arrangement and prior-decision context for the officer's review. */
+export async function fetchSafetyReview(
+  eventId: string,
+  safetyOfficerId: string,
+): Promise<SafetyReview> {
+  const params = new URLSearchParams({ safetyOfficerId })
+  return (await request(`/safety-checks/${eventId}/review?${params.toString()}`)) as SafetyReview
 }
 
 /** Submit the event for its safety check (AC1, AC3). */

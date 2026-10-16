@@ -8,6 +8,7 @@ import {
   approveSafetyCheck,
   fetchSafetyQueue,
   fetchSafetyReadiness,
+  fetchSafetyReview,
   rejectSafetyCheck,
   requestSafetyChanges,
   submitSafetyCheck,
@@ -60,6 +61,17 @@ test('SCRUM-162: a queue refusal carries the service message', async () => {
     code: 'NOT_SAFETY_OFFICER',
     message: 'Only a Safety Officer can decide.',
   })
+})
+
+test('SCRUM-163: the review is fetched from Safety Check Service as the officer', async () => {
+  const review = { event: {}, safetyCheck: {}, venues: [], equipment: [], history: [] }
+  vi.stubGlobal('fetch', respond(200, review))
+
+  expect(await fetchSafetyReview(eventId, officerId)).toEqual(review)
+  const [url] = vi.mocked(fetch).mock.calls[0]
+  expect(String(url)).toBe(
+    `http://localhost:5012/safety-checks/${eventId}/review?safetyOfficerId=${officerId}`,
+  )
 })
 
 test('AC3: both note fields are sent with the submission', async () => {

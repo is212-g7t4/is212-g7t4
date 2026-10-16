@@ -21,6 +21,7 @@ SAFETY_CHECK_RECORD_SERVICE_URL = (
 )
 USER_SERVICE_URL = os.environ.get("USER_SERVICE_URL") or "http://localhost:5001"
 VENUE_SERVICE_URL = os.environ.get("VENUE_SERVICE_URL") or "http://localhost:5006"
+EQUIPMENT_SERVICE_URL = os.environ.get("EQUIPMENT_SERVICE_URL") or "http://localhost:5002"
 
 # Shared with Event Service: proves to it that a call to
 # PATCH /events/<id>/safety-status came from this workflow, not a direct
@@ -289,25 +290,30 @@ def cancel_venue_booking(booking_id: str, event_id: str) -> dict:
 # --- Equipment Request Service (atomic, 5011) -------------------------------
 
 
-def get_event_equipment_requests(event_id: str, coordinator_id: str) -> list:
+def get_event_equipment_requests(
+    event_id: str, viewer_id: str, viewer_role: str = "Event Coordinator"
+) -> list:
     """Every equipment request for the event.
 
-    This endpoint is behind the DEV identity headers; `READ_ROLES` there
-    already allows Event Coordinators, so we pass the submitting coordinator's
-    own identity rather than inventing a service account.
+    This endpoint is behind the DEV identity headers; `READ_ROLES` allows
+    Event Coordinators and Safety Officers, so we pass the verified viewer's
+    identity rather than inventing a service account.
     """
     response = _ok(
         _send(
             "GET",
             f"{EQUIPMENT_REQUEST_SERVICE_URL}/equipment-requests",
             params={"eventId": event_id},
-            headers={
-                "X-Dev-User-Id": coordinator_id,
-                "X-Dev-Role": "Event Coordinator",
-            },
+            headers={"X-Dev-User-Id": viewer_id, "X-Dev-Role": viewer_role},
         )
     )
     return response.json()["requests"]
+
+
+def list_equipment() -> list:
+    """The equipment catalogue, used to name requested items in a review."""
+    response = _ok(_send("GET", f"{EQUIPMENT_SERVICE_URL}/equipment"))
+    return response.json()["equipment"]
 
 
 # --- Safety Check Record Service (atomic, 5013) -----------------------------

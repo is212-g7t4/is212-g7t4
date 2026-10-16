@@ -22,6 +22,19 @@ the other.
 | Safety Check Record Service (5013) | creating, deciding, listing, withdrawing and rolling back a round |
 | User Service (5001) | the caller's role (SCRUM-150: is this a Safety Officer?) |
 | Venue Service (5006) | venue names for the Safety Officer's queue (SCRUM-162) |
+| Equipment Service (5002) | equipment catalogue details for the Safety Officer's review (SCRUM-163) |
+
+## `GET /safety-checks/<eventId>/review?safetyOfficerId=<uuid>`
+
+The Safety Officer's read-only review page uses this composite read to gather
+the event, venue bookings and venue catalogue details, equipment requests and
+catalogue names, the open round's placement/crowd notes, and every earlier
+safety round. The route verifies the caller's role and that the event is
+`Pending Safety Check`; downstream read failures fail closed. The response
+groups per-booking capacity comparisons under `venues`, requested inventory
+under `equipment`, and earlier decisions under `history`. Emergency access
+and venue restrictions are returned as null where the current venue model
+does not record them, so the UI displays **Not provided**.
 
 No notification in this story: Notification Service and RabbitMQ aren't built,
 and the "decision" notification is SCRUM-168.
