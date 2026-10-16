@@ -40,14 +40,29 @@ def equipment_request(status="Approved", request_id=REQUEST_ID, **overrides):
     }
 
 
-def event(status="Approved"):
-    """Only the fields this composite reads from Event Service."""
+def event(status="Approved", **overrides):
+    """Only the fields this composite reads from Event Service.
+
+    The editable details are here because SCRUM-153's re-check compares the
+    `changes` it is given against the event's current values before
+    withdrawing anything.
+    """
     return {
         "id": EVENT_ID,
         "eventName": "Community Workshop",
         "status": status,
         "coordinatorId": COORDINATOR_ID,
+        "description": "A workshop for the community.",
+        "purpose": "Skills sharing.",
+        "preferredStartDate": "2026-11-10T09:00:00",
+        "preferredEndDate": "2026-11-10T12:00:00",
+        "expectedAttendance": "120",
+        "venueRequirements": "Hall A",
+        "equipmentRequirements": "Two microphones",
+        "accessibilityNeeds": "Step-free access",
+        "registrationNeeds": "Name and email",
         "actionHistory": [],
+        **overrides,
     }
 
 
@@ -75,6 +90,10 @@ def record(round_number=1, status="Pending", **overrides):
         "decidedBy": None,
         "decidedAt": None,
         "remarks": None,
+        # SCRUM-153: on every round, null unless its approval was withdrawn.
+        "withdrawnAt": None,
+        "withdrawnBy": None,
+        "withdrawalReason": None,
         "flags": [],
         **overrides,
     }

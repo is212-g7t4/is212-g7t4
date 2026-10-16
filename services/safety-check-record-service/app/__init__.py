@@ -18,14 +18,18 @@ from app.models import (
     RecordNotFoundError,
     RoundAlreadyDecidedError,
     RoundAlreadyOpenError,
+    RoundNotApprovedError,
     RoundNotLatestError,
     RoundNotReopenableError,
+    RoundNotRestorableError,
     clean_notes,
     create_round,
     decide_round,
     delete_open_round,
     list_rounds,
     reopen_round,
+    restore_approval,
+    withdraw_approval,
 )
 
 NO_DATABASE = (
@@ -246,6 +250,93 @@ def create_app(config=None) -> Flask:
             ), 409
         return jsonify(reopened), 200
 
+    @app.post("/safety-check-records/<safety_check_id>/withdraw")
+    def withdraw_record(safety_check_id):
+        """Withdraw an approval and open the next round (SCRUM-153 AC1, AC3).
+
+        For Safety Check Service only — it is the service that has checked the
+        caller is the assigned coordinator and that a high-impact field really
+        changed. Re-validated here anyway: an atomic never trusts its caller's
+        homework, and the row lock inside `withdraw_approval` is what stops two
+        simultaneous re-checks both opening round N+1.
+
+        Unlike `reopen`, this is a deliberate later withdrawal, not
+        compensation: round N stays in the history as 'Approval Withdrawn',
+        with its original decision intact (AC3).
+        """
+        safety_check_id = _uuid_or_none(safety_check_id)
+        if not safety_check_id:
+            return jsonify(message="The safety check ID must be a valid UUID."), 400
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        withdrawn_by = _uuid_or_none(data.get("withdrawnBy"))
+        if not withdrawn_by:
+            return jsonify(message="withdrawnBy must be a valid UUID."), 400
+        reason, failure = _withdrawal_reason(data)
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message=NO_DATABASE), 503
+        try:
+            withdrawn, opened = withdraw_approval(
+                app.config["DATABASE_URL"], safety_check_id, withdrawn_by, reason
+            )
+        except RecordNotFoundError:
+            return jsonify(message="Safety check not found."), 404
+        except RoundNotLatestError:
+            return jsonify(
+                code="NOT_LATEST_ROUND",
+                message=(
+                    "A later round exists for this event; this round's approval "
+                    "is no longer the one in force."
+                ),
+            ), 409
+        except RoundNotApprovedError as not_approved:
+            return jsonify(
+                code="ROUND_NOT_APPROVED",
+                message="Only an approved safety check can have its approval withdrawn.",
+                currentStatus=not_approved.existing["status"],
+                safetyCheck=not_approved.existing,
+            ), 409
+        return jsonify(withdrawn=withdrawn, opened=opened), 201
+
+    @app.post("/safety-check-records/<safety_check_id>/restore")
+    def restore_record(safety_check_id):
+        """Compensation only: undo the withdrawal the caller's own request just made.
+
+        Safety Check Service calls this when it withdrew an approval but could
+        not then save the edit and move the event. Not a general "un-withdraw"
+        endpoint: it refuses unless the round it opened is still undecided and
+        still the latest.
+        """
+        safety_check_id = _uuid_or_none(safety_check_id)
+        if not safety_check_id:
+            return jsonify(message="The safety check ID must be a valid UUID."), 400
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        opened_safety_check_id = _uuid_or_none(data.get("openedSafetyCheckId"))
+        if not opened_safety_check_id:
+            return jsonify(message="openedSafetyCheckId must be a valid UUID."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message=NO_DATABASE), 503
+        try:
+            restored = restore_approval(
+                app.config["DATABASE_URL"], safety_check_id, opened_safety_check_id
+            )
+        except RecordNotFoundError:
+            return jsonify(message="Safety check not found."), 404
+        except RoundNotRestorableError:
+            return jsonify(
+                code="NOT_RESTORABLE",
+                message=(
+                    "This withdrawal can no longer be undone: the round it "
+                    "opened is not the one waiting for a decision."
+                ),
+            ), 409
+        return jsonify(restored), 200
+
     return app
 
 
@@ -286,6 +377,23 @@ def _remarks(data, required=False):
     if required and not cleaned:
         return None, (jsonify(message="remarks is required."), 400)
     return cleaned, None
+
+
+def _withdrawal_reason(data):
+    """Why the approval was withdrawn (SCRUM-153 AC1 "told why"): required text.
+
+    Stored on round N, so the history says what changed rather than only that
+    something did.
+    """
+    value = data.get("reason")
+    if not isinstance(value, str) or not value.strip():
+        return None, (jsonify(message="reason is required."), 400)
+    if len(value) > NOTES_LIMIT:
+        return None, (
+            jsonify(message=f"reason must be {NOTES_LIMIT} characters or fewer."),
+            400,
+        )
+    return value.strip(), None
 
 
 def _flags(data, status):

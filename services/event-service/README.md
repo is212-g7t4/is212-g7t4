@@ -80,11 +80,14 @@ until the event has passed its Operational Safety Check.
 
 ```
 Submitted → Under Review → Approved ──(SCRUM-149)──► Pending Safety Check
-                         ↘ Rejected                    │
-                                    (SCRUM-150) ◄──────┼──────► (SCRUM-151)
-                                         │             │            │
-                                     Confirmed     Safety Changes  Cancelled
+                         ↘ Rejected                    │       ▲
+                                    (SCRUM-150) ◄──────┼───────┼──► (SCRUM-151)
+                                         │             │       │        │
+                                     Confirmed     Safety Changes    Cancelled
                                    (in preparation)  Requested
+                                         │                     │
+                                         └──(SCRUM-153: a high-impact edit
+                                             withdraws the approval)
 ```
 
 **`Confirmed` *is* the preparation stage.** It means the event passed its
@@ -261,9 +264,136 @@ decision (AC5, AC3), but it could skip the arrangements check or role lookup
 if it somehow had the token — the same trust level as the rest of the system
 until auth lands.
 
+### `PATCH /events/<id>/details` — editing an event, and the re-check gate
+
+The one endpoint that edits an event's details, and the only place that
+classifies a change as low- or high-impact (SCRUM-153; SCRUM-20 adds its
+contradiction checks in front of it later and reuses this write).
+
+```json
+PATCH /events/<id>/details
+{
+  "coordinatorId": "<uuid>",
+  "changes": {"expectedAttendance": "400", "eventName": "Community Workshop"}
+}
+```
+
+`changes` is a non-empty object of `EDITABLE_FIELDS`, every value text (as on
+submit). An unknown key, an empty object or a non-text value returns `400`;
+so does a merged event that breaks `validation.validate` (the same rules as a
+submission: required fields, attendance range, end after start), with
+`missingFields` and `errors`.
+
+| Field | Impact |
+| --- | --- |
+| `preferredStartDate`, `preferredEndDate` | **High** — "Date/time" |
+| `expectedAttendance` | **High** |
+| `venueRequirements` | **High** |
+| `equipmentRequirements` | **High** |
+| `accessibilityNeeds` | **High** |
+| `eventName` | Low |
+| `description`, `purpose` (inside the `description` JSON) | Low |
+| `registrationNeeds` | Low |
+
+**"Changed" means the normalised value differs** — strings stripped,
+`expectedAttendance` compared as an int, dates as naive Singapore-local
+date-times. So re-saving the form without edits is not a change: it returns
+`200` with the event untouched, writes no history entry and withdraws no
+approval. Both date fields share one label, so changing start and end reads
+"Date/time" once.
+
+What happens, by the event's status:
+
+- **`Confirmed` + a high-impact change, no `safetyRecheck`** → `409`, and
+  **nothing is saved** (not even the low-impact half of a mixed edit):
+
+  ```json
+  {
+    "code": "SAFETY_RECHECK_REQUIRED",
+    "message": "Changing Date/time and Expected attendance will withdraw this event's safety approval. It will return to Pending Safety Check.",
+    "changedFields": ["preferredStartDate", "expectedAttendance"],
+    "highImpactFields": ["preferredStartDate", "expectedAttendance"],
+    "labels": ["Date/time", "Expected attendance"]
+  }
+  ```
+
+  **That `409` is the gate** (SCRUM-153 AC1). It carries everything the UI's
+  confirm step needs, and it means a client that skips the UI still can't
+  change a `Confirmed` event's high-impact fields without the safety workflow
+  withdrawing the approval first — so an event is never prepared on the basis
+  of an outdated safety review.
+- **`Confirmed` + a high-impact change, with `safetyRecheck` and the internal
+  token** → `200`. The fields are written **and** the event moves
+  `Confirmed → Pending Safety Check` in the same `UPDATE`, inside the same
+  `FOR UPDATE` transaction, so the status change can never land without the
+  change that caused it:
+
+  ```json
+  {"coordinatorId": "<uuid>", "changes": {...},
+   "safetyRecheck": {"withdrawnSafetyCheckId": "<round N>",
+                     "safetyCheckId": "<round N+1>", "roundNumber": 3}}
+  ```
+
+  Only [`safety-check-service`](../safety-check-service/) sends this, after it
+  has withdrawn round N and opened round N+1. The same opt-in
+  `X-Internal-Service-Token` lock as `/safety-status` applies: without a
+  matching token (when one is configured) the request is treated as an
+  ordinary edit and gated. `withdrawnSafetyCheckId` must equal the
+  `safetyCheckId` on the latest `Confirmed` entry in `actionHistory` — the
+  approval the event actually holds — else `409 {"code": "STALE_SAFETY_CHECK"}`,
+  so a stale or made-up round can't move the event.
+- **`Pending Safety Check` + a high-impact change** →
+  `409 {"code": "EVENT_UNDER_SAFETY_REVIEW"}`: don't move the goalposts under
+  a Safety Officer who is mid-review. Low-impact edits still save.
+- **`Submitted`, `Under Review`, `Approved`, `Safety Changes Requested`** →
+  `200`, status unchanged. There is no approval to withdraw; a
+  `Safety Changes Requested` event is ordinary rework (SCRUM-164).
+- **`Rejected`, `Cancelled`** →
+  `409 {"code": "EVENT_NOT_EDITABLE", "currentStatus": "<status>"}`. Those
+  details are history.
+- Not the assigned coordinator → `403`, checked first so a stranger learns
+  nothing about the event's stage. Missing → `404`.
+
+A re-check appends the line AC1's "the coordinator is told why" shows:
+
+```json
+{
+  "status": "Pending Safety Check",
+  "details": "Safety approval withdrawn because Date/time and Expected attendance changed after approval. The event needs a new Operational Safety Check (round 3) before it can proceed to preparation.",
+  "changedFields": ["preferredStartDate", "expectedAttendance"],
+  "highImpactFields": ["preferredStartDate", "expectedAttendance"],
+  "coordinatorId": "<uuid>", "withdrawnSafetyCheckId": "<round N>",
+  "safetyCheckId": "<round N+1>", "recordedAt": "2026-10-16T06:00:00+00:00"
+}
+```
+
+A plain edit appends `{"status": "<unchanged>", "details": "Event details
+updated: Event name, Purpose.", "changedFields": [...], "coordinatorId",
+"recordedAt"}` and no safety fields.
+
+The re-check entry carries `safetyCheckId` = **round N+1** deliberately:
+SCRUM-150/151's stale-round check identifies the open round as the latest
+`Pending Safety Check` entry with a `safetyCheckId`, so the Safety Officer can
+approve, reject or request changes on round N+1 with no change to those code
+paths. `decision`, `decisionHistory`, `actionDetails` and the earlier
+`actionHistory` are all carried through: an edit rewrites `description`, and
+dropping the metadata stored alongside it would erase the approve/reject
+history.
+
+`Confirmed → Pending Safety Check` is in `SAFETY_TRANSITIONS` but listed in
+`RECHECK_ONLY_MOVES`, and `update_event_safety_status` refuses every pair
+there. So `/safety-status` can reach every other safety move but not this
+one: a `Confirmed` event may only go back for re-review together with the edit
+that invalidated its approval. (It can't be refused before the database is
+read — `Pending Safety Check` is also SCRUM-149's legitimate target from
+`Approved`, so only the event's current status, known under the lock, tells
+the two apart.)
+
 The lifecycle constants (`ALL_STATUSES`, `PRE_SAFETY_STATUSES`,
 `SAFETY_STATUSES`, `PREPARATION_STATUS`, `ALLOWED_TRANSITIONS`,
-`SAFETY_TRANSITIONS`, `SAFETY_BLOCK_MESSAGES`) live at module level in
+`SAFETY_TRANSITIONS`, `RECHECK_ONLY_MOVES`, `SAFETY_BLOCK_MESSAGES`,
+`LOW_IMPACT_FIELDS`, `HIGH_IMPACT_FIELDS`, `FIELD_LABELS`,
+`EDITABLE_STATUSES`) live at module level in
 `app/models.py` for the sibling safety stories to reuse. The frontend mirrors them in
 `src/features/event/eventStatus.ts` purely to offer the right options and
 explain the next step up front — the backend remains the authority.
