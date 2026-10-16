@@ -53,6 +53,7 @@ beforeEach(() => {
 
 const show = (role: Role = 'Technical Support') => render(<EquipmentRequestsPage role={role} user={role === 'Event Coordinator' ? coordinator : user} resolveUserName={(id) => id === 'coord-1' ? 'Alicia Tan' : null} />)
 
+// Review AC1: display requested equipment, type, quantity and technical requirements for an event.
 test('AC1: defaults to all requests and shows equipment details', async () => {
   show()
   expect(await screen.findByRole('heading', { name: 'Hackday' })).toBeInTheDocument()
@@ -67,6 +68,7 @@ test('AC1: defaults to all requests and shows equipment details', async () => {
   expect(fetchEventReservations).toHaveBeenCalledWith(user, undefined)
 })
 
+// Review AC1/AC2 (supporting filter): distinguish Pending requests from already-decided requests.
 test('status filter shows only requests matching the selected status', async () => {
   const pending = line()
   const approved = line({ id: 'r2', equipmentId: 'eq2', status: 'Approved', reviewedBy: 'u1', availability: null,
@@ -84,6 +86,7 @@ test('status filter shows only requests matching the selected status', async () 
   expect(fetchEventReservations).toHaveBeenLastCalledWith(user, 'Pending')
 })
 
+// Review AC3 (supporting identity): identify the coordinator assigned to the event.
 test('shows the coordinator name on the right side of the event card heading', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus: 'Approved' })])
   show()
@@ -95,6 +98,8 @@ test('shows the coordinator name on the right side of the event card heading', a
   expect(status.parentElement?.querySelector('h2')).toHaveTextContent('Hackday')
 })
 
+// Create request AC2: recorded equipment requests display the corresponding event's date and time.
+// Reservation AC1/AC2 (supporting display): show the schedule belonging to the requested event.
 test('shows the event date and time in its card', async () => {
   const startTime = '2026-10-01T09:00:00'
   const endTime = '2026-10-01T17:00:00'
@@ -104,14 +109,16 @@ test('shows the event date and time in its card', async () => {
   expect(schedule).toHaveClass('event-card-date')
 })
 
+// Review AC1 (supporting presentation): distinguish event status from equipment-request status.
 test('Confirmed events use the same success badge style as Approved events', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus: 'Confirmed' })])
   show()
   expect(await screen.findByText('Confirmed', { selector: '.event-card-title .status-badge' })).toHaveClass('confirmed')
 })
 
+// Review AC2 (eligibility): expose individual and bulk decisions only while the event is Under Review.
 test.each([
-  ['Submitted', true],
+  ['Submitted', false],
   ['Under Review', true],
   ['Approved', false],
   ['Confirmed', false],
@@ -129,7 +136,11 @@ test.each([
     expect(screen.getByRole('button', { name: 'Approve All' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Reject All' })).toBeInTheDocument()
   } else {
-    expect(screen.queryByRole('columnheader', { name: 'Available' })).not.toBeInTheDocument()
+    if (eventStatus === 'Submitted') {
+      expect(screen.getByRole('columnheader', { name: 'Available' })).toBeInTheDocument()
+    } else {
+      expect(screen.queryByRole('columnheader', { name: 'Available' })).not.toBeInTheDocument()
+    }
     expect(screen.queryByRole('columnheader', { name: 'Action' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
@@ -138,6 +149,7 @@ test.each([
   }
 })
 
+// Review AC2/AC3 (access): assigned coordinators can view requests but cannot make staff decisions.
 test('assigned Event Coordinators can view requests but cannot review them', async () => {
   show('Event Coordinator')
   expect(await screen.findByRole('heading', { name: 'Hackday' })).toBeInTheDocument()
@@ -148,6 +160,7 @@ test('assigned Event Coordinators can view requests but cannot review them', asy
   expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
 })
 
+// Review AC3: show the updated status on the next mocked fetch; this does not test live push or DB persistence.
 test('assigned coordinator sees an updated request status after refreshing', async () => {
   const pendingEvent = event([line()])
   const approvedEvent = event([line({ status: 'Approved', reviewedBy: user.id, availability: null })])
@@ -168,12 +181,14 @@ test('assigned coordinator sees an updated request status after refreshing', asy
   expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
 })
 
+// Review AC3 (supporting fallback): clearly identify legacy events without an assigned coordinator.
 test('shows Unassigned when the event has no coordinator', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { coordinatorId: null })])
   show()
   expect(await screen.findByText('Coordinator: Unassigned')).toBeInTheDocument()
 })
 
+// Review AC1 / Reservation AC2: keep each event's requested equipment grouped separately.
 test('groups every requested item of one event under a single event card', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([
     event([line(), chair({ availability: { reservedQuantity: 0, availableStock: 60, isInsufficient: false } })]),
@@ -187,6 +202,7 @@ test('groups every requested item of one event under a single event card', async
   expect(within(card).getByText('Folding chair')).toBeInTheDocument()
 })
 
+// Reservation AC1: display the remaining available pool rather than the catalogue total.
 test('the stock column is labelled Available and shows the remaining unallocated balance', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line({ availability: { reservedQuantity: 4, availableStock: 5, isInsufficient: false } })])])
   show()
@@ -197,6 +213,7 @@ test('the stock column is labelled Available and shows the remaining unallocated
   expect(within(row).queryByText('9')).not.toBeInTheDocument()
 })
 
+// Reservation AC1 (boundary): flag requests exceeding the remaining pool without flagging sufficient lines.
 test('flags only the lines that exceed the remaining balance as Insufficient', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), chair()])])
   show()
@@ -208,6 +225,7 @@ test('flags only the lines that exceed the remaining balance as Insufficient', a
   expect(within(screen.getByText('Wireless mic').closest('tr')!).queryByText('Insufficient')).not.toBeInTheDocument()
 })
 
+// Review AC2 (decided state): reviewed requests no longer expose decision controls.
 test('hides the Available and Action columns once nothing in an event is pending', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line({ status: 'Approved', reviewedBy: 'u1', availability: null })])])
   show()
@@ -219,6 +237,7 @@ test('hides the Available and Action columns once nothing in an event is pending
   expect(screen.getByRole('columnheader', { name: 'Requested' })).toBeInTheDocument()
 })
 
+// Review AC1/AC3 (access): unrelated roles cannot fetch the equipment review screen.
 test('other roles see the access notice and no request is made', () => {
   show('Event Organiser')
   expect(screen.getByText(/visible to Technical Support/)).toBeInTheDocument()
@@ -227,6 +246,7 @@ test('other roles see the access notice and no request is made', () => {
 
 // --- insufficiency gating -------------------------------------------------
 
+// Review AC2 / Reservation AC1: prevent bulk over-allocation while still allowing rejection.
 test('batch Approve is disabled while any line in the event is insufficient, but Reject stays enabled', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), chair()])])
   show()
@@ -239,6 +259,7 @@ test('batch Approve is disabled while any line in the event is insufficient, but
   expect(reviewAllEventEquipmentRequests).not.toHaveBeenCalled()
 })
 
+// Review AC2 / Reservation AC1: prevent individual over-allocation while still allowing rejection.
 test('the insufficient line cannot be approved on its own, but can be rejected', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), chair()])])
   show()
@@ -248,6 +269,7 @@ test('the insufficient line cannot be approved on its own, but can be rejected',
   expect(within(screen.getByText('Wireless mic').closest('tr')!).getByRole('button', { name: 'Approve' })).toBeEnabled()
 })
 
+// Review AC2 / Reservation AC1: rejecting an insufficient line permits approval of the remaining valid lines.
 test('batch Approve is enabled again once the insufficient line has been rejected', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), chair()])])
   vi.mocked(reviewEquipmentRequest).mockResolvedValue(decided(chair(), 'Rejected'))
@@ -260,6 +282,8 @@ test('batch Approve is enabled again once the insufficient line has been rejecte
   expect(screen.getByRole('button', { name: 'Approve All' })).toBeEnabled()
 })
 
+// Availability AC1/AC2: show the Unavailable item's name and physical status, with zero usable stock.
+// This covers the Unavailable display path, not an explicit Available status label.
 test('a physically unavailable item shows zero available and an Unavailable badge', async () => {
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line({
     equipment: { description: 'Laptop', type: 'Laptop', totalQuantity: 8, status: 'Unavailable' },
@@ -276,6 +300,7 @@ test('a physically unavailable item shows zero available and an Unavailable badg
 
 // --- decisions -------------------------------------------------------------
 
+// Review AC2: an individual approval updates only the selected request's status.
 test('AC2: Approve updates one equipment row and the other stays pending under All requests', async () => {
   const second = line({ id: 'r2', equipmentId: 'eq2', equipment: { description: 'Folding chair', type: 'Chair', totalQuantity: 60, status: 'Available' } })
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
@@ -289,6 +314,7 @@ test('AC2: Approve updates one equipment row and the other stays pending under A
   expect(reviewEquipmentRequest).toHaveBeenCalledTimes(1)
 })
 
+// Review AC2: an individual rejection updates only that request and removes its review controls.
 test('AC2: rejecting one row under the All filter updates only that row and removes its buttons', async () => {
   const second = line({ id: 'r2', equipmentId: 'eq2', equipment: { description: 'Folding chair', type: 'Chair', totalQuantity: 60, status: 'Available' } })
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
@@ -302,6 +328,7 @@ test('AC2: rejecting one row under the All filter updates only that row and remo
   expect(screen.getByText('Reviewed')).toBeInTheDocument()
 })
 
+// Review AC2 / Reservation AC2: bulk approval affects the selected event's Pending requests.
 test('Approve All approves every pending request in the event', async () => {
   const second = line({ id: 'r2', equipmentId: 'eq2' })
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
@@ -316,6 +343,7 @@ test('Approve All approves every pending request in the event', async () => {
   expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
 })
 
+// Review AC2: bulk rejection updates every Pending line even when stock is insufficient.
 test('Reject All works even when a line is insufficient and updates all rows under the All filter', async () => {
   const second = chair()
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
@@ -328,6 +356,7 @@ test('Reject All works even when a line is insufficient and updates all rows und
   expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
 })
 
+// Review AC2 (failure): a rejected decision call displays an error without falsely updating the status.
 test('shows the service error when a review fails and keeps the request', async () => {
   vi.mocked(reviewEquipmentRequest).mockRejectedValue(new Error('Cannot approve, insufficient stock: Wireless mic.'))
   show()
@@ -336,6 +365,7 @@ test('shows the service error when a review fails and keeps the request', async 
   expect(screen.getByText('Wireless mic')).toBeInTheDocument()
 })
 
+// Review AC2 (failure): a failed bulk decision displays its service error.
 test('shows the service error when a batch decision fails', async () => {
   vi.mocked(reviewAllEventEquipmentRequests).mockRejectedValue(new Error('Stock changed.'))
   show()
@@ -344,6 +374,7 @@ test('shows the service error when a batch decision fails', async () => {
   expect(screen.getByText('Wireless mic')).toBeInTheDocument()
 })
 
+// Review AC1 (failure/fallback): handle unreadable requests, unknown items and empty technical requirements.
 test('shows a load error, and unknown equipment and empty requirements fall back', async () => {
   vi.mocked(fetchEventReservations).mockRejectedValueOnce(new Error('boom'))
   const { unmount } = show()
@@ -357,9 +388,23 @@ test('shows a load error, and unknown equipment and empty requirements fall back
   expect(screen.getByText('—', { selector: 'td' })).toBeInTheDocument()
 })
 
+// Review AC3 (supporting refresh): reload requests to retrieve newly saved statuses.
 test('refresh reloads the list', async () => {
   show()
   await screen.findByText('Wireless mic')
   await userEvent.click(screen.getByRole('button', { name: /Refresh requests/ }))
   await waitFor(() => expect(fetchEventReservations).toHaveBeenCalledTimes(2))
+})
+
+// Create request AC1 (entry/access): only Event Coordinators can open the equipment recording form.
+test('only Event Coordinators get the New request button, which opens the form', async () => {
+  const onCreate = vi.fn()
+  const { unmount } = render(<EquipmentRequestsPage role="Technical Support" user={user} onCreate={onCreate} />)
+  await screen.findByText('Wireless mic')
+  expect(screen.queryByRole('button', { name: /New request/ })).not.toBeInTheDocument()
+  unmount()
+
+  render(<EquipmentRequestsPage role="Event Coordinator" user={coordinator} onCreate={onCreate} />)
+  await userEvent.click(await screen.findByRole('button', { name: /New request/ }))
+  expect(onCreate).toHaveBeenCalledTimes(1)
 })

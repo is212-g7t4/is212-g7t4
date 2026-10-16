@@ -1,6 +1,7 @@
 from contextlib import closing
 
 import psycopg2
+import psycopg2.errors
 from psycopg2.extras import RealDictCursor
 
 COLUMNS = (
@@ -14,6 +15,10 @@ class RequestNotFoundError(Exception):
 
 
 class RequestAlreadyReviewedError(Exception):
+    pass
+
+
+class UnknownReferenceError(Exception):
     pass
 
 
@@ -62,6 +67,27 @@ def list_requests(database_url, status=None, event_id=None, event_ids=None):
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, params)
             return [serialize(row) for row in cursor.fetchall()]
+
+
+def create_requests(database_url, event_id, items, requester_id):
+    """Insert every line as Pending in one transaction, so a bad line saves none of them."""
+    created = []
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        try:
+            with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                for item in items:
+                    cursor.execute(
+                        f"""INSERT INTO public."EquipmentRequest"
+                               (event_id, equipment_id, quantity_requested, technical_requirements, status,
+                                requested_by, requested_at)
+                           VALUES (%s, %s, %s, %s, 'Pending', %s, CURRENT_TIMESTAMP)
+                           RETURNING {COLUMNS}""",
+                        [event_id, item["equipmentId"], item["quantityRequested"], item["technicalRequirements"] or None, requester_id],
+                    )
+                    created.append(serialize(cursor.fetchone()))
+        except psycopg2.errors.ForeignKeyViolation:
+            raise UnknownReferenceError from None
+    return created
 
 
 def review_request(database_url, request_id, status, reviewer_id):
