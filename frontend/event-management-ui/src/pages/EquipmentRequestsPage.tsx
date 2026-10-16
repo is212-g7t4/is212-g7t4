@@ -5,17 +5,18 @@ import { REQUEST_STATUSES, fetchEventReservations, reviewAllEventEquipmentReques
 import type { EquipmentRequestStatus, EventReservation, ReviewedRequest } from '../features/equipment/requests'
 import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { EventCardSkeletonList, Spinner } from '../components/Loading'
-import { RefreshIcon } from '../components/Icon'
+import { RefreshIcon, PlusIcon } from '../components/Icon'
 
 type StatusFilter = EquipmentRequestStatus | 'All'
 
 export const EQUIPMENT_REQUESTS_ACCESS_NOTICE = 'Equipment requests are visible to Technical Support and assigned Event Coordinators.'
 const INSUFFICIENT_HINT = 'Not enough stock for this window. Reject it, or wait for stock to free up.'
 
-export function EquipmentRequestsPage({ role, user, resolveUserName }: {
+export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }: {
   role: Role
   user: User | null
   resolveUserName?: (userId: string | null | undefined) => string | null
+  onCreate?: () => void
 }) {
   const [events, setEvents] = useState<EventReservation[]>([])
   const [filter, setFilter] = useState<StatusFilter>('All')
@@ -92,6 +93,7 @@ export function EquipmentRequestsPage({ role, user, resolveUserName }: {
           </select>
         </label>
         <button className="button small" onClick={() => { setLoading(true); void load(filter, user) }}><RefreshIcon size={14} /> Refresh requests</button>
+        {role === 'Event Coordinator' && onCreate && <button className="button small primary" onClick={onCreate}><PlusIcon size={14} /> New request</button>}
       </div>
       {actionError && <p className="field-error" role="alert">{actionError}</p>}
     </section>
@@ -102,7 +104,7 @@ export function EquipmentRequestsPage({ role, user, resolveUserName }: {
         // Availability and actions only matter while a decision is still open.
         const pendingItems = items.filter((request) => request.status === 'Pending')
         const showStock = pendingItems.length > 0 && (eventStatus === 'Submitted' || eventStatus === 'Under Review')
-        const showActions = showStock && canReview && (eventStatus === 'Submitted' || eventStatus === 'Under Review')
+        const showActions = showStock && canReview && eventStatus === 'Under Review'
         const anyInsufficient = pendingItems.some((request) => request.availability?.isInsufficient)
         const widths = showStock
           ? showActions ? [27, 13, 12, 14, 19, 15] : [30, 15, 15, 18, 22]

@@ -41,6 +41,12 @@ export const PlusIcon = (props: IconProps) => (
   </Base>
 )
 
+export const MinusIcon = (props: IconProps) => (
+  <Base {...props}>
+    <path d="M5 12h14" />
+  </Base>
+)
+
 export const EditIcon = (props: IconProps) => (
   <Base {...props}>
     <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />

@@ -38,6 +38,13 @@ Service) until Supabase JWT verification lands.
   `{"status": "Approved" | "Rejected"}`; updates every Pending request for
   that event and returns them in `{"requests": [...]}`. `409` if the event has
   requests but none are Pending, `404` if the event has no requests.
+- `POST /events/<event_id>/equipment-requests` — Event Coordinator only. Body
+  `{"items": [{"equipmentId", "quantityRequested", "technicalRequirements"?}]}`
+  (1–50 items, quantity a whole number ≥ 1, each equipment once). Saves every
+  line as Pending in one transaction and returns `201 {"requests": [...]}`;
+  `404` (nothing saved) if the event or an equipment item does not exist.
+  Assignment, event status and equipment availability are checked by
+  Equipment Reservation Service, which is the caller the UI uses.
 
 Because the status lives in this table, a coordinator reading
 `GET /equipment-requests?eventId=` sees a decision as soon as it is saved.

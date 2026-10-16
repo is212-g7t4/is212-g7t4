@@ -18,9 +18,8 @@ polled or stored, and `Equipment.operational_status` is never changed.
 1. **Physical check** — equipment that is not `Available` has effective stock `0`.
 2. **Temporal check** — stock is a shared pool. `reserved` is the sum of
    `quantityRequested` over **Approved** requests belonging to *other* events
-   whose status is `Approved`, `Confirmed`, `Submitted` or `Under Review`
-   (i.e. not `Rejected`, so an Approved line on a still-pending event already
-   holds stock) and whose window overlaps:
+  whose status is `Approved`, `Confirmed` or `Under Review`
+  (Submitted events do not reserve stock) and whose window overlaps:
    `other.start < target.end AND other.end > target.start`.
    `availableStock = max(0, totalQuantity - reserved)`.
 3. `isInsufficient = quantityRequested > availableStock`.
@@ -42,6 +41,13 @@ DEV `X-Dev-User-Id` / `X-Dev-Role` headers are forwarded to the atomics.
 - `PATCH /equipment-reservations/events/<event_id>` — Technical Support only;
   the batch decision. Approving while any Pending line is insufficient is
   `409`; Rejecting is always allowed.
+- `POST /equipment-reservations/events/<event_id>/requests` — Event Coordinator
+  only; body `{"items": [{"equipmentId", "quantityRequested",
+  "technicalRequirements"?}]}`. `403` unless the event is assigned to the
+  caller, `409` unless it is Under Review, `409` if any item's
+  physical status is Unavailable, `404` if an item is not in the catalogue.
+  Stock over the event's window is not checked here — that happens at review.
+  Forwards to Equipment Request Service and returns `201 {"requests": [...]}`.
 - `GET /health`
 
 ## Configuration
