@@ -234,6 +234,84 @@ def test_queue_handles_event_service_error(mock_get_user, mock_get_unassigned):
     assert "Failed to fetch unassigned events" in response.json["error"]
 
 
+@patch("app.routes.get_active_events")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_lead_sees_every_coordinator_with_their_active_events(mock_get_user, mock_get_coordinators, mock_get_active):
+    """Workload AC1/AC3: every coordinator (the Lead too, and those with no
+    events) is listed with their active events; unassigned events are kept
+    apart so they're clearly marked."""
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [LEAD, COORDINATOR]
+    assigned = {"id": "EVT-001", "coordinatorId": "user-coordinator", "status": "Under Review"}
+    unassigned = {"id": "EVT-002", "coordinatorId": None, "status": "Submitted"}
+    mock_get_active.return_value = [assigned, unassigned]
+
+    response = create_app().test_client().get("/workload?actingUserId=user-lead")
+
+    assert response.status_code == 200
+    assert response.json == {
+        "coordinators": [{**LEAD, "events": []}, {**COORDINATOR, "events": [assigned]}],
+        "unassigned": [unassigned],
+        "otherAssigned": [],
+    }
+    mock_get_user.assert_called_once_with("user-lead")
+
+
+@patch("app.routes.get_active_events")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_workload_keeps_events_whose_coordinator_is_no_longer_listed(mock_get_user, mock_get_coordinators, mock_get_active):
+    """An event assigned to someone who's no longer an Event Coordinator still shows up."""
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [COORDINATOR]
+    orphan = {"id": "EVT-003", "coordinatorId": "user-gone", "status": "Approved"}
+    mock_get_active.return_value = [orphan]
+
+    response = create_app().test_client().get("/workload?actingUserId=user-lead")
+
+    assert response.status_code == 200
+    assert response.json["otherAssigned"] == [orphan]
+    assert response.json["coordinators"] == [{**COORDINATOR, "events": []}]
+
+
+@pytest.mark.parametrize("acting_user", [COORDINATOR, ORGANISER, None])
+@patch("app.routes.get_active_events")
+@patch("app.routes.get_user")
+def test_only_the_lead_can_see_the_workload(mock_get_user, mock_get_active, acting_user):
+    """Workload AC6: Event Coordinators, other roles and unknown users get 403 and no events."""
+    mock_get_user.return_value = acting_user
+    response = create_app().test_client().get("/workload?actingUserId=someone")
+    assert response.status_code == 403
+    mock_get_active.assert_not_called()
+
+
+def test_workload_requires_acting_user_id():
+    response = create_app().test_client().get("/workload")
+    assert response.status_code == 400
+    assert "actingUserId" in response.json["error"]
+
+
+@patch("app.routes.get_user")
+def test_workload_handles_acting_user_lookup_error(mock_get_user):
+    mock_get_user.side_effect = Exception("User Service unreachable")
+    response = create_app().test_client().get("/workload?actingUserId=user-lead")
+    assert response.status_code == 500
+    assert "Failed to validate acting user" in response.json["error"]
+
+
+@patch("app.routes.get_active_events")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_workload_handles_downstream_error(mock_get_user, mock_get_coordinators, mock_get_active):
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [COORDINATOR]
+    mock_get_active.side_effect = Exception("Event Service down")
+    response = create_app().test_client().get("/workload?actingUserId=user-lead")
+    assert response.status_code == 500
+    assert "Failed to fetch coordinator workload" in response.json["error"]
+
+
 @patch("app.routes.assign_event_coordinator")
 @patch("app.routes.get_available_coordinators")
 @patch("app.routes.get_user")

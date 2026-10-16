@@ -63,6 +63,12 @@ oldest submission first. It backs the Lead's unassigned queue, which
 `coordinator-assignment-service` serves at `GET /queue` after checking that the
 caller is the Lead. The frontend never calls this endpoint directly.
 
+`GET /events/active` returns every event that isn't `Confirmed`, `Rejected` or
+`Cancelled`, assigned or not, ordered by start date. It backs the Lead's
+coordinator workload view, which `coordinator-assignment-service` serves at
+`GET /workload` after checking that the caller is the Lead. The frontend never
+calls this endpoint directly.
+
 Decisions are returned in `decision` and retained in `decisionHistory`. Each decision
 records its status, coordinator ID, UTC timestamp, and rejection reason when present.
 

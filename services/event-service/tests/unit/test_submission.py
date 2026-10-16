@@ -661,6 +661,27 @@ def test_unassigned_queue_needs_database(monkeypatch):
     assert client.get("/events/unassigned").status_code == 503
 
 
+def test_active_events_include_unassigned_and_exclude_confirmed_rejected_cancelled(setup):
+    """The Lead's workload view lists active events, assigned or
+    not; Confirmed, Rejected and Cancelled events are left out."""
+    client, _, cursor = setup
+    assigned = {**saved_row(), "status": "Under Review", "coordinator_id": COORDINATOR_ID}
+    cursor.fetchall.return_value = [saved_row(), assigned]
+    response = client.get("/events/active")
+    assert response.status_code == 200
+    assert [event["coordinatorId"] for event in response.json["events"]] == [None, COORDINATOR_ID]
+    query, params = cursor.execute.call_args.args
+    assert "WHERE status NOT IN %s" in query
+    assert "coordinator_id" not in query.split("WHERE")[1]
+    assert params == [("Confirmed", "Rejected", "Cancelled")]
+    assert "ORDER BY preferred_start_date ASC NULLS LAST" in query
+
+
+def test_active_events_need_database(monkeypatch):
+    client = create_app({"TESTING": True, "DATABASE_URL": ""}).test_client()
+    assert client.get("/events/active").status_code == 503
+
+
 def test_submitted_queue_ignores_the_retired_is_manager_flag(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = []
