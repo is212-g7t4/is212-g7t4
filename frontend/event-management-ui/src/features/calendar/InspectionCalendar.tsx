@@ -3,6 +3,9 @@ import { ClosureDetails, entryClass, entryLabel } from './ClosureDetails'
 import type { CalendarEntry as CalendarBooking } from './api'
 import { addDays, overlaps, timestampMicros } from './dates'
 
+const occupancyStart = (booking: CalendarBooking) => booking.effectiveStartTime ?? booking.requestedStartTime
+const occupancyEnd = (booking: CalendarBooking) => booking.effectiveEndTime ?? booking.requestedEndTime
+
 export function InspectionCalendar({ start, end, rows, summary, venueNames = {}, onBack }: {
   start: string; end: string; rows: CalendarBooking[]; summary: string; venueNames?: Record<string, string>; onBack: () => void
 }) {
@@ -39,12 +42,12 @@ export function InspectionCalendar({ start, end, rows, summary, venueNames = {},
           {format === 'Month' && Array.from({length: (new Date(dates[0] + 'T12:00:00Z').getUTCDay() + 6) % 7}, (_, i) => <div key={i} className="calendar-alignment-spacer" aria-hidden="true" />)}
           {dates.map(date => <article key={date} data-inspected-date={date} className="calendar-result-day">
             <h4>{date}</h4>
-            {rows.filter(b => overlaps(date + 'T00:00:00+08:00', addDays(date, 1) + 'T00:00:00+08:00', b.requestedStartTime, b.requestedEndTime)).map(b => {
+            {rows.filter(b => overlaps(date + 'T00:00:00+08:00', addDays(date, 1) + 'T00:00:00+08:00', occupancyStart(b), occupancyEnd(b))).map(b => {
               const later = (a: string, b: string) => timestampMicros(a)! > timestampMicros(b)! ? a : b
               const earlier = (a: string, b: string) => timestampMicros(a)! < timestampMicros(b)! ? a : b
-              const from = later(later(b.requestedStartTime, start), date + 'T00:00:00+08:00')
-              const to = earlier(earlier(b.requestedEndTime, end), addDays(date, 1) + 'T00:00:00+08:00')
-              const clipped = timestampMicros(from) !== timestampMicros(b.requestedStartTime) || timestampMicros(to) !== timestampMicros(b.requestedEndTime)
+              const from = later(later(occupancyStart(b), start), date + 'T00:00:00+08:00')
+              const to = earlier(earlier(occupancyEnd(b), end), addDays(date, 1) + 'T00:00:00+08:00')
+              const clipped = timestampMicros(from) !== timestampMicros(occupancyStart(b)) || timestampMicros(to) !== timestampMicros(occupancyEnd(b))
               return <div key={`${b.venueId}:${b.id}`} className={entryClass(b)}>
                 <span className="calendar-venue-name">{venueNames[b.venueId]}</span>
                 {entryLabel(b)} · {from.replace('T', ' ').replace('+08:00', '')} – {to.replace('T', ' ').replace('+08:00', '')} SGT
