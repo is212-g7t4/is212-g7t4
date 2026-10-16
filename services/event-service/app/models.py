@@ -22,7 +22,7 @@ FIELDS = {
 COLUMNS = ", ".join(FIELDS.values())
 ROW_COLUMNS = (
     f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id,"
-    " assigned_by, assigned_at"
+    " assigned_by, assigned_at, previous_coordinator_id"
 )
 
 SINGAPORE = ZoneInfo("Asia/Singapore")
@@ -207,6 +207,9 @@ def serialize(row):
         assignedAt=row["assigned_at"].astimezone(UTC).isoformat()
         if row.get("assigned_at")
         else None,
+        previousCoordinatorId=str(row["previous_coordinator_id"])
+        if row.get("previous_coordinator_id")
+        else None,
         decision=decision,
         decisionHistory=history,
         actionDetails=action_details,
@@ -373,15 +376,54 @@ class SafetyApprovalRequiredError(Exception):
         return safety_block_message(self.current_status)
 
 
+class EventClosedError(Exception):
+    """Reassignment: a Rejected or Cancelled event can't change coordinator."""
+
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class NoCoordinatorChangeError(Exception):
+    """Reassignment: the selected coordinator is already the assigned one."""
+
+
+# Events whose coordinator can no longer be changed.
+CLOSED_STATUSES = ("Rejected", "Cancelled")
+
+
 def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by):
+    """Assign or reassign the event's coordinator.
+
+    Venue bookings, equipment requests and safety checks all authorise against
+    the event's current coordinator_id, so changing it here hands every linked
+    record to the new coordinator and takes it away from the previous one.
+    """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Locked so two Leads reassigning at once can't both pass the
+            # no-change check against the same old coordinator.
+            cursor.execute(
+                """SELECT coordinator_id, status FROM public."Event"
+                   WHERE event_id = %s FOR UPDATE""",
+                [event_id],
+            )
+            current = cursor.fetchone()
+            if not current:
+                raise EventNotFoundError
+            if current["status"] in CLOSED_STATUSES:
+                raise EventClosedError(current["status"])
+            if current["coordinator_id"] and str(current["coordinator_id"]) == coordinator_id:
+                raise NoCoordinatorChangeError
             # Only ever reaches 'Under Review'. Keep it that way: anything that
             # can set 'Confirmed' or a later stage must go through the safety
             # gate in update_event_progress (SCRUM-152).
+            # previous_coordinator_id = coordinator_id reads the old value, so
+            # only the latest handover is kept; NULL on a first assignment.
             cursor.execute(
                 f"""UPDATE public."Event"
-                    SET coordinator_id = %s,
+                    SET previous_coordinator_id = coordinator_id,
+                        coordinator_id = %s,
                         assigned_by = %s,
                         assigned_at = now(),
                         status = CASE WHEN status = 'Submitted' THEN 'Under Review' ELSE status END
@@ -390,8 +432,6 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
-            if not assigned:
-                raise EventNotFoundError
     return serialize(assigned)
 
 

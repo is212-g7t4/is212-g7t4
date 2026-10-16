@@ -14,11 +14,13 @@ from app.models import (
     FIELDS,
     SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
+    EventClosedError,
     EventNotAssignedError,
     EventNotFoundError,
     EventNotOwnedError,
     EventNotSubmittedError,
     InvalidStatusTransitionError,
+    NoCoordinatorChangeError,
     RejectionReasonError,
     SafetyApprovalRequiredError,
     SafetyCheckAlreadyPendingError,
@@ -323,6 +325,14 @@ def create_app(config=None):
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
+        except EventClosedError as closed:
+            return jsonify(
+                message=f"A {closed.current_status} event can't be reassigned."
+            ), 409
+        except NoCoordinatorChangeError:
+            return jsonify(
+                message="That coordinator is already assigned to this event. No change was made."
+            ), 409
         return jsonify(assigned), 200
 
     @app.patch("/events/<uuid:event_id>/progress")

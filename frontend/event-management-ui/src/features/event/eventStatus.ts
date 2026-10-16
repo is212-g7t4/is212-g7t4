@@ -1,4 +1,4 @@
-import type { EventStatus } from './submission'
+import type { EventStatus, SubmittedEvent } from './submission'
 
 // Mirrors ALLOWED_TRANSITIONS / SAFETY_BLOCK_MESSAGES in
 // services/event-service/app/models.py. The backend is the authority — this
@@ -56,3 +56,15 @@ const SHOWS_SAFETY_HINT: EventStatus[] = [
 export function showsSafetyHint(status: EventStatus) {
   return SHOWS_SAFETY_HINT.includes(status)
 }
+
+// Mirrors CLOSED_STATUSES in services/event-service/app/models.py: these
+// events keep their coordinator. Event Service enforces it; the UI just
+// doesn't offer a reassignment that would 409.
+const CLOSED_STATUSES: EventStatus[] = ['Rejected', 'Cancelled']
+
+export function canReassign(event: SubmittedEvent) {
+  return Boolean(event.coordinatorId) && !CLOSED_STATUSES.includes(event.status)
+}
+
+// Same wording as Event Service's no-change refusal.
+export const NO_CHANGE_MESSAGE = 'That coordinator is already assigned to this event. No change was made.'

@@ -219,7 +219,7 @@ def test_assign_coordinator_updates_event(setup):
     assigned["status"] = "Under Review"
     assigned["assigned_by"] = LEAD_ID
     assigned["assigned_at"] = datetime(2026, 10, 16, 2, 15, tzinfo=UTC)
-    cursor.fetchone.return_value = assigned
+    cursor.fetchone.side_effect = [{"coordinator_id": None, "status": "Submitted"}, assigned]
 
     response = client.patch(
         "/events/00000000-0000-0000-0000-000000000001",
@@ -231,13 +231,77 @@ def test_assign_coordinator_updates_event(setup):
     assert response.json["status"] == "Under Review"
     assert response.json["assignedBy"] == LEAD_ID
     assert response.json["assignedAt"] == "2026-10-16T02:15:00+00:00"
+    assert response.json["previousCoordinatorId"] is None
+    lock_query, lock_parameters = cursor.execute.call_args_list[0].args
+    assert "FOR UPDATE" in lock_query
+    assert lock_parameters == ["00000000-0000-0000-0000-000000000001"]
     query, parameters = cursor.execute.call_args.args
-    assert "SET coordinator_id = %s" in query
+    assert "previous_coordinator_id = coordinator_id" in query
+    assert "coordinator_id = %s" in query
     assert "assigned_by = %s" in query
     assert "assigned_at = now()" in query
     assert "status = CASE WHEN status = 'Submitted' THEN 'Under Review'" in query
-    assert "RETURNING" in query and "assigned_by, assigned_at" in query
+    assert "RETURNING" in query and "assigned_by, assigned_at, previous_coordinator_id" in query
     assert parameters == [COORDINATOR_ID, LEAD_ID, "00000000-0000-0000-0000-000000000001"]
+
+
+@pytest.mark.parametrize("status", [
+    "Under Review", "Approved", "Pending Safety Check", "Confirmed", "Safety Changes Requested",
+])
+def test_reassign_replaces_the_coordinator_and_records_the_previous_one(setup, status):
+    """Reassignment: any open event can move to a different coordinator; the
+    Lead, previous coordinator, new coordinator and time are all returned."""
+    client, _, cursor = setup
+    reassigned = saved_row()
+    reassigned.update(
+        status=status, coordinator_id=OTHER_COORDINATOR_ID, previous_coordinator_id=COORDINATOR_ID,
+        assigned_by=LEAD_ID, assigned_at=datetime(2026, 10, 16, 13, 5, tzinfo=UTC),
+    )
+    cursor.fetchone.side_effect = [{"coordinator_id": COORDINATOR_ID, "status": status}, reassigned]
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": OTHER_COORDINATOR_ID, "assignedBy": LEAD_ID},
+    )
+
+    assert response.status_code == 200
+    assert response.json["coordinatorId"] == OTHER_COORDINATOR_ID
+    assert response.json["previousCoordinatorId"] == COORDINATOR_ID
+    assert response.json["assignedBy"] == LEAD_ID
+    assert response.json["assignedAt"] == "2026-10-16T13:05:00+00:00"
+    assert response.json["status"] == status
+    assert cursor.execute.call_count == 2
+
+
+@pytest.mark.parametrize("status", ["Rejected", "Cancelled"])
+def test_reassign_is_blocked_for_closed_events(setup, status):
+    """Reassignment: Rejected and Cancelled events keep their coordinator."""
+    client, _, cursor = setup
+    cursor.fetchone.return_value = {"coordinator_id": COORDINATOR_ID, "status": status}
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": OTHER_COORDINATOR_ID, "assignedBy": LEAD_ID},
+    )
+
+    assert response.status_code == 409
+    assert response.json["message"] == f"A {status} event can't be reassigned."
+    assert cursor.execute.call_count == 1  # the lock only; nothing updated
+
+
+def test_reassign_to_the_current_coordinator_is_rejected_as_no_change(setup):
+    """Reassignment: choosing the coordinator who already has the event is refused."""
+    client, _, cursor = setup
+    cursor.fetchone.return_value = {"coordinator_id": COORDINATOR_ID, "status": "Under Review"}
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": COORDINATOR_ID, "assignedBy": LEAD_ID},
+    )
+
+    assert response.status_code == 409
+    assert "No change" in response.json["message"]
+    assert cursor.execute.call_count == 1
 
 
 @pytest.mark.parametrize("assigned_by", [None, "", "not-a-uuid", 123])
@@ -272,6 +336,7 @@ def test_unassigned_event_serializes_without_assignment_record():
     body = serialize(saved_row())
     assert body["assignedBy"] is None
     assert body["assignedAt"] is None
+    assert body["previousCoordinatorId"] is None
 
 
 @pytest.mark.parametrize(

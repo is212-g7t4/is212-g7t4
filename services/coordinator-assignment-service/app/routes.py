@@ -1,3 +1,4 @@
+import httpx
 from flask import Blueprint, jsonify, request
 
 from app.clients import (
@@ -129,6 +130,20 @@ def assign_coordinator(event_id, coordinator_id):
         try:
             result = assign_event_coordinator(event_id, coordinator_id, acting_user_id)
             return jsonify(result), 200
+        except httpx.HTTPStatusError as e:
+            # Event Service's own refusals (unknown event, closed event, no
+            # change) reach the Lead as they are; anything else is a failure.
+            if 400 <= e.response.status_code < 500:
+                try:
+                    message = e.response.json().get("message")
+                except ValueError:
+                    message = None
+                return jsonify(
+                    error=message or "Event Service refused the assignment."
+                ), e.response.status_code
+            return jsonify(
+                error=f"Failed to assign coordinator to event: {str(e)}"
+            ), 500
         except Exception as e:
             return jsonify(
                 error=f"Failed to assign coordinator to event: {str(e)}"

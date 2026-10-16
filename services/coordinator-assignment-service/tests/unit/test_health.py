@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 from app import create_app
@@ -241,6 +242,73 @@ def test_assign_coordinator_handles_event_service_error(mock_get_user, mock_get_
     mock_get_user.return_value = LEAD
     mock_get_coordinators.return_value = [COORDINATOR]
     mock_assign.side_effect = Exception("Event Service down")
+
+    response = create_app().test_client().post(
+        "/events/EVT-001/assign-coordinator/user-coordinator",
+        json={"actingUserId": "user-lead"},
+    )
+
+    assert response.status_code == 500
+    assert "Failed to assign coordinator to event" in response.json["error"]
+
+
+def event_service_refusal(status, body):
+    request = httpx.Request("PATCH", "http://event.test/events/EVT-001")
+    response = httpx.Response(status, json=body, request=request)
+    return httpx.HTTPStatusError("refused", request=request, response=response)
+
+
+@pytest.mark.parametrize("status,message", [
+    (409, "That coordinator is already assigned to this event. No change was made."),
+    (409, "A Cancelled event can't be reassigned."),
+    (404, "Event request not found."),
+])
+@patch("app.routes.assign_event_coordinator")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_reassign_passes_event_service_refusals_to_the_lead(
+    mock_get_user, mock_get_coordinators, mock_assign, status, message
+):
+    """Reassignment: no-change and closed-event refusals keep their status and message."""
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [COORDINATOR]
+    mock_assign.side_effect = event_service_refusal(status, {"message": message})
+
+    response = create_app().test_client().post(
+        "/events/EVT-001/assign-coordinator/user-coordinator",
+        json={"actingUserId": "user-lead"},
+    )
+
+    assert response.status_code == status
+    assert response.json == {"error": message}
+
+
+@patch("app.routes.assign_event_coordinator")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_reassign_refusal_without_a_message_gets_a_fallback(mock_get_user, mock_get_coordinators, mock_assign):
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [COORDINATOR]
+    request = httpx.Request("PATCH", "http://event.test/events/EVT-001")
+    mock_assign.side_effect = httpx.HTTPStatusError(
+        "refused", request=request, response=httpx.Response(409, text="not json", request=request))
+
+    response = create_app().test_client().post(
+        "/events/EVT-001/assign-coordinator/user-coordinator",
+        json={"actingUserId": "user-lead"},
+    )
+
+    assert response.status_code == 409
+    assert response.json == {"error": "Event Service refused the assignment."}
+
+
+@patch("app.routes.assign_event_coordinator")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_reassign_event_service_outage_is_a_500(mock_get_user, mock_get_coordinators, mock_assign):
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [COORDINATOR]
+    mock_assign.side_effect = event_service_refusal(503, {"message": "db down"})
 
     response = create_app().test_client().post(
         "/events/EVT-001/assign-coordinator/user-coordinator",

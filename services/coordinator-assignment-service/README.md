@@ -47,7 +47,13 @@ this up alongside every other service.
   calling `event-service` to persist the change. The acting Lead is sent as
   `assignedBy`; `event-service` stores it with the assignment time
   (`assigned_by`/`assigned_at`) and returns both as `assignedBy`/`assignedAt`
-  for the event's detail page.
+  for the event's detail page. On a reassignment it also keeps the
+  outgoing coordinator as `previousCoordinatorId` (latest handover only).
+  `event-service` refuses with `409` — passed through with its message —
+  when the event is `Rejected`/`Cancelled` or the coordinator is already the
+  assigned one (no change). Venue bookings, equipment requests and safety
+  checks authorise against the event's current coordinator, so they move to
+  the new coordinator with no further calls.
 
 ## Known limitation
 

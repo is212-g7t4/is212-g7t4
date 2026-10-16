@@ -9,6 +9,7 @@ export interface SubmittedEvent extends EventData {
   /** The Event Coordinator Lead who made the current assignment, and when. */
   assignedBy?: string | null
   assignedAt?: string | null
+  previousCoordinatorId?: string | null
   decision: EventDecision | null
   decisionHistory: EventDecision[]
   actionDetails: string

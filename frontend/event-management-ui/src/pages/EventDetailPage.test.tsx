@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
-import { eventApi } from '../features/event/submission'
+import { assignmentApi, eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { fetchRegistrations } from '../features/registration/registrations'
 import { EventDetailPage } from './EventDetailPage'
 
-vi.mock('../features/event/submission', () => ({ eventApi: vi.fn() }))
+vi.mock('../features/event/submission', () => ({ eventApi: vi.fn(), assignmentApi: vi.fn() }))
 vi.mock('../features/registration/registrations', () => ({ fetchRegistrations: vi.fn() }))
 vi.mock('../features/venue/VenueBookingsPanel', () => ({
   VenueBookingsPanel: () => <section aria-label="Venue bookings" />,
@@ -96,6 +96,77 @@ test('an event without an assignment record shows no assigner', async () => {
 
   await screen.findByRole('heading', { name: 'Community Workshop' })
   expect(screen.getByText(/Assigned to/)).not.toHaveTextContent(/ by /)
+})
+
+// Reassign coordinator: who sees the control, what is recorded, and that the
+// previous coordinator loses the ability to manage the event.
+const leadId = '33333333-3333-4333-8333-333333333333'
+const newCoordinatorId = '22222222-2222-4222-8222-222222222222'
+const names: Record<string, string> = { [coordinatorId]: 'Alicia Tan', [leadId]: 'Grace Lee', [newCoordinatorId]: 'Marcus Lim' }
+const resolveName = (id: string | null | undefined) => (id ? names[id] ?? null : null)
+
+test.each(['Under Review', 'Approved', 'Pending Safety Check', 'Confirmed', 'Safety Changes Requested'] as const)('the Lead can reassign a %s event', async (status) => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status, decision: null })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator Lead" currentCoordinatorId={leadId} currentCoordinatorName="Grace Lee" resolveUserName={resolveName} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  expect(screen.getByRole('button', { name: 'Reassign Coordinator' })).toBeInTheDocument()
+})
+
+test.each(['Rejected', 'Cancelled'] as const)('a %s event offers no reassignment, even to the Lead', async (status) => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator Lead" currentCoordinatorId={leadId} currentCoordinatorName="Grace Lee" resolveUserName={resolveName} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  expect(screen.queryByRole('button', { name: /reassign/i })).not.toBeInTheDocument()
+})
+
+test('an Event Coordinator who is not the Lead sees no Reassign option on the detail page', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Under Review', decision: null })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={resolveName} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  expect(screen.queryByRole('button', { name: /reassign/i })).not.toBeInTheDocument()
+})
+
+test('the detail page records the Lead, previous coordinator, new coordinator and time', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event, status: 'Under Review', decision: null, coordinatorId: newCoordinatorId,
+    previousCoordinatorId: coordinatorId, assignedBy: leadId, assignedAt: '2026-10-16T13:05:00+00:00',
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator Lead" currentCoordinatorId={leadId} currentCoordinatorName="Grace Lee" resolveUserName={resolveName} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  const footnote = screen.getByText(/Reassigned from/)
+  expect(footnote).toHaveTextContent('Reassigned from Alicia Tan to Marcus Lim by Grace Lee on')
+  expect(footnote).toHaveTextContent(new Date('2026-10-16T13:05:00+00:00').toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT')
+})
+
+test('after a reassignment the Lead sees the new coordinator recorded straight away', async () => {
+  const before = { ...event, status: 'Under Review' as const, decision: null }
+  vi.mocked(eventApi).mockResolvedValue(before)
+  vi.mocked(assignmentApi)
+    .mockResolvedValueOnce({ coordinators: [
+      { user_id: coordinatorId, username: 'Alicia Tan', email: 'a@example.com', role: 'Event Coordinator', organization: '', contact_details: '' },
+      { user_id: newCoordinatorId, username: 'Marcus Lim', email: 'm@example.com', role: 'Event Coordinator', organization: '', contact_details: '' },
+    ] })
+    .mockResolvedValueOnce({ ...before, coordinatorId: newCoordinatorId, previousCoordinatorId: coordinatorId, assignedBy: leadId, assignedAt: '2026-10-16T13:05:00+00:00' })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator Lead" currentCoordinatorId={leadId} currentCoordinatorName="Grace Lee" resolveUserName={resolveName} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Reassign Coordinator' }))
+  await screen.findByRole('option', { name: /Marcus Lim/ })
+  fireEvent.change(screen.getByLabelText('New coordinator'), { target: { value: newCoordinatorId } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm Reassignment' }))
+
+  expect(await screen.findByText(/Reassigned from/)).toHaveTextContent('Reassigned from Alicia Tan to Marcus Lim by Grace Lee')
+})
+
+test('the previous coordinator can no longer manage a reassigned event', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Under Review', decision: null, coordinatorId: newCoordinatorId, previousCoordinatorId: coordinatorId })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={resolveName} backLabel="my events" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByText('Only the assigned Event Coordinator can update this event.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Save progress' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: 'Venue bookings' })).not.toBeInTheDocument()
 })
 
 test('assigned coordinator updates the status and action details', async () => {

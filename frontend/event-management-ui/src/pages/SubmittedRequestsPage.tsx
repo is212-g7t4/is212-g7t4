@@ -4,6 +4,8 @@ import { isCoordinator, isLead } from '../roles'
 import { assignmentApi, eventApi } from '../features/event/submission'
 import type { Coordinator, SubmittedEvent } from '../features/event/submission'
 import { EventOverview } from '../features/event/EventOverview'
+import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorPanel'
+import { canReassign } from '../features/event/eventStatus'
 import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { RejectionDialog } from '../components/RejectionDialog'
@@ -19,10 +21,6 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
   const [rejecting, setRejecting] = useState<SubmittedEvent | null>(null)
   const [reason, setReason] = useState('')
   const [coordinators, setCoordinators] = useState<Coordinator[]>([])
-  const [assigningId, setAssigningId] = useState<string | null>(null)
-  const [selectedCoordinator, setSelectedCoordinator] = useState<Record<string, string>>({})
-  const [reassigning, setReassigning] = useState<Record<string, boolean>>({})
-  const [assignmentError, setAssignmentError] = useState<Record<string, string>>({})
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
 
   const currentCoordinator = {
@@ -44,36 +42,6 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [role, currentCoordinator.id, refresh])
-
-  const assign = async (event: SubmittedEvent) => {
-    const coordinatorId = selectedCoordinator[event.id]
-    if (!coordinatorId || coordinatorId === event.coordinatorId) {
-      setAssignmentError((current) => ({
-        ...current,
-        [event.id]: 'Choose a different coordinator before confirming.',
-      }))
-      return
-    }
-
-    setAssigningId(event.id)
-    setAssignmentError((current) => ({ ...current, [event.id]: '' }))
-
-    try {
-      const result = await assignmentApi(`/events/${event.id}/assign-coordinator/${coordinatorId}`, 'POST', { actingUserId: currentCoordinator.id })
-      const assignedId = result.assignedCoordinatorId || coordinatorId
-      setEvents((current) => current.map((item) => item.id === event.id
-        ? { ...item, ...result, coordinatorId: assignedId }
-        : item))
-      setReassigning((current) => ({ ...current, [event.id]: false }))
-    } catch (cause) {
-      setAssignmentError((current) => ({
-        ...current,
-        [event.id]: cause instanceof Error ? cause.message : 'Unable to assign the coordinator.',
-      }))
-    } finally {
-      setAssigningId(null)
-    }
-  }
 
   const approve = async (event: SubmittedEvent) => {
     setDecisionId(event.id)
@@ -127,9 +95,6 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
     }
   }
 
-  const availableReassignmentCoordinators = (event: SubmittedEvent) =>
-    coordinators.filter((coordinator) => coordinator.user_id !== event.coordinatorId)
-
   if (!isCoordinator(role)) return <RoleWarning>Submitted event requests are visible to Event Coordinators.</RoleWarning>
 
   return <div className="page-stack">
@@ -146,25 +111,16 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
             <button className="button small" onClick={() => onViewDetails(event.id)}>View details <ArrowRightIcon size={13} /></button>
           </div>
         </header>
-        <EventOverview event={event} coordinatorName={coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username ?? resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} />
+        <EventOverview event={event} coordinatorName={coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username ?? resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
 
         {event.coordinatorId
           ? <div className="event-card-actions">
-              {isLead(role) && <button className="button secondary" onClick={() => {
-                const candidates = availableReassignmentCoordinators(event)
-                const fallbackCoordinatorId = candidates[0]?.user_id || ''
-                setSelectedCoordinator((current) => ({ ...current, [event.id]: fallbackCoordinatorId }))
-                setReassigning((current) => ({ ...current, [event.id]: true }))
-              }}>Reassign Coordinator</button>}
-
-              {isLead(role) && reassigning[event.id] && <div className="assignment-picker">
-                <label htmlFor={`reassign-coordinator-${event.id}`}>New coordinator</label>
-                <select id={`reassign-coordinator-${event.id}`} value={selectedCoordinator[event.id] || availableReassignmentCoordinators(event)[0]?.user_id || ''} onChange={(change) => setSelectedCoordinator((current) => ({ ...current, [event.id]: change.target.value }))}>
-                  {availableReassignmentCoordinators(event).map((coordinator) => <option key={coordinator.user_id} value={coordinator.user_id}>{coordinator.username} · {coordinator.email}</option>)}
-                </select>
-                <button className="button approve" disabled={assigningId === event.id} onClick={() => assign(event)}>{assigningId === event.id && <Spinner size={12} />}{assigningId === event.id ? 'Reassigning…' : 'Confirm Reassignment'}</button>
-                {assignmentError[event.id] && <p className="assignment-error" role="alert">{assignmentError[event.id]}</p>}
-              </div>}
+              {isLead(role) && canReassign(event) && <ReassignCoordinatorPanel
+                event={event}
+                leadId={currentCoordinator.id}
+                coordinators={coordinators}
+                onReassigned={(updated) => setEvents((current) => current.map((item) => item.id === updated.id ? updated : item))}
+              />}
 
               {event.coordinatorId === currentCoordinator.id && <div className="table-actions">
                 <button className="button approve" disabled={decisionId === event.id} onClick={() => approve(event)}>{decisionId === event.id && <Spinner size={12} />}{decisionId === event.id ? 'Processing…' : 'Approve Request'}</button>
