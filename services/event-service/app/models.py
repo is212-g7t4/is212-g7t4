@@ -21,7 +21,8 @@ FIELDS = {
 }
 COLUMNS = ", ".join(FIELDS.values())
 ROW_COLUMNS = (
-    f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id"
+    f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id,"
+    " assigned_by, assigned_at"
 )
 
 SINGAPORE = ZoneInfo("Asia/Singapore")
@@ -202,6 +203,10 @@ def serialize(row):
         else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         organiserId=str(row["organiser_id"]) if row.get("organiser_id") else None,
+        assignedBy=str(row["assigned_by"]) if row.get("assigned_by") else None,
+        assignedAt=row["assigned_at"].astimezone(UTC).isoformat()
+        if row.get("assigned_at")
+        else None,
         decision=decision,
         decisionHistory=history,
         actionDetails=action_details,
@@ -368,7 +373,7 @@ class SafetyApprovalRequiredError(Exception):
         return safety_block_message(self.current_status)
 
 
-def update_event_coordinator(database_url, event_id, coordinator_id):
+def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             # Only ever reaches 'Under Review'. Keep it that way: anything that
@@ -377,10 +382,12 @@ def update_event_coordinator(database_url, event_id, coordinator_id):
             cursor.execute(
                 f"""UPDATE public."Event"
                     SET coordinator_id = %s,
+                        assigned_by = %s,
+                        assigned_at = now(),
                         status = CASE WHEN status = 'Submitted' THEN 'Under Review' ELSE status END
                     WHERE event_id = %s
                     RETURNING {ROW_COLUMNS}""",
-                [coordinator_id, event_id],
+                [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
             if not assigned:

@@ -146,7 +146,7 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
             <button className="button small" onClick={() => onViewDetails(event.id)}>View details <ArrowRightIcon size={13} /></button>
           </div>
         </header>
-        <EventOverview event={event} coordinatorName={coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username ?? resolveUserName?.(event.coordinatorId)} />
+        <EventOverview event={event} coordinatorName={coordinators.find((coordinator) => coordinator.user_id === event.coordinatorId)?.username ?? resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} />
 
         {event.coordinatorId
           ? <div className="event-card-actions">

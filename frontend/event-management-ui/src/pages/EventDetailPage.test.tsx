@@ -77,6 +77,27 @@ test('shows the selected event status and full recorded details', async () => {
   expect(fetchRegistrations).not.toHaveBeenCalled()
 })
 
+// Assign coordinator: the detail page records the current coordinator, who
+// assigned them and when.
+test('shows who assigned the coordinator and when', async () => {
+  const leadId = '33333333-3333-4333-8333-333333333333'
+  vi.mocked(eventApi).mockResolvedValue({ ...event, assignedBy: leadId, assignedAt: '2026-10-01T09:30:00+00:00' })
+  const names: Record<string, string> = { [coordinatorId]: 'Alicia Tan', [leadId]: 'Grace Lee' }
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={(id) => (id ? names[id] ?? null : null)} backLabel="my events" onBack={vi.fn()} />)
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  const footnote = screen.getByText(/Assigned to/)
+  expect(footnote).toHaveTextContent('Assigned to Alicia Tan by Grace Lee on')
+  expect(footnote).toHaveTextContent(new Date('2026-10-01T09:30:00+00:00').toLocaleString('en-SG', { timeZone: 'Asia/Singapore' }) + ' SGT')
+})
+
+test('an event without an assignment record shows no assigner', async () => {
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  expect(screen.getByText(/Assigned to/)).not.toHaveTextContent(/ by /)
+})
+
 test('assigned coordinator updates the status and action details', async () => {
   const submittedEvent: SubmittedEvent = {
     ...event,
@@ -271,7 +292,7 @@ test('AC5: a coordinator who is not the assigned one never sees the panel', asyn
   expect(safetyPanel()).not.toBeInTheDocument()
 })
 
-test('AC5: a Lead viewing another coordinator\'s event as a manager cannot submit', async () => {
+test('AC5: the Lead viewing another coordinator\'s event cannot submit', async () => {
   vi.mocked(eventApi).mockResolvedValue({
     ...event, status: 'Approved', coordinatorId: '22222222-2222-4222-8222-222222222222',
   })

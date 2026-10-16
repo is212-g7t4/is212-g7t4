@@ -44,7 +44,10 @@ this up alongside every other service.
   `{"actingUserId": "<user id>"}`; only the Event Coordinator Lead (role
   `Event Coordinator Lead`) may do this — `403` otherwise.
   Validates `coordinator_id` is a real, available Event Coordinator before
-  calling `event-service` to persist the change.
+  calling `event-service` to persist the change. The acting Lead is sent as
+  `assignedBy`; `event-service` stores it with the assignment time
+  (`assigned_by`/`assigned_at`) and returns both as `assignedBy`/`assignedAt`
+  for the event's detail page.
 
 ## Known limitation
 

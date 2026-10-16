@@ -4,8 +4,8 @@ import pytest
 
 from app import create_app
 
-MANAGER = {"user_id": "user-manager", "username": "Alice Tan", "role": "Event Coordinator Lead"}
-COORDINATOR = {"user_id": "user-report", "username": "Marcus Lim", "role": "Event Coordinator"}
+LEAD = {"user_id": "user-lead", "username": "Alice Tan", "role": "Event Coordinator Lead"}
+COORDINATOR = {"user_id": "user-coordinator", "username": "Marcus Lim", "role": "Event Coordinator"}
 
 
 @patch("app.routes.get_available_coordinators")
@@ -29,29 +29,29 @@ def test_get_coordinators_returns_available_event_coordinators(mock_get_coordina
 @patch("app.routes.get_available_coordinators")
 @patch("app.routes.get_user")
 def test_assign_coordinator_success_for_new_assignment(mock_get_user, mock_get_coordinators, mock_assign):
-    """A manager can assign a submitted event to a new Event Coordinator."""
-    mock_get_user.return_value = MANAGER
+    """The Event Coordinator Lead can assign a submitted event to a new Event Coordinator."""
+    mock_get_user.return_value = LEAD
     mock_get_coordinators.return_value = [{"user_id": "user-123", "username": "Alice Tan", "role": "Event Coordinator"}]
     mock_assign.return_value = {"eventId": "EVT-001", "assignedCoordinatorId": "user-123"}
 
     client = create_app().test_client()
     response = client.post(
         "/events/EVT-001/assign-coordinator/user-123",
-        json={"actingUserId": "user-manager"},
+        json={"actingUserId": "user-lead"},
     )
 
     assert response.status_code == 200
     assert response.json == {"eventId": "EVT-001", "assignedCoordinatorId": "user-123"}
-    mock_get_user.assert_called_once_with("user-manager")
-    mock_assign.assert_called_once_with("EVT-001", "user-123")
+    mock_get_user.assert_called_once_with("user-lead")
+    mock_assign.assert_called_once_with("EVT-001", "user-123", "user-lead")
 
 
 @patch("app.routes.assign_event_coordinator")
 @patch("app.routes.get_available_coordinators")
 @patch("app.routes.get_user")
 def test_assign_coordinator_success_for_reassignment(mock_get_user, mock_get_coordinators, mock_assign):
-    """A manager can reassign an already-assigned event to a different Event Coordinator."""
-    mock_get_user.return_value = MANAGER
+    """The Event Coordinator Lead can reassign an already-assigned event to a different Event Coordinator."""
+    mock_get_user.return_value = LEAD
     mock_get_coordinators.return_value = [
         {"user_id": "user-123", "username": "Alice Tan", "role": "Event Coordinator"},
         {"user_id": "user-456", "username": "Marcus Lim", "role": "Event Coordinator"},
@@ -61,25 +61,25 @@ def test_assign_coordinator_success_for_reassignment(mock_get_user, mock_get_coo
     client = create_app().test_client()
     response = client.post(
         "/events/EVT-001/assign-coordinator/user-456",
-        json={"actingUserId": "user-manager"},
+        json={"actingUserId": "user-lead"},
     )
 
     assert response.status_code == 200
     assert response.json == {"eventId": "EVT-001", "assignedCoordinatorId": "user-456"}
-    mock_assign.assert_called_once_with("EVT-001", "user-456")
+    mock_assign.assert_called_once_with("EVT-001", "user-456", "user-lead")
 
 
 @patch("app.routes.get_available_coordinators")
 @patch("app.routes.get_user")
 def test_assign_coordinator_rejects_unavailable_coordinator(mock_get_user, mock_get_coordinators):
     """Only known available coordinators can be assigned to an event."""
-    mock_get_user.return_value = MANAGER
+    mock_get_user.return_value = LEAD
     mock_get_coordinators.return_value = [{"user_id": "user-123", "username": "Alice Tan", "role": "Event Coordinator"}]
 
     client = create_app().test_client()
     response = client.post(
         "/events/EVT-001/assign-coordinator/user-999",
-        json={"actingUserId": "user-manager"},
+        json={"actingUserId": "user-lead"},
     )
 
     assert response.status_code == 404
@@ -90,13 +90,13 @@ def test_assign_coordinator_rejects_unavailable_coordinator(mock_get_user, mock_
 @patch("app.routes.get_user")
 def test_assign_coordinator_handles_validation_error(mock_get_user, mock_get_coordinators):
     """Downstream coordinator validation failures are surfaced as service errors."""
-    mock_get_user.return_value = MANAGER
+    mock_get_user.return_value = LEAD
     mock_get_coordinators.side_effect = Exception("User Service error")
 
     client = create_app().test_client()
     response = client.post(
         "/events/EVT-001/assign-coordinator/user-123",
-        json={"actingUserId": "user-manager"},
+        json={"actingUserId": "user-lead"},
     )
 
     assert response.status_code == 500
@@ -104,7 +104,7 @@ def test_assign_coordinator_handles_validation_error(mock_get_user, mock_get_coo
 
 
 def test_assign_coordinator_requires_acting_user_id():
-    """actingUserId must be supplied so the manager check has something to verify."""
+    """actingUserId must be supplied so the Lead check has something to verify."""
     client = create_app().test_client()
     response = client.post("/events/EVT-001/assign-coordinator/user-123", json={})
 
@@ -113,14 +113,14 @@ def test_assign_coordinator_requires_acting_user_id():
 
 
 @patch("app.routes.get_user")
-def test_assign_coordinator_rejects_non_manager(mock_get_user):
+def test_assign_coordinator_rejects_non_lead(mock_get_user):
     """An Event Coordinator (not the Lead) cannot assign/reassign."""
     mock_get_user.return_value = COORDINATOR
 
     client = create_app().test_client()
     response = client.post(
         "/events/EVT-001/assign-coordinator/user-123",
-        json={"actingUserId": "user-report"},
+        json={"actingUserId": "user-coordinator"},
     )
 
     assert response.status_code == 403
@@ -150,7 +150,7 @@ def test_assign_coordinator_handles_acting_user_lookup_error(mock_get_user, mock
     client = create_app().test_client()
     response = client.post(
         "/events/EVT-001/assign-coordinator/user-123",
-        json={"actingUserId": "user-manager"},
+        json={"actingUserId": "user-lead"},
     )
 
     assert response.status_code == 500
@@ -163,18 +163,18 @@ def test_assign_coordinator_handles_acting_user_lookup_error(mock_get_user, mock
 @patch("app.routes.get_user")
 def test_lead_can_assign_an_event_to_themselves(mock_get_user, mock_get_coordinators, mock_assign):
     """The Lead appears in the assignable pool, so self-assignment succeeds."""
-    mock_get_user.return_value = MANAGER
-    mock_get_coordinators.return_value = [MANAGER, COORDINATOR]
-    mock_assign.return_value = {"eventId": "EVT-001", "assignedCoordinatorId": "user-manager"}
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [LEAD, COORDINATOR]
+    mock_assign.return_value = {"eventId": "EVT-001", "assignedCoordinatorId": "user-lead"}
 
     client = create_app().test_client()
     response = client.post(
-        "/events/EVT-001/assign-coordinator/user-manager",
-        json={"actingUserId": "user-manager"},
+        "/events/EVT-001/assign-coordinator/user-lead",
+        json={"actingUserId": "user-lead"},
     )
 
     assert response.status_code == 200
-    mock_assign.assert_called_once_with("EVT-001", "user-manager")
+    mock_assign.assert_called_once_with("EVT-001", "user-lead", "user-lead")
 
 
 ORGANISER = {"user_id": "user-organiser", "username": "Priya Nair", "role": "Event Organiser"}
@@ -184,15 +184,15 @@ ORGANISER = {"user_id": "user-organiser", "username": "Priya Nair", "role": "Eve
 @patch("app.routes.get_user")
 def test_lead_sees_the_unassigned_queue(mock_get_user, mock_get_unassigned):
     """The Lead gets the submitted events that still need a coordinator."""
-    mock_get_user.return_value = MANAGER
+    mock_get_user.return_value = LEAD
     mock_get_unassigned.return_value = [{"id": "EVT-001", "coordinatorId": None}]
 
     client = create_app().test_client()
-    response = client.get("/queue?actingUserId=user-manager")
+    response = client.get("/queue?actingUserId=user-lead")
 
     assert response.status_code == 200
     assert response.json == {"events": [{"id": "EVT-001", "coordinatorId": None}]}
-    mock_get_user.assert_called_once_with("user-manager")
+    mock_get_user.assert_called_once_with("user-lead")
 
 
 @pytest.mark.parametrize("acting_user", [COORDINATOR, ORGANISER, None])
@@ -218,7 +218,7 @@ def test_queue_requires_acting_user_id():
 @patch("app.routes.get_user")
 def test_queue_handles_acting_user_lookup_error(mock_get_user):
     mock_get_user.side_effect = Exception("User Service unreachable")
-    response = create_app().test_client().get("/queue?actingUserId=user-manager")
+    response = create_app().test_client().get("/queue?actingUserId=user-lead")
     assert response.status_code == 500
     assert "Failed to validate acting user" in response.json["error"]
 
@@ -226,8 +226,26 @@ def test_queue_handles_acting_user_lookup_error(mock_get_user):
 @patch("app.routes.get_unassigned_events")
 @patch("app.routes.get_user")
 def test_queue_handles_event_service_error(mock_get_user, mock_get_unassigned):
-    mock_get_user.return_value = MANAGER
+    mock_get_user.return_value = LEAD
     mock_get_unassigned.side_effect = Exception("Event Service down")
-    response = create_app().test_client().get("/queue?actingUserId=user-manager")
+    response = create_app().test_client().get("/queue?actingUserId=user-lead")
     assert response.status_code == 500
     assert "Failed to fetch unassigned events" in response.json["error"]
+
+
+@patch("app.routes.assign_event_coordinator")
+@patch("app.routes.get_available_coordinators")
+@patch("app.routes.get_user")
+def test_assign_coordinator_handles_event_service_error(mock_get_user, mock_get_coordinators, mock_assign):
+    """If Event Service can't save the assignment, the Lead gets an error, not a false success."""
+    mock_get_user.return_value = LEAD
+    mock_get_coordinators.return_value = [COORDINATOR]
+    mock_assign.side_effect = Exception("Event Service down")
+
+    response = create_app().test_client().post(
+        "/events/EVT-001/assign-coordinator/user-coordinator",
+        json={"actingUserId": "user-lead"},
+    )
+
+    assert response.status_code == 500
+    assert "Failed to assign coordinator to event" in response.json["error"]

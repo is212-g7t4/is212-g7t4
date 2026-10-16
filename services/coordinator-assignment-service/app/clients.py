@@ -36,11 +36,11 @@ def get_user(user_id: str) -> dict | None:
     return response.json()
 
 
-def assign_event_coordinator(event_id: str, coordinator_id: str) -> dict:
-    """Update the coordinator for an event in Event Service."""
+def assign_event_coordinator(event_id: str, coordinator_id: str, assigned_by: str) -> dict:
+    """Update the coordinator for an event in Event Service, recording who assigned them."""
     response = httpx.patch(
         f"{EVENT_SERVICE_URL}/events/{event_id}",
-        json={"assignedCoordinatorId": coordinator_id}
+        json={"assignedCoordinatorId": coordinator_id, "assignedBy": assigned_by}
     )
     response.raise_for_status()
     return response.json()

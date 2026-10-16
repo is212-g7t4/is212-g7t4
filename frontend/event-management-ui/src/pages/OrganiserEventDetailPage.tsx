@@ -54,7 +54,7 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
-      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
+      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} />
 
       <div className="event-card-section">
         <h3>Registrations</h3>

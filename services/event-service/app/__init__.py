@@ -304,15 +304,22 @@ def create_app(config=None):
     def assign_coordinator(event_id):
         data = request.get_json(silent=True)
         coordinator_id = data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
+        assigned_by = data.get("assignedBy", "") if isinstance(data, dict) else ""
         try:
             coordinator_id = str(UUID(coordinator_id))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid coordinator ID is required."), 400
+        # Who made the assignment is shown on the event's detail page, so it
+        # is required rather than left blank.
+        try:
+            assigned_by = str(UUID(assigned_by))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid assigning user ID is required."), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         try:
             assigned = update_event_coordinator(
-                app.config["DATABASE_URL"], str(event_id), coordinator_id
+                app.config["DATABASE_URL"], str(event_id), coordinator_id, assigned_by
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
