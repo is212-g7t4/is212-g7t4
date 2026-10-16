@@ -232,7 +232,9 @@ def update_booking(
     if response.status_code == 404:
         raise BookingNotFoundError
     if response.status_code == 409:
-        if response.json().get("message", "").startswith("Cancelled"):
+        if response.json().get("code") == "BOOKING_IMMUTABLE" or response.json().get(
+            "message", ""
+        ).startswith("Cancelled"):
             raise BookingStateError
         raise BookingConflictError(_conflict_types(response))
     response.raise_for_status()
@@ -247,6 +249,11 @@ def cancel_booking(booking_id: str, event_id: str) -> dict:
     )
     if response.status_code == 404:
         raise BookingNotFoundError
+    if (
+        response.status_code == 409
+        and response.json().get("code") == "BOOKING_IMMUTABLE"
+    ):
+        raise BookingStateError
     response.raise_for_status()
     return response.json()
 
@@ -271,7 +278,9 @@ def decide_booking(
     if response.status_code == 404:
         raise BookingNotFoundError
     if response.status_code == 409:
-        if response.json().get("message", "").startswith("Cancelled"):
+        if response.json().get("code") == "BOOKING_IMMUTABLE" or response.json().get(
+            "message", ""
+        ).startswith("Cancelled"):
             raise BookingStateError
         raise BookingConflictError(_conflict_types(response))
     response.raise_for_status()

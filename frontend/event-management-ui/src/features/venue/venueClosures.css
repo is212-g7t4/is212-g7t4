@@ -107,6 +107,16 @@
 .venue-closures .closure-list small { color: var(--color-muted); }
 .venue-closures .closure-list + .button { margin-top: var(--space-4); }
 .venue-closures .closure-success { padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); background: var(--color-success-soft); color: var(--color-success); }
+.venue-closures .closure-confirmation {
+  padding: var(--space-4); border: 2px solid var(--color-primary-dark);
+  border-radius: var(--radius-sm); background: var(--color-surface); min-width: 0;
+  overflow-wrap: anywhere;
+}
+.venue-closures .closure-confirmation:focus-visible,
+.venue-closures .closure-impact-list:focus-visible { outline: 2px solid var(--color-primary-dark); outline-offset: 3px; }
+.venue-closures .closure-impact-list { max-height: 320px; overflow-y: auto; padding-left: 24px; }
+.venue-closures .closure-impact-list li { padding: 12px 4px; border-bottom: 1px solid var(--color-border); }
+.venue-closures .closure-impact-list p { margin: 4px 0; }
 @media (max-width: 600px) {
   .venue-closures { padding: var(--space-4); }
   .venue-closures .closure-section-header { align-items: stretch; }

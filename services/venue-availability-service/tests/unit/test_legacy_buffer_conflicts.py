@@ -1,4 +1,11 @@
-"""SCRUM-155: identify legacy conflicts without altering bookings."""
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-155 regression; no direct SCRUM-171 AC:** buffer-only conflict detection, half-open effective windows, original booking information, owned-marker cleanup, buffer validation, lookup and route contracts. Existing AC labels below belong to SCRUM-155.
+- **SCRUM-171 integration compatibility:** stale-marker cleanup still makes exactly two booking queries, excluding the newly required advisory gate. The marker predicate and venue parameter assertions remain unchanged. This is not AC2 closure-time preservation.
+
+## Existing test contract
+
+SCRUM-155: identify legacy conflicts without altering bookings."""
 
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -110,10 +117,11 @@ def test_reconciliation_clears_only_its_own_stale_marker(monkeypatch):
     result = reconcile_legacy_conflicts("test", VENUE_ID, 0, 0)
 
     assert result["conflicts"] == []
-    clear_sql, clear_params = cursor.execute.call_args_list[1].args
+    booking_queries = [call for call in cursor.execute.call_args_list if "pg_advisory_xact_lock" not in call.args[0]]
+    clear_sql, clear_params = booking_queries[1].args
     assert "conflict_reason = 'BUFFER_OVERLAP'" in clear_sql
     assert clear_params == [VENUE_ID]
-    assert len(cursor.execute.call_args_list) == 2
+    assert len(booking_queries) == 2
 
 
 def test_buffer_parser_rejects_every_invalid_shape():

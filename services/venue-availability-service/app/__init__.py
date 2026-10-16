@@ -74,6 +74,7 @@ def create_app(config=None):
     app.config["VENUE_CLOSURE_DEV_MODE"] = os.getenv("VENUE_CLOSURE_DEV_MODE") == "true"
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
+        CLOSURE_CONFIRMATION_KEY=os.getenv("CLOSURE_CONFIRMATION_KEY"),
         CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
         # The Vite dev server is pinned to 5174 (strictPort in
         # vite.config.ts), so that is the origin the browser sends.
@@ -453,7 +454,13 @@ def create_app(config=None):
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found for this event."), 404
         except BookingStateError:
-            return jsonify(message="Cancelled venue bookings cannot be modified."), 409
+            return (
+                jsonify(
+                    message="Cancelled or Rejected venue bookings cannot be modified.",
+                    code="BOOKING_IMMUTABLE",
+                ),
+                409,
+            )
         except BookingConflictError as error:
             return jsonify(
                 message="This venue is unavailable for the requested time.",
@@ -475,6 +482,14 @@ def create_app(config=None):
         try:
             booking = cancel_booking(
                 app.config["DATABASE_URL"], str(booking_id), event_id
+            )
+        except BookingStateError:
+            return (
+                jsonify(
+                    message="Rejected venue bookings cannot be cancelled.",
+                    code="BOOKING_IMMUTABLE",
+                ),
+                409,
             )
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found for this event."), 404
@@ -521,7 +536,13 @@ def create_app(config=None):
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found."), 404
         except BookingStateError:
-            return jsonify(message="Cancelled venue bookings cannot be reviewed."), 409
+            return (
+                jsonify(
+                    message="Cancelled or Rejected venue bookings cannot be reviewed.",
+                    code="BOOKING_IMMUTABLE",
+                ),
+                409,
+            )
         except BookingConflictError as error:
             return jsonify(
                 message="This venue is unavailable for the requested time.",

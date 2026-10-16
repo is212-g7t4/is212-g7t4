@@ -11,10 +11,10 @@ an unapproved venue.
 """
 from datetime import datetime
 
-# A booking the event no longer relies on: withdrawn by the coordinator, or
-# lapsed. Same set `venue-availability-service` already treats as inactive.
+# A venue booking the event no longer relies on: withdrawn, lapsed, or
+# retained rejected history. A separate live replacement still needs approval.
 # ('On Hold' rows are never returned for an event, so they can't appear here.)
-IGNORED_BOOKING_STATUSES = frozenset({"Cancelled", "Expired"})
+IGNORED_BOOKING_STATUSES = frozenset({"Cancelled", "Expired", "Rejected"})
 APPROVED_BOOKING_STATUSES = frozenset({"Approved"})
 
 # 'Reserved' is the Jira/db-structure.md wording for an allocated request; no
@@ -33,7 +33,6 @@ NO_VENUE_BOOKING = {
 VENUE_REASONS = {
     "Pending Review": "Waiting for Venue Staff approval.",
     "Pending": "Waiting for Venue Staff approval.",
-    "Rejected": "Rejected by Venue Staff. Cancel this booking or book another venue.",
 }
 EQUIPMENT_REASONS = {
     "Pending": "Waiting for Technical Support approval.",
