@@ -52,6 +52,8 @@ export const test = base.extend<{ mockApi: (page: Page) => Promise<void>; unmock
           return route.abort()
         })
       }
+      // App-shell poll that runs on every page for coordinators; tests override it to show an alert.
+      await mock(page, 'availability', '/venue-holds/reminders', (route) => json(route, { reminders: [] }))
     })
   },
 })
