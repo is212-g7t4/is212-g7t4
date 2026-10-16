@@ -29,6 +29,8 @@ def venue_row(**overrides):
         "accessibility": "Wheelchair accessible, elevator access",
         "supported_layouts": ["theatre", "banquet", "classroom"],
         "operational_status": "Available",
+        "setup_time_minutes": 30,
+        "turnaround_time_minutes": 45,
     }
     row.update(overrides)
     return row
@@ -64,6 +66,8 @@ def test_ac1_returns_all_venue_characteristics(setup):
         "accessibility": "Wheelchair accessible, elevator access",
         "supportedLayouts": ["theatre", "banquet", "classroom"],
         "status": "Available",
+        "setupTimeMinutes": 30,
+        "turnaroundTimeMinutes": 45,
     }
 
 
