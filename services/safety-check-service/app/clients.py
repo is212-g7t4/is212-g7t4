@@ -20,6 +20,7 @@ SAFETY_CHECK_RECORD_SERVICE_URL = (
     os.environ.get("SAFETY_CHECK_RECORD_SERVICE_URL") or "http://localhost:5013"
 )
 USER_SERVICE_URL = os.environ.get("USER_SERVICE_URL") or "http://localhost:5001"
+VENUE_SERVICE_URL = os.environ.get("VENUE_SERVICE_URL") or "http://localhost:5006"
 
 # Shared with Event Service: proves to it that a call to
 # PATCH /events/<id>/safety-status came from this workflow, not a direct
@@ -134,6 +135,23 @@ def get_event(event_id: str, viewer_id: str, viewer_role: str = None) -> dict:
     if response.status_code == 403:
         raise EventNotAssignedError
     return _ok(response).json()
+
+
+def list_events_by_status(status: str, viewer_id: str, viewer_role: str) -> list:
+    """Every event in `status`, read as a role that may see all events (SCRUM-162).
+
+    Event Service answers 403 when `viewer_role` isn't one of its
+    `ALL_EVENTS_ROLES`; that can only be a misconfiguration here, so it is a
+    plain `DownstreamError`.
+    """
+    response = _ok(
+        _send(
+            "GET",
+            f"{EVENT_SERVICE_URL}/events",
+            params={"coordinatorId": viewer_id, "viewerRole": viewer_role, "status": status},
+        )
+    )
+    return response.json()["events"]
 
 
 def set_event_safety_status(
@@ -317,3 +335,16 @@ def get_user(user_id: str) -> dict:
     if response.status_code == 404:
         raise UserNotFoundError
     return _ok(response).json()
+
+
+# --- Venue Service (atomic, 5006) -------------------------------------------
+
+
+def list_venues() -> list:
+    """The whole venue catalogue, unfiltered — only to name the queue's venues (SCRUM-162).
+
+    One call for the catalogue rather than one per booked venue: it is small,
+    and the queue would otherwise cost a call per booking.
+    """
+    response = _ok(_send("GET", f"{VENUE_SERVICE_URL}/venues"))
+    return response.json()["venues"]

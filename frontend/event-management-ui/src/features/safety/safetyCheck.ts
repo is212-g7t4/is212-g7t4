@@ -86,6 +86,21 @@ export interface SafetyRejectionRelease {
   equipment: string
 }
 
+/** One row of the Safety Officer's queue (SCRUM-162). */
+export interface SafetyQueueItem {
+  eventId: string
+  eventName: string
+  preferredStartDate: string
+  preferredEndDate: string
+  expectedAttendance: string
+  venues: { id: string; name: string }[]
+  safetyCheckId: string
+  /** When the open round was submitted — a resubmission's own date, not the first. */
+  submittedAt: string | null
+  roundNumber: number
+  resubmission: boolean
+}
+
 export const NOTES_LIMIT = 2000
 
 /**
@@ -135,6 +150,16 @@ export async function fetchSafetyReadiness(
 ): Promise<SafetyReadiness> {
   const params = new URLSearchParams({ eventId, coordinatorId })
   return (await request(`/safety-checks/readiness?${params.toString()}`)) as SafetyReadiness
+}
+
+/**
+ * SCRUM-162: events awaiting a safety check, nearest event date first. The
+ * service checks the role itself and sorts the list; the page only renders it.
+ */
+export async function fetchSafetyQueue(safetyOfficerId: string): Promise<SafetyQueueItem[]> {
+  const params = new URLSearchParams({ safetyOfficerId })
+  const body = await request(`/safety-checks/queue?${params.toString()}`)
+  return body.events as SafetyQueueItem[]
 }
 
 /** Submit the event for its safety check (AC1, AC3). */

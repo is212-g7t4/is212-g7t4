@@ -42,6 +42,8 @@ NOT_SAFETY_OFFICER = (
 )
 UNREADABLE_ARRANGEMENTS = "Unable to check the event's arrangements right now."
 UNREADABLE_ROLE = "Unable to check the caller's role right now."
+UNREADABLE_QUEUE = "Unable to load the safety check queue right now."
+QUEUE_WORKERS = 8
 
 
 @bp.get("/health")
@@ -416,6 +418,109 @@ def safety_check_readiness():
         outstanding=outstanding,
         openSafetyCheck=open_round,
     ), 200
+
+
+@bp.get("/safety-checks/queue")
+def safety_check_queue():
+    """SCRUM-162: the events awaiting an Operational Safety Check, nearest first.
+
+    Query: `safetyOfficerId`. Only events 'Pending Safety Check' are listed
+    (AC1) — so a decided event drops out as soon as its status moves (AC4).
+    Each entry carries the event's name, date/time, venues and expected
+    attendance, plus the open round's submission time (AC2) and whether it
+    is a resubmission, i.e. not the first round (AC3).
+
+    Read-only, and fails closed like the rest of this service: if any part
+    can't be read the whole queue is a 502/504, never a partial list that
+    silently omits an event.
+    """
+    safety_officer_id = _uuid_or_none(request.args.get("safetyOfficerId"))
+    if not safety_officer_id:
+        return jsonify(message="safetyOfficerId must be a valid UUID."), 400
+    failure = _check_safety_officer(safety_officer_id)
+    if failure:
+        return failure
+
+    try:
+        with ThreadPoolExecutor(max_workers=QUEUE_WORKERS) as pool:
+            events_call = pool.submit(
+                clients.list_events_by_status,
+                PENDING_SAFETY_CHECK,
+                safety_officer_id,
+                SAFETY_OFFICER,
+            )
+            venues_call = pool.submit(clients.list_venues)
+            events = events_call.result()
+            venue_names = {venue["id"]: venue["name"] for venue in venues_call.result()}
+            # Each event needs its open round and its bookings; they're all
+            # independent, so the queue costs the slowest read, not the sum.
+            calls = [
+                (
+                    found,
+                    pool.submit(
+                        clients.list_safety_check_records, found["id"], "Pending"
+                    ),
+                    pool.submit(clients.get_event_venue_bookings, found["id"]),
+                )
+                for found in events
+            ]
+            details = [
+                (found, rounds_call.result(), bookings_call.result())
+                for found, rounds_call, bookings_call in calls
+            ]
+    except clients.DownstreamTimeout:
+        return jsonify(message=UNREADABLE_QUEUE), 504
+    except Exception:  # noqa: BLE001 — don't leak the URL or error text
+        return jsonify(message=UNREADABLE_QUEUE), 502
+
+    queue = []
+    for found, rounds, bookings in details:
+        if not rounds:
+            # Out of step: the event says it's waiting but no round is open,
+            # so there is nothing a Safety Officer could decide. Leave it
+            # out rather than show a row with no submission date.
+            logger.warning(
+                "Event %s is 'Pending Safety Check' but has no open safety "
+                "check round; left out of the queue.",
+                found["id"],
+            )
+            continue
+        queue.append(_queue_entry(found, rounds[0], bookings, venue_names))
+
+    # AC2: nearest event date first. Event Service already returns its list
+    # in this order, but the contract belongs here; an undated event goes last.
+    queue.sort(
+        key=lambda entry: (
+            not entry["preferredStartDate"],
+            entry["preferredStartDate"],
+            entry["eventId"],
+        )
+    )
+    return jsonify(events=queue), 200
+
+
+def _queue_entry(event, open_round, bookings, venue_names):
+    """One queue row: the event, its live venues and its open round."""
+    venues = []
+    seen = set()
+    for booking in bookings:
+        venue_id = booking.get("venueId")
+        if booking.get("status") in RELEASED_BOOKING_STATUSES or venue_id in seen:
+            continue
+        seen.add(venue_id)
+        venues.append({"id": venue_id, "name": venue_names.get(venue_id) or "Unknown venue"})
+    return {
+        "eventId": event["id"],
+        "eventName": event.get("eventName") or "",
+        "preferredStartDate": event.get("preferredStartDate") or "",
+        "preferredEndDate": event.get("preferredEndDate") or "",
+        "expectedAttendance": event.get("expectedAttendance") or "",
+        "venues": venues,
+        "safetyCheckId": open_round["id"],
+        "submittedAt": open_round.get("submittedAt"),
+        "roundNumber": open_round["roundNumber"],
+        "resubmission": open_round["roundNumber"] > 1,
+    }
 
 
 # --- Steps shared by both routes --------------------------------------------

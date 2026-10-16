@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import {
   SafetySubmitError,
   approveSafetyCheck,
+  fetchSafetyQueue,
   fetchSafetyReadiness,
   rejectSafetyCheck,
   requestSafetyChanges,
@@ -41,6 +42,24 @@ test('readiness is read from Safety Check Service with both identifiers', async 
   expect(String(url)).toBe(
     `http://localhost:5012/safety-checks/readiness?eventId=${eventId}&coordinatorId=${coordinatorId}`,
   )
+})
+
+test('SCRUM-162: the queue is read from Safety Check Service as the officer', async () => {
+  const events = [{ eventId, eventName: 'Community Workshop', resubmission: false }]
+  vi.stubGlobal('fetch', respond(200, { events }))
+
+  expect(await fetchSafetyQueue(officerId)).toEqual(events)
+  const [url] = vi.mocked(fetch).mock.calls[0]
+  expect(String(url)).toBe(`http://localhost:5012/safety-checks/queue?safetyOfficerId=${officerId}`)
+})
+
+test('SCRUM-162: a queue refusal carries the service message', async () => {
+  vi.stubGlobal('fetch', respond(403, { code: 'NOT_SAFETY_OFFICER', message: 'Only a Safety Officer can decide.' }))
+
+  await expect(fetchSafetyQueue(officerId)).rejects.toMatchObject({
+    code: 'NOT_SAFETY_OFFICER',
+    message: 'Only a Safety Officer can decide.',
+  })
 })
 
 test('AC3: both note fields are sent with the submission', async () => {
