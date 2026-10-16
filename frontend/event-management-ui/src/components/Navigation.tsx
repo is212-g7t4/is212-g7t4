@@ -46,7 +46,7 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
           <NavButton active={route === 'equipment'} onClick={() => onNavigate('equipment')} icon={<ListIcon size={17} />}>Equipment</NavButton>
         )}
         {(canManageEquipment(role) || role === 'Event Coordinator') && (
-          <NavButton active={route === 'equipmentRequests'} onClick={() => onNavigate('equipmentRequests')} icon={<CheckIcon size={17} />}>Equipment requests</NavButton>
+          <NavButton active={route === 'equipmentRequests' || route === 'newEquipmentRequest'} onClick={() => onNavigate('equipmentRequests')} icon={<CheckIcon size={17} />}>Equipment requests</NavButton>
         )}
         {role === 'Safety Officer' && (
           <NavButton active={route === 'safetyChecks'} onClick={() => onNavigate('safetyChecks')} icon={<CheckIcon size={17} />}>Safety checks</NavButton>

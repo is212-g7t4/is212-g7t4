@@ -10,6 +10,8 @@ load_dotenv()
 from app.models import (
     RequestAlreadyReviewedError,
     RequestNotFoundError,
+    UnknownReferenceError,
+    create_requests,
     get_request,
     list_requests,
     review_event_requests,
@@ -20,6 +22,9 @@ STATUSES = ("Pending", "Approved", "Rejected")
 DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
 READ_ROLES = REVIEW_ROLES | {"Event Coordinator"}
+CREATE_ROLES = {"Event Coordinator"}
+MAX_ITEMS = 50
+MAX_REQUIREMENTS_LENGTH = 1000
 
 
 def _uuid_or_none(value):
@@ -27,6 +32,32 @@ def _uuid_or_none(value):
         return str(uuid.UUID(value or ""))
     except (ValueError, AttributeError, TypeError):
         return None
+
+
+def _validate_items(payload):
+    """Return (items, error) for a {items: [{equipmentId, quantityRequested, technicalRequirements?}]} body."""
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not items:
+        return None, "Add at least one equipment item."
+    if len(items) > MAX_ITEMS:
+        return None, f"A request can include at most {MAX_ITEMS} equipment items."
+    cleaned = []
+    for item in items:
+        if not isinstance(item, dict):
+            return None, "Each equipment item must be an object."
+        equipment_id = _uuid_or_none(item.get("equipmentId"))
+        if not equipment_id:
+            return None, "Each equipment item needs a valid equipmentId."
+        quantity = item.get("quantityRequested")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            return None, "Quantity must be a whole number of at least 1."
+        requirements = item.get("technicalRequirements") or ""
+        if not isinstance(requirements, str) or len(requirements.strip()) > MAX_REQUIREMENTS_LENGTH:
+            return None, f"Technical requirements must be text of {MAX_REQUIREMENTS_LENGTH} characters or fewer."
+        cleaned.append({"equipmentId": equipment_id, "quantityRequested": quantity, "technicalRequirements": requirements.strip()})
+    if len({item["equipmentId"] for item in cleaned}) != len(cleaned):
+        return None, "Each equipment item can appear only once in a request."
+    return cleaned, None
 
 
 def create_app(config=None):
@@ -51,7 +82,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Headers"] = (
                 "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
             )
-            response.headers["Access-Control-Allow-Methods"] = "GET, PATCH, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
         return response
@@ -113,6 +144,24 @@ def create_app(config=None):
             return jsonify(request=get_request(app.config["DATABASE_URL"], request_id))
         except RequestNotFoundError:
             return jsonify(message="Equipment request not found."), 404
+
+    @app.post("/events/<event_id>/equipment-requests")
+    def event_requests_create(event_id):
+        # Assignment, event status and equipment availability are checked by Equipment Reservation Service.
+        requester_id, failure = authorise(CREATE_ROLES, "Only Event Coordinators can request equipment.")
+        if failure:
+            return failure
+        event_id = _uuid_or_none(event_id)
+        if not event_id:
+            return jsonify(message="The event ID must be a valid UUID."), 400
+        items, error = _validate_items(request.get_json(silent=True))
+        if error:
+            return jsonify(message=error), 400
+        try:
+            created = create_requests(app.config["DATABASE_URL"], event_id, items, requester_id)
+        except UnknownReferenceError:
+            return jsonify(message="The event, requester or an equipment item no longer exists."), 404
+        return jsonify(requests=created), 201
 
     @app.patch("/events/<event_id>/equipment-requests")
     def event_requests_review(event_id):

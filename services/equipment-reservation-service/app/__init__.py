@@ -23,7 +23,7 @@ def create_app(config=None) -> Flask:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
-            response.headers["Access-Control-Allow-Methods"] = "GET, PATCH, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
         return response

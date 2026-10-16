@@ -1,7 +1,11 @@
 import type { User } from '../../types'
+import { eventApi } from '../event/submission'
+import type { SubmittedEvent } from '../event/submission'
 
 export const REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected'] as const
 export type EquipmentRequestStatus = (typeof REQUEST_STATUSES)[number]
+
+export const REQUESTABLE_EVENT_STATUSES = ['Under Review'] as const
 
 export interface RequestAvailability {
   reservedQuantity: number
@@ -68,5 +72,28 @@ export async function reviewAllEventEquipmentRequests(eventId: string, status: '
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to update this event\'s equipment requests.')
+  return body.requests as ReviewedRequest[]
+}
+
+export interface NewEquipmentRequestItem {
+  equipmentId: string
+  quantityRequested: number
+  technicalRequirements: string
+}
+
+/** Events assigned to the coordinator that can still take equipment requests. */
+export async function fetchRequestableEvents(coordinatorId: string): Promise<SubmittedEvent[]> {
+  const body = await eventApi(`/events?coordinatorId=${encodeURIComponent(coordinatorId)}`)
+  return (body.events as SubmittedEvent[]).filter((event) => (REQUESTABLE_EVENT_STATUSES as readonly string[]).includes(event.status))
+}
+
+export async function createEquipmentRequests(eventId: string, items: NewEquipmentRequestItem[], user: Pick<User, 'id' | 'role'>): Promise<ReviewedRequest[]> {
+  const response = await fetch(`${serviceUrl()}/equipment-reservations/events/${encodeURIComponent(eventId)}/requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...devHeaders(user) },
+    body: JSON.stringify({ items }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.message || 'Unable to submit this equipment request.')
   return body.requests as ReviewedRequest[]
 }

@@ -11,6 +11,9 @@ STATUSES = ("Pending", "Approved", "Rejected")
 DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
 READ_ROLES = REVIEW_ROLES | {"Event Coordinator"}
+CREATE_ROLES = {"Event Coordinator"}
+MAX_ITEMS = 50
+MAX_REQUIREMENTS_LENGTH = 1000
 
 
 def _uuid_or_none(value):
@@ -18,6 +21,32 @@ def _uuid_or_none(value):
         return str(uuid.UUID(value or ""))
     except (ValueError, AttributeError, TypeError):
         return None
+
+
+def _validate_items(payload):
+    """Return (items, error) for a {items: [{equipmentId, quantityRequested, technicalRequirements?}]} body."""
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not items:
+        return None, "Add at least one equipment item."
+    if len(items) > MAX_ITEMS:
+        return None, f"A request can include at most {MAX_ITEMS} equipment items."
+    cleaned = []
+    for item in items:
+        if not isinstance(item, dict):
+            return None, "Each equipment item must be an object."
+        equipment_id = _uuid_or_none(item.get("equipmentId"))
+        if not equipment_id:
+            return None, "Each equipment item needs a valid equipmentId."
+        quantity = item.get("quantityRequested")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            return None, "Quantity must be a whole number of at least 1."
+        requirements = item.get("technicalRequirements") or ""
+        if not isinstance(requirements, str) or len(requirements.strip()) > MAX_REQUIREMENTS_LENGTH:
+            return None, f"Technical requirements must be text of {MAX_REQUIREMENTS_LENGTH} characters or fewer."
+        cleaned.append({"equipmentId": equipment_id, "quantityRequested": quantity, "technicalRequirements": requirements.strip()})
+    if len({item["equipmentId"] for item in cleaned}) != len(cleaned):
+        return None, "Each equipment item can appear only once in a request."
+    return cleaned, None
 
 
 def _authorise(allowed_roles, denied_message):
@@ -44,6 +73,11 @@ def downstream_failure(error):
 @bp.errorhandler(reservations.InsufficientStockError)
 def insufficient_stock(error):
     return jsonify(message=str(error)), 409
+
+
+@bp.errorhandler(reservations.RequestNotAllowedError)
+def request_not_allowed(error):
+    return jsonify(message=error.message), error.status
 
 
 @bp.get("/health")
@@ -93,3 +127,19 @@ def event_review(event_id):
     if not status:
         return jsonify(message=f"status must be one of: {', '.join(DECISIONS)}."), 400
     return jsonify(requests=reservations.review_event(request.headers, event_id, status))
+
+
+@bp.post("/equipment-reservations/events/<event_id>/requests")
+def event_requests_create(event_id):
+    failure = _authorise(CREATE_ROLES, "Only Event Coordinators can request equipment.")
+    if failure:
+        return failure
+    event_id = _uuid_or_none(event_id)
+    if not event_id:
+        return jsonify(message="The event ID must be a valid UUID."), 400
+    items, error = _validate_items(request.get_json(silent=True))
+    if error:
+        return jsonify(message=error), 400
+    coordinator_id = _uuid_or_none(request.headers["X-Dev-User-Id"])
+    created = reservations.create_requests(request.headers, coordinator_id, event_id, items)
+    return jsonify(requests=created), 201

@@ -69,6 +69,11 @@ def review_event_requests(headers, event_id, status):
     return body["requests"]
 
 
+def create_event_requests(headers, event_id, items):
+    body = _call("POST", _request_service(f"/events/{event_id}/equipment-requests"), json={"items": items}, headers=_identity(headers))
+    return body["requests"]
+
+
 # Event Service (atomic): names, status and time windows.
 def _event_service(path):
     return f"{_base('EVENT_SERVICE_URL', 'http://localhost:5003')}{path}"
@@ -82,13 +87,16 @@ def get_event_summaries(event_ids):
     return summaries
 
 
-def list_assigned_event_ids(coordinator_id):
-    events = _call(
+def list_assigned_events(coordinator_id):
+    return _call(
         "GET",
         _event_service("/events"),
         params={"coordinatorId": coordinator_id},
     )["events"]
-    return [event["id"] for event in events]
+
+
+def list_assigned_event_ids(coordinator_id):
+    return [event["id"] for event in list_assigned_events(coordinator_id)]
 
 
 def get_overlapping_events(start, end, statuses, exclude_event_id):
