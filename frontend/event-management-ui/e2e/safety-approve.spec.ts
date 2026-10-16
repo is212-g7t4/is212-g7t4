@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { allUsers, asUser, json, makeEvent, mock, mockSafetyQueue, test, expect, users } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, test, expect, users } from './fixtures'
 
 // SCRUM-150: a Safety Officer approves an event's Operational Safety Check.
 // Every backend call is mocked (see fixtures.ts), so this needs no running
@@ -31,7 +31,6 @@ async function openAsSafetyOfficer(page: Page, mockApi: MockApi, events: Record<
   await asUser(page, users.safetyOfficer.user_id)
   await mock(page, 'user', '/users', (route) => json(route, { users: allUsers }))
   await mock(page, 'event', '/events', (route) => json(route, { events }))
-  await mockSafetyQueue(page, () => events.filter((event) => event.status === 'Pending Safety Check'))
   for (const event of events) {
     await mock(page, 'event', `/events/${event.id}`, (route) => json(route, event))
   }

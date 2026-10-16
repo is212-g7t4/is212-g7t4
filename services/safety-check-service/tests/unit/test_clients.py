@@ -593,53 +593,6 @@ def test_get_user_failure_is_a_downstream_error(sent):
         clients.get_user(OFFICER_ID)
 
 
-# --- SCRUM-162: the queue's reads ----------------------------------------------
-
-
-def test_list_events_by_status_reads_as_the_viewer_role(sent):
-    """The officer isn't anyone's coordinator, so viewerRole lets them see all events."""
-    calls, queue = sent
-    queue.append(Response(200, {"events": [event("Pending Safety Check")]}))
-
-    found = clients.list_events_by_status("Pending Safety Check", OFFICER_ID, "Safety Officer")
-
-    assert found[0]["status"] == "Pending Safety Check"
-    assert calls[0]["method"] == "GET"
-    assert calls[0]["url"].endswith("/events")
-    assert calls[0]["params"] == {
-        "coordinatorId": OFFICER_ID,
-        "viewerRole": "Safety Officer",
-        "status": "Pending Safety Check",
-    }
-
-
-@pytest.mark.parametrize("status", [400, 403, 503])
-def test_list_events_by_status_failure_is_a_downstream_error(status, sent):
-    _, queue = sent
-    queue.append(Response(status, {"message": "no"}))
-
-    with pytest.raises(clients.DownstreamError):
-        clients.list_events_by_status("Pending Safety Check", OFFICER_ID, "Safety Officer")
-
-
-def test_list_venues_reads_the_whole_catalogue(sent):
-    calls, queue = sent
-    queue.append(Response(200, {"venues": [{"id": "v1", "name": "Main Hall"}]}))
-
-    assert clients.list_venues() == [{"id": "v1", "name": "Main Hall"}]
-    assert calls[0]["method"] == "GET"
-    assert calls[0]["url"].endswith("/venues")
-    assert "params" not in calls[0]
-
-
-def test_list_venues_failure_is_a_downstream_error(sent):
-    _, queue = sent
-    queue.append(Response(503, {"message": "down"}))
-
-    with pytest.raises(clients.DownstreamError):
-        clients.list_venues()
-
-
 # --- Transport failures ------------------------------------------------------
 
 
@@ -668,4 +621,3 @@ def test_default_urls_are_the_host_ports():
     assert clients.EQUIPMENT_REQUEST_SERVICE_URL.endswith((":5011", ":5000"))
     assert clients.SAFETY_CHECK_RECORD_SERVICE_URL.endswith((":5013", ":5000"))
     assert clients.USER_SERVICE_URL.endswith((":5001", ":5000"))
-    assert clients.VENUE_SERVICE_URL.endswith((":5006", ":5000"))
