@@ -20,6 +20,9 @@ vi.mock('../features/safety/SafetySubmitPanel', () => ({
 vi.mock('../features/safety/SafetyDecisionPanel', () => ({
   SafetyDecisionPanel: () => <h4>Operational Safety Check</h4>,
 }))
+vi.mock('../features/safety/SafetyReview', () => ({
+  SafetyReview: () => <h3>Safety review information</h3>,
+}))
 // SCRUM-153: and likewise, this file covers *who* gets the Edit details button
 // and what the action history renders; the dialog's two-step save is
 // EventEditDialog.test.tsx.
@@ -261,6 +264,8 @@ test('SCRUM-150 AC3: a Safety Officer sees the Approve panel on a pending event'
   await screen.findByRole('heading', { name: 'Community Workshop' })
 
   expect(screen.getByRole('heading', { name: 'Operational Safety Check' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Safety review information' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument()
   // The generic waiting note is the coordinator's message, not shown here.
   expect(screen.queryByText("This event is waiting for the Safety Officer's decision.")).not.toBeInTheDocument()
 })

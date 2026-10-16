@@ -147,6 +147,7 @@ services:
       SAFETY_CHECK_RECORD_SERVICE_URL: "http://safety-check-record-service:5000"
       USER_SERVICE_URL: "http://user-service:5000"
       VENUE_SERVICE_URL: "http://venue-service:5000"
+      EQUIPMENT_SERVICE_URL: "http://equipment-service:5000"
       INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
     depends_on:
       - event-service
@@ -155,5 +156,6 @@ services:
       - safety-check-record-service
       - user-service
       - venue-service
+      - equipment-service
     ports:
       - "5012:5000"
