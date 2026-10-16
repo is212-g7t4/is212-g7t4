@@ -87,5 +87,25 @@ export function mockSafetyReadiness(
   }))
 }
 
+// SCRUM-162: the Safety Officer's queue, built by Safety Check Service. Pass
+// events in the order the service would return them (nearest first); any
+// overrides (venues, roundNumber, resubmission) go on the event itself.
+export function mockSafetyQueue(page: Page, events: () => Record<string, unknown>[]) {
+  return mock(page, 'safetyCheck', '/safety-checks/queue', (route) => json(route, {
+    events: events().map((event) => ({
+      eventId: event.id,
+      eventName: event.eventName,
+      preferredStartDate: event.preferredStartDate,
+      preferredEndDate: event.preferredEndDate,
+      expectedAttendance: event.expectedAttendance,
+      venues: event.venues ?? [{ id: venues[0].id, name: venues[0].name }],
+      safetyCheckId: `record-${event.id}`,
+      submittedAt: event.safetySubmittedAt ?? '2026-11-01T02:30:00+00:00',
+      roundNumber: event.roundNumber ?? 1,
+      resubmission: Number(event.roundNumber ?? 1) > 1,
+    })),
+  }))
+}
+
 export const asUser = (page: Page, userId: string) =>
   page.addInitScript((id) => localStorage.setItem('activeUserId', id), userId)
