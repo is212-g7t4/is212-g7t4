@@ -66,11 +66,45 @@ def get_event(event_id: str, coordinator_id: str) -> dict:
     return response.json()
 
 
+def get_event_for_internal_viewer(event_id: str, viewer_id: str, viewer_role: str) -> dict:
+    """Resolve event display details for an authorised internal venue workflow."""
+    response = httpx.get(
+        f"{EVENT_SERVICE_URL}/events/{event_id}",
+        params={"coordinatorId": viewer_id, "viewerRole": viewer_role},
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def get_venues() -> list:
     """Return the venue catalogue from Venue Service."""
     response = httpx.get(f"{VENUE_SERVICE_URL}/venues")
     response.raise_for_status()
     return response.json()["venues"]
+
+
+def get_venue(venue_id: str) -> dict:
+    response = httpx.get(f"{VENUE_SERVICE_URL}/venues/{venue_id}")
+    response.raise_for_status()
+    return response.json()["venue"]
+
+
+def update_venue_profile(venue_id: str, details: dict) -> dict:
+    response = httpx.put(f"{VENUE_SERVICE_URL}/venues/{venue_id}", json=details)
+    response.raise_for_status()
+    return response.json()["venue"]
+
+
+def reconcile_legacy_conflicts(venue: dict) -> dict:
+    response = httpx.post(
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venues/{venue['id']}/legacy-conflicts/reconcile",
+        json={
+            "setupTimeMinutes": venue.get("setupTimeMinutes", 0),
+            "turnaroundTimeMinutes": venue.get("turnaroundTimeMinutes", 0),
+        },
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def search_venues(filters: list) -> list:
@@ -86,7 +120,7 @@ def search_venues(filters: list) -> list:
     return response.json()["venues"]
 
 
-def get_bookings_between(start: str, end: str) -> dict:
+def get_bookings_between(start: str, end: str, padding_minutes: int = 0) -> dict:
     """Bookings and distinct closures overlapping [start, end) for every venue.
 
     Uses the window read, not `GET /venue-bookings`: that one answers for a
@@ -96,14 +130,15 @@ def get_bookings_between(start: str, end: str) -> dict:
     """
     response = httpx.get(
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/window",
-        params={"dateFrom": start, "dateTo": end},
+        params={"dateFrom": start, "dateTo": end}
+        | ({"paddingMinutes": padding_minutes} if padding_minutes else {}),
         timeout=SEARCH_TIMEOUT,
     )
     response.raise_for_status()
     payload = response.json()
     from app.search import validate_window
 
-    return validate_window(payload, start, end)
+    return validate_window(payload, start, end, padding_minutes)
 
 
 def create_booking(
@@ -114,6 +149,8 @@ def create_booking(
     required_capacity: int,
     venue_requirements: str,
     requested_by: str,
+    setup_time_minutes: int | None = None,
+    turnaround_time_minutes: int | None = None,
 ) -> dict:
     """Persist a booking request in Venue Availability Service (conflict-checked there)."""
     response = httpx.post(
@@ -126,7 +163,15 @@ def create_booking(
             "requiredCapacity": required_capacity,
             "venueRequirements": venue_requirements,
             "requestedBy": requested_by,
-        },
+        }
+        | (
+            {
+                "setupTimeMinutes": setup_time_minutes,
+                "turnaroundTimeMinutes": turnaround_time_minutes,
+            }
+            if setup_time_minutes is not None and turnaround_time_minutes is not None
+            else {}
+        ),
     )
     if response.status_code == 409:
         raise BookingConflictError(_conflict_types(response))
@@ -143,6 +188,16 @@ def get_event_bookings(event_id: str) -> list:
     return response.json()["bookings"]
 
 
+def get_booking(booking_id: str) -> dict:
+    response = httpx.get(
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}"
+    )
+    if response.status_code == 404:
+        raise BookingNotFoundError
+    response.raise_for_status()
+    return response.json()
+
+
 def update_booking(
     booking_id: str,
     event_id: str,
@@ -151,6 +206,8 @@ def update_booking(
     end: str,
     required_capacity: int,
     venue_requirements: str,
+    setup_time_minutes: int | None = None,
+    turnaround_time_minutes: int | None = None,
 ) -> dict:
     """Update and revalidate one booking without changing its siblings."""
     response = httpx.patch(
@@ -162,7 +219,15 @@ def update_booking(
             "requestedEndTime": end,
             "requiredCapacity": required_capacity,
             "venueRequirements": venue_requirements,
-        },
+        }
+        | (
+            {
+                "setupTimeMinutes": setup_time_minutes,
+                "turnaroundTimeMinutes": turnaround_time_minutes,
+            }
+            if setup_time_minutes is not None and turnaround_time_minutes is not None
+            else {}
+        ),
     )
     if response.status_code == 404:
         raise BookingNotFoundError
@@ -186,12 +251,22 @@ def cancel_booking(booking_id: str, event_id: str) -> dict:
     return response.json()
 
 
-def decide_booking(booking_id: str, reviewed_by: str, status: str) -> dict:
+def decide_booking(
+    booking_id: str,
+    reviewed_by: str,
+    status: str,
+    setup_time_minutes: int = 0,
+    turnaround_time_minutes: int = 0,
+) -> dict:
     """Approve or reject a booking via Venue Availability Service."""
     action = "approve" if status == "Approved" else "reject"
     response = httpx.patch(
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/{action}",
-        json={"reviewedBy": reviewed_by},
+        json={
+            "reviewedBy": reviewed_by,
+            "setupTimeMinutes": setup_time_minutes,
+            "turnaroundTimeMinutes": turnaround_time_minutes,
+        },
     )
     if response.status_code == 404:
         raise BookingNotFoundError

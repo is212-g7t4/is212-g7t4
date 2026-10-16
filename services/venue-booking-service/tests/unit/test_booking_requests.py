@@ -245,9 +245,13 @@ def test_lists_multiple_bookings_for_same_event_separately(
     ]
 
 
+@patch("app.routes.get_venue")
+@patch("app.routes.get_booking")
 @patch("app.routes.decide_booking")
-def test_approve_booking_request(mock_decide_booking):
+def test_approve_booking_request(mock_decide_booking, mock_get_booking, mock_get_venue):
     mock_decide_booking.return_value = {**BOOKING, "status": "Approved"}
+    mock_get_booking.return_value = {**BOOKING, "venueId": "ven-2"}
+    mock_get_venue.return_value = {"id": "ven-2", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
 
     client = create_app().test_client()
     response = client.patch(
@@ -256,7 +260,7 @@ def test_approve_booking_request(mock_decide_booking):
 
     assert response.status_code == 200
     assert response.json["status"] == "Approved"
-    mock_decide_booking.assert_called_once_with("booking-1", "staff-1", "Approved")
+    mock_decide_booking.assert_called_once_with("booking-1", "staff-1", "Approved", 30, 45)
 
 
 @patch("app.routes.decide_booking")
@@ -267,9 +271,10 @@ def test_reject_booking_request_requires_reviewer(mock_decide_booking):
     mock_decide_booking.assert_not_called()
 
 
+@patch("app.routes.get_booking")
 @patch("app.routes.decide_booking")
-def test_approve_booking_request_missing_returns_404(mock_decide_booking):
-    mock_decide_booking.side_effect = BookingNotFoundError
+def test_approve_booking_request_missing_returns_404(mock_decide_booking, mock_get_booking):
+    mock_get_booking.side_effect = BookingNotFoundError
 
     client = create_app().test_client()
     response = client.patch(
@@ -278,9 +283,10 @@ def test_approve_booking_request_missing_returns_404(mock_decide_booking):
     assert response.status_code == 404
 
 
+@patch("app.routes.get_booking")
 @patch("app.routes.decide_booking")
-def test_cancelled_booking_cannot_be_reviewed(mock_decide_booking):
-    mock_decide_booking.side_effect = BookingStateError
+def test_cancelled_booking_cannot_be_reviewed(mock_decide_booking, mock_get_booking):
+    mock_get_booking.side_effect = BookingStateError
 
     response = create_app().test_client().patch(
         "/booking-requests/booking-1/approve", json={"reviewedBy": "staff-1"}
