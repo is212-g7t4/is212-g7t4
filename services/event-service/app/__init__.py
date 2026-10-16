@@ -11,19 +11,25 @@ load_dotenv()
 
 from app.models import (
     ALL_STATUSES,
+    EDITABLE_FIELDS,
     FIELDS,
+    RECHECK_ONLY_MOVES,
     SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
+    UNDER_SAFETY_REVIEW_MESSAGE,
     EventClosedError,
     EventNotAssignedError,
+    EventNotEditableError,
     EventNotFoundError,
     EventNotOwnedError,
     EventNotSubmittedError,
+    EventUnderSafetyReviewError,
     InvalidStatusTransitionError,
     NoCoordinatorChangeError,
     RejectionReasonError,
     SafetyApprovalRequiredError,
     SafetyCheckAlreadyPendingError,
+    SafetyRecheckRequiredError,
     StaleSafetyCheckError,
     approve_event,
     get_event,
@@ -39,6 +45,7 @@ from app.models import (
     reject_event,
     submit_event,
     update_event_coordinator,
+    update_event_details,
     update_event_progress,
     update_event_safety_status,
 )
@@ -49,6 +56,43 @@ from app.validation import validate
 # whatever the caller sends, like coordinatorId.
 LEAD_ROLE = "Event Coordinator Lead"
 ALL_EVENTS_ROLES = (LEAD_ROLE, "Venue Staff", "Technical Support", "Safety Officer")
+
+
+def _safety_recheck(data):
+    """Validate the optional `safetyRecheck` block on PATCH /details (SCRUM-153).
+
+    Present only when Safety Check Service has already withdrawn the approval
+    and opened round N+1, and it names both rounds so this service can check
+    the withdrawn one really is the approval the event holds.
+    """
+    raw = data.get("safetyRecheck")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        return None, (jsonify(message="safetyRecheck must be an object."), 400)
+    cleaned = {}
+    for key in ("withdrawnSafetyCheckId", "safetyCheckId"):
+        try:
+            cleaned[key] = str(UUID(raw.get(key, "")))
+        except (ValueError, TypeError, AttributeError):
+            return None, (
+                jsonify(message=f"safetyRecheck.{key} must be a valid UUID."),
+                400,
+            )
+    round_number = raw.get("roundNumber")
+    if (
+        isinstance(round_number, bool)
+        or not isinstance(round_number, int)
+        or round_number < 1
+    ):
+        return None, (
+            jsonify(
+                message="safetyRecheck.roundNumber must be a positive whole number."
+            ),
+            400,
+        )
+    cleaned["roundNumber"] = round_number
+    return cleaned, None
 
 
 def create_app(config=None):
@@ -66,7 +110,8 @@ def create_app(config=None):
     if not app.config["INTERNAL_SERVICE_TOKEN"]:
         app.logger.warning(
             "INTERNAL_SERVICE_TOKEN is not set: PATCH /events/<id>/safety-status "
-            "is not locked to Safety Check Service (SCRUM-150/152)."
+            "and the safety re-check on PATCH /events/<id>/details are not "
+            "locked to Safety Check Service (SCRUM-150/152/153)."
         )
 
     @app.after_request
@@ -394,6 +439,116 @@ def create_app(config=None):
             ), 409
         return jsonify(updated), 200
 
+    @app.patch("/events/<uuid:event_id>/details")
+    def update_details(event_id):
+        """Edit an event's details (SCRUM-153 AC1, AC2; the write SCRUM-20 reuses).
+
+        Body: `{coordinatorId, changes: {<EDITABLE_FIELDS>: text},
+        safetyRecheck?: {withdrawnSafetyCheckId, safetyCheckId, roundNumber}}`.
+
+        This is the only endpoint that classifies a change as low- or
+        high-impact, which is why the UI calls it first: the low-impact path
+        (AC2) needs no safety call at all, and the `409` it answers a
+        high-impact change with carries everything the confirm step has to
+        show. `safetyRecheck` is accepted only from Safety Check Service, with
+        the internal token — that is the gate, so a client that skips the UI
+        still can't change a `Confirmed` event's high-impact fields without
+        the approval being withdrawn.
+        """
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        try:
+            coordinator_id = str(UUID(data.get("coordinatorId", "")))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+
+        changes = data.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            return jsonify(
+                message="changes must be a non-empty object of fields to update."
+            ), 400
+        unknown = sorted(set(changes) - set(EDITABLE_FIELDS))
+        if unknown:
+            return jsonify(
+                message=(
+                    f"These fields can't be edited: {', '.join(unknown)}. "
+                    f"Editable fields are: {', '.join(EDITABLE_FIELDS)}."
+                )
+            ), 400
+        if any(not isinstance(value, str) for value in changes.values()):
+            return jsonify(message="Every value in changes must be text."), 400
+
+        safety_recheck, failure = _safety_recheck(data)
+        if failure:
+            return failure
+        # The same opt-in lock as /safety-status: when
+        # INTERNAL_SERVICE_TOKEN isn't configured, `safetyRecheck` alone is
+        # treated as sufficient, so a local setup behaves as it did before
+        # SCRUM-153. Configuring it on both services turns the lock on.
+        configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
+        internal = True
+        if configured_token:
+            presented_token = request.headers.get("X-Internal-Service-Token", "")
+            internal = hmac.compare_digest(presented_token, configured_token)
+
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = update_event_details(
+                app.config["DATABASE_URL"],
+                str(event_id),
+                coordinator_id,
+                changes,
+                safety_recheck=safety_recheck,
+                internal=internal,
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(
+                message="This event request is not assigned to the current coordinator."
+            ), 403
+        except EventNotEditableError as blocked:
+            return jsonify(
+                code="EVENT_NOT_EDITABLE",
+                message=(
+                    f"An event that is '{blocked.current_status}' can no longer "
+                    "be edited."
+                ),
+                currentStatus=blocked.current_status,
+            ), 409
+        except SafetyRecheckRequiredError as recheck:
+            # AC1, before anything is written: the coordinator is told what
+            # this change costs and confirms it, and the workflow (not this
+            # endpoint) is what actually withdraws the approval.
+            return jsonify(
+                code="SAFETY_RECHECK_REQUIRED",
+                message=recheck.message,
+                changedFields=recheck.changed_fields,
+                highImpactFields=recheck.high_impact_fields,
+                labels=recheck.labels,
+            ), 409
+        except EventUnderSafetyReviewError:
+            return jsonify(
+                code="EVENT_UNDER_SAFETY_REVIEW",
+                message=UNDER_SAFETY_REVIEW_MESSAGE,
+                currentStatus="Pending Safety Check",
+            ), 409
+        except StaleSafetyCheckError:
+            return jsonify(
+                code="STALE_SAFETY_CHECK",
+                message="This safety check round is not the approval this event holds.",
+            ), 409
+        except ValueError as invalid:
+            details = invalid.args[0]
+            return jsonify(
+                message="Please correct the event details.",
+                missingFields=details["missingFields"],
+                errors=details["errors"],
+            ), 400
+        return jsonify(updated), 200
+
     @app.patch("/events/<uuid:event_id>/safety-status")
     def update_safety_status(event_id):
         """Move an event along the safety-check workflow (SCRUM-149 AC1, SCRUM-150 AC1).
@@ -428,6 +583,12 @@ def create_app(config=None):
             return jsonify(
                 message=f"Status must be one of: {', '.join(SAFETY_STATUSES)}."
             ), 400
+        # SCRUM-153: 'Confirmed -> Pending Safety Check' can't be refused here,
+        # before the database is read — `Pending Safety Check` is also the
+        # target of SCRUM-149's legitimate submit move, so only the event's
+        # current status tells the two apart. `update_event_safety_status`
+        # refuses every pair in RECHECK_ONLY_MOVES under its row lock, which
+        # is where that status is known and can't be stale.
         try:
             safety_check_id = str(UUID(data.get("safetyCheckId", "")))
         except (ValueError, TypeError, AttributeError):

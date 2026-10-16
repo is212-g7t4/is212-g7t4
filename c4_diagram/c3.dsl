@@ -45,7 +45,7 @@ workspace "ConnectSphere" "C3 — API Application Components" {
                 equipmentModule             = component "Equipment Module" "Owns the equipment catalogue only — no reservation data." "Python module" "Atomic Module"
                 equipmentAvailabilityModule = component "Equipment Availability Module" "Owns equipment reservation records and coordinates the equipment-reservation workflow, including re-review and release." "Python module" "Atomic Module"
                 registrationModule          = component "Registration Module" "Owns attendee registration records and coordinates the attendee registration/withdrawal workflow." "Python module" "Atomic Module"
-                safetyCheckModule           = component "Safety Check Module" "Owns safety check records and coordinates the safety-check workflow: submit, review, decide, resubmit." "Python module" "Atomic Module"
+                safetyCheckModule           = component "Safety Check Module" "Owns safety check records and coordinates the safety-check workflow: submit, review, decide, resubmit, and re-open after a high-impact change." "Python module" "Atomic Module"
                 notificationModule          = component "Notification Module" "Owns in-app notification records, consumes notification events from the broker, and serves them to the Front-End." "Python module" "Atomic Module"
                 forumModule                 = component "Forum / Communication Module" "Owns all communication tied to a request, such as clarifications and decision reasons." "Python module" "Atomic Module NoSQL"
             }

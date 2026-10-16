@@ -6,6 +6,8 @@ import type { EventStatus, SubmittedEvent } from '../features/event/submission'
 import { ALLOWED_TRANSITIONS, canReassign, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
 import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorPanel'
+import { EventEditDialog } from '../features/event/EventEditDialog'
+import { fieldLabels } from '../features/event/eventDetails'
 import { canViewAllInternalEvents, canViewInternalEvents, INTERNAL_EVENT_ACCESS_MESSAGE } from '../features/event/permissions'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
@@ -46,6 +48,10 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
   // SCRUM-149: a venue booking change can make the event ready (or not), so
   // the safety panel re-reads its readiness whenever one is saved or cancelled.
   const [bookingsChanged, setBookingsChanged] = useState(0)
+  // SCRUM-153: the edit dialog, and the line it leaves behind — which says
+  // why the status changed when a high-impact edit withdrew the approval (AC1).
+  const [editing, setEditing] = useState(false)
+  const [editMessage, setEditMessage] = useState('')
   const currentCoordinator = {
     id: currentCoordinatorId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || '',
     name: currentCoordinatorName || import.meta.env.VITE_CURRENT_COORDINATOR_NAME || '',
@@ -92,6 +98,11 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
   // safety workflow sets it — so instead of a dead option the field explains
   // what has to happen for the event to progress.
   const safetyHint = event && showsSafetyHint(event.status) ? safetyBlockMessage(event.status) : ''
+  // SCRUM-153: the details of a Rejected or Cancelled event are history, so
+  // there is nothing to edit; Event Service refuses those too
+  // (EDITABLE_STATUSES). Only the assigned coordinator ever sees the button.
+  const canEditDetails = canUpdate && event !== null
+    && event.status !== 'Rejected' && event.status !== 'Cancelled'
 
   const saveProgress = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
@@ -143,6 +154,27 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
         />
       </section>}
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
+
+      {/* SCRUM-153: the assigned coordinator edits the details here. The
+          dialog's own confirm step handles a high-impact change to a
+          Confirmed event (AC1); the API gates it regardless. */}
+      {canEditDetails && <section className="event-card-section">
+        {editMessage && <p role="status">{editMessage}</p>}
+        {editing ? <EventEditDialog
+          event={event}
+          coordinatorId={currentCoordinator.id}
+          onCancel={() => setEditing(false)}
+          onSaved={(updated, message) => {
+            setEditing(false)
+            setEditMessage(message)
+            setEvent(updated)
+            setDraftStatus(updated.status)
+            setActionDetails(updated.actionDetails || '')
+          }}
+        /> : <button className="button small" type="button" onClick={() => { setEditing(true); setEditMessage('') }}>
+          Edit details
+        </button>}
+      </section>}
 
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel
         eventId={event.id}
@@ -215,9 +247,17 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
         {event.actionHistory.length === 0 ? <p className="muted">No actions recorded yet.</p> :
           <dl className="event-details">
             {event.actionHistory.map((action, index) => <div className="event-detail full" key={`${action.recordedAt}-${index}`}>
-              <dt>{action.status} · {new Date(action.recordedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT</dt>
+              <dt>
+                {action.status} · {new Date(action.recordedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT
+                {/* SCRUM-153 AC3: the withdrawal stays visible in the event's
+                    history, tagged so it reads as more than an ordinary edit. */}
+                {action.withdrawnSafetyCheckId && <> · <span className="muted">Safety approval withdrawn</span></>}
+              </dt>
               <dd>
                 {action.details}
+                {action.changedFields && action.changedFields.length > 0 && <>
+                  <br /><span className="muted">Changed: {fieldLabels(action.changedFields).join(', ')}</span>
+                </>}
                 {action.areas && action.areas.length > 0 && <>
                   <br /><span className="muted">Areas: {action.areas.join(', ')}</span>
                 </>}
