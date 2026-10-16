@@ -387,7 +387,13 @@ def update_booking_request(booking_id):
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found for this event."), 404
     except BookingStateError:
-        return jsonify(message="Cancelled venue bookings cannot be modified."), 409
+        return (
+            jsonify(
+                message="Cancelled or Rejected venue bookings cannot be modified.",
+                code="BOOKING_IMMUTABLE",
+            ),
+            409,
+        )
     except BookingConflictError as error:
         return jsonify(
             message=f"{venue['name']} is unavailable for that time.",
@@ -419,6 +425,14 @@ def cancel_booking_request(booking_id):
         return jsonify(message=f"Failed to look up the event: {error}"), 502
     try:
         booking = cancel_booking(booking_id, event_id)
+    except BookingStateError:
+        return (
+            jsonify(
+                message="Rejected venue bookings cannot be cancelled.",
+                code="BOOKING_IMMUTABLE",
+            ),
+            409,
+        )
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found for this event."), 404
     except Exception as error:
@@ -459,7 +473,13 @@ def _decide(booking_id, status):
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
     except BookingStateError:
-        return jsonify(message="Cancelled venue bookings cannot be reviewed."), 409
+        return (
+            jsonify(
+                message="Cancelled or Rejected venue bookings cannot be reviewed.",
+                code="BOOKING_IMMUTABLE",
+            ),
+            409,
+        )
     except BookingConflictError as error:
         return jsonify(
             message="This venue is unavailable for the requested time.",

@@ -1,4 +1,15 @@
-"""Execute the read predicate against an in-memory SQL engine, not mock results.
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **Calendar read regression (no direct SCRUM-171 AC):** SQL status inclusion, half-open filtering, malformed candidates and venue isolation. Fixture columns now accept nullable closure metadata. Read filtering alone does not prove closure rejections or AC2 preservation; SQLite is not PostgreSQL.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+Execute the read predicate against an in-memory SQL engine, not mock results.
 
 SQLite exercises NULL/AND/OR/comparison semantics, not Postgres driver/types.
 Only placeholders and schema qualification are adapted; live smoke covers PG.
@@ -26,10 +37,15 @@ class ReadConnection:
         )
         for row in rows:
             self.db.execute(
-                'INSERT INTO "VenueBooking" (' + COLUMNS + ') VALUES ('
+                'INSERT INTO "VenueBooking" ('
+                + COLUMNS
+                + ") VALUES ("
                 + ",".join("?" for _ in COLUMNS.split(","))
                 + ")",
-                [v.isoformat() if isinstance(v, datetime) else v for v in row.values()],
+                [
+                    v.isoformat() if isinstance(v, datetime) else v
+                    for v in (row.get(c.strip()) for c in COLUMNS.split(","))
+                ],
             )
 
     def __enter__(self):

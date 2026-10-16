@@ -1,12 +1,18 @@
 """Closure HTTP orchestration only; never access the atomic database."""
 
 import httpx
-from app.clients import VENUE_SERVICE_URL, VENUE_AVAILABILITY_SERVICE_URL
+from app.clients import (
+    VENUE_SERVICE_URL,
+    VENUE_AVAILABILITY_SERVICE_URL,
+    EVENT_SERVICE_URL,
+)
 
 
 class ClosureUpstreamError(Exception):
-    def __init__(self, status):
+
+    def __init__(self, status, code=None):
         self.status = status
+        self.code = code
 
 
 def call(method, url, **kwargs):
@@ -14,6 +20,12 @@ def call(method, url, **kwargs):
         response = httpx.request(method, url, timeout=5.0, **kwargs)
     except httpx.RequestError as error:
         raise ClosureUpstreamError(503) from error
+    if response.status_code == 409:
+        try:
+            if response.json().get("code") == "CLOSURE_PREVIEW_CHANGED":
+                raise ClosureUpstreamError(409, "CLOSURE_PREVIEW_CHANGED")
+        except (ValueError, AttributeError):
+            pass
     if response.status_code not in {200, 201}:
         code = (
             response.status_code
@@ -43,6 +55,77 @@ def create(data, headers):
             headers=headers,
         )
     )
+
+
+def preview(data, headers):
+    from app.closure_contract import uuid_value, timestamp
+
+    try:
+        venue = call("GET", f"{VENUE_SERVICE_URL}/venues/{data['venueId']}")["venue"]
+        if (
+            venue["id"] != data["venueId"]
+            or not isinstance(venue["name"], str)
+            or not venue["name"].strip()
+        ):
+            raise ValueError()
+        result = call(
+            "POST",
+            f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-closures/preview",
+            json=data,
+            headers=headers,
+        )
+        rows = result["affectedRequests"]
+        if (
+            not isinstance(rows, list)
+            or type(result["affectedCount"]) is not int
+            or result["affectedCount"] != len(rows)
+            or result["closure"] != data
+            or not isinstance(result["confirmationToken"], str)
+            or not result["confirmationToken"]
+        ):
+            raise ValueError()
+        seen = set()
+        for row in rows:
+            booking_id = uuid_value(row["id"])
+            uuid_value(row["eventId"])
+            start, end = timestamp(row["requestedStartTime"]), timestamp(
+                row["requestedEndTime"]
+            )
+            if (
+                booking_id in seen
+                or row["venueId"] != data["venueId"]
+                or row["status"] not in {"Pending", "Pending Review", "Approved"}
+                or end <= start
+                or start >= timestamp(data["endDateTime"])
+                or end <= timestamp(data["startDateTime"])
+            ):
+                raise ValueError()
+            seen.add(booking_id)
+        event_ids = sorted({row["eventId"] for row in rows})
+        names = {}
+        for offset in range(0, len(event_ids), 100):
+            events = call(
+                "GET",
+                f"{EVENT_SERVICE_URL}/events/summaries",
+                params={"ids": ",".join(event_ids[offset : offset + 100])},
+            )["events"]
+            for event in events:
+                if (
+                    not isinstance(event["eventName"], str)
+                    or not event["eventName"].strip()
+                ):
+                    raise ValueError()
+                names[event["id"]] = event["eventName"]
+        return {
+            **result,
+            "venueName": venue["name"],
+            "affectedRequests": [
+                {**row, "venueName": venue["name"], "eventName": names[row["eventId"]]}
+                for row in rows
+            ],
+        }
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise ClosureUpstreamError(502) from error
 
 
 def read(closure_id, params, headers):

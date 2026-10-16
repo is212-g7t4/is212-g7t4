@@ -1,4 +1,15 @@
-"""Characterization tests: SCRUM-25 must not change the existing write contract."""
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-25 characterization (no direct SCRUM-171 AC):** invalid writes/decisions, missing database and naive pending-write timestamp contract remain unchanged. Expected query indices only accommodate the shared SCRUM-171 gate; no closure persistence claim.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+Characterization tests: SCRUM-25 must not change the existing write contract."""
 
 import pytest
 from app.calendar import SINGAPORE
@@ -75,7 +86,7 @@ def test_write_remains_naive_pending_without_dev_gate(setup):
     assert response.json["requestedStartTime"] == "2026-10-01T09:00:00"
     assert response.json["status"] == "Pending Review"
     assert "blocksSelection" not in response.json
-    sql, params = cursor.execute.call_args_list[1].args
+    sql, params = cursor.execute.call_args_list[2].args
     assert "status IN ('Approved', 'On Hold')" in sql
     assert "requested_start_time < %s AND requested_end_time > %s" in sql
     assert params == [
