@@ -13,7 +13,11 @@ def setup(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
+    app = create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "FRONTEND_ORIGIN": "http://localhost:5174",
+    })
     return app.test_client(), cursor
 
 
@@ -28,6 +32,8 @@ def test_ac2_edit_saves_current_venue_fields_and_status(setup):
         accessibility="Step-free access",
         supported_layouts=["theatre"],
         operational_status="Under Maintenance",
+        setup_time_minutes=60,
+        turnaround_time_minutes=20,
     )]
     payload = {
         **VALID_PAYLOAD,
@@ -38,6 +44,8 @@ def test_ac2_edit_saves_current_venue_fields_and_status(setup):
         "accessibility": "Step-free access",
         "supportedLayouts": ["theatre"],
         "status": "Under Maintenance",
+        "setupTimeMinutes": "60",
+        "turnaroundTimeMinutes": "20",
     }
 
     response = client.put(f"/venues/{VENUE_ID}", json=payload)
@@ -52,10 +60,13 @@ def test_ac2_edit_saves_current_venue_fields_and_status(setup):
         "accessibility": "Step-free access",
         "supportedLayouts": ["theatre"],
         "status": "Under Maintenance",
+        "setupTimeMinutes": 60,
+        "turnaroundTimeMinutes": 20,
     }
     update_query, update_params = cursor.execute.call_args_list[-1].args
     assert 'UPDATE public."Venue"' in update_query
     assert update_params[3].adapted == {"wifi": True, "stage": True}
+    assert update_params[-3:-1] == [60, 20]
     assert update_params[-1] == VENUE_ID
 
 
