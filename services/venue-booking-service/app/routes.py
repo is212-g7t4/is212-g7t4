@@ -14,15 +14,42 @@ from app.clients import (
     create_booking,
     decide_booking,
     get_bookings_between,
+    get_booking,
     get_event_bookings,
     get_event,
+    get_event_for_internal_viewer,
+    get_venue,
     get_venues,
+    reconcile_legacy_conflicts,
     search_venues,
     update_booking,
+    update_venue_profile,
 )
 from app.search import SearchError, shortlist, validate_search
 
 bp = Blueprint("venue_booking_service", __name__)
+
+
+def _add_event_names(result, viewer_id, viewer_role):
+    """Best-effort display enrichment; conflict identification must still work if Event Service is down."""
+    if not viewer_id or viewer_role != "Venue Staff":
+        return result
+    names = {}
+    for conflict in result.get("conflicts", []):
+        for key in ("firstBooking", "secondBooking"):
+            booking = conflict.get(key, {})
+            event_id = booking.get("eventId")
+            if not event_id:
+                continue
+            if event_id not in names:
+                try:
+                    event = get_event_for_internal_viewer(event_id, viewer_id, viewer_role)
+                    names[event_id] = event.get("eventName") or None
+                except Exception:
+                    names[event_id] = None
+            if names[event_id]:
+                booking["eventName"] = names[event_id]
+    return result
 
 
 @bp.get("/health")
@@ -49,22 +76,42 @@ def venue_search():
     except SearchError as error:
         return jsonify(message=error.message, missing=error.missing), 400
 
-    # Independent calls, so the search costs the slower one rather than both
-    # — what keeps AC3's 3-second budget realistic.
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        venues_call = pool.submit(search_venues, criteria["filters"])
-        bookings_call = pool.submit(
-            get_bookings_between, criteria["start"], criteria["end"]
+    try:
+        # Preserve the existing parallel fast path. If any matching venue has
+        # padding, issue one widened read after the catalogue reveals the safe
+        # bound; zero-buffer catalogues still cost only the slower first call.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            venues_call = pool.submit(search_venues, criteria["filters"])
+            window_call = pool.submit(
+                get_bookings_between, criteria["start"], criteria["end"]
+            )
+            venues = venues_call.result()
+            window = window_call.result()
+        padding = max(
+            (
+                int(venue.get("setupTimeMinutes", 0))
+                + int(venue.get("turnaroundTimeMinutes", 0))
+                for venue in venues
+            ),
+            default=0,
         )
-        try:
-            venues, window = venues_call.result(), bookings_call.result()
-        except httpx.TimeoutException:
-            return jsonify(message="Venue search took too long. Please try again."), 504
-        except Exception:
-            # Don't leak the downstream URL or error text to the browser.
-            return jsonify(message="Unable to search venues right now."), 502
+        if padding:
+            window = get_bookings_between(
+                criteria["start"], criteria["end"], padding
+            )
+    except httpx.TimeoutException:
+        return jsonify(message="Venue search took too long. Please try again."), 504
+    except Exception:
+        # Don't leak the downstream URL or error text to the browser.
+        return jsonify(message="Unable to search venues right now."), 502
 
-    results = shortlist(venues, window["bookings"], window["closures"])
+    results = shortlist(
+        venues,
+        window["bookings"],
+        window["closures"],
+        criteria["start"],
+        criteria["end"],
+    )
     return jsonify(venues=results, count=len(results))
 
 
@@ -166,7 +213,7 @@ def create_booking_request():
         ), 422
 
     try:
-        booking = create_booking(
+        args = (
             event_id,
             venue_id,
             start,
@@ -175,6 +222,14 @@ def create_booking_request():
             venue_requirements.strip(),
             coordinator_id,
         )
+        if "setupTimeMinutes" in venue or "turnaroundTimeMinutes" in venue:
+            booking = create_booking(
+                *args,
+                int(venue.get("setupTimeMinutes", 0)),
+                int(venue.get("turnaroundTimeMinutes", 0)),
+            )
+        else:
+            booking = create_booking(*args)
     except BookingConflictError as error:
         return jsonify(
             message=f"{venue['name']} is unavailable for that time.",
@@ -312,7 +367,7 @@ def update_booking_request(booking_id):
         ), 422
 
     try:
-        booking = update_booking(
+        args = (
             booking_id,
             event_id,
             venue_id,
@@ -321,6 +376,14 @@ def update_booking_request(booking_id):
             required_capacity,
             venue_requirements.strip(),
         )
+        if "setupTimeMinutes" in venue or "turnaroundTimeMinutes" in venue:
+            booking = update_booking(
+                *args,
+                int(venue.get("setupTimeMinutes", 0)),
+                int(venue.get("turnaroundTimeMinutes", 0)),
+            )
+        else:
+            booking = update_booking(*args)
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found for this event."), 404
     except BookingStateError:
@@ -379,7 +442,20 @@ def _decide(booking_id, status):
     if not reviewed_by:
         return jsonify(message="reviewedBy is required."), 400
     try:
-        booking = decide_booking(booking_id, reviewed_by, status)
+        if status == "Approved":
+            current = get_booking(booking_id)
+            venue = get_venue(current["venueId"])
+            booking = decide_booking(
+                booking_id,
+                reviewed_by,
+                status,
+                int(venue.get("setupTimeMinutes", 0)),
+                int(venue.get("turnaroundTimeMinutes", 0)),
+            )
+        else:
+            # Rejection cannot create a scheduling conflict and retains the
+            # existing one-call workflow.
+            booking = decide_booking(booking_id, reviewed_by, status)
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
     except BookingStateError:
@@ -393,3 +469,55 @@ def _decide(booking_id, status):
     except Exception as e:
         return jsonify(message=f"Failed to update the booking request: {e}"), 502
     return jsonify(booking), 200
+
+
+@bp.put("/venues/<uuid:venue_id>")
+def update_venue_and_reconcile(venue_id):
+    """Save a venue profile, then identify conflicts introduced by buffers."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    try:
+        venue = update_venue_profile(str(venue_id), data)
+    except httpx.HTTPStatusError as error:
+        try:
+            body = error.response.json()
+        except ValueError:
+            body = {"message": "Unable to save the venue."}
+        return jsonify(body), error.response.status_code
+    except Exception:
+        return jsonify(message="Unable to save the venue."), 502
+
+    try:
+        conflicts = reconcile_legacy_conflicts(venue)
+    except Exception:
+        return jsonify(
+            message=(
+                "The venue was saved, but legacy scheduling conflicts could "
+                "not be refreshed. Open the venue and retry."
+            ),
+            venueSaved=True,
+            venue=venue,
+        ), 502
+    return jsonify(venue=venue, legacyConflicts=conflicts), 200
+
+
+@bp.get("/venues/<uuid:venue_id>/legacy-conflicts")
+def list_venue_legacy_conflicts(venue_id):
+    """Reconcile on read so booking edits/cancellations cannot leave stale flags."""
+    try:
+        venue = get_venue(str(venue_id))
+        conflicts = reconcile_legacy_conflicts(venue)
+        return jsonify(
+            _add_event_names(
+                conflicts,
+                request.headers.get("X-Dev-User-Id"),
+                request.headers.get("X-Dev-Role"),
+            )
+        )
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 404:
+            return jsonify(message="Venue not found."), 404
+        return jsonify(message="Unable to identify scheduling conflicts."), 502
+    except Exception:
+        return jsonify(message="Unable to identify scheduling conflicts."), 502

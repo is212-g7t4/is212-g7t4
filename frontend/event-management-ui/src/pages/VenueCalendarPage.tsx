@@ -27,6 +27,10 @@ function bookingLabel(b: CalendarBooking): string {
   return `${entryLabel(b)} · ${time(b.requestedStartTime)}–${time(b.requestedEndTime)} SGT`
 }
 
+const occupancyStart = (booking: CalendarBooking) => booking.effectiveStartTime ?? booking.requestedStartTime
+const occupancyEnd = (booking: CalendarBooking) => booking.effectiveEndTime ?? booking.requestedEndTime
+const hasBuffers = (venue?: Venue) => venue && ('setupTimeMinutes' in venue || 'turnaroundTimeMinutes' in venue)
+
 /** Switcher identity → read-only calendar, never a booking submission or real auth. */
 export function VenueCalendarPage({
   user,
@@ -111,7 +115,10 @@ function Calendar({
       for (const venueId of venueIds) {
         for (let from = start.slice(0, 10); from < until;) {
           const next = addDays(from, Math.min(42, (Date.parse(until) - Date.parse(from)) / 86400000))
-          const rows = await fetchCalendar(venueId, {start: from, end: next}, user, controller.signal)
+          const venue = venues.find(item => item.id === venueId)
+          const rows = hasBuffers(venue)
+            ? await fetchCalendar(venueId, {start: from, end: next}, user, controller.signal, venue)
+            : await fetchCalendar(venueId, {start: from, end: next}, user, controller.signal)
           if (version !== inspectionVersion.current) return
           for (const row of rows) {
             const prior = unique.get(`${row.venueId}:${row.id}`)
@@ -122,7 +129,7 @@ function Calendar({
           from = next
         }
       }
-      const matching = [...unique.values()].filter(b => overlaps(startTime!, endTime!, b.requestedStartTime, b.requestedEndTime))
+      const matching = [...unique.values()].filter(b => overlaps(startTime!, endTime!, occupancyStart(b), occupancyEnd(b)))
       setInspectionRows(matching)
       setInspectorOpen(false)
       setInspected({start: startTime!, end: endTime!})
@@ -200,7 +207,12 @@ function Calendar({
     // oxlint-disable-next-line react/set-state-in-effect
     setError('')
     setBookings(null)
-    Promise.all(venueIds.map(id => fetchCalendar(id, window, user, controller.signal))).then(groups => groups.flat())
+    Promise.all(venueIds.map(id => {
+      const venue = venues.find(item => item.id === id)
+      return hasBuffers(venue)
+        ? fetchCalendar(id, window, user, controller.signal, venue)
+        : fetchCalendar(id, window, user, controller.signal)
+    })).then(groups => groups.flat())
       .then((rows) => {
         if (active) {
           setBookings(rows)
@@ -217,7 +229,7 @@ function Calendar({
       active = false
       controller.abort()
     }
-  }, [venueIds, window, user, requestKey])
+  }, [venueIds, venues, window, user, requestKey])
   return (
     <section
       className="venue-calendar"
@@ -288,7 +300,7 @@ function Calendar({
             {Array.from({ length: 42 }, (_, i) => addDays(window.start, i)).map(date => {
               const entries = ready ? bookings.filter(b => overlaps(
                 date + 'T00:00:00+08:00', addDays(date, 1) + 'T00:00:00+08:00',
-                b.requestedStartTime, b.requestedEndTime,
+                occupancyStart(b), occupancyEnd(b),
               )).sort((a, b) => Number(b.status === 'Closed') - Number(a.status === 'Closed')) : []
               return <button key={date} aria-label={`Open ${date}`}
                 className={date.slice(0, 7) !== anchor.slice(0, 7) ? 'calendar-outside' : ''}
@@ -325,8 +337,8 @@ function Calendar({
                   overlaps(
                     date + 'T00:00:00+08:00',
                     addDays(date, 1) + 'T00:00:00+08:00',
-                    b.requestedStartTime,
-                    b.requestedEndTime,
+                    occupancyStart(b),
+                    occupancyEnd(b),
                   ),
                 )
                 .map((b) => (
@@ -341,6 +353,10 @@ function Calendar({
                       {b.requestedStartTime.slice(0, 19).replace('T', ' ')} –{' '}
                       {b.requestedEndTime.slice(0, 19).replace('T', ' ')} SGT
                     </p>
+                    {b.effectiveStartTime && b.effectiveEndTime && (b.effectiveStartTime !== b.requestedStartTime || b.effectiveEndTime !== b.requestedEndTime) && <p>
+                      Occupied including buffers: {occupancyStart(b).slice(0, 19).replace('T', ' ')} –{' '}
+                      {occupancyEnd(b).slice(0, 19).replace('T', ' ')} SGT
+                    </p>}
                     <ClosureDetails entry={b} />
                   </div>
                 ))}

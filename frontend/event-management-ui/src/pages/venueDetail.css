@@ -41,6 +41,32 @@
 }
 .venue-detail-page .venue-detail-metadata dt { font-size: 11px; }
 .venue-detail-page .venue-detail-metadata dd { margin: 0; font-size: 14px; line-height: 1.5; }
+.venue-detail-page .legacy-conflicts { padding: var(--space-5); border-top: 1px solid var(--color-border); }
+.venue-detail-page .legacy-conflict-list { list-style: none; padding: 0; margin: var(--space-4) 0 0; }
+.venue-detail-page .legacy-conflict-item {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius);
+  background: var(--color-background);
+}
+.venue-detail-page .legacy-conflict-events {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.venue-detail-page .legacy-conflict-event { min-width: 0; }
+.venue-detail-page .legacy-conflict-event h4 { margin: 0 0 var(--space-3); overflow-wrap: anywhere; }
+.venue-detail-page .legacy-conflict-event dl { margin: 0; display: grid; gap: var(--space-2); }
+.venue-detail-page .legacy-conflict-event dt { color: var(--color-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.venue-detail-page .legacy-conflict-event dd { margin: 2px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.venue-detail-page .legacy-conflict-overlap {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
 .venue-detail-page .venue-detail-actions { background: var(--color-surface); }
 .venue-detail-page .venue-detail-action-buttons { flex-wrap: wrap; }
 .venue-detail-page .button { min-height: 44px; }
@@ -53,6 +79,8 @@
   .venue-detail-page .venue-detail-header { padding: var(--space-4); flex-wrap: wrap; }
   .venue-detail-page .venue-detail-header h2 { font-size: 24px; }
   .venue-detail-page .venue-detail-metadata { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
+  .venue-detail-page .legacy-conflicts { padding: var(--space-4); }
+  .venue-detail-page .legacy-conflict-events { grid-template-columns: minmax(0, 1fr); }
   .venue-detail-page .venue-detail-actions { padding: var(--space-4); }
   .venue-detail-page .venue-hold-form { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
 }

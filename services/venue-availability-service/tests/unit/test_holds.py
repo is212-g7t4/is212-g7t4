@@ -255,6 +255,31 @@ def test_place_hold_stores_the_coordinator_it_is_held_for(setup):
     assert params[-1] == USER_ID
 
 
+def test_place_hold_keeps_coordinator_and_buffer_conflict_rules_together(setup):
+    """The reminder assignment must not discard the venue's buffer times."""
+    client, cursor = setup
+    client.application.config["CALENDAR_DEV_MODE"] = True
+    cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, None, HOLD_ROW]
+
+    response = client.post(
+        "/venue-holds",
+        json={
+            "venueId": VENUE_ID,
+            "expiresAt": "2099-10-01T12:00",
+            "coordinatorId": USER_ID,
+            "setupTimeMinutes": 30,
+            "turnaroundTimeMinutes": 45,
+        },
+        headers=HOLD_HEADERS,
+    )
+
+    assert response.status_code == 201
+    overlap_params = cursor.execute.call_args_list[1].args[1]
+    insert_params = cursor.execute.call_args_list[2].args[1]
+    assert overlap_params[3] == datetime(2099, 10, 1, 12, 30, tzinfo=SINGAPORE)
+    assert insert_params[-1] == USER_ID
+
+
 def test_place_hold_rejects_malformed_coordinator_id(setup):
     client, cursor = setup
     client.application.config["CALENDAR_DEV_MODE"] = True

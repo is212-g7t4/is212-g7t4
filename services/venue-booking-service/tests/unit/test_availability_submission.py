@@ -33,6 +33,10 @@ def prepare(monkeypatch, status, body):
                 ]
             }
             if url.endswith("/venues")
+            else {"venue": {"id": "venue-1", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}}
+            if url.endswith("/venues/venue-1")
+            else {"id": "booking-1", "venueId": "venue-1"}
+            if url.endswith("/venue-bookings/booking-1")
             else {"id": "event-1"}
         )
         return httpx.Response(200, json=data, request=httpx.Request("GET", url))
@@ -197,6 +201,19 @@ def test_review_client_success_not_found_and_failure(
     monkeypatch, action, status, expected
 ):
     client = create_app().test_client()
+    monkeypatch.setattr(
+        clients.httpx,
+        "get",
+        lambda url, **kwargs: httpx.Response(
+            200,
+            json=(
+                {"id": "booking-1", "venueId": "venue-1"}
+                if "/venue-bookings/" in url
+                else {"venue": {"id": "venue-1", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}}
+            ),
+            request=httpx.Request("GET", url),
+        ),
+    )
     monkeypatch.setattr(
         clients.httpx,
         "patch",
