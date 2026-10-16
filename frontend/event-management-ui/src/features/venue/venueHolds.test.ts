@@ -45,6 +45,26 @@ test('sends the coordinator the hold is placed for', async () => {
   expect(vi.mocked(fetch).mock.calls[0][1]?.body).toBe(JSON.stringify({ venueId: 'venue-1', expiresAt: '2026-10-09T12:00', coordinatorId: 'coord-1' }))
 })
 
+test('sends venue buffers together with the coordinator reminder assignment', async () => {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ hold: { id: 'h1' } }) } as Response)
+
+  await placeVenueHold(
+    'venue-1',
+    '2026-10-09T12:00',
+    { id: 'staff-1', role: 'Venue Staff' },
+    'coord-1',
+    { setupTimeMinutes: 30, turnaroundTimeMinutes: 45 },
+  )
+
+  expect(vi.mocked(fetch).mock.calls[0][1]?.body).toBe(JSON.stringify({
+    venueId: 'venue-1',
+    expiresAt: '2026-10-09T12:00',
+    coordinatorId: 'coord-1',
+    setupTimeMinutes: 30,
+    turnaroundTimeMinutes: 45,
+  }))
+})
+
 test('loads hold reminders with the coordinator identity', async () => {
   vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ reminders: [{ id: 'h1' }] }) } as Response)
 

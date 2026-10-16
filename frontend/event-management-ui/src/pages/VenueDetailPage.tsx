@@ -7,6 +7,8 @@ import type { Venue } from '../features/venue/venues'
 import { fetchActiveVenueHolds, placeVenueHold, showVenueHoldStatus } from '../features/venue/venueHolds'
 import type { VenueHold } from '../features/venue/venueHolds'
 import { VENUE_ACCESS_NOTICE, canViewVenues } from '../features/venue/permissions'
+import { fetchLegacyConflicts } from '../features/venue/legacyConflicts'
+import type { LegacyConflict } from '../features/venue/legacyConflicts'
 import { ArrowLeftIcon, EditIcon, RefreshIcon } from '../components/Icon'
 import { RoleWarning } from '../components/FormControls'
 import { DetailPanelSkeleton } from '../components/Loading'
@@ -19,6 +21,49 @@ function statusClass(status: string): string {
 function formatExpiry(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatLocal(value: string): string {
+  return value.slice(0, 16).replace('T', ' ')
+}
+
+function conflictMemberLabel(booking: LegacyConflict['firstBooking']): string {
+  if (!booking.eventId) return 'Venue hold'
+  return booking.eventName || `Event ${booking.eventId}`
+}
+
+function formatDuration(totalMinutes: number): string {
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return [
+    hours ? `${hours} hour${hours === 1 ? '' : 's'}` : '',
+    minutes ? `${minutes} minute${minutes === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' ')
+}
+
+function overlapSummary(conflict: LegacyConflict): string {
+  const first = conflict.firstBooking
+  const second = conflict.secondBooking
+  const start = Date.parse(first.effectiveStartTime) >= Date.parse(second.effectiveStartTime)
+    ? first.effectiveStartTime : second.effectiveStartTime
+  const end = Date.parse(first.effectiveEndTime) <= Date.parse(second.effectiveEndTime)
+    ? first.effectiveEndTime : second.effectiveEndTime
+  const minutes = Math.round((Date.parse(end) - Date.parse(start)) / 60_000)
+  return Number.isFinite(minutes) && minutes > 0
+    ? `Venue occupancy overlaps by ${formatDuration(minutes)}, from ${formatLocal(start)} to ${formatLocal(end)} SGT.`
+    : 'The venue occupancy periods overlap.'
+}
+
+function ConflictSchedule({ booking }: { booking: LegacyConflict['firstBooking'] }) {
+  return <section className="legacy-conflict-event">
+    <h4 title={booking.eventId ? `Event ID: ${booking.eventId}` : `Hold ID: ${booking.id}`}>
+      {conflictMemberLabel(booking)}
+    </h4>
+    <dl>
+      <div><dt>Event time</dt><dd>{formatLocal(booking.requestedStartTime)}–{formatLocal(booking.requestedEndTime)} SGT</dd></div>
+      <div><dt>Venue occupied</dt><dd>{formatLocal(booking.effectiveStartTime)}–{formatLocal(booking.effectiveEndTime)} SGT</dd></div>
+    </dl>
+  </section>
 }
 
 function Chips({ values }: { values: string[] }) {
@@ -44,6 +89,8 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
   const [holdCoordinator, setHoldCoordinator] = useState('')
   const [holdError, setHoldError] = useState('')
   const [holdSaving, setHoldSaving] = useState(false)
+  const [legacyConflicts, setLegacyConflicts] = useState<LegacyConflict[]>([])
+  const [conflictError, setConflictError] = useState('')
 
   useEffect(() => {
     if (!canViewVenues(role)) return
@@ -61,9 +108,19 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
     }).finally(() => {
       if (active) setLoading(false)
     })
+    if (role === 'Venue Staff') {
+      fetchLegacyConflicts(venueId, user).then((result) => {
+        if (active) {
+          setLegacyConflicts(result.conflicts)
+          setConflictError('')
+        }
+      }).catch((cause: Error) => {
+        if (active) setConflictError(cause.message)
+      })
+    }
     const interval = window.setInterval(() => setRefresh((value) => value + 1), 30_000)
     return () => { active = false; window.clearInterval(interval) }
-  }, [venueId, role, refresh])
+  }, [venueId, role, user, refresh])
 
   async function submitHold(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -74,7 +131,13 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
     setHoldSaving(true)
     setHoldError('')
     try {
-      setHold(await (holdCoordinator ? placeVenueHold(venueId, holdExpiry, user, holdCoordinator) : placeVenueHold(venueId, holdExpiry, user)))
+      setHold(await placeVenueHold(
+        venueId,
+        holdExpiry,
+        user,
+        holdCoordinator || undefined,
+        venue ?? {},
+      ))
       setVenue((current) => current ? { ...current, status: 'On Hold' } : current)
       setHoldFormOpen(false)
       setHoldExpiry('')
@@ -110,6 +173,26 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
         <div className="event-detail"><dt>Supported layouts</dt><dd><Chips values={venue.supportedLayouts} /></dd></div>
         {hold && <div className="event-detail"><dt>Hold expires</dt><dd>{formatExpiry(hold.expiresAt)}</dd></div>}
       </dl>
+      {role === 'Venue Staff' && <section className="legacy-conflicts" aria-labelledby="legacy-conflicts-title">
+        <h3 id="legacy-conflicts-title">Scheduling conflicts</h3>
+        {conflictError ? <p className="field-error" role="alert">{conflictError}</p> : legacyConflicts.length === 0 ?
+          <p>No existing bookings conflict under this venue&apos;s buffer rules.</p> : <>
+            <p role="status">{legacyConflicts.length} buffer conflict{legacyConflicts.length === 1 ? ' requires' : 's require'} manual review. No booking has been cancelled or changed.</p>
+            <ul className="legacy-conflict-list">
+              {legacyConflicts.map((conflict) => {
+                const first = conflict.firstBooking
+                const second = conflict.secondBooking
+                return <li className="legacy-conflict-item" key={`${first.id}:${second.id}`}>
+                  <div className="legacy-conflict-events">
+                    <ConflictSchedule booking={first} />
+                    <ConflictSchedule booking={second} />
+                  </div>
+                  <p className="legacy-conflict-overlap"><strong>{overlapSummary(conflict)}</strong></p>
+                </li>
+              })}
+            </ul>
+          </>}
+      </section>}
       {role === 'Venue Staff' && <footer className="venue-detail-actions">
         <div className="venue-detail-action-buttons">
           <button className="button hold" disabled={venue.status !== 'Available'} onClick={() => { setHoldFormOpen((open) => !open); setHoldError('') }}>Hold</button>

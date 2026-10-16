@@ -74,6 +74,7 @@ export class VenueSubmissionError extends Error {
 }
 
 const venueServiceUrl = () => import.meta.env.VITE_VENUE_SERVICE_URL || 'http://localhost:5006'
+const venueBookingServiceUrl = () => import.meta.env.VITE_VENUE_BOOKING_SERVICE_URL || 'http://localhost:5007'
 
 export async function createVenue(form: VenueFormData): Promise<Venue> {
   return saveVenue('/venues', 'POST', form)
@@ -95,7 +96,10 @@ async function saveVenue(path: string, method: 'POST' | 'PUT', form: VenueFormDa
     setupTimeMinutes: form.setupTimeMinutes.trim(),
     turnaroundTimeMinutes: form.turnaroundTimeMinutes.trim(),
   }
-  const response = await fetch(`${venueServiceUrl()}${path}`, {
+  // Editing a venue changes both its catalogue profile and the scheduling
+  // rules applied to existing bookings, so the composite owns that workflow.
+  const serviceUrl = method === 'PUT' ? venueBookingServiceUrl() : venueServiceUrl()
+  const response = await fetch(`${serviceUrl}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
