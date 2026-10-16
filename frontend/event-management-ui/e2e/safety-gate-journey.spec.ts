@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, json, makeEvent, mock, mockSafetyQueue, test, expect, users, venues } from './fixtures'
 
 // SCRUM-152: ties the gate (PR #38, safety-gate.spec.ts) and the approval
 // route (SCRUM-150, PR #54, safety-approve.spec.ts) into one journey, so the
@@ -29,6 +29,7 @@ test('SCRUM-152: a coordinator is blocked until the Safety Officer approves, the
   await mock(page, 'venueBooking', `/events/${pending.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [current] }))
   await mock(page, 'event', `/events/${pending.id}`, (route) => json(route, current))
+  await mockSafetyQueue(page, () => [current].filter((event) => event.status === 'Pending Safety Check'))
 
   // 1. As the assigned coordinator: no Confirmed option, told to wait.
   await page.goto('/my-events')
