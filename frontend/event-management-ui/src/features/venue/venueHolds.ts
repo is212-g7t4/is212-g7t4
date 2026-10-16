@@ -22,6 +22,7 @@ export async function placeVenueHold(
   venueId: string,
   expiresAt: string,
   user: Pick<User, 'id' | 'role'>,
+  coordinatorId?: string,
 ): Promise<VenueHold> {
   const response = await fetch(`${availabilityServiceUrl()}/venue-holds`, {
     method: 'POST',
@@ -30,11 +31,21 @@ export async function placeVenueHold(
       'X-Dev-User-Id': user.id,
       'X-Dev-Role': user.role,
     },
-    body: JSON.stringify({ venueId, expiresAt }),
+    body: JSON.stringify(coordinatorId ? { venueId, expiresAt, coordinatorId } : { venueId, expiresAt }),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to place a hold on this venue.')
   return body.hold as VenueHold
+}
+
+// Holds placed for this coordinator that expire within 3 days; the service decides.
+export async function fetchHoldReminders(user: Pick<User, 'id' | 'role'>): Promise<VenueHold[]> {
+  const response = await fetch(`${availabilityServiceUrl()}/venue-holds/reminders`, {
+    headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.message || 'Unable to load hold reminders.')
+  return body.reminders as VenueHold[]
 }
 
 export function showVenueHoldStatus(venues: Venue[], holds: VenueHold[]): Venue[] {
