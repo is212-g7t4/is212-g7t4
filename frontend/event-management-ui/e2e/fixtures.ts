@@ -5,7 +5,7 @@ import { SERVICE_PORTS } from './playwright.config'
 // Payload shapes mirror the backend serializers (snake_case users, camelCase events).
 export const users = {
   organiser: { user_id: 'u-organiser', username: 'Olivia Lim', email: 'olivia@example.com', role: 'Event Organiser', organization: 'Org A' },
-  manager: { user_id: 'u-manager', username: 'Alice Tan', email: 'alice@example.com', role: 'Event Coordinator Lead', organization: 'Org A' },
+  lead: { user_id: 'u-lead', username: 'Alice Tan', email: 'alice@example.com', role: 'Event Coordinator Lead', organization: 'Org A' },
   coordinator: { user_id: 'u-coord', username: 'Carl Ng', email: 'carl@example.com', role: 'Event Coordinator', organization: 'Org A' },
   venueStaff: { user_id: '00000000-0000-0000-0000-0000000000aa', username: 'Vera Koh', email: 'vera@example.com', role: 'Venue Staff', organization: 'Org A' },
   techSupport: { user_id: '00000000-0000-0000-0000-0000000000bb', username: 'Wei Chen', email: 'wei@example.com', role: 'Technical Support', organization: 'Org A' },

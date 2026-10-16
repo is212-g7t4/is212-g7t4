@@ -61,6 +61,7 @@ def test_ac4_reject_identity(calendar, headers, code):
     "role",
     [
         "Event Coordinator",
+        "Event Coordinator Lead",
         "Venue Staff",
         "Technical Support",
         "Technical Support Staff",

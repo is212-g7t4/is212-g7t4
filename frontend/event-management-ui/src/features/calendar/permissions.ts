@@ -3,6 +3,7 @@
 export function canViewCalendar(role: string): boolean {
   return [
     'Event Coordinator',
+    'Event Coordinator Lead',
     'Venue Staff',
     'Technical Support',
     'Technical Support Staff',

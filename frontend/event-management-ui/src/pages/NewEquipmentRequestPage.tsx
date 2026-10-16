@@ -10,6 +10,7 @@ import { FormSection, RoleWarning } from '../components/FormControls'
 import { SubmissionPopup } from '../components/SubmissionPopup'
 import { InlineLoading, Spinner } from '../components/Loading'
 import { ArrowLeftIcon, MinusIcon, PlusIcon } from '../components/Icon'
+import { isCoordinator } from '../roles'
 
 export const NEW_EQUIPMENT_REQUEST_ACCESS_NOTICE = 'Only Event Coordinators can request equipment.'
 
@@ -35,7 +36,7 @@ export function NewEquipmentRequestPage({ role, user, onBack, onCreated }: {
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
   const [pending, setPending] = useState(false)
 
-  const coordinator = role === 'Event Coordinator' ? user : null
+  const coordinator = isCoordinator(role) ? user : null
 
   useEffect(() => {
     if (!coordinator) return

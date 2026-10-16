@@ -161,20 +161,15 @@ def test_optional_field_wrong_type(setup):
     )
 
 
-def test_submitted_queue_loads_all_persisted_events_without_coordinator_filter(setup):
+def test_submitted_queue_requires_a_coordinator_id(setup):
+    """No caller-less "show me everything" — the old unfiltered fallback is gone."""
     client, _, cursor = setup
-    cursor.fetchall.return_value = [saved_row()]
     response = client.get("/events/submitted")
-    assert response.status_code == 200
-    assert response.json["events"][0]["eventName"] == "Community Workshop"
-    query, params = cursor.execute.call_args.args
-    assert "WHERE status IN ('Submitted', 'Under Review')" in query
-    assert "coordinator_id = %s" not in query
-    assert "ORDER BY submission_date ASC NULLS LAST" in query
-    assert params == []
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
 
 
-def test_submitted_queue_still_accepts_optional_coordinator_filter(setup):
+def test_submitted_queue_filters_to_the_coordinator(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = []
     response = client.get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}")
@@ -189,7 +184,7 @@ def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = [saved_row()]
     response = client.get(
-        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true"
+        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead"
     )
     assert response.status_code == 200
     assert len(response.json["events"]) == 1
@@ -208,28 +203,120 @@ def test_submitted_queue_rejects_invalid_optional_coordinator_id(query_string, s
 
 def test_empty_queue(setup):
     setup[2].fetchall.return_value = []
-    assert setup[0].get("/events/submitted").json == {"events": []}
+    response = setup[0].get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}")
+    assert response.json == {"events": []}
+
+
+LEAD_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def test_assign_coordinator_updates_event(setup):
+    """Assignment records the coordinator, who assigned them and when, and
+    moves the event out of the unassigned queue ('Submitted' -> 'Under Review')."""
     client, _, cursor = setup
     assigned = saved_row()
     assigned["coordinator_id"] = COORDINATOR_ID
     assigned["status"] = "Under Review"
-    cursor.fetchone.return_value = assigned
+    assigned["assigned_by"] = LEAD_ID
+    assigned["assigned_at"] = datetime(2026, 10, 16, 2, 15, tzinfo=UTC)
+    cursor.fetchone.side_effect = [{"coordinator_id": None, "status": "Submitted"}, assigned]
 
     response = client.patch(
         "/events/00000000-0000-0000-0000-000000000001",
-        json={"assignedCoordinatorId": COORDINATOR_ID},
+        json={"assignedCoordinatorId": COORDINATOR_ID, "assignedBy": LEAD_ID},
     )
 
     assert response.status_code == 200
     assert response.json["coordinatorId"] == COORDINATOR_ID
     assert response.json["status"] == "Under Review"
+    assert response.json["assignedBy"] == LEAD_ID
+    assert response.json["assignedAt"] == "2026-10-16T02:15:00+00:00"
+    assert response.json["previousCoordinatorId"] is None
+    lock_query, lock_parameters = cursor.execute.call_args_list[0].args
+    assert "FOR UPDATE" in lock_query
+    assert lock_parameters == ["00000000-0000-0000-0000-000000000001"]
     query, parameters = cursor.execute.call_args.args
-    assert "SET coordinator_id = %s" in query
+    assert "previous_coordinator_id = coordinator_id" in query
+    assert "coordinator_id = %s" in query
+    assert "assigned_by = %s" in query
+    assert "assigned_at = now()" in query
     assert "status = CASE WHEN status = 'Submitted' THEN 'Under Review'" in query
-    assert parameters == [COORDINATOR_ID, "00000000-0000-0000-0000-000000000001"]
+    assert "RETURNING" in query and "assigned_by, assigned_at, previous_coordinator_id" in query
+    assert parameters == [COORDINATOR_ID, LEAD_ID, "00000000-0000-0000-0000-000000000001"]
+
+
+@pytest.mark.parametrize("status", [
+    "Under Review", "Approved", "Pending Safety Check", "Confirmed", "Safety Changes Requested",
+])
+def test_reassign_replaces_the_coordinator_and_records_the_previous_one(setup, status):
+    """Reassignment: any open event can move to a different coordinator; the
+    Lead, previous coordinator, new coordinator and time are all returned."""
+    client, _, cursor = setup
+    reassigned = saved_row()
+    reassigned.update(
+        status=status, coordinator_id=OTHER_COORDINATOR_ID, previous_coordinator_id=COORDINATOR_ID,
+        assigned_by=LEAD_ID, assigned_at=datetime(2026, 10, 16, 13, 5, tzinfo=UTC),
+    )
+    cursor.fetchone.side_effect = [{"coordinator_id": COORDINATOR_ID, "status": status}, reassigned]
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": OTHER_COORDINATOR_ID, "assignedBy": LEAD_ID},
+    )
+
+    assert response.status_code == 200
+    assert response.json["coordinatorId"] == OTHER_COORDINATOR_ID
+    assert response.json["previousCoordinatorId"] == COORDINATOR_ID
+    assert response.json["assignedBy"] == LEAD_ID
+    assert response.json["assignedAt"] == "2026-10-16T13:05:00+00:00"
+    assert response.json["status"] == status
+    assert cursor.execute.call_count == 2
+
+
+@pytest.mark.parametrize("status", ["Rejected", "Cancelled"])
+def test_reassign_is_blocked_for_closed_events(setup, status):
+    """Reassignment: Rejected and Cancelled events keep their coordinator."""
+    client, _, cursor = setup
+    cursor.fetchone.return_value = {"coordinator_id": COORDINATOR_ID, "status": status}
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": OTHER_COORDINATOR_ID, "assignedBy": LEAD_ID},
+    )
+
+    assert response.status_code == 409
+    assert response.json["message"] == f"A {status} event can't be reassigned."
+    assert cursor.execute.call_count == 1  # the lock only; nothing updated
+
+
+def test_reassign_to_the_current_coordinator_is_rejected_as_no_change(setup):
+    """Reassignment: choosing the coordinator who already has the event is refused."""
+    client, _, cursor = setup
+    cursor.fetchone.return_value = {"coordinator_id": COORDINATOR_ID, "status": "Under Review"}
+
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": COORDINATOR_ID, "assignedBy": LEAD_ID},
+    )
+
+    assert response.status_code == 409
+    assert "No change" in response.json["message"]
+    assert cursor.execute.call_count == 1
+
+
+@pytest.mark.parametrize("assigned_by", [None, "", "not-a-uuid", 123])
+def test_assign_coordinator_requires_a_valid_assigning_user(setup, assigned_by):
+    """Without a valid assigner there's nothing to show on the detail page."""
+    client, _, cursor = setup
+    body = {"assignedCoordinatorId": COORDINATOR_ID}
+    if assigned_by is not None:
+        body["assignedBy"] = assigned_by
+
+    response = client.patch("/events/00000000-0000-0000-0000-000000000001", json=body)
+
+    assert response.status_code == 400
+    assert "assigning user" in response.json["message"]
+    cursor.execute.assert_not_called()
 
 
 def test_assign_coordinator_returns_not_found(setup):
@@ -238,10 +325,18 @@ def test_assign_coordinator_returns_not_found(setup):
 
     response = client.patch(
         "/events/00000000-0000-0000-0000-000000000001",
-        json={"assignedCoordinatorId": COORDINATOR_ID},
+        json={"assignedCoordinatorId": COORDINATOR_ID, "assignedBy": LEAD_ID},
     )
 
     assert response.status_code == 404
+
+
+def test_unassigned_event_serializes_without_assignment_record():
+    """Events never assigned (or legacy rows) have no assigner or time."""
+    body = serialize(saved_row())
+    assert body["assignedBy"] is None
+    assert body["assignedAt"] is None
+    assert body["previousCoordinatorId"] is None
 
 
 @pytest.mark.parametrize(
@@ -547,3 +642,64 @@ def test_timestamptz_values_serialize_as_singapore_local():
 
     assert serialized["preferredStartDate"] == "2026-10-01T09:00:00"
     assert serialized["preferredEndDate"] == "2026-10-01T17:00:00"
+
+
+def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [saved_row()]
+    response = client.get("/events/unassigned")
+    assert response.status_code == 200
+    assert response.json["events"][0]["coordinatorId"] is None
+    query = cursor.execute.call_args.args[0]
+    assert "WHERE status = 'Submitted' AND coordinator_id IS NULL" in query
+    assert "'Under Review'" not in query
+    assert "ORDER BY submission_date ASC NULLS LAST" in query
+
+
+def test_unassigned_queue_needs_database(monkeypatch):
+    client = create_app({"TESTING": True, "DATABASE_URL": ""}).test_client()
+    assert client.get("/events/unassigned").status_code == 503
+
+
+def test_active_events_include_unassigned_and_exclude_confirmed_rejected_cancelled(setup):
+    """The Lead's workload view lists active events, assigned or
+    not; Confirmed, Rejected and Cancelled events are left out."""
+    client, _, cursor = setup
+    assigned = {**saved_row(), "status": "Under Review", "coordinator_id": COORDINATOR_ID}
+    cursor.fetchall.return_value = [saved_row(), assigned]
+    response = client.get("/events/active")
+    assert response.status_code == 200
+    assert [event["coordinatorId"] for event in response.json["events"]] == [None, COORDINATOR_ID]
+    query, params = cursor.execute.call_args.args
+    assert "WHERE status NOT IN %s" in query
+    assert "coordinator_id" not in query.split("WHERE")[1]
+    assert params == [("Confirmed", "Rejected", "Cancelled")]
+    assert "ORDER BY preferred_start_date ASC NULLS LAST" in query
+
+
+def test_active_events_need_database(monkeypatch):
+    client = create_app({"TESTING": True, "DATABASE_URL": ""}).test_client()
+    assert client.get("/events/active").status_code == 503
+
+
+def test_submitted_queue_ignores_the_retired_is_manager_flag(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = []
+    response = client.get(
+        f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}&isManager=true"
+    )
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" in query
+    assert params == [OTHER_COORDINATOR_ID]
+
+
+@pytest.mark.parametrize("role", ["Venue Staff", "Event Coordinator", "Attendee"])
+def test_only_the_lead_can_view_every_submitted_request(role, setup):
+    client, _, cursor = setup
+    response = client.get(
+        "/events/submitted",
+        query_string={"coordinatorId": OTHER_COORDINATOR_ID, "viewerRole": role},
+    )
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()

@@ -2,9 +2,21 @@ import { render, screen } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { Sidebar } from './Navigation'
 
-test('shows My events to Event Coordinators', () => {
+test('Event Coordinators get one Events entry instead of separate event pages', () => {
   render(<Sidebar route="dashboard" role="Event Coordinator" onNavigate={vi.fn()} />)
-  expect(screen.getByRole('button', { name: 'My events' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Events' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'My events' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Request review' })).not.toBeInTheDocument()
+})
+
+test('Events opens My events for a coordinator and the unassigned queue for the Lead', () => {
+  const onNavigate = vi.fn()
+  const { rerender } = render(<Sidebar route="dashboard" role="Event Coordinator" onNavigate={onNavigate} />)
+  screen.getByRole('button', { name: 'Events' }).click()
+  expect(onNavigate).toHaveBeenLastCalledWith('myEvents')
+  rerender(<Sidebar route="dashboard" role="Event Coordinator Lead" onNavigate={onNavigate} />)
+  screen.getByRole('button', { name: 'Events' }).click()
+  expect(onNavigate).toHaveBeenLastCalledWith('queue')
 })
 
 test('shows My events to Event Organisers', () => {
@@ -38,8 +50,8 @@ test('Request review tab is hidden from Event Organisers', () => {
   expect(screen.getByRole('button', { name: 'My events' })).toBeInTheDocument()
 })
 
-test('Request review tab is still shown to Event Coordinators', () => {
-  render(<Sidebar route="review" role="Event Coordinator" onNavigate={vi.fn()} />)
+test('Request review is still its own entry for Venue Staff', () => {
+  render(<Sidebar route="review" role="Venue Staff" onNavigate={vi.fn()} />)
   expect(screen.getByRole('button', { name: 'Request review' })).toBeInTheDocument()
 })
 
