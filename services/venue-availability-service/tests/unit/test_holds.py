@@ -1,6 +1,16 @@
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **Hold/reminder and buffer regressions (no direct SCRUM-171 AC):** staff/identity guards, expiry, conflict refusal, coordinator ownership, buffer-expanded overlap, active reminder filtering and configuration errors.
+- **SCRUM-171 integration:** the shared write gate precedes the existing hold SQL; the coordinator/buffer case locates overlap and insert queries by purpose rather than positional indices. Both upstream behavior and its assertions are preserved.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+"""
+
 from datetime import datetime
 
-from app import create_app
 from app.calendar import SINGAPORE
 from tests.unit.factories import USER_ID, VENUE_ID
 
@@ -129,7 +139,7 @@ def test_place_hold_rejects_overlap_with_existing_booking(setup):
     assert response.status_code == 409
     assert (
         "status NOT IN ('Rejected', 'Cancelled', 'Expired')"
-        in cursor.execute.call_args_list[1].args[0]
+        in cursor.execute.call_args_list[2].args[0]
     )
 
 
@@ -274,8 +284,8 @@ def test_place_hold_keeps_coordinator_and_buffer_conflict_rules_together(setup):
     )
 
     assert response.status_code == 201
-    overlap_params = cursor.execute.call_args_list[1].args[1]
-    insert_params = cursor.execute.call_args_list[2].args[1]
+    overlap_params = next(call.args[1] for call in cursor.execute.call_args_list if "SELECT 1 FROM" in call.args[0])
+    insert_params = next(call.args[1] for call in cursor.execute.call_args_list if "INSERT INTO" in call.args[0])
     assert overlap_params[3] == datetime(2099, 10, 1, 12, 30, tzinfo=SINGAPORE)
     assert insert_params[-1] == USER_ID
 

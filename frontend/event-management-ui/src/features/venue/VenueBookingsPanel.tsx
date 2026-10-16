@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import './venueBookings.css'
 import type { FormEvent } from 'react'
 import { Field, StatusBadge } from '../../components/FormControls'
 import { InlineLoading } from '../../components/Loading'
-import { formatSchedule } from '../event/dateFormat'
+import { singaporeInput } from '../calendar/dates'
 import { fetchVenues } from './venues'
 import type { Venue } from './venues'
 import { VenueBookingError, cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
@@ -28,7 +29,19 @@ const conflictMessages: Record<string, string> = {
   VENUE_CLOSURE: 'The venue is closed during this time.',
 }
 
-const localDateTime = (value: string) => value ? value.slice(0, 16) : ''
+const singaporeInstant = (value: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}$/.test(value)
+  ? value + '+08:00'
+  : singaporeInput(value) ?? value
+const closureDate = (value: string) => new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(singaporeInstant(value))) + ' SGT'
+
+const localDateTime = (value: string) => {
+  if (!value) return ''
+  const parsed = new Date(singaporeInstant(value))
+  if (!Number.isFinite(parsed.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Singapore', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(parsed)
+  const part = (type: string) => parts.find(p => p.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`
+}
 
 export function VenueBookingsPanel({
   eventId,
@@ -95,6 +108,19 @@ export function VenueBookingsPanel({
     setSubmitMessage('')
   }
 
+  const handleImmutable = async (cause: unknown, bookingId: string | null) => {
+    if (!(cause instanceof VenueBookingError) || cause.code !== 'BOOKING_IMMUTABLE') return false
+    if (editingId === bookingId) {
+      setEditingId(null)
+      setSubmitError('This request is now read-only. Your draft is retained; use Add venue booking for a separate replacement.')
+    } else {
+      setSubmitError('This request is now read-only. Your other booking draft is unchanged.')
+    }
+    try { setBookings(await fetchVenueBookings(eventId, coordinatorId)); onBookingsChanged?.() }
+    catch { setLoadError('Unable to refresh bookings. Reload the page to view the latest request status.') }
+    return true
+  }
+
   const submit = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
     if (saving) return
@@ -137,6 +163,7 @@ export function VenueBookingsPanel({
       resetForm()
       onBookingsChanged?.()
     } catch (cause) {
+      if (await handleImmutable(cause, editingId)) return
       if (cause instanceof VenueBookingError && cause.status === 409 && cause.code === 'VENUE_UNAVAILABLE') {
         // A late rejection belongs to the submitted draft, not a newly edited time/venue.
         if (submittedRevision !== draftRevision.current) return
@@ -167,6 +194,7 @@ export function VenueBookingsPanel({
       setSubmitMessage(`${booking.venueName} booking cancelled. Other venue bookings were not changed.`)
       onBookingsChanged?.()
     } catch (cause) {
+      if (await handleImmutable(cause, booking.id)) return
       setSubmitError(cause instanceof Error ? cause.message : 'Unable to cancel this venue booking.')
     } finally {
       setCancellingId(null)
@@ -184,11 +212,17 @@ export function VenueBookingsPanel({
           {bookings.map((booking) => <article className="venue-booking-item" key={booking.id}>
             <header><strong>{booking.venueName}</strong><StatusBadge status={booking.status} /></header>
             <dl className="event-details">
-              <div className="event-detail full"><dt>Date and time</dt><dd>{formatSchedule(booking.requestedStartTime, booking.requestedEndTime)}</dd></div>
+              <div className="event-detail full"><dt>Date and time</dt><dd>{closureDate(booking.requestedStartTime)} – {closureDate(booking.requestedEndTime)}</dd></div>
               <div className="event-detail"><dt>Required capacity</dt><dd>{booking.requiredCapacity}</dd></div>
               <div className="event-detail"><dt>Venue requirements</dt><dd>{booking.venueRequirements || 'None specified'}</dd></div>
             </dl>
-            {booking.status !== 'Cancelled' && <div className="venue-booking-actions">
+            {booking.closureRejection && <div className="closure-rejection">
+              <strong>Rejected due to temporary venue closure</strong>
+              <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{booking.closureRejection.reason}</p>
+              <p>{closureDate(booking.closureRejection.startDateTime)} – {closureDate(booking.closureRejection.endDateTime)}</p>
+            </div>}
+            {booking.status === 'Rejected' && <p className="muted">Rejected requests are read-only. Use Add venue booking below to request a replacement.</p>}
+            {booking.status !== 'Cancelled' && booking.status !== 'Rejected' && <div className="venue-booking-actions">
               <button className="button small" type="button" disabled={saving || cancellingId !== null} onClick={() => edit(booking)}>Edit booking</button>
               <button className="button small reject" type="button" disabled={saving || cancellingId !== null} onClick={() => void cancel(booking)}>
                 {cancellingId === booking.id ? 'Cancelling…' : 'Cancel booking'}

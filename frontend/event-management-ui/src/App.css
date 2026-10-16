@@ -1790,6 +1790,9 @@ td small {
 }
 
 @media (max-width: 600px) {
+  .role-switcher { max-width: 100%; }
+  .role-switcher select { min-width: 0; flex: 1; }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;

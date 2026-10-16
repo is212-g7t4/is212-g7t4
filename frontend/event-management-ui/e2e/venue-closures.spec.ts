@@ -1,3 +1,14 @@
+/**
+ * # Test scope and acceptance mapping — SCRUM-171 integration
+ *
+ * - **SCRUM-170 history regression:** inline creation, paginated history and Singapore display in a Los Angeles browser remain usable through the new preview step. History dates are not AC3 rejected-request detail evidence.
+ * - **Supporting uncertainty robustness (no direct AC):** lost save response retains the draft, warns and avoids automatic retry; it does not assert rollback.
+ *
+ * ## Case/group traceability
+ *
+ * The named test functions/cases below implement the groups above; their existing
+ * names and assertions specify the scenario. No group is credited with all five ACs.
+ */
 import { allUsers, asUser, json, mock, test, expect, users, venues } from './fixtures'
 
 test.use({ timezoneId: 'America/Los_Angeles' })
@@ -8,6 +19,7 @@ test.beforeEach(async ({ page, mockApi }) => {
  await mock(page, 'user', '/users', route => json(route, { users: allUsers }))
  await mock(page, 'venue', '/venues', route => json(route, { venues }))
  await mock(page, 'venue', `/venues/${venues[0].id}`, route => json(route, { venue: { ...venues[0], status: 'Maintenance' } }))
+ await mock(page, 'venueBooking', '/venue-closures/preview', route => json(route, { closure: route.request().postDataJSON(), venueName: 'Grand Hall', affectedCount: 0, affectedRequests: [], confirmationToken: 'signed' }))
  await mock(page, 'availability', '/venue-holds', route => json(route, { holds: [] }))
 })
 test('SCRUM-170 record inline, read persisted pages, retain SGT in non-Singapore browser', async ({ page }, testInfo) => {
@@ -20,9 +32,9 @@ test('SCRUM-170 record inline, read persisted pages, retain SGT in non-Singapore
   expect(request.headers()['x-dev-role']).toBe('Venue Staff')
   if (request.method() === 'POST') {
    posts++
-   expect(request.postDataJSON()).toEqual({ venueId: venues[0].id, startDateTime: closure.startDateTime, endDateTime: closure.endDateTime, reason: closure.reason })
+   expect(request.postDataJSON()).toEqual({ venueId: venues[0].id, startDateTime: closure.startDateTime, endDateTime: closure.endDateTime, reason: closure.reason, confirmed: true, confirmationToken: 'signed' })
    stored = true
-   return json(route, { closure }, 201)
+   return json(route, { closure, rejectedCount: 0 }, 201)
   }
   const cursor = new URL(request.url()).searchParams.get('cursor')
   reads.push(cursor)
@@ -40,10 +52,11 @@ test('SCRUM-170 record inline, read persisted pages, retain SGT in non-Singapore
  await page.getByLabel('Closure end (SGT)').fill('2099-01-01T10:00')
  await page.getByLabel('Reason', { exact: true }).fill('  Air-conditioning maintenance  ')
  const reasonBounds = await page.getByLabel('Reason', { exact: true }).boundingBox()
- const saveBounds = await page.getByRole('button', { name: 'Save closure' }).boundingBox()
+ const saveBounds = await page.getByRole('button', { name: 'Preview affected requests' }).boundingBox()
  expect(saveBounds!.y).toBeGreaterThanOrEqual(reasonBounds!.y + reasonBounds!.height)
  await page.screenshot({ path: testInfo.outputPath('closure-form.png'), fullPage: true })
- await page.getByRole('button', { name: 'Save closure' }).click()
+ await page.getByRole('button', { name: 'Preview affected requests' }).click()
+ await page.getByRole('button', { name: 'Confirm closure and reject requests' }).click()
  await expect(page.getByText('Closure recorded.', { exact: true })).toBeVisible()
  await expect(page.getByText('1 Jan 2020, 09:00 SGT – 1 Jan 2099, 10:00 SGT')).toBeVisible()
  await page.getByRole('button', { name: 'Load more closures' }).click()
@@ -67,7 +80,8 @@ test('SCRUM-170 lost save response preserves draft, warns instead of automatic r
  await page.getByLabel('Closure start (SGT)').fill('2020-01-01T09:00')
  await page.getByLabel('Closure end (SGT)').fill('2099-01-01T10:00')
  await page.getByLabel('Reason', { exact: true }).fill('Repairs')
- await page.getByRole('button', { name: 'Save closure' }).click()
+ await page.getByRole('button', { name: 'Preview affected requests' }).click()
+ await page.getByRole('button', { name: 'Confirm closure and reject requests' }).click()
  await expect(page.getByRole('alert')).toContainText('may have been recorded')
  await expect(page.getByLabel('Reason', { exact: true })).toHaveValue('Repairs')
  expect(posts).toBe(1)

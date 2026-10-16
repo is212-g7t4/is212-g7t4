@@ -1,4 +1,16 @@
-"""Venue Availability: booking creation, approval/rejection, and conflict-checking."""
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **Existing booking-write regression (no direct SCRUM-171 AC):** creation, conflict scope, approval/rejection, single-child edit/cancel, validation and configuration errors. Sibling-preserving CRUD is not closure-time AC2 proof.
+- **SCRUM-171 compatibility only:** expected SQL-call ordering accounts for the shared transaction gate; existing response and mutation assertions remain.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+Venue Availability: booking creation, approval/rejection, and conflict-checking."""
 
 from datetime import datetime
 
@@ -305,7 +317,7 @@ def test_cancel_booking_is_idempotent(setup):
 
     assert response.status_code == 200
     assert response.json["status"] == "Cancelled"
-    assert cursor.execute.call_count == 1
+    assert cursor.execute.call_count == 2
 
 
 def test_update_and_cancel_require_booking_to_belong_to_event(setup):
@@ -371,4 +383,3 @@ def test_cancel_requires_event_id(setup):
     assert client.patch(
         f"/venue-bookings/{BOOKING_ID}/cancel", json={}
     ).status_code == 400
-

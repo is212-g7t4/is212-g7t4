@@ -1,19 +1,33 @@
+/**
+ * # Test scope and acceptance mapping — SCRUM-171 integration
+ *
+ * - **SCRUM-170 page regressions (no direct SCRUM-171 AC):** paginated history, identity/role/venue isolation, draft preservation across failed polling and in-flight saves, retry, duplicate-submit control, required fields and persistence feedback.
+ * - **Supporting SCRUM-171 AC4 integration:** existing inline saves pass through preview/explicit confirmation; these tests do not prove the complete affected-list clause. The new main scheduling-conflict read is mocked independently.
+ *
+ * ## Case/group traceability
+ *
+ * The named test functions/cases below implement the groups above; their existing
+ * names and assertions specify the scenario. No group is credited with all five ACs.
+ */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { VenueDetailPage } from './VenueDetailPage'
 import { fetchVenue } from '../features/venue/venues'
-import { createClosure, listClosures } from '../features/venue/venueClosures'
+import { createClosure, listClosures, previewClosure } from '../features/venue/venueClosures'
 vi.mock('../features/venue/venues', () => ({ fetchVenue: vi.fn() }))
+// Main added an independent scheduling-conflict read; keep this closure suite hermetic.
+vi.mock('../features/venue/legacyConflicts', () => ({ fetchLegacyConflicts: vi.fn().mockResolvedValue({ venueId: 'v1', conflictCount: 0, conflicts: [] }) }))
 vi.mock('../features/venue/venueHolds', () => ({ fetchActiveVenueHolds: vi.fn().mockResolvedValue([]), showVenueHoldStatus: (v: unknown) => v }))
-vi.mock('../features/venue/venueClosures', () => ({ createClosure: vi.fn(), listClosures: vi.fn() }))
+vi.mock('../features/venue/venueClosures', () => ({ createClosure: vi.fn(), listClosures: vi.fn(), previewClosure: vi.fn() }))
 const user = { id: 'staff1', role: 'Venue Staff' as const }
 const props = { venueId: 'v1', role: 'Venue Staff' as const, user, onBack: vi.fn(), onEdit: vi.fn() }
-const row = { closureId: 'c1', venueId: 'v1', startDateTime: '2020-01-01T01:00:00Z', endDateTime: '2099-01-01T02:00:00Z', reason: 'Maintenance', createdBy: 'staff1', createdAt: '2026-01-01T02:00:00Z' }
+const row = { rejectedCount: 0, closureId: 'c1', venueId: 'v1', startDateTime: '2020-01-01T01:00:00Z', endDateTime: '2099-01-01T02:00:00Z', reason: 'Maintenance', createdBy: 'staff1', createdAt: '2026-01-01T02:00:00Z' }
 beforeEach(() => {
  vi.clearAllMocks()
  vi.mocked(fetchVenue).mockResolvedValue({ id: 'v1', name: 'Grand Hall', status: 'Maintenance', location: 'L1', capacity: 10, accessibility: '', facilities: [], supportedLayouts: [] })
  vi.mocked(listClosures).mockResolvedValue({ closures: [], nextCursor: null })
  vi.mocked(createClosure).mockResolvedValue(row)
+ vi.mocked(previewClosure).mockResolvedValue({ closure: { ...row, venueId: 'v1' }, venueName: 'Grand Hall', affectedCount: 0, affectedRequests: [], confirmationToken: 'signed' })
 })
 test('SCRUM-170 persisted list uses Singapore dates, reaches later pages and refreshes from first page', async () => {
  vi.mocked(listClosures).mockResolvedValueOnce({ closures: [row], nextCursor: 'next' }).mockResolvedValueOnce({ closures: [{ ...row, closureId: 'c2', reason: 'Second page' }], nextCursor: null })
@@ -33,7 +47,7 @@ test('SCRUM-170 preserves input on save failure and exposes list retry', async (
  render(<VenueDetailPage {...props} />)
  await fill()
  expect(await screen.findByText('List unavailable')).toBeInTheDocument()
- fireEvent.click(screen.getByRole('button', { name: 'Save closure' }))
+ fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
  expect(await screen.findByText(/may have been recorded/)).toBeInTheDocument()
  expect(screen.getByLabelText('Reason')).toHaveValue('Maintenance')
  expect(screen.getByLabelText('Closure start (SGT)')).toHaveValue('2020-01-01T09:00')
@@ -46,8 +60,8 @@ test('SCRUM-170 role change cancels list and save, clears state, ignores late re
  vi.mocked(createClosure).mockReturnValue(new Promise(resolve => { finish = resolve }))
  const { rerender } = render(<VenueDetailPage {...props} />)
  await fill()
- fireEvent.click(screen.getByRole('button', { name: 'Save closure' }))
- const saveSignal = vi.mocked(createClosure).mock.calls[0][5]
+ fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
+ const saveSignal = vi.mocked(createClosure).mock.calls[0][6]
  const listSignal = vi.mocked(listClosures).mock.calls[0][3]
  rerender(<VenueDetailPage {...props} role="Event Coordinator" />)
  expect(saveSignal?.aborted).toBe(true)
@@ -111,7 +125,11 @@ test.each([false, true])('SCRUM-170 failed polling preserves draft and pending s
   fireEvent.change(screen.getByLabelText('Closure start (SGT)'), { target: { value: '2020-01-01T09:00' } })
   fireEvent.change(screen.getByLabelText('Closure end (SGT)'), { target: { value: '2099-01-01T10:00' } })
   fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Maintenance' } })
-  if (saving) fireEvent.click(screen.getByRole('button', { name: 'Save closure' }))
+  if (saving) {
+   fireEvent.click(screen.getByRole('button', { name: 'Preview affected requests' }))
+   await act(async () => {})
+  }
+  if (saving) fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
   vi.mocked(fetchVenue).mockRejectedValueOnce(new Error('Venue refresh offline'))
   await act(async () => vi.advanceTimersByTime(30_000))
   expect(screen.getByLabelText('Reason')).toHaveValue('Maintenance')
@@ -119,7 +137,7 @@ test.each([false, true])('SCRUM-170 failed polling preserves draft and pending s
   expect(screen.getByRole('alert')).toHaveTextContent('Venue refresh offline')
   expect(screen.getByRole('heading', { name: 'Grand Hall' })).toBeInTheDocument()
   if (saving) {
-   expect(vi.mocked(createClosure).mock.calls[0][5]?.aborted).toBe(false)
+   expect(vi.mocked(createClosure).mock.calls[0][6]?.aborted).toBe(false)
    await act(async () => finish(row))
    expect(screen.getByText('Closure recorded.')).toBeInTheDocument()
    expect(listClosures).toHaveBeenCalledTimes(2)
@@ -163,11 +181,13 @@ test('SCRUM-170 cancel preserves draft, duplicate submit is ignored, non-Error s
  vi.mocked(createClosure).mockReturnValueOnce(new Promise((_, fail) => { reject = fail }))
  render(<VenueDetailPage {...props} />)
  await fill()
- fireEvent.click(screen.getByRole('button', { name: 'Cancel closure' }))
+ fireEvent.click(screen.getByRole('button', { name: 'Discard closure draft' }))
  expect(screen.queryByLabelText('Reason')).not.toBeInTheDocument()
  fireEvent.click(screen.getByRole('button', { name: 'Record temporary closure' }))
  expect(screen.getByLabelText('Reason')).toHaveValue('Maintenance')
- const form = screen.getByRole('button', { name: 'Save closure' }).closest('form')!
+ fireEvent.click(screen.getByRole('button', { name: 'Preview affected requests' }))
+ await screen.findByRole('region', { name: 'Confirm temporary closure' })
+ const form = screen.getByRole('button', { name: 'Confirm closure and reject requests' }).closest('form')!
  fireEvent.submit(form); fireEvent.submit(form)
  expect(createClosure).toHaveBeenCalledTimes(1)
  await act(async () => reject('failure'))
@@ -196,7 +216,7 @@ test('SCRUM-170 list non-Error fallback and stale save failure do not leak to an
  const view = render(<VenueDetailPage {...props} />)
  await fill()
  expect(await screen.findByText('Unable to load recorded closures.')).toBeInTheDocument()
- fireEvent.click(screen.getByRole('button', { name: 'Save closure' }))
+ fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
  view.rerender(<VenueDetailPage {...props} user={{ ...user, id: 'staff2' }} />)
  await act(async () => reject(new Error('Old save error')))
  expect(screen.queryByText('Old save error')).not.toBeInTheDocument()
@@ -219,6 +239,8 @@ async function fill() {
  fireEvent.change(screen.getByLabelText('Closure start (SGT)'), { target: { value: '2020-01-01T09:00' } })
  fireEvent.change(screen.getByLabelText('Closure end (SGT)'), { target: { value: '2099-01-01T10:00' } })
  fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Maintenance' } })
+ fireEvent.click(screen.getByRole('button', { name: 'Preview affected requests' }))
+ await screen.findByRole('region', { name: 'Confirm temporary closure' })
 }
 test('SCRUM-170 staff records ongoing closure inline for maintenance venue, only after persistence', async () => {
  let finish!: (value: typeof row) => void
@@ -227,12 +249,12 @@ test('SCRUM-170 staff records ongoing closure inline for maintenance venue, only
  await fill()
  expect(screen.getByLabelText('Closure venue')).toHaveValue('Grand Hall')
  expect(screen.getByLabelText('Closure venue')).toHaveAttribute('readonly')
- fireEvent.click(screen.getByRole('button', { name: 'Save closure' }))
- expect(screen.getByRole('button', { name: 'Saving closure…' })).toBeDisabled()
+ fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
+ expect(screen.getByRole('button', { name: 'Working…' })).toBeDisabled()
  expect(screen.queryByText('Closure recorded.')).not.toBeInTheDocument()
  await act(async () => finish(row))
  expect(await screen.findByText('Closure recorded.')).toBeInTheDocument()
  expect(createClosure).toHaveBeenCalledTimes(1)
  expect(listClosures).toHaveBeenCalledTimes(2)
- expect(screen.getByText(/enforcement is handled separately/)).toBeInTheDocument()
+ expect(screen.getByText(/Saving a closure rejects overlapping/)).toBeInTheDocument()
 })

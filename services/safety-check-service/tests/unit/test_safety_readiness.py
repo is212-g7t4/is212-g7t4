@@ -1,4 +1,16 @@
-"""SCRUM-149 AC1/AC2: the rule for whether an event's arrangements are approved.
+"""# Test scope and acceptance mapping — SCRUM-171 integration
+
+- **SCRUM-149 readiness regression; no direct SCRUM-171 AC:** approved arrangements pass; pending/unknown/missing venue and unapproved equipment block with readable outstanding items.
+- **Separately approved venue-only compatibility:** rejected venue history is ignored when a live approved booking exists; rejected-only remains missing a live venue. Cancelled/expired handling and equipment rejection rules are unchanged.
+
+## Case/group traceability
+
+The named test functions/cases below implement the groups above; their existing
+names and assertions specify the scenario. No group is credited with all five ACs.
+
+## Existing test contract and detailed cases
+
+SCRUM-149 AC1/AC2: the rule for whether an event's arrangements are approved.
 
 AC1 Given an event ... has every venue booking approved and every equipment
     request approved/reserved (or no equipment requested), when the Event
@@ -6,6 +18,9 @@ AC1 Given an event ... has every venue booking approved and every equipment
 AC2 Given any venue booking or equipment request for the event is still
     pending or rejected, when the Event Coordinator tries to submit, then
     submission is blocked and the outstanding arrangements are listed.
+
+SCRUM-171 authorised compatibility exception: rejected VENUE requests are
+immutable history; require a live approved replacement. Equipment is unchanged.
 
 A pure function, so these tests need no HTTP and no app. The rule fails closed:
 anything it can't read as approved counts as outstanding.
@@ -41,8 +56,8 @@ def test_approved_bookings_and_approved_equipment_are_ready():
 def test_cancelled_and_expired_bookings_are_ignored():
     """Boundary: a withdrawn or lapsed booking is one the event no longer relies on.
 
-    Since SCRUM-156 a coordinator can cancel a rejected booking and book
-    elsewhere, so these must not keep blocking.
+    SCRUM-171 retains rejected venue requests as history; a separate live
+    replacement is checked instead.
     """
     assert (
         outstanding_arrangements(
@@ -75,14 +90,10 @@ def test_cancelled_equipment_request_is_ignored():
     [
         ("Pending Review", "Waiting for Venue Staff approval."),
         ("Pending", "Waiting for Venue Staff approval."),
-        (
-            "Rejected",
-            "Rejected by Venue Staff. Cancel this booking or book another venue.",
-        ),
     ],
 )
 def test_unapproved_booking_is_listed_with_its_reason(status, reason):
-    """AC2: a pending or rejected booking blocks, and says why."""
+    """AC2: a pending live booking blocks, and says why."""
     outstanding = outstanding_arrangements([booking(status)], [])
 
     assert outstanding == [
@@ -145,7 +156,7 @@ def test_venue_items_come_before_equipment_items():
 def test_every_unapproved_arrangement_is_listed():
     """AC2 lists *the* outstanding arrangements, not just the first one."""
     outstanding = outstanding_arrangements(
-        [booking("Pending Review"), booking("Rejected", OTHER_BOOKING_ID)],
+        [booking("Pending Review"), booking("Pending", OTHER_BOOKING_ID)],
         [
             equipment_request("Pending"),
             equipment_request("Rejected", OTHER_REQUEST_ID),
@@ -166,12 +177,12 @@ def test_every_unapproved_arrangement_is_listed():
 
 @pytest.mark.parametrize(
     "bookings",
-    [[], None, [booking("Cancelled")], [booking("Cancelled"), booking("Expired")]],
+    [[], None, [booking("Cancelled")], [booking("Rejected")], [booking("Cancelled"), booking("Expired")]],
 )
 def test_event_without_a_live_booking_is_blocked(bookings):
     """AC1 allows no equipment but never no venue: an event needs somewhere to be.
 
-    Only cancelled or expired bookings means the event has nowhere to happen,
+    Only cancelled, rejected or expired bookings means no live venue remains,
     which reads the same as never having booked.
     """
     outstanding = outstanding_arrangements(bookings, [])

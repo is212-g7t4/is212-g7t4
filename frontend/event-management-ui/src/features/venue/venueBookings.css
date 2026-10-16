@@ -1,0 +1,14 @@
+/* Keep long venue names and rejection details within mobile booking cards. */
+.venue-bookings-section .venue-booking-list { grid-template-columns: minmax(0, 1fr); }
+.venue-bookings-section .venue-booking-item { min-width: 0; overflow-wrap: anywhere; }
+.venue-bookings-section .venue-booking-item header { flex-wrap: wrap; }
+.venue-bookings-section .venue-booking-item header strong { min-width: 0; }
+.venue-bookings-section .venue-booking-item .event-details,
+.venue-bookings-section .closure-rejection,
+.venue-bookings-section .venue-booking-item > .muted,
+.venue-bookings-section .venue-booking-actions { padding: var(--space-3) var(--space-4); margin: 0; }
+.venue-bookings-section .closure-rejection { border-top: 1px solid var(--color-border); background: var(--color-surface); }
+.venue-bookings-section .closure-rejection p { margin: var(--space-2) 0; }
+.venue-bookings-section .venue-booking-actions { flex-wrap: wrap; }
+.venue-bookings-section .venue-booking-form select,
+.venue-bookings-section .venue-booking-form input { min-width: 0; max-width: 100%; }

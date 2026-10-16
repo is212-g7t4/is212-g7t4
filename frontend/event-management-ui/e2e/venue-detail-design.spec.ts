@@ -1,3 +1,13 @@
+/**
+ * # Test scope and acceptance mapping — SCRUM-171 integration
+ *
+ * - **SCRUM-170 presentation regression (no direct SCRUM-171 AC):** desktop/mobile hierarchy, closure disclosure, mandatory/read-only fields and empty/populated screenshots. The preview-button label is updated; no rejection, detail or transaction claim.
+ *
+ * ## Case/group traceability
+ *
+ * The named test functions/cases below implement the groups above; their existing
+ * names and assertions specify the scenario. No group is credited with all five ACs.
+ */
 import { allUsers, asUser, json, mock, test, expect, users, venues } from './fixtures'
 
 // All backend traffic is intercepted. Screenshots contain synthetic demo fixtures only.
@@ -84,7 +94,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(reason).toHaveValue('Draft survives collapse')
     await screenshot('populated-expanded')
     const reasonBounds = (await reason.boundingBox())!
-    const saveBounds = (await page.getByRole('button', { name: 'Save closure' }).boundingBox())!
+    const saveBounds = (await page.getByRole('button', { name: 'Preview affected requests' }).boundingBox())!
     expect(saveBounds.y).toBeGreaterThanOrEqual(reasonBounds.y + reasonBounds.height)
     const overflow = await page.evaluate(() => [...document.querySelectorAll('*')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).map(el => ({ tag: el.tagName, class: el.className, width: el.getBoundingClientRect().width })))
     expect(overflow, 'elements overflow viewport').toEqual([])
