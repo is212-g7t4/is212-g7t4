@@ -8,6 +8,8 @@ export interface VenueFormData {
   accessibility: string
   supportedLayouts: string
   status: string
+  setupTimeMinutes: string
+  turnaroundTimeMinutes: string
 }
 
 export const VENUE_STATUSES = ['Available', 'Under Maintenance', 'Booked'] as const
@@ -20,6 +22,8 @@ export const emptyVenueForm: VenueFormData = {
   accessibility: '',
   supportedLayouts: '',
   status: 'Available',
+  setupTimeMinutes: '0',
+  turnaroundTimeMinutes: '0',
 }
 
 function splitList(value: string): string[] {
@@ -36,6 +40,8 @@ export function validateVenueForm(form: VenueFormData) {
   if (splitList(form.facilities).length === 0) missingFields.push('Facilities')
   if (splitList(form.supportedLayouts).length === 0) missingFields.push('Supported Room Layouts')
   if (!form.status.trim()) missingFields.push('Operating Status')
+  if (!form.setupTimeMinutes.trim()) missingFields.push('Setup Time')
+  if (!form.turnaroundTimeMinutes.trim()) missingFields.push('Turnaround Time')
 
   if (missingFields.length) return { missingFields, errors }
 
@@ -44,6 +50,14 @@ export function validateVenueForm(form: VenueFormData) {
   }
   if (!(VENUE_STATUSES as readonly string[]).includes(form.status.trim())) {
     errors.push(`Operating Status must be one of: ${VENUE_STATUSES.join(', ')}.`)
+  }
+  for (const [value, label] of [
+    [form.setupTimeMinutes, 'Setup Time'],
+    [form.turnaroundTimeMinutes, 'Turnaround Time'],
+  ] as const) {
+    if (!/^\d+$/.test(value.trim()) || Number(value) > 2147483647) {
+      errors.push(`${label} must be a non-negative whole number of minutes (maximum 2147483647).`)
+    }
   }
 
   return { missingFields, errors }
@@ -78,6 +92,8 @@ async function saveVenue(path: string, method: 'POST' | 'PUT', form: VenueFormDa
     accessibility: form.accessibility.trim(),
     supportedLayouts: splitList(form.supportedLayouts),
     status: form.status.trim(),
+    setupTimeMinutes: form.setupTimeMinutes.trim(),
+    turnaroundTimeMinutes: form.turnaroundTimeMinutes.trim(),
   }
   const response = await fetch(`${venueServiceUrl()}${path}`, {
     method,

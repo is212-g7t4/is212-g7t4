@@ -15,6 +15,8 @@ VALID_PAYLOAD = {
     "accessibility": "Wheelchair accessible",
     "supportedLayouts": ["theatre", "classroom"],
     "status": "Available",
+    "setupTimeMinutes": "30",
+    "turnaroundTimeMinutes": "45",
 }
 
 
@@ -28,6 +30,8 @@ def saved_row(**overrides):
         "accessibility": "Wheelchair accessible",
         "supported_layouts": ["theatre", "classroom"],
         "operational_status": "Available",
+        "setup_time_minutes": 30,
+        "turnaround_time_minutes": 45,
     }
     row.update(overrides)
     return row

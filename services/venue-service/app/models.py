@@ -3,7 +3,11 @@ from contextlib import closing
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-COLUMNS = "venue_id, venue_name, location, max_capacity, facilities, accessibility, supported_layouts, operational_status"
+COLUMNS = (
+    "venue_id, venue_name, location, max_capacity, facilities, accessibility, "
+    "supported_layouts, operational_status, setup_time_minutes, "
+    "turnaround_time_minutes"
+)
 
 # SCRUM-26: accessibility is free text in the catalogue, so a checkbox key is
 # matched against the phrases the live rows actually use. A key matches when
@@ -41,6 +45,8 @@ def serialize(row):
         "accessibility": row["accessibility"] or "",
         "supportedLayouts": _names(row["supported_layouts"]),
         "status": row["operational_status"] or "Unknown",
+        "setupTimeMinutes": row.get("setup_time_minutes", 0),
+        "turnaroundTimeMinutes": row.get("turnaround_time_minutes", 0),
     }
 
 
@@ -110,8 +116,9 @@ def create_venue(database_url, details):
             cursor.execute(
                 f"""INSERT INTO public."Venue"
                     (venue_name, location, max_capacity, facilities,
-                     accessibility, supported_layouts, operational_status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                     accessibility, supported_layouts, operational_status,
+                     setup_time_minutes, turnaround_time_minutes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING {COLUMNS}""",
                 [
                     details["name"],
@@ -121,6 +128,8 @@ def create_venue(database_url, details):
                     details["accessibility"],
                     Json(details["supportedLayouts"]),
                     details["status"],
+                    details.get("setupTimeMinutes", 0),
+                    details.get("turnaroundTimeMinutes", 0),
                 ],
             )
             saved = cursor.fetchone()
@@ -141,7 +150,9 @@ def update_venue(database_url, venue_id, details):
                 f"""UPDATE public.\"Venue\"
                     SET venue_name = %s, location = %s, max_capacity = %s,
                         facilities = %s, accessibility = %s,
-                        supported_layouts = %s, operational_status = %s
+                        supported_layouts = %s, operational_status = %s,
+                        setup_time_minutes = COALESCE(%s, setup_time_minutes),
+                        turnaround_time_minutes = COALESCE(%s, turnaround_time_minutes)
                     WHERE venue_id = %s
                     RETURNING {COLUMNS}""",
                 [
@@ -152,6 +163,8 @@ def update_venue(database_url, venue_id, details):
                     details["accessibility"],
                     Json(details["supportedLayouts"]),
                     details["status"],
+                    details.get("setupTimeMinutes"),
+                    details.get("turnaroundTimeMinutes"),
                     venue_id,
                 ],
             )

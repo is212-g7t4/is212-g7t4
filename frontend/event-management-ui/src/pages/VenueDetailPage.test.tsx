@@ -15,6 +15,7 @@ vi.mock('../features/venue/venueHolds', () => ({
 const venue = {
   id: 'venue-1', name: 'Rooftop Garden', location: 'Level 12', capacity: 150,
   facilities: [], accessibility: '', supportedLayouts: [], status: 'Available',
+  setupTimeMinutes: 30, turnaroundTimeMinutes: 45,
 }
 
 beforeEach(() => {
@@ -24,6 +25,14 @@ beforeEach(() => {
     id: 'hold-1', venueId: venue.id, createdAt: '2026-10-08T09:00:00',
     expiresAt: '2026-10-09T12:00:00', heldBy: 'staff-1',
   })
+})
+
+test('shows the venue-specific setup and turnaround times', async () => {
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  expect(await screen.findByText('Setup time')).toBeInTheDocument()
+  expect(screen.getByText('30 minutes')).toBeInTheDocument()
+  expect(screen.getByText('45 minutes')).toBeInTheDocument()
 })
 
 test('Event Coordinator sees the expiry of a venue on hold', async () => {
