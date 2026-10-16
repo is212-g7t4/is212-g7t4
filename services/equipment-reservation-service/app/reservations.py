@@ -9,6 +9,16 @@ class InsufficientStockError(Exception):
     pass
 
 
+class RequestNotAllowedError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+OPEN_EVENT_STATUSES = ("Under Review",)
+
+
 def _catalogue():
     return {item["id"]: item for item in clients.list_equipment()}
 
@@ -95,3 +105,26 @@ def review_event(headers, event_id, status):
         if pending:
             _ensure_sufficient(event_id, pending, headers)
     return clients.review_event_requests(headers, event_id, status)
+
+
+def create_requests(headers, coordinator_id, event_id, items):
+    """Check assignment, event status and physical status, then save the lines as Pending.
+
+    Stock over the event's window is not checked here; Technical Support checks it at review.
+    """
+    event = next((e for e in clients.list_assigned_events(coordinator_id) if e["id"] == event_id), None)
+    if event is None:
+        raise RequestNotAllowedError(403, "You can only request equipment for events assigned to you.")
+    if event.get("status") not in OPEN_EVENT_STATUSES:
+        raise RequestNotAllowedError(409, "Equipment can only be requested while the event is Under Review.")
+    catalogue = _catalogue()
+    if any(item["equipmentId"] not in catalogue for item in items):
+        raise RequestNotAllowedError(404, "An equipment item no longer exists in the catalogue.")
+    unavailable = [
+        catalogue[item["equipmentId"]]["description"]
+        for item in items
+        if catalogue[item["equipmentId"]].get("status") != "Available"
+    ]
+    if unavailable:
+        raise RequestNotAllowedError(409, "This equipment is Unavailable: " + ", ".join(unavailable) + ".")
+    return clients.create_event_requests(headers, event_id, items)

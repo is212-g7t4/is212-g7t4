@@ -22,6 +22,7 @@ from app.models import (
     list_active_holds,
     list_bookings,
     list_event_bookings,
+    list_hold_reminders,
     list_window_bookings,
     list_window_closures,
     reconcile_legacy_conflicts,
@@ -91,7 +92,11 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            if request.path in {"/venue-bookings", "/venue-holds"} or request.path.startswith("/venue-closures"):
+            if request.path in {
+                "/venue-bookings",
+                "/venue-holds",
+                "/venue-holds/reminders",
+            } or request.path.startswith("/venue-closures"):
                 response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
                 response.headers["Access-Control-Allow-Headers"] = (
                     "Content-Type, X-Dev-User-Id, X-Dev-Role"
@@ -186,9 +191,7 @@ def create_app(config=None):
         does, and the composite does its own role check.
         """
         if any(len(request.args.getlist(key)) != 1 for key in ("dateFrom", "dateTo")):
-            return jsonify(
-                message="Provide dateFrom and dateTo exactly once."
-            ), 400
+            return jsonify(message="Provide dateFrom and dateTo exactly once."), 400
         date_from = parse_boundary(request.args["dateFrom"])
         date_to = parse_boundary(request.args["dateTo"])
         padding_minutes = _parse_buffer_minutes(
@@ -226,6 +229,25 @@ def create_app(config=None):
             ), 503
         return jsonify(holds=list_active_holds(app.config["DATABASE_URL"]))
 
+    @app.get("/venue-holds/reminders")
+    def get_hold_reminders():
+        """Holds expiring within 3 days that were placed for the calling coordinator."""
+        if app.config["CALENDAR_DEV_MODE"] is not True:
+            return jsonify(message="Venue hold DEV mode is disabled."), 503
+        coordinator_id = _parse_uuid(request.headers.get("X-Dev-User-Id"))
+        role = request.headers.get("X-Dev-Role")
+        if not coordinator_id or not role:
+            return jsonify(message="DEV user UUID and role headers are required."), 401
+        if role not in {"Event Coordinator", "Event Coordinator Lead"}:
+            return jsonify(message="Event Coordinator role is required."), 403
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Venue Availability Service."
+            ), 503
+        return jsonify(
+            reminders=list_hold_reminders(app.config["DATABASE_URL"], coordinator_id)
+        )
+
     @app.post("/venue-holds")
     def place_hold():
         if app.config["CALENDAR_DEV_MODE"] is not True:
@@ -254,6 +276,11 @@ def create_app(config=None):
                     "must be non-negative whole minutes."
                 )
             ), 400
+        held_for = None
+        if data.get("coordinatorId") is not None:
+            held_for = _parse_uuid(data["coordinatorId"])
+            if not held_for:
+                return jsonify(message="coordinatorId must be a valid id."), 400
         from app.calendar import SINGAPORE
 
         now = datetime.now(SINGAPORE).replace(tzinfo=None)
@@ -271,6 +298,7 @@ def create_app(config=None):
                 staff_id,
                 setup_time,
                 turnaround_time,
+                app.config["DATABASE_URL"], venue_id, expires_at, staff_id, held_for
             )
         except HoldVenueNotFoundError:
             return jsonify(message="Venue not found."), 404
@@ -527,5 +555,6 @@ def create_app(config=None):
         return jsonify(result)
 
     from app.closures import bp as closures_bp
+
     app.register_blueprint(closures_bp)
     return app

@@ -498,7 +498,7 @@ def create_hold(
     database_url,
     venue_id,
     expires_at,
-    held_by,
+    held_by, held_for=None,
     setup_time_minutes=0,
     turnaround_time_minutes=0,
 ):
@@ -537,10 +537,19 @@ def create_hold(
             cursor.execute(
                 f"""INSERT INTO public."VenueBooking"
                     (venue_id, requested_start_time, requested_end_time,
-                     required_capacity, status, held_by, held_at, hold_expires_at)
-                    VALUES (%s, %s, %s, 1, 'On Hold', %s, %s, %s)
+                     required_capacity, status, held_by, held_at, hold_expires_at,
+                     held_for)
+                    VALUES (%s, %s, %s, 1, 'On Hold', %s, %s, %s, %s)
                     RETURNING {HOLD_COLUMNS}""",
-                [venue_id, hold_now, expires_at, held_by, hold_now, expires_at],
+                [
+                    venue_id,
+                    hold_now,
+                    expires_at,
+                    held_by,
+                    hold_now,
+                    expires_at,
+                    held_for,
+                ],
             )
             saved = _localize(cursor.fetchone())
     return serialize_hold(saved)

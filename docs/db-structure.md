@@ -137,6 +137,7 @@ A **hold** is a row with status `On Hold`: `event_id` is empty, the time range r
 | rejection_reason | TEXT | | Venue Staff's reason for rejecting, shown to the coordinator so they can plan an alternative. |
 | held_by | UUID (FK User), nullable | new | The Venue Staff member who placed the hold. |
 | held_at | TIMESTAMPTZ | new | When the hold was placed, shown on the hold details page. |
+| held_for | UUID (FK User), nullable | new | The Event Coordinator the hold was placed for; they get the 3-day expiry reminder. Empty means no reminder. |
 | hold_expires_at | TIMESTAMPTZ | changed | Deadline of the hold; the Hold Checker expires the hold once this time passes. |
 | reminder_sent_at | TIMESTAMPTZ | new, optional | When the 3-day reminder was sent, so the Hold Checker does not publish it again every minute. |
 | conflict_reason | VARCHAR(50), nullable | replaces conflict_flag | Why the booking is flagged (buffer overlap or venue closure); empty means no problem. |
