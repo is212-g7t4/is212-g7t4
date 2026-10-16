@@ -15,7 +15,7 @@ const STATUS_OPTIONS = [
   'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled',
 ]
 
-type MyEventsProps = { role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }
+type MyEventsProps = { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }
 
 // `currentCoordinatorId` / `currentCoordinatorName` carry the active user, whatever their role.
 export function MyEventsPage(props: MyEventsProps) {
@@ -25,7 +25,7 @@ export function MyEventsPage(props: MyEventsProps) {
   return <InternalMyEvents {...props} />
 }
 
-function InternalMyEvents({ role, isManager, currentCoordinatorId, currentCoordinatorName, onViewDetails }: MyEventsProps) {
+function InternalMyEvents({ role, currentCoordinatorId, currentCoordinatorName, onViewDetails }: MyEventsProps) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -43,8 +43,7 @@ function InternalMyEvents({ role, isManager, currentCoordinatorId, currentCoordi
     if (!canViewInternalEvents(role) || !currentCoordinator.id) return
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
-    if (canViewAllInternalEvents(role, isManager)) params.set('isManager', 'true')
-    if (role === 'Venue Staff' || role === 'Technical Support') params.set('viewerRole', role)
+    if (canViewAllInternalEvents(role)) params.set('viewerRole', role)
     if (query.status) params.set('status', query.status)
     // Matches the event's free-text venue requirements (Event Service `venue`).
     if (query.venue.trim()) params.set('venue', query.venue.trim())
@@ -56,7 +55,7 @@ function InternalMyEvents({ role, isManager, currentCoordinatorId, currentCoordi
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [role, isManager, query, currentCoordinator.id])
+  }, [role, query, currentCoordinator.id])
 
   const applyFilters = (formEvent: FormEvent) => {
     formEvent.preventDefault()
@@ -67,7 +66,7 @@ function InternalMyEvents({ role, isManager, currentCoordinatorId, currentCoordi
 
   if (!canViewInternalEvents(role)) return <RoleWarning>{INTERNAL_EVENT_ACCESS_MESSAGE}</RoleWarning>
 
-  const scopeMessage = canViewAllInternalEvents(role, isManager)
+  const scopeMessage = canViewAllInternalEvents(role)
     ? 'Showing all events in the planning process.'
     : 'Showing events assigned to you.'
 

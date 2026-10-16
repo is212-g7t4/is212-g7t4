@@ -21,7 +21,8 @@ FIELDS = {
 }
 COLUMNS = ", ".join(FIELDS.values())
 ROW_COLUMNS = (
-    f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id"
+    f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id,"
+    " assigned_by, assigned_at, previous_coordinator_id"
 )
 
 SINGAPORE = ZoneInfo("Asia/Singapore")
@@ -202,6 +203,13 @@ def serialize(row):
         else None,
         coordinatorId=str(row["coordinator_id"]) if row.get("coordinator_id") else None,
         organiserId=str(row["organiser_id"]) if row.get("organiser_id") else None,
+        assignedBy=str(row["assigned_by"]) if row.get("assigned_by") else None,
+        assignedAt=row["assigned_at"].astimezone(UTC).isoformat()
+        if row.get("assigned_at")
+        else None,
+        previousCoordinatorId=str(row["previous_coordinator_id"])
+        if row.get("previous_coordinator_id")
+        else None,
         decision=decision,
         decisionHistory=history,
         actionDetails=action_details,
@@ -241,8 +249,8 @@ def submit_event(database_url, data):
     return serialize(saved)
 
 
-def list_submitted(database_url, coordinator_id=None, is_manager=False):
-    if is_manager or coordinator_id is None:
+def list_submitted(database_url, coordinator_id, view_all=False):
+    if view_all:
         query = f"""SELECT {ROW_COLUMNS}
                     FROM public."Event" WHERE status IN ('Submitted', 'Under Review')
                     ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
@@ -257,6 +265,38 @@ def list_submitted(database_url, coordinator_id=None, is_manager=False):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, params)
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def list_unassigned(database_url):
+    """The Lead's queue: submitted requests no coordinator has been assigned.
+
+    Assignment moves an event to 'Under Review', so it drops out of here."""
+    query = f"""SELECT {ROW_COLUMNS}
+                FROM public."Event"
+                WHERE status = 'Submitted' AND coordinator_id IS NULL
+                ORDER BY submission_date ASC NULLS LAST, event_id ASC"""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query)
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+# The Lead's workload view leaves out events whose coordinator work is over:
+# 'Confirmed' (passed safety, in preparation), 'Rejected', and 'Cancelled'
+# (safety rejection).
+INACTIVE_STATUSES = ("Confirmed", "Rejected", "Cancelled")
+
+
+def list_active_events(database_url):
+    """Every active event, assigned or not, for the Lead's workload view."""
+    query = f"""SELECT {ROW_COLUMNS}
+                FROM public."Event"
+                WHERE status NOT IN %s
+                ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC"""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query, [INACTIVE_STATUSES])
             return [serialize(row) for row in cursor.fetchall()]
 
 
@@ -354,23 +394,62 @@ class SafetyApprovalRequiredError(Exception):
         return safety_block_message(self.current_status)
 
 
-def update_event_coordinator(database_url, event_id, coordinator_id):
+class EventClosedError(Exception):
+    """Reassignment: a Rejected or Cancelled event can't change coordinator."""
+
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class NoCoordinatorChangeError(Exception):
+    """Reassignment: the selected coordinator is already the assigned one."""
+
+
+# Events whose coordinator can no longer be changed.
+CLOSED_STATUSES = ("Rejected", "Cancelled")
+
+
+def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by):
+    """Assign or reassign the event's coordinator.
+
+    Venue bookings, equipment requests and safety checks all authorise against
+    the event's current coordinator_id, so changing it here hands every linked
+    record to the new coordinator and takes it away from the previous one.
+    """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Locked so two Leads reassigning at once can't both pass the
+            # no-change check against the same old coordinator.
+            cursor.execute(
+                """SELECT coordinator_id, status FROM public."Event"
+                   WHERE event_id = %s FOR UPDATE""",
+                [event_id],
+            )
+            current = cursor.fetchone()
+            if not current:
+                raise EventNotFoundError
+            if current["status"] in CLOSED_STATUSES:
+                raise EventClosedError(current["status"])
+            if current["coordinator_id"] and str(current["coordinator_id"]) == coordinator_id:
+                raise NoCoordinatorChangeError
             # Only ever reaches 'Under Review'. Keep it that way: anything that
             # can set 'Confirmed' or a later stage must go through the safety
             # gate in update_event_progress (SCRUM-152).
+            # previous_coordinator_id = coordinator_id reads the old value, so
+            # only the latest handover is kept; NULL on a first assignment.
             cursor.execute(
                 f"""UPDATE public."Event"
-                    SET coordinator_id = %s,
+                    SET previous_coordinator_id = coordinator_id,
+                        coordinator_id = %s,
+                        assigned_by = %s,
+                        assigned_at = now(),
                         status = CASE WHEN status = 'Submitted' THEN 'Under Review' ELSE status END
                     WHERE event_id = %s
                     RETURNING {ROW_COLUMNS}""",
-                [coordinator_id, event_id],
+                [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
-            if not assigned:
-                raise EventNotFoundError
     return serialize(assigned)
 
 
@@ -381,9 +460,9 @@ def list_events(
     venue=None,
     date_from=None,
     date_to=None,
-    is_manager=False,
+    view_all=False,
 ):
-    if is_manager:
+    if view_all:
         conditions = []
         params = []
     else:
@@ -458,7 +537,7 @@ def get_organiser_event(database_url, event_id, organiser_id):
     return serialize(event)
 
 
-def get_event(database_url, event_id, coordinator_id, is_manager=False):
+def get_event(database_url, event_id, coordinator_id, view_all=False):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -470,7 +549,7 @@ def get_event(database_url, event_id, coordinator_id, is_manager=False):
             event = cursor.fetchone()
     if not event:
         raise EventNotFoundError
-    if not is_manager and (
+    if not view_all and (
         not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id
     ):
         raise EventNotAssignedError

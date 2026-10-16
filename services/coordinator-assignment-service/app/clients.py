@@ -36,11 +36,25 @@ def get_user(user_id: str) -> dict | None:
     return response.json()
 
 
-def assign_event_coordinator(event_id: str, coordinator_id: str) -> dict:
-    """Update the coordinator for an event in Event Service."""
+def assign_event_coordinator(event_id: str, coordinator_id: str, assigned_by: str) -> dict:
+    """Update the coordinator for an event in Event Service, recording who assigned them."""
     response = httpx.patch(
         f"{EVENT_SERVICE_URL}/events/{event_id}",
-        json={"assignedCoordinatorId": coordinator_id}
+        json={"assignedCoordinatorId": coordinator_id, "assignedBy": assigned_by}
     )
     response.raise_for_status()
     return response.json()
+
+
+def get_unassigned_events() -> list:
+    """Submitted events with no coordinator yet, oldest first, from Event Service."""
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events/unassigned")
+    response.raise_for_status()
+    return response.json()["events"]
+
+
+def get_active_events() -> list:
+    """Active events (not Confirmed/Rejected/Cancelled), assigned or not, from Event Service."""
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events/active")
+    response.raise_for_status()
+    return response.json()["events"]

@@ -64,7 +64,7 @@ def test_list_users_filters_by_role(setup):
 
 
 def test_get_user_returns_the_coordinator_lead_by_role(setup):
-    """The Lead is identified by role (docs/db-structure.md), not a manager link."""
+    """The Lead is identified by role (docs/db-structure.md), not a link to a Lead."""
     client, _, cursor = setup
     cursor.fetchone.return_value = user_row(role="Event Coordinator Lead")
 

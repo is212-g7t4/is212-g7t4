@@ -46,11 +46,28 @@ the caller's id. Rejection requires a non-empty reason. The backend repeats the 
 check while locking the event row and only approves or rejects requests whose current
 status is `Submitted`.
 
-The Event Coordinator Lead (role `Event Coordinator Lead`) can bypass the `coordinator_id` filter/ownership check on the read
-endpoints (`/events`, `/events/submitted`, `/events/<id>`) by passing
-`isManager=true` — this lets them see every event, not just ones assigned to
-them. Approve/reject are **not** bypassed — the manager must be the assigned
-coordinator to approve or reject, same as anyone else.
+`coordinatorId` is required on the coordinator read endpoints (`/events`,
+`/events/submitted`, `/events/<id>`). Passing `viewerRole` widens them from
+"assigned to me" to every event: `Event Coordinator Lead` on all three, and
+`Venue Staff`/`Technical Support` on `/events` and `/events/<id>` only. Any
+other `viewerRole` gets `403`. Approve and reject are **not** widened: the Lead
+must be the assigned coordinator to approve or reject, the same as anyone else.
+
+The role is whatever the caller sends, the same as `coordinatorId`. Atomics
+can't call User Service to check it, so this stays trust-based until services
+verify the Supabase JWT (see AGENTS.md). The retired `isManager=true` flag is
+ignored.
+
+`GET /events/unassigned` returns `Submitted` events with no `coordinator_id`,
+oldest submission first. It backs the Lead's unassigned queue, which
+`coordinator-assignment-service` serves at `GET /queue` after checking that the
+caller is the Lead. The frontend never calls this endpoint directly.
+
+`GET /events/active` returns every event that isn't `Confirmed`, `Rejected` or
+`Cancelled`, assigned or not, ordered by start date. It backs the Lead's
+coordinator workload view, which `coordinator-assignment-service` serves at
+`GET /workload` after checking that the caller is the Lead. The frontend never
+calls this endpoint directly.
 
 Decisions are returned in `decision` and retained in `decisionHistory`. Each decision
 records its status, coordinator ID, UTC timestamp, and rejection reason when present.

@@ -29,3 +29,38 @@ def test_available_coordinators_propagate_user_service_failure(monkeypatch):
     monkeypatch.setattr(clients.httpx, "get", Mock(return_value=response(503, {})))
     with pytest.raises(httpx.HTTPStatusError):
         clients.get_available_coordinators()
+
+
+def test_unassigned_events_come_from_event_service(monkeypatch):
+    get = Mock(return_value=response(200, {"events": [{"id": "evt-1"}]}))
+    monkeypatch.setattr(clients.httpx, "get", get)
+
+    assert clients.get_unassigned_events() == [{"id": "evt-1"}]
+    assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/unassigned"
+
+
+def test_active_events_come_from_event_service(monkeypatch):
+    get = Mock(return_value=response(200, {"events": [{"id": "evt-1"}]}))
+    monkeypatch.setattr(clients.httpx, "get", get)
+
+    assert clients.get_active_events() == [{"id": "evt-1"}]
+    assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/active"
+
+
+def test_assignment_records_who_assigned_the_coordinator(monkeypatch):
+    """Event Service is told who made the assignment, for the event's detail page."""
+    saved = {"id": "evt-1", "coordinatorId": "coord", "assignedBy": "lead"}
+    patch = Mock(return_value=httpx.Response(
+        200, json=saved, request=httpx.Request("PATCH", "http://event.test")))
+    monkeypatch.setattr(clients.httpx, "patch", patch)
+
+    assert clients.assign_event_coordinator("evt-1", "coord", "lead") == saved
+    assert patch.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/evt-1"
+    assert patch.call_args.kwargs["json"] == {"assignedCoordinatorId": "coord", "assignedBy": "lead"}
+
+
+def test_assignment_propagates_event_service_failure(monkeypatch):
+    monkeypatch.setattr(clients.httpx, "patch", Mock(return_value=httpx.Response(
+        404, json={}, request=httpx.Request("PATCH", "http://event.test"))))
+    with pytest.raises(httpx.HTTPStatusError):
+        clients.assign_event_coordinator("evt-1", "coord", "lead")

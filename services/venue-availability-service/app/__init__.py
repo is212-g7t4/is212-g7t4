@@ -121,6 +121,7 @@ def create_app(config=None):
             return jsonify(message="DEV user UUID and role headers are required."), 401
         if role not in {
             "Event Coordinator",
+            "Event Coordinator Lead",
             "Venue Staff",
             "Technical Support",
             "Technical Support Staff",

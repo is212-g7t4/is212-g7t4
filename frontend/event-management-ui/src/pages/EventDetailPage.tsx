@@ -3,8 +3,9 @@ import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { EventStatus, SubmittedEvent } from '../features/event/submission'
-import { ALLOWED_TRANSITIONS, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
+import { ALLOWED_TRANSITIONS, canReassign, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
+import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorPanel'
 import { canViewAllInternalEvents, canViewInternalEvents, INTERNAL_EVENT_ACCESS_MESSAGE } from '../features/event/permissions'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
@@ -17,8 +18,9 @@ import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
 import { SafetySubmitPanel } from '../features/safety/SafetySubmitPanel'
 import { SafetyDecisionPanel } from '../features/safety/SafetyDecisionPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
+import { isCoordinator, isLead } from '../roles'
 
-type EventDetailProps = { eventId: string; role: Role; isManager: boolean; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
+type EventDetailProps = { eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
 // `currentCoordinatorId` carries the active user, whatever their role.
 export function EventDetailPage(props: EventDetailProps) {
@@ -28,7 +30,7 @@ export function EventDetailPage(props: EventDetailProps) {
   return <CoordinatorEventDetail {...props} />
 }
 
-function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: EventDetailProps) {
+function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: EventDetailProps) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -52,8 +54,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     if (!canViewInternalEvents(role) || !currentCoordinator.id) return
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
-    if (canViewAllInternalEvents(role, isManager)) params.set('isManager', 'true')
-    if (role === 'Venue Staff' || role === 'Technical Support' || role === 'Safety Officer') params.set('viewerRole', role)
+    if (canViewAllInternalEvents(role)) params.set('viewerRole', role)
     eventApi(`/events/${eventId}?${params.toString()}`).then((body) => {
       if (active) {
         setEvent(body)
@@ -66,10 +67,10 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [eventId, role, isManager, refresh, currentCoordinator.id])
+  }, [eventId, role, refresh, currentCoordinator.id])
 
   useEffect(() => {
-    if (role !== 'Event Coordinator' || event?.status !== 'Approved') return
+    if (!isCoordinator(role) || event?.status !== 'Approved') return
     let active = true
     fetchRegistrations(eventId).then((fetched) => {
       if (active) {
@@ -85,7 +86,7 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
   const hasUnsavedChanges = Boolean(event) && (
     draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
   )
-  const canUpdate = Boolean(role === 'Event Coordinator' && event && event.coordinatorId === currentCoordinator.id)
+  const canUpdate = Boolean(isCoordinator(role) && event && event.coordinatorId === currentCoordinator.id)
   const availableStatuses = event ? ALLOWED_TRANSITIONS[event.status] : []
   // SCRUM-152 AC1: 'Confirmed' is never offered to a coordinator — only the
   // safety workflow sets it — so instead of a dead option the field explains
@@ -128,7 +129,19 @@ function CoordinatorEventDetail({ eventId, role, isManager, currentCoordinatorId
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
-      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
+      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
+      {/* Reassignment: Lead-only, and never on a Rejected or Cancelled event.
+          Taking the event away from a coordinator needs nothing else here —
+          canUpdate below, venue bookings, equipment and safety checks all
+          follow event.coordinatorId. */}
+      {isLead(role) && canReassign(event) && <section className="event-card-section">
+        <h3>Coordinator</h3>
+        <ReassignCoordinatorPanel
+          event={event}
+          leadId={currentCoordinator.id}
+          onReassigned={(updated) => { setEvent(updated); setDraftStatus(updated.status); setActionDetails(updated.actionDetails || '') }}
+        />
+      </section>}
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
 
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel
