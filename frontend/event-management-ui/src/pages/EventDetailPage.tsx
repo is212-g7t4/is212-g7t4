@@ -128,7 +128,7 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
-      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} />
+      <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} />
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
 
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel

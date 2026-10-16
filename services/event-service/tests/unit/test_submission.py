@@ -207,25 +207,52 @@ def test_empty_queue(setup):
     assert response.json == {"events": []}
 
 
+LEAD_ID = "33333333-3333-4333-8333-333333333333"
+
+
 def test_assign_coordinator_updates_event(setup):
+    """Assignment records the coordinator, who assigned them and when, and
+    moves the event out of the unassigned queue ('Submitted' -> 'Under Review')."""
     client, _, cursor = setup
     assigned = saved_row()
     assigned["coordinator_id"] = COORDINATOR_ID
     assigned["status"] = "Under Review"
+    assigned["assigned_by"] = LEAD_ID
+    assigned["assigned_at"] = datetime(2026, 10, 16, 2, 15, tzinfo=UTC)
     cursor.fetchone.return_value = assigned
 
     response = client.patch(
         "/events/00000000-0000-0000-0000-000000000001",
-        json={"assignedCoordinatorId": COORDINATOR_ID},
+        json={"assignedCoordinatorId": COORDINATOR_ID, "assignedBy": LEAD_ID},
     )
 
     assert response.status_code == 200
     assert response.json["coordinatorId"] == COORDINATOR_ID
     assert response.json["status"] == "Under Review"
+    assert response.json["assignedBy"] == LEAD_ID
+    assert response.json["assignedAt"] == "2026-10-16T02:15:00+00:00"
     query, parameters = cursor.execute.call_args.args
     assert "SET coordinator_id = %s" in query
+    assert "assigned_by = %s" in query
+    assert "assigned_at = now()" in query
     assert "status = CASE WHEN status = 'Submitted' THEN 'Under Review'" in query
-    assert parameters == [COORDINATOR_ID, "00000000-0000-0000-0000-000000000001"]
+    assert "RETURNING" in query and "assigned_by, assigned_at" in query
+    assert parameters == [COORDINATOR_ID, LEAD_ID, "00000000-0000-0000-0000-000000000001"]
+
+
+@pytest.mark.parametrize("assigned_by", [None, "", "not-a-uuid", 123])
+def test_assign_coordinator_requires_a_valid_assigning_user(setup, assigned_by):
+    """Without a valid assigner there's nothing to show on the detail page."""
+    client, _, cursor = setup
+    body = {"assignedCoordinatorId": COORDINATOR_ID}
+    if assigned_by is not None:
+        body["assignedBy"] = assigned_by
+
+    response = client.patch("/events/00000000-0000-0000-0000-000000000001", json=body)
+
+    assert response.status_code == 400
+    assert "assigning user" in response.json["message"]
+    cursor.execute.assert_not_called()
 
 
 def test_assign_coordinator_returns_not_found(setup):
@@ -234,10 +261,17 @@ def test_assign_coordinator_returns_not_found(setup):
 
     response = client.patch(
         "/events/00000000-0000-0000-0000-000000000001",
-        json={"assignedCoordinatorId": COORDINATOR_ID},
+        json={"assignedCoordinatorId": COORDINATOR_ID, "assignedBy": LEAD_ID},
     )
 
     assert response.status_code == 404
+
+
+def test_unassigned_event_serializes_without_assignment_record():
+    """Events never assigned (or legacy rows) have no assigner or time."""
+    body = serialize(saved_row())
+    assert body["assignedBy"] is None
+    assert body["assignedAt"] is None
 
 
 @pytest.mark.parametrize(

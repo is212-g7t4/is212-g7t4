@@ -127,7 +127,7 @@ def assign_coordinator(event_id, coordinator_id):
         
         # Assign the coordinator to the event via Event Service
         try:
-            result = assign_event_coordinator(event_id, coordinator_id)
+            result = assign_event_coordinator(event_id, coordinator_id, acting_user_id)
             return jsonify(result), 200
         except Exception as e:
             return jsonify(

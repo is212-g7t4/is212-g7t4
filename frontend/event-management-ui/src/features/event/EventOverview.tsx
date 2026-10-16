@@ -1,7 +1,7 @@
 import type { SubmittedEvent } from './submission'
 import { formatDateTime, formatTimestamp } from './formatDates'
 
-export function EventOverview({ event, coordinatorName }: { event: SubmittedEvent; coordinatorName?: string | null }) {
+export function EventOverview({ event, coordinatorName, assignedByName }: { event: SubmittedEvent; coordinatorName?: string | null; assignedByName?: string | null }) {
   return (
     <>
       <div className="event-facts">
@@ -21,6 +21,8 @@ export function EventOverview({ event, coordinatorName }: { event: SubmittedEven
 
       <p className="event-footnote muted">
         Assigned to <strong>{coordinatorName || 'Not assigned'}</strong>
+        {event.coordinatorId && event.assignedBy && assignedByName && <> by <strong>{assignedByName}</strong></>}
+        {event.coordinatorId && event.assignedAt && <> on {formatTimestamp(event.assignedAt)}</>}
         {event.submittedAt && <> · Submitted {formatTimestamp(event.submittedAt)}</>}
         {event.decision?.decidedAt && <> · {event.decision.status} on {formatTimestamp(event.decision.decidedAt)}</>}
       </p>
