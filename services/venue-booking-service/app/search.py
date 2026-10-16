@@ -126,7 +126,35 @@ def _venue_filters(args, min_capacity):
     return filters
 
 
-def availability_for(venue, bookings):
+def _effective_window(venue, start, end):
+    return (
+        _shift(start, -int(venue.get("setupTimeMinutes", 0))),
+        _shift(end, int(venue.get("turnaroundTimeMinutes", 0))),
+    )
+
+
+def _shift(value, minutes):
+    try:
+        return value + timedelta(minutes=minutes)
+    except OverflowError:
+        boundary = datetime.max if minutes > 0 else datetime.min
+        return boundary.replace(tzinfo=value.tzinfo)
+
+
+def _overlaps(first_start, first_end, second_start, second_end):
+    return first_start < second_end and first_end > second_start
+
+
+def _local_datetime(value):
+    parsed = datetime.fromisoformat(value)
+    return (
+        parsed.astimezone(SINGAPORE).replace(tzinfo=None)
+        if parsed.tzinfo
+        else parsed
+    )
+
+
+def availability_for(venue, bookings, requested_start=None, requested_end=None):
     """How free is this venue in the requested window?
 
     Venue Availability Service has already narrowed `bookings` to the ones
@@ -137,7 +165,30 @@ def availability_for(venue, bookings):
     """
     if venue.get("status") != "Available":
         return NOT_OPERATIONAL
-    overlapping = [b for b in bookings if b.get("venueId") == venue.get("id")]
+    candidates = [b for b in bookings if b.get("venueId") == venue.get("id")]
+    if requested_start is not None and requested_end is not None:
+        event_start = _local_datetime(requested_start)
+        event_end = _local_datetime(requested_end)
+        wanted_start, wanted_end = _effective_window(venue, event_start, event_end)
+        overlapping = []
+        for booking in candidates:
+            if not booking.get("requestedStartTime") or not booking.get(
+                "requestedEndTime"
+            ):
+                # Compatibility with an already-windowed availability result.
+                overlapping.append(booking)
+                continue
+            booking_start = _local_datetime(booking["requestedStartTime"])
+            booking_end = _local_datetime(booking["requestedEndTime"])
+            if booking.get("status") != "On Hold":
+                booking_start, booking_end = _effective_window(
+                    venue, booking_start, booking_end
+                )
+            if _overlaps(wanted_start, wanted_end, booking_start, booking_end):
+                overlapping.append(booking)
+    else:
+        # Compatibility for callers that already supplied a narrowed window.
+        overlapping = candidates
     if any(booking.get("status") == "On Hold" for booking in overlapping):
         return BOOKED
     if any(booking.get("status") == "Approved" for booking in overlapping):
@@ -145,13 +196,37 @@ def availability_for(venue, bookings):
     return PENDING if overlapping else AVAILABLE
 
 
-def shortlist(venues, bookings, closures):
+def shortlist(venues, bookings, closures, requested_start=None, requested_end=None):
     """Venues a coordinator can still request, Available ones first."""
-    closed_venues = {closure["venueId"] for closure in closures}
+    event_start = _local_datetime(requested_start) if requested_start else None
+    event_end = _local_datetime(requested_end) if requested_end else None
+
+    def is_closed(venue):
+        venue_closures = [
+            closure for closure in closures if closure["venueId"] == venue.get("id")
+        ]
+        if event_start is None or event_end is None:
+            return bool(venue_closures)
+        wanted_start, wanted_end = _effective_window(venue, event_start, event_end)
+        return any(
+            _overlaps(
+                wanted_start,
+                wanted_end,
+                _local_datetime(closure["startDateTime"]),
+                _local_datetime(closure["endDateTime"]),
+            )
+            for closure in venue_closures
+        )
+
     results = [
-        {**venue, "availability": availability_for(venue, bookings)}
+        {
+            **venue,
+            "availability": availability_for(
+                venue, bookings, requested_start, requested_end
+            ),
+        }
         for venue in venues
-        if venue.get("id") not in closed_venues
+        if not is_closed(venue)
     ]
     bookable = [venue for venue in results if venue["availability"] in SHOWN]
     return sorted(
@@ -159,7 +234,7 @@ def shortlist(venues, bookings, closures):
     )
 
 
-def validate_window(payload, start, end):
+def validate_window(payload, start, end, padding_minutes=0):
     """Validate the full response, then retain half-open overlapping closures."""
     from app.closure_contract import timestamp, uuid_value
 
@@ -169,8 +244,12 @@ def validate_window(payload, start, end):
         or not isinstance(payload.get("closures"), list)
     ):
         raise ValueError("Invalid availability window")
-    window_start = datetime.fromisoformat(start).replace(tzinfo=SINGAPORE)
-    window_end = datetime.fromisoformat(end).replace(tzinfo=SINGAPORE)
+    window_start = _shift(
+        datetime.fromisoformat(start).replace(tzinfo=SINGAPORE), -padding_minutes
+    )
+    window_end = _shift(
+        datetime.fromisoformat(end).replace(tzinfo=SINGAPORE), padding_minutes
+    )
     closures, seen = [], set()
     for closure in payload["closures"]:
         if not isinstance(closure, dict):

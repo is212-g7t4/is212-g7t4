@@ -84,6 +84,13 @@ No wildcard origin or credentials support is enabled. CORS is not authentication
 
 `GET /venue-bookings?venueId=<UUID>&dateFrom=<datetime>&dateTo=<datetime>`
 
+The calendar caller also supplies the venue's optional
+`setupTimeMinutes` and `turnaroundTimeMinutes`. Event rows are returned when
+their effective occupancy (`start - setup` through `end + turnaround`)
+overlaps the requested window. The response retains the advertised times and
+adds `effectiveStartTime`/`effectiveEndTime`; holds retain their exact stored
+interval.
+
 All three parameters are required exactly once. UUID must parse as a UUID.
 Both dates must be ISO 8601 datetimes containing `T`; date-only and malformed
 values are rejected, never silently ignored. Require `dateFrom < dateTo` and
@@ -108,6 +115,19 @@ curl --get 'http://127.0.0.1:5008/venue-bookings' \
 ```
 
 The UUIDs above are illustrative; use a venue selected from `GET /venues`.
+
+## Buffer conflicts and legacy reconciliation
+
+Booking creation, modification and approval accept the current venue buffer
+values from Venue Booking Service and use the padded half-open interval for
+approved-booking, hold and closure checks. The atomic never calls Venue
+Service.
+
+`POST /venues/<venueId>/legacy-conflicts/reconcile` receives the current
+buffer values from the composite. It identifies pairs whose advertised times
+do not overlap but whose effective occupancy does, marks both rows with
+`conflict_reason = 'BUFFER_OVERLAP'`, and clears only stale markers owned by
+this rule. It never changes event IDs, advertised times, or booking statuses.
 A syntactically valid but nonexistent venue returns an empty list, not `404`:
 this atomic does not verify another service's entity.
 

@@ -10,6 +10,8 @@ export interface CalendarBooking {
   blocksSelection: boolean
   requestedStartTime: string
   requestedEndTime: string
+  effectiveStartTime?: string
+  effectiveEndTime?: string
 }
 /** Presentation-only closure entry: never submitted as a booking or event. */
 export interface CalendarClosure extends Omit<CalendarBooking, 'status'> {
@@ -28,8 +30,15 @@ export async function fetchCalendar(
   window: { start: string; end: string },
   user: { id: string; role: string },
   signal?: AbortSignal,
+  buffer: { setupTimeMinutes?: number; turnaroundTimeMinutes?: number } = {},
 ): Promise<CalendarEntry[]> {
-  const query = new URLSearchParams({venueId, dateFrom: window.start + 'T00:00:00+08:00', dateTo: window.end + 'T00:00:00+08:00'})
+  const query = new URLSearchParams({
+    venueId,
+    dateFrom: window.start + 'T00:00:00+08:00',
+    dateTo: window.end + 'T00:00:00+08:00',
+    setupTimeMinutes: String(buffer.setupTimeMinutes ?? 0),
+    turnaroundTimeMinutes: String(buffer.turnaroundTimeMinutes ?? 0),
+  })
   const response = await fetch(`${import.meta.env.VITE_VENUE_AVAILABILITY_SERVICE_URL || 'http://localhost:5008'}/venue-bookings?${query}`, {
     signal, headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
   })
@@ -59,8 +68,15 @@ function validBooking(value: unknown, venueId: string): value is CalendarBooking
       !(validId(b.eventId) || (b.status === 'On Hold' && b.eventId === null))) return false
   if (!['Approved', 'Pending', 'Pending Review', 'On Hold'].includes(String(b.status)) ||
       b.blocksSelection !== (b.status === 'Approved' || b.status === 'On Hold')) return false
-  return validInterval(b.requestedStartTime, b.requestedEndTime)
+  if (!validInterval(b.requestedStartTime, b.requestedEndTime)) return false
+  if (b.effectiveStartTime === undefined && b.effectiveEndTime === undefined) return true
+  return validInterval(b.effectiveStartTime, b.effectiveEndTime) &&
+    timestampMicros(b.effectiveStartTime)! <= timestampMicros(b.requestedStartTime)! &&
+    timestampMicros(b.effectiveEndTime)! >= timestampMicros(b.requestedEndTime)!
 }
+
+export const occupancyStart = (booking: CalendarEntry) => booking.effectiveStartTime ?? booking.requestedStartTime
+export const occupancyEnd = (booking: CalendarEntry) => booking.effectiveEndTime ?? booking.requestedEndTime
 /** Closure records stay distinct and keep their original full bounds and reason. */
 function validClosure(value: unknown, venueId: string): value is ClosureResponse {
   if (!value || typeof value !== 'object') return false
