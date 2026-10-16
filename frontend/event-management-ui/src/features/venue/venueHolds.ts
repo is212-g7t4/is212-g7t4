@@ -32,7 +32,7 @@ export async function placeVenueHold(
       'X-Dev-User-Id': user.id,
       'X-Dev-Role': user.role,
     },
-    body: JSON.stringify(coordinatorId ? { venueId, expiresAt, coordinatorId } : { venueId, expiresAt, ...(
+    body: JSON.stringify({ venueId, expiresAt, ...(coordinatorId ? { coordinatorId } : {}), ...(
       buffer.setupTimeMinutes !== undefined || buffer.turnaroundTimeMinutes !== undefined
         ? { setupTimeMinutes: buffer.setupTimeMinutes ?? 0, turnaroundTimeMinutes: buffer.turnaroundTimeMinutes ?? 0 }
         : {}

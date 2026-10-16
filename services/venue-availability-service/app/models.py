@@ -498,7 +498,8 @@ def create_hold(
     database_url,
     venue_id,
     expires_at,
-    held_by, held_for=None,
+    held_by,
+    held_for=None,
     setup_time_minutes=0,
     turnaround_time_minutes=0,
 ):
@@ -562,6 +563,21 @@ def list_active_holds(database_url):
                 f"""SELECT {HOLD_COLUMNS} FROM public."VenueBooking"
                     WHERE status = 'On Hold' AND hold_expires_at > now()
                     ORDER BY hold_expires_at ASC, booking_id ASC"""
+            )
+            return [serialize_hold(_localize(row)) for row in cursor.fetchall()]
+
+
+def list_hold_reminders(database_url, coordinator_id):
+    """Return this coordinator's active holds that expire within three days."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {HOLD_COLUMNS} FROM public."VenueBooking"
+                    WHERE status = 'On Hold' AND held_for = %s
+                      AND hold_expires_at > now()
+                      AND hold_expires_at <= now() + interval '3 days'
+                    ORDER BY hold_expires_at ASC, booking_id ASC""",
+                [coordinator_id],
             )
             return [serialize_hold(_localize(row)) for row in cursor.fetchall()]
 

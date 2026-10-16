@@ -70,9 +70,38 @@ test('Venue Staff can submit a timed hold from venue details', async () => {
     venue.id,
     '2026-10-09T12:00',
     { id: 'staff-1', role: 'Venue Staff' },
+    undefined,
     venue,
   ))
   expect(await screen.findAllByText('On Hold')).toHaveLength(2)
+})
+
+test('Venue Staff can assign a coordinator reminder without losing venue buffers', async () => {
+  render(<VenueDetailPage
+    venueId={venue.id}
+    role="Venue Staff"
+    user={{ id: 'staff-1', role: 'Venue Staff' }}
+    coordinators={[{ id: 'coordinator-1', username: 'Alice Tan' }]}
+    onBack={vi.fn()}
+    onEdit={vi.fn()}
+  />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Hold' }))
+  fireEvent.change(screen.getByLabelText('Hold expiry date and time'), {
+    target: { value: '2026-10-09T12:00' },
+  })
+  fireEvent.change(screen.getByLabelText('Event Coordinator to remind (optional)'), {
+    target: { value: 'coordinator-1' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm hold' }))
+
+  await waitFor(() => expect(placeVenueHold).toHaveBeenCalledWith(
+    venue.id,
+    '2026-10-09T12:00',
+    { id: 'staff-1', role: 'Venue Staff' },
+    'coordinator-1',
+    venue,
+  ))
 })
 
 test('Venue Staff sees legacy buffer conflicts without any automatic cancellation', async () => {
