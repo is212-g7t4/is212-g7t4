@@ -296,9 +296,9 @@ def create_app(config=None):
                 venue_id,
                 expires_at,
                 staff_id,
+                held_for,
                 setup_time,
                 turnaround_time,
-                app.config["DATABASE_URL"], venue_id, expires_at, staff_id, held_for
             )
         except HoldVenueNotFoundError:
             return jsonify(message="Venue not found."), 404

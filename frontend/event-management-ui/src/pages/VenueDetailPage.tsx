@@ -131,7 +131,13 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
     setHoldSaving(true)
     setHoldError('')
     try {
-      setHold(await (holdCoordinator ? placeVenueHold(venueId, holdExpiry, user, holdCoordinator) : placeVenueHold(venueId, holdExpiry, user, venue ?? {})))
+      setHold(await placeVenueHold(
+        venueId,
+        holdExpiry,
+        user,
+        holdCoordinator || undefined,
+        venue ?? {},
+      ))
       setVenue((current) => current ? { ...current, status: 'On Hold' } : current)
       setHoldFormOpen(false)
       setHoldExpiry('')
