@@ -51,3 +51,10 @@ def get_unassigned_events() -> list:
     response = httpx.get(f"{EVENT_SERVICE_URL}/events/unassigned")
     response.raise_for_status()
     return response.json()["events"]
+
+
+def get_active_events() -> list:
+    """Active events (not Confirmed/Rejected/Cancelled), assigned or not, from Event Service."""
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events/active")
+    response.raise_for_status()
+    return response.json()["events"]

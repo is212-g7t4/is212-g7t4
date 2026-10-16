@@ -39,6 +39,14 @@ def test_unassigned_events_come_from_event_service(monkeypatch):
     assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/unassigned"
 
 
+def test_active_events_come_from_event_service(monkeypatch):
+    get = Mock(return_value=response(200, {"events": [{"id": "evt-1"}]}))
+    monkeypatch.setattr(clients.httpx, "get", get)
+
+    assert clients.get_active_events() == [{"id": "evt-1"}]
+    assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/active"
+
+
 def test_assignment_records_who_assigned_the_coordinator(monkeypatch):
     """Event Service is told who made the assignment, for the event's detail page."""
     saved = {"id": "evt-1", "coordinatorId": "coord", "assignedBy": "lead"}

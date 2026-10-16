@@ -282,6 +282,24 @@ def list_unassigned(database_url):
             return [serialize(row) for row in cursor.fetchall()]
 
 
+# The Lead's workload view leaves out events whose coordinator work is over:
+# 'Confirmed' (passed safety, in preparation), 'Rejected', and 'Cancelled'
+# (safety rejection).
+INACTIVE_STATUSES = ("Confirmed", "Rejected", "Cancelled")
+
+
+def list_active_events(database_url):
+    """Every active event, assigned or not, for the Lead's workload view."""
+    query = f"""SELECT {ROW_COLUMNS}
+                FROM public."Event"
+                WHERE status NOT IN %s
+                ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC"""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query, [INACTIVE_STATUSES])
+            return [serialize(row) for row in cursor.fetchall()]
+
+
 class EventNotFoundError(Exception):
     pass
 

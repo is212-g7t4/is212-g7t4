@@ -1051,6 +1051,29 @@ textarea:disabled {
   overflow-x: auto;
 }
 
+.status-badge.unassigned {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.workload-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 14px 16px;
+}
+
+.workload-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.workload-panel > .muted {
+  padding: 0 16px 14px;
+  margin: 0;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

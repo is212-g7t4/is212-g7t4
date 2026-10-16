@@ -9,6 +9,7 @@ import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
 import { AttendeeRegistrationsPage } from './pages/AttendeeRegistrationsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
 import { UnassignedQueuePage } from './pages/UnassignedQueuePage'
+import { CoordinatorWorkloadPage } from './pages/CoordinatorWorkloadPage'
 import { EventsTabs } from './components/EventsTabs'
 import { coordinatorEventTabs } from './features/event/permissions'
 import { isCoordinator } from './roles'
@@ -36,6 +37,7 @@ const paths: Record<Route, string> = {
   manage: '/events/evt-001/edit',
   review: '/requests/review',
   queue: '/requests/queue',
+  workload: '/requests/workload',
   detail: '/events',
   myEvents: '/my-events',
   browseEvents: '/events/browse',
@@ -60,6 +62,7 @@ function getRoute(): Route {
   if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/requests/queue') return 'queue'
+  if (path === '/requests/workload') return 'workload'
   if (path === '/my-events') return 'myEvents'
   if (path === '/events/browse') return 'browseEvents'
   if (path === '/registrations') return 'myRegistrations'
@@ -200,6 +203,7 @@ function App() {
       {inEventsPage && <EventsTabs tabs={eventTabs} route={route} onNavigate={navigate} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'queue' && <UnassignedQueuePage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
+      {route === 'workload' && <CoordinatorWorkloadPage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}

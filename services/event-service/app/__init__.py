@@ -28,6 +28,7 @@ from app.models import (
     approve_event,
     get_event,
     get_organiser_event,
+    list_active_events,
     list_event_summaries,
     list_events,
     list_confirmed_events,
@@ -155,6 +156,14 @@ def create_app(config=None):
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         return jsonify(events=list_unassigned(app.config["DATABASE_URL"]))
+
+    @app.get("/events/active")
+    def active():
+        if not app.config["DATABASE_URL"]:
+            return jsonify(
+                message="DATABASE_URL is not configured for Event Service."
+            ), 503
+        return jsonify(events=list_active_events(app.config["DATABASE_URL"]))
 
     @app.get("/events")
     def list_events_route():

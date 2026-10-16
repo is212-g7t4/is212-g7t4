@@ -2,6 +2,7 @@ import httpx
 from flask import Blueprint, jsonify, request
 
 from app.clients import (
+    get_active_events,
     get_available_coordinators,
     get_unassigned_events,
     get_user,
@@ -70,6 +71,64 @@ def get_queue():
         return jsonify(events=get_unassigned_events()), 200
     except Exception as e:
         return jsonify(error=f"Failed to fetch unassigned events: {str(e)}"), 500
+
+
+@bp.get("/workload")
+def get_workload():
+    """
+    The Event Coordinator Lead's read-only workload view: every coordinator
+    (the Lead included) with the active events assigned to them, plus the
+    active events nobody has been assigned yet.
+
+    Query parameters:
+    - actingUserId: the id of the user asking. Only the Event Coordinator
+      Lead may see the workload.
+
+    Response (200):
+    {
+        "coordinators": [{...coordinator, "events": [...]}],
+        "unassigned": [...],
+        "otherAssigned": [...]
+    }
+    otherAssigned holds events whose coordinator is no longer an Event
+    Coordinator, so they still show up rather than silently disappear.
+    """
+    acting_user_id = request.args.get("actingUserId")
+    if not acting_user_id:
+        return jsonify(error="actingUserId is required"), 400
+
+    try:
+        acting_user = get_user(acting_user_id)
+    except Exception as e:
+        return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
+
+    if not acting_user or acting_user.get("role") != LEAD_ROLE:
+        return jsonify(
+            error="Only the Event Coordinator Lead can view coordinator workload"
+        ), 403
+
+    try:
+        coordinators = get_available_coordinators()
+        events = get_active_events()
+    except Exception as e:
+        return jsonify(error=f"Failed to fetch coordinator workload: {str(e)}"), 500
+
+    by_coordinator = {c.get("user_id"): {**c, "events": []} for c in coordinators}
+    unassigned, other_assigned = [], []
+    for event in events:
+        coordinator_id = event.get("coordinatorId")
+        if not coordinator_id:
+            unassigned.append(event)
+        elif coordinator_id in by_coordinator:
+            by_coordinator[coordinator_id]["events"].append(event)
+        else:
+            other_assigned.append(event)
+
+    return jsonify(
+        coordinators=list(by_coordinator.values()),
+        unassigned=unassigned,
+        otherAssigned=other_assigned,
+    ), 200
 
 
 @bp.post("/events/<event_id>/assign-coordinator/<coordinator_id>")

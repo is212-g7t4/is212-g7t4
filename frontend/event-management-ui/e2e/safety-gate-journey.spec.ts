@@ -70,7 +70,7 @@ test('SCRUM-152: a coordinator is blocked until the Safety Officer approves, the
 
   // 3. Switch back to the coordinator: Confirmed, and the safety note is gone.
   await page.getByLabel('Select active user').selectOption({ label: 'Carl Ng — Event Coordinator' })
-  await page.getByRole('button', { name: 'My events' }).click()
+  await page.getByRole('button', { name: 'Events', exact: true }).click()
   await page.getByRole('button', { name: /Safety Journey Expo/ }).click()
   await expect(page.getByRole('heading', { name: 'Safety Journey Expo' })).toBeVisible()
   await expect(page.locator('.status-badge').first()).toContainText('Confirmed')

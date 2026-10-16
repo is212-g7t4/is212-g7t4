@@ -39,6 +39,15 @@ this up alongside every other service.
   may view it — `403` for everyone else, `400` without `actingUserId`. An
   event leaves the queue once assigned, because assignment moves it to
   `Under Review`.
+- `GET /workload?actingUserId=<user id>` — the Lead's read-only workload
+  view: every coordinator from `GET /coordinators` (the Lead included, and
+  those with nothing assigned) with their active events under `events`, plus
+  `unassigned` (active events with no coordinator) and `otherAssigned`
+  (events whose coordinator is no longer an Event Coordinator, so they don't
+  silently vanish). Events come from `event-service`'s `GET /events/active`,
+  which leaves out `Confirmed`, `Rejected` and `Cancelled`. Only the Event
+  Coordinator Lead may view it — `403` for everyone else, `400` without
+  `actingUserId`.
 - `POST /events/<event_id>/assign-coordinator/<coordinator_id>` — assigns or
   reassigns the coordinator on an event. Body must include
   `{"actingUserId": "<user id>"}`; only the Event Coordinator Lead (role
