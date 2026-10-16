@@ -349,6 +349,23 @@ def test_equipment_read_rejection_is_a_downstream_error(sent):
         clients.get_event_equipment_requests(EVENT_ID, COORDINATOR_ID)
 
 
+def test_equipment_catalogue_is_read_for_review(sent):
+    calls, queue = sent
+    queue.append(Response(200, {"equipment": [{"id": "fixture", "type": "Table"}]}))
+
+    assert clients.list_equipment() == [{"id": "fixture", "type": "Table"}]
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"].endswith("/equipment")
+
+
+def test_equipment_catalogue_failure_is_a_downstream_error(sent):
+    _, queue = sent
+    queue.append(Response(503, {"message": "database unavailable"}))
+
+    with pytest.raises(clients.DownstreamError):
+        clients.list_equipment()
+
+
 # --- Safety Check Record Service --------------------------------------------
 
 

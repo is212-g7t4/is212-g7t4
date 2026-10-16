@@ -84,6 +84,112 @@ def health():
     return jsonify(status="ok")
 
 
+@bp.get("/safety-checks/<uuid:event_id>/review")
+def review_safety_check(event_id):
+    """Read the complete safety context for a Safety Officer (SCRUM-163)."""
+    safety_officer_id = _uuid_or_none(request.args.get("safetyOfficerId"))
+    if not safety_officer_id:
+        return jsonify(message="safetyOfficerId must be a valid UUID."), 400
+    failure = _check_safety_officer(safety_officer_id)
+    if failure:
+        return failure
+
+    event, failure = _load_event_for_officer(str(event_id), safety_officer_id)
+    if failure:
+        return failure
+    if event.get("status") != PENDING_SAFETY_CHECK:
+        return jsonify(
+            code="EVENT_NOT_PENDING_SAFETY_CHECK",
+            message="Only an event awaiting a safety decision can be reviewed.",
+        ), 409
+
+    try:
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            bookings_call = pool.submit(clients.get_event_venue_bookings, str(event_id))
+            requests_call = pool.submit(
+                clients.get_event_equipment_requests,
+                str(event_id),
+                safety_officer_id,
+                SAFETY_OFFICER,
+            )
+            rounds_call = pool.submit(clients.list_safety_check_records, str(event_id))
+            venues_call = pool.submit(clients.list_venues)
+            equipment_call = pool.submit(clients.list_equipment)
+            bookings = bookings_call.result()
+            requests = requests_call.result()
+            rounds = rounds_call.result()
+            venues = venues_call.result()
+            equipment = equipment_call.result()
+    except clients.DownstreamTimeout:
+        return jsonify(message=UNREADABLE_ARRANGEMENTS), 504
+    except Exception:  # noqa: BLE001 — never leak downstream URLs or error text
+        return jsonify(message=UNREADABLE_ARRANGEMENTS), 502
+
+    venue_by_id = {venue.get("id"): venue for venue in venues}
+    equipment_by_id = {item.get("id"): item for item in equipment}
+    expected_attendance = event.get("expectedAttendance")
+    try:
+        attendance_number = int(expected_attendance)
+    except (TypeError, ValueError):
+        attendance_number = None
+
+    review_venues = []
+    for booking in bookings:
+        venue = venue_by_id.get(booking.get("venueId"), {})
+        capacity = venue.get("capacity")
+        review_venues.append({
+            "bookingId": booking.get("id"),
+            "venueId": booking.get("venueId"),
+            "name": venue.get("name"),
+            "expectedAttendance": expected_attendance,
+            "capacity": capacity,
+            "overCapacity": (
+                attendance_number is not None
+                and isinstance(capacity, int)
+                and attendance_number > capacity
+            ),
+            "layout": ", ".join(venue.get("supportedLayouts") or []) or None,
+            "emergencyAccess": venue.get("emergencyAccess"),
+            "accessibility": venue.get("accessibility"),
+            "restrictions": venue.get("restrictions"),
+            "venueRequirements": booking.get("venueRequirements"),
+            "status": booking.get("status"),
+        })
+
+    review_equipment = []
+    for equipment_request in requests:
+        item = equipment_by_id.get(equipment_request.get("equipmentId"), {})
+        review_equipment.append({
+            "requestId": equipment_request.get("id"),
+            "name": item.get("type") or item.get("description"),
+            "description": item.get("description"),
+            "quantity": equipment_request.get("quantityRequested"),
+            "technicalRequirements": equipment_request.get("technicalRequirements"),
+            "status": equipment_request.get("status"),
+        })
+
+    current_round = next(
+        (item for item in rounds if item.get("status") == "Pending"), None
+    )
+    if current_round is None:
+        return jsonify(
+            code="NO_OPEN_SAFETY_CHECK",
+            message="No open safety check was found for this event.",
+        ), 409
+
+    history = sorted(
+        (item for item in rounds if item.get("id") != current_round.get("id")),
+        key=lambda item: item.get("roundNumber", 0),
+    )
+    return jsonify(
+        event=event,
+        safetyCheck=current_round,
+        venues=review_venues,
+        equipment=review_equipment,
+        history=history,
+    )
+
+
 @bp.post("/safety-checks")
 def submit_safety_check():
     """Submit an `Approved` event for its Operational Safety Check.
