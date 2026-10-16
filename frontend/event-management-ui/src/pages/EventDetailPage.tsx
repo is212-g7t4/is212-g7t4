@@ -19,6 +19,7 @@ import { OrganiserEventDetailPage } from './OrganiserEventDetailPage'
 import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
 import { SafetySubmitPanel } from '../features/safety/SafetySubmitPanel'
 import { SafetyDecisionPanel } from '../features/safety/SafetyDecisionPanel'
+import { SafetyReview } from '../features/safety/SafetyReview'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 import { isCoordinator, isLead } from '../roles'
 
@@ -225,6 +226,10 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
           coordinatorId={currentCoordinator.id}
           refreshKey={bookingsChanged}
           onSubmitted={() => { setLoading(true); setRefresh((value) => value + 1) }}
+        />}
+        {role === 'Safety Officer' && event.status === 'Pending Safety Check' && <SafetyReview
+          eventId={event.id}
+          safetyOfficerId={currentCoordinator.id}
         />}
         {/* SCRUM-150: the Safety Officer's decision, offered only while the
             event is actually awaiting one (AC3, UI side). */}
