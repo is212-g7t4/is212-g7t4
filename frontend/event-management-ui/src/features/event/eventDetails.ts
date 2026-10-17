@@ -1,8 +1,10 @@
 import type { SubmittedEvent } from './submission'
 
-// SCRUM-153: editing an event's details. Calls Event Service directly — it
-// owns the event's fields and is the single authority on what counts as a
-// high-impact change, and there is no API gateway.
+// SCRUM-20: editing an event's details. Calls Event Workflow Service (the
+// composite), which validates a high-impact change against the event's venue
+// and equipment arrangements before Event Service saves it. Event Service
+// still owns the fields and the low/high-impact split, and there is no API
+// gateway.
 
 /** The five details in SCRUM-153 AC1 whose change invalidates a safety review.
  * Mirrors `HIGH_IMPACT_FIELDS` in services/event-service/app/models.py. */
@@ -89,26 +91,41 @@ export class SafetyRecheckRequired extends Error {
   }
 }
 
-/** Any other refusal from Event Service, with its code so callers needn't
- * match on the prose (e.g. 'EVENT_UNDER_SAFETY_REVIEW', 'EVENT_NOT_EDITABLE'). */
+/** One reason a high-impact change was refused (SCRUM-20 AC3). */
+export type ArrangementConflict = {
+  field: string
+  area: 'venue' | 'equipment'
+  message: string
+}
+
+/** Any other refusal from the service, with its code so callers needn't
+ * match on the prose (e.g. 'EVENT_UNDER_SAFETY_REVIEW', 'EVENT_NOT_EDITABLE',
+ * 'CHANGE_CONTRADICTS_ARRANGEMENTS'). */
 export class EventEditError extends Error {
   code?: string
   missingFields: string[]
   errors: string[]
+  conflicts: ArrangementConflict[]
 
   constructor(
     message: string,
-    details: { code?: string; missingFields?: string[]; errors?: string[] } = {},
+    details: {
+      code?: string
+      missingFields?: string[]
+      errors?: string[]
+      conflicts?: ArrangementConflict[]
+    } = {},
   ) {
     super(message)
     this.name = 'EventEditError'
     this.code = details.code
     this.missingFields = details.missingFields || []
     this.errors = details.errors || []
+    this.conflicts = details.conflicts || []
   }
 }
 
-const serviceUrl = () => import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'
+const serviceUrl = () => import.meta.env.VITE_EVENT_WORKFLOW_SERVICE_URL || 'http://localhost:5014'
 
 /**
  * Save an edit (AC2), or learn that it needs a safety re-check first (AC1).
@@ -141,5 +158,6 @@ export async function updateEventDetails(
     code: body.code,
     missingFields: body.missingFields,
     errors: body.errors,
+    conflicts: body.conflicts,
   })
 }

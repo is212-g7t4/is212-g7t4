@@ -123,6 +123,7 @@ HIGH_IMPACT_FIELDS = (
     "accessibilityNeeds",
 )
 EDITABLE_FIELDS = (*LOW_IMPACT_FIELDS, *HIGH_IMPACT_FIELDS)
+COORDINATOR_LEAD_ROLE = "Event Coordinator Lead"
 
 # Human labels for the history line and the UI (AC1's "told why"). Both date
 # fields map to one label deliberately, so changing start and end together
@@ -992,8 +993,15 @@ def update_event_details(
     changes,
     safety_recheck=None,
     internal=False,
+    actor_role=None,
+    dry_run=False,
 ):
     """Save an edit to an event's details (SCRUM-153 AC1, AC2; SCRUM-20's edit write).
+
+    `actor_role` lets the Event Coordinator Lead edit an event that has no
+    assigned coordinator, but only on an `internal` call (the composite has
+    looked the role up). `dry_run` runs every check and returns the classification of the
+    change without writing, so the composite can validate before saving.
 
     This service is the single authority on what counts as high-impact, so the
     classification and the gate live here rather than in the composite. A
@@ -1022,7 +1030,12 @@ def update_event_details(
                 raise EventNotFoundError
             # Assignment first, as everywhere else: a caller who isn't the
             # assigned coordinator gets 403 and learns nothing about the event.
-            if (
+            is_lead = (
+                internal
+                and actor_role == COORDINATOR_LEAD_ROLE
+                and not event["coordinator_id"]
+            )
+            if not is_lead and (
                 not event["coordinator_id"]
                 or str(event["coordinator_id"]) != coordinator_id
             ):
@@ -1038,6 +1051,15 @@ def update_event_details(
                 raise ValueError({"missingFields": missing, "errors": errors})
 
             changed, high = _changed_fields(changes, current)
+            if dry_run:
+                if high and status == "Pending Safety Check":
+                    raise EventUnderSafetyReviewError
+                return {
+                    "event": current,
+                    "changedFields": changed,
+                    "highImpactFields": high,
+                    "labels": field_labels(changed),
+                }
             if not changed:
                 # Nothing actually differs, so there is nothing to record and
                 # no approval to withdraw (AC2).

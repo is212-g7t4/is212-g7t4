@@ -549,6 +549,28 @@ test('SCRUM-153: only the assigned coordinator is offered the edit', async () =>
   expect(editButton()).not.toBeInTheDocument()
 })
 
+test('SCRUM-20: the Lead can edit an event that has no assigned coordinator', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Approved', coordinatorId: null })
+  renderPage('Event Coordinator Lead')
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(editButton()).toBeInTheDocument()
+})
+
+test('SCRUM-20: the Lead cannot edit an event assigned to another coordinator', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Approved',
+    coordinatorId: '22222222-2222-4222-8222-222222222222',
+  })
+  renderPage('Event Coordinator Lead')
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(editButton()).not.toBeInTheDocument()
+})
+
 test('SCRUM-153: a Safety Officer does not edit the event details', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
   renderPage('Safety Officer')
