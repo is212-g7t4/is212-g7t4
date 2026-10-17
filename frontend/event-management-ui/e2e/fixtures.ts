@@ -54,6 +54,8 @@ export const test = base.extend<{ mockApi: (page: Page) => Promise<void>; unmock
       }
       // App-shell poll that runs on every page for coordinators; tests override it to show an alert.
       await mock(page, 'availability', '/venue-holds/reminders', (route) => json(route, { reminders: [] }))
+      // Booking forms need active holds to determine whether a venue is selectable.
+      await mock(page, 'availability', '/venue-holds', (route) => json(route, { holds: [] }))
       // Safety Officer event details read their consolidated review context
       // before rendering the decision controls.
       await page.route(

@@ -16,10 +16,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetchVenues } from './venues'
+import { fetchActiveVenueHolds } from './venueHolds'
 import { VenueBookingError, cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
 import { VenueBookingsPanel } from './VenueBookingsPanel'
 
 vi.mock('./venues', () => ({ fetchVenues: vi.fn() }))
+vi.mock('./venueHolds', () => ({ fetchActiveVenueHolds: vi.fn() }))
 vi.mock('./venueBookings', async (importOriginal) => ({
   ...await importOriginal<typeof import('./venueBookings')>(),
   cancelVenueBooking: vi.fn(),
@@ -62,7 +64,32 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(fetchVenues).mockResolvedValue(venues)
+  vi.mocked(fetchActiveVenueHolds).mockResolvedValue([])
   vi.mocked(fetchVenueBookings).mockResolvedValue(bookings)
+})
+
+test('active holds are labeled and unavailable in the venue booking selector', async () => {
+  vi.mocked(fetchActiveVenueHolds).mockResolvedValue([
+    { id: 'hold-a', venueId: 'venue-a', createdAt: '2026-10-19T09:00:00+08:00', expiresAt: '2026-10-21T09:00:00+08:00', heldBy: null },
+  ])
+  renderPanel()
+
+  const heldVenue = await screen.findByRole('option', { name: 'Auditorium A · capacity 500 (On Hold)' })
+  expect(heldVenue).toBeDisabled()
+  expect(screen.getByRole('option', { name: 'Breakout Room B · capacity 60' })).toBeEnabled()
+
+  fireEvent.change(screen.getByLabelText('Booking start *'), { target: { value: '2026-10-22T09:00' } })
+  fireEvent.change(screen.getByLabelText('Booking end *'), { target: { value: '2026-10-22T12:00' } })
+  expect(screen.getByRole('option', { name: 'Auditorium A · capacity 500' })).toBeEnabled()
+})
+
+test('hold lookup failure prevents submitting a booking with unknown hold status', async () => {
+  vi.mocked(fetchActiveVenueHolds).mockRejectedValue(new Error('Hold service offline'))
+  renderPanel()
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Hold service offline')
+  expect(screen.getByLabelText(/Venue \*/)).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Submit venue booking' })).toBeDisabled()
 })
 
 test('immutable cancellation preserves an unrelated edit and submits an update, not a replacement', async () => {
