@@ -102,8 +102,10 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
   const safetyHint = event && showsSafetyHint(event.status) ? safetyBlockMessage(event.status) : ''
   // SCRUM-153: the details of a Rejected or Cancelled event are history, so
   // there is nothing to edit; Event Service refuses those too
-  // (EDITABLE_STATUSES). Only the assigned coordinator ever sees the button.
-  const canEditDetails = canUpdate && event !== null
+  // (EDITABLE_STATUSES). Only the assigned coordinator, or the Lead while no
+  // coordinator is assigned, sees the button (SCRUM-20); the service checks
+  // the same on its side.
+  const canEditDetails = (canUpdate || (isLead(role) && !event?.coordinatorId)) && event !== null
     && event.status !== 'Rejected' && event.status !== 'Cancelled'
 
   const saveProgress = async (formEvent: FormEvent) => {
@@ -141,7 +143,12 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
       <button className="button small" onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}><RefreshIcon size={13} /> Refresh</button>
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
-      <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
+      <header className="event-card-header"><h2>{event.eventName}</h2><div className="event-card-header-actions">
+        <StatusBadge status={event.status} />
+        {canEditDetails && !editing && <button className="button primary small" type="button" onClick={() => { setEditing(true); setEditMessage('') }}>
+          Edit details
+        </button>}
+      </div></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
       {canUpdate && event.status === 'Safety Changes Requested' && <SafetyFeedbackPanel
         key={`${event.id}-${currentCoordinator.id}-${refresh}`}
@@ -164,10 +171,10 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
       </section>}
       <p className="muted event-card-section">Venue and equipment are shown as requested — confirmed assignment isn't tracked yet.</p>
 
-      {/* SCRUM-153: the assigned coordinator edits the details here. The
-          dialog's own confirm step handles a high-impact change to a
+      {/* SCRUM-153: the Edit details button is in the header; the dialog opens
+          here. Its own confirm step handles a high-impact change to a
           Confirmed event (AC1); the API gates it regardless. */}
-      {canEditDetails && <section className="event-card-section">
+      {canEditDetails && (editing || editMessage) && <section className="event-card-section">
         {editMessage && <p role="status">{editMessage}</p>}
         {editing ? <EventEditDialog
           event={event}
@@ -180,9 +187,7 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
             setDraftStatus(updated.status)
             setActionDetails(updated.actionDetails || '')
           }}
-        /> : <button className="button small" type="button" onClick={() => { setEditing(true); setEditMessage('') }}>
-          Edit details
-        </button>}
+        /> : null}
       </section>}
 
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel

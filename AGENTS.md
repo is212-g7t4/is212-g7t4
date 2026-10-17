@@ -148,8 +148,9 @@ refuses to parse at all while one is missing, which is exactly when you need
 the list.
 
 Composites that take all their configuration from `environment:` in
-`docker-compose.yml` need no `.env` at all — Attendee Registration and Safety
-Check are the two today, which is why no file is expected for them.
+`docker-compose.yml` need no `.env` at all — Attendee Registration, Safety
+Check and Event Workflow are the three today, which is why no file is expected
+for them.
 
 Each service also ships a `.env.example` listing the variables it needs; the
 root `.env` is a superset and works for all of them today. `.env` files are

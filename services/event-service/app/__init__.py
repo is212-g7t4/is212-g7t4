@@ -478,7 +478,12 @@ def create_app(config=None):
             ), 400
         if any(not isinstance(value, str) for value in changes.values()):
             return jsonify(message="Every value in changes must be text."), 400
-
+        actor_role = data.get("actorRole")
+        if actor_role is not None and not isinstance(actor_role, str):
+            return jsonify(message="actorRole must be text."), 400
+        dry_run = data.get("dryRun", False)
+        if not isinstance(dry_run, bool):
+            return jsonify(message="dryRun must be true or false."), 400
         safety_recheck, failure = _safety_recheck(data)
         if failure:
             return failure
@@ -502,6 +507,8 @@ def create_app(config=None):
                 changes,
                 safety_recheck=safety_recheck,
                 internal=internal,
+                actor_role=actor_role,
+                dry_run=dry_run,
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404

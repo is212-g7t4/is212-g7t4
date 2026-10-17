@@ -8,7 +8,7 @@ import {
   sentenceList,
   updateEventDetails,
 } from './eventDetails'
-import type { EditableField, EventChanges } from './eventDetails'
+import type { ArrangementConflict, EditableField, EventChanges } from './eventDetails'
 import { validateEvent } from './submission'
 import type { SubmittedEvent } from './submission'
 import { recheckSafety } from '../safety/safetyCheck'
@@ -75,6 +75,8 @@ export function EventEditDialog({ event, coordinatorId, onCancel, onSaved }: Pro
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [validationErrors, setValidationErrors] = useState<string[]>([])
+  // SCRUM-20 AC3: why a high-impact change was refused; nothing was saved.
+  const [conflicts, setConflicts] = useState<ArrangementConflict[]>([])
   const [recheck, setRecheck] = useState<SafetyRecheckRequired | null>(null)
 
   // Only the fields the user actually touched are sent. Event Service ignores
@@ -99,12 +101,14 @@ export function EventEditDialog({ event, coordinatorId, onCancel, onSaved }: Pro
     setDraft((previous) => ({ ...previous, [field]: value }))
     setError('')
     setValidationErrors([])
+    setConflicts([])
   }
 
   const fail = (cause: unknown, fallback: string) => {
     if (cause instanceof EventEditError) {
       setError(cause.message)
       setValidationErrors([...cause.missingFields, ...cause.errors])
+      setConflicts(cause.conflicts)
       return
     }
     setError(cause instanceof Error ? cause.message : fallback)
@@ -115,6 +119,7 @@ export function EventEditDialog({ event, coordinatorId, onCancel, onSaved }: Pro
     setSaving(true)
     setError('')
     setValidationErrors([])
+    setConflicts([])
     try {
       const updated = await updateEventDetails(event.id, coordinatorId, changes)
       onSaved(updated, 'Event details saved.')
@@ -193,7 +198,11 @@ export function EventEditDialog({ event, coordinatorId, onCancel, onSaved }: Pro
       {highImpact.length > 0 && event.status === 'Confirmed' &&
         ' Saving will ask you to confirm withdrawing the safety approval.'}
     </p>}
-    {error && <p className="field-error" role="alert">{error}</p>}
+    {conflicts.length > 0 ? <div className="field-error" role="alert">
+      <strong>{error}</strong>
+      <ul>{conflicts.map((item) => <li key={item.message}>{item.message}</li>)}</ul>
+      <p>Nothing was changed. Update the arrangements first, or adjust this change.</p>
+    </div> : error && <p className="field-error" role="alert">{error}</p>}
     {validationErrors.length > 0 && <ul className="field-error">
       {validationErrors.map((message) => <li key={message}>{message}</li>)}
     </ul>}
