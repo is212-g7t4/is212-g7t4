@@ -21,6 +21,7 @@ export interface EquipmentRequest {
   technicalRequirements: string
   status: EquipmentRequestStatus
   reviewedBy: string | null
+  rejectionReason?: string | null
   safetyFeedback?: { reason: string | null; requestedChanges: string[] } | null
   equipment: { description: string; type: string; totalQuantity: number; status: string } | null
   /** Only Pending lines are checked for availability. */
@@ -54,22 +55,22 @@ export async function fetchEventReservations(user: Pick<User, 'id' | 'role'>, st
   return body.events as EventReservation[]
 }
 
-export async function reviewEquipmentRequest(id: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>): Promise<ReviewedRequest> {
+export async function reviewEquipmentRequest(id: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>, rejectionReason?: string): Promise<ReviewedRequest> {
   const response = await fetch(`${serviceUrl()}/equipment-reservations/requests/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...devHeaders(user) },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, ...(status === 'Rejected' ? { rejectionReason } : {}) }),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to update this equipment request.')
   return body.request as ReviewedRequest
 }
 
-export async function reviewAllEventEquipmentRequests(eventId: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>): Promise<ReviewedRequest[]> {
+export async function reviewAllEventEquipmentRequests(eventId: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>, rejectionReason?: string): Promise<ReviewedRequest[]> {
   const response = await fetch(`${serviceUrl()}/equipment-reservations/events/${encodeURIComponent(eventId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...devHeaders(user) },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, ...(status === 'Rejected' ? { rejectionReason } : {}) }),
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to update this event\'s equipment requests.')

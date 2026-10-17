@@ -1145,8 +1145,17 @@ td small {
   width: 100%;
 }
 
-.equipment-request-table.with-safety-feedback {
+.equipment-request-table.with-safety-feedback,
+.equipment-request-table.with-reject-reason {
   min-width: 1240px;
+}
+
+.equipment-request-table.with-safety-feedback.with-reject-reason {
+  min-width: 1480px;
+}
+
+.equipment-reject-reason {
+  white-space: pre-wrap;
 }
 
 .venue-request-table {

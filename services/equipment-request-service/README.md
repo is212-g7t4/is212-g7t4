@@ -28,7 +28,7 @@ Service) until Supabase JWT verification lands.
 - `GET /equipment-requests[?status=Pending|Approved|Rejected][&eventId=<uuid>][&eventIds=<uuid>,<uuid>...]`
   — Technical Support or Event Coordinator. `eventIds` takes up to 500 IDs.
   Each item:
-  `{id, eventId, equipmentId, quantityRequested, technicalRequirements, status, reviewedBy}`.
+  `{id, eventId, equipmentId, quantityRequested, technicalRequirements, status, reviewedBy, rejectionReason}`.
 - `GET /equipment-requests/<id>` — same roles; `404` if unknown.
 - `PATCH /equipment-requests/<id>` — Technical Support only. Body
   `{"status": "Approved" | "Rejected"}`; records the caller as `reviewedBy`.
@@ -38,6 +38,10 @@ Service) until Supabase JWT verification lands.
   `{"status": "Approved" | "Rejected"}`; updates every Pending request for
   that event and returns them in `{"requests": [...]}`. `409` if the event has
   requests but none are Pending, `404` if the event has no requests.
+  Both decision endpoints require `rejectionReason` when status is `Rejected`
+  (1-500 characters after trimming). The reason is saved to `rejection_reason`
+  and returned on reads; bulk rejection applies it to every Pending line.
+  Approval and safety reset clear any previous rejection reason.
 - `POST /events/<event_id>/equipment-requests` — Event Coordinator only. Body
   `{"items": [{"equipmentId", "quantityRequested", "technicalRequirements"?}]}`
   (1–50 items, quantity a whole number ≥ 1, each equipment once). Saves every

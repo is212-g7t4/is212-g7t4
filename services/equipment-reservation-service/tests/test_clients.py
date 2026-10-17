@@ -75,7 +75,7 @@ def test_get_and_review_calls(sent):
 
     assert clients.get_request(HEADERS, "r") == {"id": "r"}
     assert clients.review_request(HEADERS, "r", "Approved") == {"id": "r"}
-    assert clients.review_event_requests(HEADERS, "ev", "Rejected") == [{"id": "r"}]
+    assert clients.review_event_requests(HEADERS, "ev", "Rejected", "No technician available.") == [{"id": "r"}]
 
     assert [(c[0], c[1]) for c in calls] == [
         ("GET", "http://localhost:5011/equipment-requests/r"),
@@ -83,6 +83,7 @@ def test_get_and_review_calls(sent):
         ("PATCH", "http://localhost:5011/events/ev/equipment-requests"),
     ]
     assert calls[1][2]["json"] == {"status": "Approved"}
+    assert calls[2][2]["json"] == {"status": "Rejected", "rejectionReason": "No technician available."}
 
 
 # Create request AC1/AC2 (transport): forward equipment needs, the event ID and caller identity to storage.

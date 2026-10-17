@@ -109,20 +109,20 @@ def _ensure_sufficient(event_id, pending, headers):
         raise InsufficientStockError("Cannot approve, insufficient stock: " + "; ".join(short) + ".")
 
 
-def review_request(headers, request_id, status):
+def review_request(headers, request_id, status, rejection_reason=None):
     if status == "Approved":
         request = clients.get_request(headers, request_id)
         if request["status"] == "Pending":
             _ensure_sufficient(request["eventId"], [request], headers)
-    return clients.review_request(headers, request_id, status)
+    return clients.review_request(headers, request_id, status, rejection_reason)
 
 
-def review_event(headers, event_id, status):
+def review_event(headers, event_id, status, rejection_reason=None):
     if status == "Approved":
         pending = clients.list_requests(headers, "Pending", [event_id])
         if pending:
             _ensure_sufficient(event_id, pending, headers)
-    return clients.review_event_requests(headers, event_id, status)
+    return clients.review_event_requests(headers, event_id, status, rejection_reason)
 
 
 def create_requests(headers, coordinator_id, event_id, items):

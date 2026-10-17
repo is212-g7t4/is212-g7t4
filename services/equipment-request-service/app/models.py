@@ -6,7 +6,7 @@ from psycopg2.extras import RealDictCursor
 
 COLUMNS = (
     "equipment_request_id, event_id, equipment_id, quantity_requested, "
-    "technical_requirements, status, reviewed_by"
+    "technical_requirements, status, reviewed_by, rejection_reason"
 )
 
 
@@ -31,6 +31,7 @@ def serialize(row):
         "technicalRequirements": row["technical_requirements"] or "",
         "status": row["status"],
         "reviewedBy": str(row["reviewed_by"]) if row["reviewed_by"] else None,
+        "rejectionReason": row.get("rejection_reason"),
     }
 
 
@@ -104,7 +105,7 @@ def reset_safety_requests(database_url, event_id, request_ids):
                 raise RequestNotFoundError
             cursor.execute(
                 f'''UPDATE public."EquipmentRequest"
-                    SET status = 'Pending', reviewed_by = NULL
+                    SET status = 'Pending', reviewed_by = NULL, rejection_reason = NULL
                     WHERE event_id = %s AND equipment_request_id = ANY(%s::uuid[])
                     RETURNING {COLUMNS}''',
                 [event_id, request_ids],
@@ -112,16 +113,16 @@ def reset_safety_requests(database_url, event_id, request_ids):
             return [serialize(row) for row in cursor.fetchall()]
 
 
-def review_request(database_url, request_id, status, reviewer_id):
+def review_request(database_url, request_id, status, reviewer_id, rejection_reason=None):
     """Move a Pending request to Approved/Rejected; the Pending guard is in the UPDATE itself."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""UPDATE public."EquipmentRequest"
-                    SET status = %s, reviewed_by = %s
+                    SET status = %s, reviewed_by = %s, rejection_reason = %s
                     WHERE equipment_request_id = %s AND status = 'Pending'
                     RETURNING {COLUMNS}""",
-                [status, reviewer_id, request_id],
+                [status, reviewer_id, rejection_reason if status == "Rejected" else None, request_id],
             )
             row = cursor.fetchone()
             if row:
@@ -135,16 +136,16 @@ def review_request(database_url, request_id, status, reviewer_id):
             raise RequestNotFoundError
 
 
-def review_event_requests(database_url, event_id, status, reviewer_id):
+def review_event_requests(database_url, event_id, status, reviewer_id, rejection_reason=None):
     """Apply one decision to every Pending request for an event."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
                 f"""UPDATE public."EquipmentRequest"
-                    SET status = %s, reviewed_by = %s
+                    SET status = %s, reviewed_by = %s, rejection_reason = %s
                     WHERE event_id = %s AND status = 'Pending'
                     RETURNING {COLUMNS}""",
-                [status, reviewer_id, event_id],
+                [status, reviewer_id, rejection_reason if status == "Rejected" else None, event_id],
             )
             rows = cursor.fetchall()
             if rows:
