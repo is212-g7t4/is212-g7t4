@@ -132,7 +132,19 @@ every other service.
     booking was cancelled.
   - `200` with the updated booking otherwise.
 
-## Known limitation
+## Venue Staff Request Review
 
-No Forum Service call for logging the approval/rejection reason, and no
+The frontend `/venue-requests` page provides a minimal event-grouped queue,
+status filtering, individual Approve/Reject and latest-round safety feedback.
+`GET /booking-requests[?status=Pending|Approved|Rejected]` requires DEV Venue
+Staff identity headers. Pending includes both `Pending` and `Pending Review`.
+The composite reads events, bookings and venue names from their owning APIs;
+`SAFETY_CHECK_RECORD_SERVICE_URL` supplies safety flags for revision events.
+
+`PATCH /booking-requests/<id>/review` requires the same headers and body
+`{status: "Approved" | "Rejected", reviewedBy: "<active staff UUID>"}`.
+Only pending bookings for Under Review, Approved or Safety Changes Requested
+events can be reviewed. Existing conflict checks still run on approval.
+
+ No Forum Service call for logging the approval/rejection reason, and no
 async notification — both flagged as planned but not built (see `INDEX.md`).

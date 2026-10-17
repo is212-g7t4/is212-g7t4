@@ -55,14 +55,22 @@ Per-status rules, checked before the database is touched:
 | `status` | `remarks` | `flags` |
 | --- | --- | --- |
 | `Safety Approved` | optional | absent or `[]` |
-| `Changes Requested` | required, non-blank | 1 to 3 items, each `{area, changeRequired}`, no area repeated |
+| `Changes Requested` | required, non-blank | `{area, changeRequired, equipmentRequestId?}` items; scope rules below |
 | `Safety Rejected` | required, non-blank | absent or `[]` |
 
 `remarks` is text up to 2000 characters. Each flag's `area` is one of
 `FLAG_AREAS` (`"venue arrangement"`, `"technical arrangement"`,
 `"event details"`) and `changeRequired` is non-blank text up to 2000
-characters. Flags are area-level: `bookingId` / `equipmentRequestId` are
-always `null` from this endpoint (SCRUM-151 AC1).
+characters. Area-wide flags have null `bookingId` / `equipmentRequestId`.
+Technical flags may identify an individual equipment request instead.
+Venue flags may identify a specific `bookingId`, stored in `booking_id`;
+distinct targeted venue flags follow the same duplicate and scope rules.
+
+Technical flags can also carry `equipmentRequestId`, stored in
+`equip_request_id`. Multiple flags for distinct equipment requests in the
+same technical area are supported (up to 500 flags). Duplicate targets and
+mixing an area-wide flag with individual flags for that area are rejected.
+Event ownership is checked by Safety Check Service before this write.
 
 The round is selected `FOR UPDATE` first, so this is also the race guard for
 SCRUM-150 AC3 / SCRUM-151 AC7: if two Safety Officers decide the same round at

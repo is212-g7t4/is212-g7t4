@@ -6,11 +6,14 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import {
   SafetySubmitError,
   approveSafetyCheck,
+  fetchSafetyFeedback,
   fetchSafetyQueue,
   fetchSafetyReadiness,
   fetchSafetyReview,
+  fetchSafetyResubmissionReadiness,
   rejectSafetyCheck,
   requestSafetyChanges,
+  resubmitSafetyCheck,
   submitSafetyCheck,
   submittedForSafetyCheckAt,
 } from './safetyCheck'
@@ -43,6 +46,34 @@ test('readiness is read from Safety Check Service with both identifiers', async 
   expect(String(url)).toBe(
     `http://localhost:5012/safety-checks/readiness?eventId=${eventId}&coordinatorId=${coordinatorId}`,
   )
+})
+
+test('AC1: feedback is read through the composite as the assigned coordinator', async () => {
+  const safetyChecks = [{ roundNumber: 2, status: 'Changes Requested', remarks: 'Keep exits clear.', flags: [] }]
+  vi.stubGlobal('fetch', respond(200, { safetyChecks }))
+  expect(await fetchSafetyFeedback(eventId, coordinatorId)).toEqual(safetyChecks)
+  expect(fetch).toHaveBeenCalledWith(
+    `http://localhost:5012/safety-checks/feedback?eventId=${eventId}&coordinatorId=${coordinatorId}`, undefined,
+  )
+})
+
+test('resubmission readiness uses the separate equipment-only endpoint', async () => {
+  const readiness = { ready: true, eventStatus: 'Safety Changes Requested', outstanding: [] }
+  vi.stubGlobal('fetch', respond(200, readiness))
+  expect(await fetchSafetyResubmissionReadiness(eventId, coordinatorId)).toEqual(readiness)
+  expect(fetch).toHaveBeenCalledWith(
+    `http://localhost:5012/safety-checks/resubmit/readiness?eventId=${eventId}&coordinatorId=${coordinatorId}`, undefined,
+  )
+})
+
+test('resubmission posts to its own workflow endpoint rather than saving progress', async () => {
+  const body = { eventId, coordinatorId, equipmentPlacementNotes: 'Cables secured.' }
+  vi.stubGlobal('fetch', respond(201, { safetyCheck: { roundNumber: 2 }, event: {} }))
+  await resubmitSafetyCheck(body)
+  const [url, init] = vi.mocked(fetch).mock.calls[0]
+  expect(url).toBe('http://localhost:5012/safety-checks/resubmit')
+  expect(init?.method).toBe('POST')
+  expect(JSON.parse(String(init?.body))).toEqual(body)
 })
 
 test('SCRUM-162: the queue is read from Safety Check Service as the officer', async () => {

@@ -1,7 +1,20 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { createVenueBooking, fetchVenueBookings, updateVenueBooking, cancelVenueBooking } from './venueBookings'
+import { createVenueBooking, fetchVenueBookings, updateVenueBooking, cancelVenueBooking, fetchVenueRequests, reviewVenueRequest } from './venueBookings'
 
 const details = { eventId: 'event', venueId: 'venue', coordinatorId: 'coordinator', requestedStartTime: '2026-12-01T09:00', requestedEndTime: '2026-12-01T10:00', requiredCapacity: 10, venueRequirements: '' }
+
+test('venue staff queue and review send the staff identity to the owning composite', async () => {
+  const user = { id: 'staff', role: 'Venue Staff' as const }
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [] })))
+  vi.stubGlobal('fetch', fetcher)
+  expect(await fetchVenueRequests(user, 'Pending')).toEqual([])
+  expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests?status=Pending'),
+    expect.objectContaining({ headers: { 'X-Dev-User-Id': 'staff', 'X-Dev-Role': 'Venue Staff' } }))
+  fetcher.mockResolvedValue(new Response(JSON.stringify({ id: 'booking', status: 'Approved' })))
+  await reviewVenueRequest('booking/id', 'Approved', user)
+  expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests/booking%2Fid/review'),
+    expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ status: 'Approved', reviewedBy: 'staff' }) }))
+})
 afterEach(() => vi.unstubAllGlobals())
 test('existing edit and cancel routes preserve encoded IDs and request bodies', async () => {
   const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: 'booking', status: 'Pending Review' })))

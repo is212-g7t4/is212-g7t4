@@ -16,7 +16,7 @@ class RequestNotAllowedError(Exception):
         self.message = message
 
 
-OPEN_EVENT_STATUSES = ("Under Review",)
+OPEN_EVENT_STATUSES = ("Under Review", "Safety Changes Requested")
 
 
 def _catalogue():
@@ -62,6 +62,12 @@ def build_event_views(requests, headers):
         items = [item for item in requests if item["eventId"] == event_id]
         pending = [item for item in items if item["status"] == "Pending"]
         availability = _evaluate_pending(event, pending, catalogue, headers)
+        safety_round = None
+        if event.get("status") == "Safety Changes Requested":
+            rounds = clients.get_event_safety_checks(event_id)
+            latest = max(rounds, key=lambda review: review["roundNumber"], default=None)
+            if latest and latest["status"] == "Changes Requested":
+                safety_round = latest
         views.append({
             "eventId": event_id,
             "eventName": event.get("eventName") or "Unknown event",
@@ -70,11 +76,23 @@ def build_event_views(requests, headers):
             "startTime": event.get("startTime"),
             "endTime": event.get("endTime"),
             "requests": [
-                {**item, "equipment": _equipment_view(catalogue.get(item["equipmentId"])), "availability": availability.get(item["id"])}
+                {**item, "equipment": _equipment_view(catalogue.get(item["equipmentId"])),
+                 "availability": availability.get(item["id"]), "safetyFeedback": _safety_feedback(safety_round, item["id"])}
                 for item in items
             ],
         })
     return views
+
+
+def _safety_feedback(safety_round, request_id):
+    if safety_round is None:
+        return None
+    changes = [flag["changeRequired"] for flag in safety_round.get("flags", [])
+        if flag["area"] == "technical arrangement"
+        and flag.get("equipmentRequestId") in (None, request_id)]
+    if not changes:
+        return None
+    return {"reason": safety_round.get("remarks"), "requestedChanges": changes}
 
 
 def _ensure_sufficient(event_id, pending, headers):
@@ -116,7 +134,7 @@ def create_requests(headers, coordinator_id, event_id, items):
     if event is None:
         raise RequestNotAllowedError(403, "You can only request equipment for events assigned to you.")
     if event.get("status") not in OPEN_EVENT_STATUSES:
-        raise RequestNotAllowedError(409, "Equipment can only be requested while the event is Under Review.")
+        raise RequestNotAllowedError(409, "Equipment can only be requested while the event is Under Review or Safety Changes Requested.")
     catalogue = _catalogue()
     if any(item["equipmentId"] not in catalogue for item in items):
         raise RequestNotAllowedError(404, "An equipment item no longer exists in the catalogue.")

@@ -107,3 +107,8 @@ def get_overlapping_events(start, end, statuses, exclude_event_id):
 # Equipment Service (atomic): the catalogue and total stock.
 def list_equipment():
     return _call("GET", f"{_base('EQUIPMENT_SERVICE_URL', 'http://localhost:5002')}/equipment")["equipment"]
+
+
+def get_event_safety_checks(event_id):
+    base = _base("SAFETY_CHECK_RECORD_SERVICE_URL", "http://localhost:5013")
+    return _call("GET", f"{base}/safety-check-records", params={"eventId": event_id})["safetyChecks"]

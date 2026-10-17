@@ -29,8 +29,10 @@ from tests.unit.factories import (
     EVENT_ID,
     OFFICER_ID,
     RECORD_ID,
+    REQUEST_ID,
     booking,
     event,
+    equipment_request,
     record,
     user,
 )
@@ -48,6 +50,7 @@ class Downstream:
         self.decided = record(status="Changes Requested", decidedBy=OFFICER_ID)
         self.updated = event("Safety Changes Requested")
         self.bookings = [booking("Approved")]
+        self.equipment = [equipment_request("Approved")]
         self.calls = []
         self.fail = {}
         self.apply_despite_failure = set()
@@ -123,6 +126,21 @@ class Downstream:
         self._maybe_fail("cancel_booking")
         return {"id": booking_id, "status": "Cancelled"}
 
+    def get_event_equipment_requests(self, event_id, coordinator_id):
+        self.calls.append(("get_equipment", event_id, coordinator_id))
+        self._maybe_fail("get_equipment")
+        return self.equipment
+
+    def reset_equipment_safety_requests(self, event_id, request_ids):
+        self.calls.append(("reset_equipment", event_id, request_ids))
+        self._maybe_fail("reset_equipment")
+        return []
+
+    def reset_venue_safety_bookings(self, event_id, booking_ids):
+        self.calls.append(("reset_bookings", event_id, booking_ids))
+        self._maybe_fail("reset_bookings")
+        return []
+
     def names(self):
         return [call[0] for call in self.calls]
 
@@ -145,6 +163,9 @@ def downstream(monkeypatch):
         "reopen_safety_check_record",
         "get_event_venue_bookings",
         "cancel_venue_booking",
+        "get_event_equipment_requests",
+        "reset_equipment_safety_requests",
+        "reset_venue_safety_bookings",
     ):
         monkeypatch.setattr(f"app.clients.{name}", getattr(stub, name))
     return stub
@@ -219,12 +240,98 @@ def test_request_changes_with_multiple_areas(client, downstream):
     assert downstream.call("patch_event")[-1] == ["venue arrangement", "event details"]
 
 
-def test_request_changes_never_touches_bookings_or_equipment(client, downstream):
-    """AC2: "existing arrangements are preserved" — no venue/equipment call at all."""
+# Safety revision AC3: a technical-area flag sends equipment back for staff review before the event moves.
+def test_technical_area_flag_returns_all_event_equipment_to_staff_review(client, downstream):
+    response = request_changes(client, flags=[{"area": "technical arrangement", "changeRequired": "Move cables."}])
+    assert response.status_code == 200
+    assert downstream.call("reset_equipment") == ("reset_equipment", EVENT_ID, [REQUEST_ID])
+    assert downstream.names().index("decide") < downstream.names().index("reset_equipment") < downstream.names().index("patch_event")
+
+
+# Safety revision AC3/AC4 (orchestration): reset only the flagged request ID; database preservation is not exercised here.
+def test_targeted_equipment_flag_leaves_unflagged_requests_confirmed(client, downstream):
+    downstream.equipment.append(equipment_request("Approved", OTHER_BOOKING_ID))
+    response = request_changes(client, flags=[{"area": "technical arrangement", "equipmentRequestId": REQUEST_ID, "changeRequired": "Move cables."}])
+    assert response.status_code == 200
+    assert downstream.call("reset_equipment")[-1] == [REQUEST_ID]
+    assert downstream.call("decide")[-1][0]["equipmentRequestId"] == REQUEST_ID
+
+
+def test_multiple_targeted_equipment_flags_share_one_history_area(client, downstream):
+    downstream.equipment.append(equipment_request("Approved", OTHER_BOOKING_ID))
+    flags = [{"area": "technical arrangement", "equipmentRequestId": request_id, "changeRequired": "Move cables."}
+        for request_id in [REQUEST_ID, OTHER_BOOKING_ID]]
+    assert request_changes(client, flags=flags).status_code == 200
+    assert set(downstream.call("reset_equipment")[-1]) == {REQUEST_ID, OTHER_BOOKING_ID}
+    assert downstream.call("patch_event")[-1] == ["technical arrangement"]
+
+
+def test_targeted_flag_cannot_reset_another_events_equipment(client, downstream):
+    response = request_changes(client, flags=[{"area": "technical arrangement", "equipmentRequestId": OTHER_BOOKING_ID, "changeRequired": "Move cables."}])
+    assert response.status_code == 400
+    assert "decide" not in downstream.names()
+    assert "reset_equipment" not in downstream.names()
+
+
+def test_technical_area_without_equipment_needs_no_reset(client, downstream):
+    downstream.equipment = []
+    assert request_changes(client, flags=[{"area": "technical arrangement", "changeRequired": "Update notes."}]).status_code == 200
+    assert "reset_equipment" not in downstream.names()
+
+
+@pytest.mark.parametrize("name", ["get_equipment", "reset_equipment"])
+@pytest.mark.parametrize("error,code", [(clients.DownstreamError(), 502), (clients.DownstreamTimeout(), 504)])
+def test_equipment_reset_failure_never_reports_success(client, downstream, name, error, code):
+    downstream.fail[name] = error
+    assert request_changes(client, flags=[{"area": "technical arrangement", "changeRequired": "Move cables."}]).status_code == code
+    assert "patch_event" not in downstream.names()
+    assert ("reopen" in downstream.names()) == (name == "reset_equipment")
+
+
+@pytest.mark.parametrize("area,reference", [("technical arrangement", "bad"), ("venue arrangement", REQUEST_ID)])
+def test_invalid_targeted_equipment_flags_are_rejected(client, downstream, area, reference):
+    assert request_changes(client, flags=[{"area": area, "equipmentRequestId": reference, "changeRequired": "Move."}]).status_code == 400
+    assert downstream.calls == []
+
+
+# Safety revision AC2: flagging a venue reopens its booking for staff review rather than cancelling it.
+def test_venue_flag_reopens_booking_without_cancelling_it(client, downstream):
     request_changes(client)
 
-    assert "get_bookings" not in downstream.names()
+    assert downstream.call("reset_bookings") == ("reset_bookings", EVENT_ID, [BOOKING_ID])
     assert "cancel_booking" not in downstream.names()
+
+
+# Safety revision AC2/AC4 (orchestration): only the affected booking ID is sent for reset, not its approved sibling.
+def test_targeted_venue_flag_leaves_unaffected_booking_approved(client, downstream):
+    downstream.bookings.append(booking("Approved", OTHER_BOOKING_ID))
+    assert request_changes(client, flags=[{"area": "venue arrangement", "bookingId": BOOKING_ID, "changeRequired": "Move stage."}]).status_code == 200
+    assert downstream.call("reset_bookings")[-1] == [BOOKING_ID]
+
+
+def test_venue_flag_ignores_terminal_history(client, downstream):
+    downstream.bookings = [booking("Rejected")]
+    assert request_changes(client).status_code == 200
+    assert "reset_bookings" not in downstream.names()
+
+
+def test_venue_flag_rejects_foreign_booking(client, downstream):
+    assert request_changes(client, flags=[{"area": "venue arrangement", "bookingId": OTHER_BOOKING_ID, "changeRequired": "Move."}]).status_code == 400
+    assert "decide" not in downstream.names()
+
+
+@pytest.mark.parametrize("reference,area", [("bad", "venue arrangement"), (BOOKING_ID, "event details")])
+def test_venue_flag_validates_reference(client, downstream, reference, area):
+    assert request_changes(client, flags=[{"area": area, "bookingId": reference, "changeRequired": "Move."}]).status_code == 400
+
+
+# Safety revision AC2 (failure): failed venue re-review setup must not advance the event.
+@pytest.mark.parametrize("name", ["get_bookings", "reset_bookings"])
+@pytest.mark.parametrize("error,code", [(clients.DownstreamError(), 502), (clients.DownstreamTimeout(), 504)])
+def test_venue_reset_failure_prevents_success(client, downstream, name, error, code):
+    downstream.fail[name] = error
+    assert request_changes(client).status_code == code
+    assert "patch_event" not in downstream.names()
 
 
 @pytest.mark.parametrize(

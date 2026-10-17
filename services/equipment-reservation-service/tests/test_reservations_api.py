@@ -39,6 +39,11 @@ class World:
         self.overlapping = []
         self.catalogue = [equipment(MIC, "Wireless mic", 10), equipment(TABLE, "Table", 50), equipment(LAPTOP, "Laptop", 8, "Unavailable")]
         self.calls = []
+        self.safety_rounds = []
+
+    def get_event_safety_checks(self, event_id):
+        self.calls.append(("safety_checks", event_id))
+        return self.safety_rounds
 
     def list_requests(self, headers, status=None, event_ids=None):
         self.calls.append(("list_requests", status, event_ids))
@@ -82,7 +87,7 @@ def world(monkeypatch):
     fake = World()
     for name in ("list_requests", "get_request", "review_request", "review_event_requests",
                  "get_event_summaries", "list_assigned_event_ids", "list_assigned_events",
-                 "get_overlapping_events", "list_equipment", "create_event_requests"):
+                 "get_overlapping_events", "list_equipment", "create_event_requests", "get_event_safety_checks"):
         monkeypatch.setattr(f"app.clients.{name}", getattr(fake, name))
     return fake
 
@@ -101,6 +106,56 @@ def rows(client, **query):
 # Supporting service health check; no story AC is directly verified.
 def test_health(client):
     assert client.get("/health").json == {"status": "ok"}
+
+
+def test_safety_feedback_matches_individual_equipment_and_only_latest_round(world, client):
+    world.events[TARGET]["status"] = "Safety Changes Requested"
+    world.requests = [line("r1", TARGET, MIC, 1), line("r2", TARGET, TABLE, 2, "Approved")]
+    world.safety_rounds = [
+        {"roundNumber": 1, "status": "Changes Requested", "remarks": "Old reason.", "flags": [
+            {"area": "technical arrangement", "equipmentRequestId": "r2", "changeRequired": "Old change."}]},
+        {"roundNumber": 2, "status": "Changes Requested", "remarks": "Trip hazard.", "flags": [
+            {"area": "technical arrangement", "equipmentRequestId": "r1", "changeRequired": "Move microphone cables."},
+            {"area": "venue arrangement", "changeRequired": "Change room."}]},
+    ]
+    requests = rows(client)[0]["requests"]
+    assert requests[0]["safetyFeedback"] == {"reason": "Trip hazard.", "requestedChanges": ["Move microphone cables."]}
+    assert requests[1]["safetyFeedback"] is None
+    assert world.calls.count(("safety_checks", TARGET)) == 1
+
+
+def test_area_wide_technical_feedback_applies_to_each_equipment_request(world, client):
+    world.events[TARGET]["status"] = "Safety Changes Requested"
+    world.requests = [line("r1", TARGET, MIC, 1), line("r2", TARGET, TABLE, 2)]
+    world.safety_rounds = [{"roundNumber": 1, "status": "Changes Requested", "remarks": None, "flags": [
+        {"area": "technical arrangement", "equipmentRequestId": None, "changeRequired": "Keep exits clear."}]}]
+    assert all(request["safetyFeedback"] == {"reason": None, "requestedChanges": ["Keep exits clear."]}
+        for request in rows(client)[0]["requests"])
+
+
+@pytest.mark.parametrize("rounds", [[], [{"roundNumber": 1, "status": "Pending", "flags": []}]])
+def test_missing_or_undecided_round_has_no_safety_feedback(world, client, rounds):
+    world.events[TARGET]["status"] = "Safety Changes Requested"
+    world.requests = [line("r1", TARGET, MIC, 1)]
+    world.safety_rounds = rounds
+    assert rows(client)[0]["requests"][0]["safetyFeedback"] is None
+
+
+def test_non_revision_events_do_not_fetch_safety_records(world, client):
+    world.requests = [line("r1", TARGET, MIC, 1)]
+    assert rows(client)[0]["requests"][0]["safetyFeedback"] is None
+    assert not any(call[0] == "safety_checks" for call in world.calls)
+
+
+def test_unavailable_safety_records_are_reported_not_mislabelled_unflagged(world, client, monkeypatch):
+    world.events[TARGET]["status"] = "Safety Changes Requested"
+    world.requests = [line("r1", TARGET, MIC, 1)]
+    def unavailable(event_id):
+        raise DownstreamError(503, "Safety feedback is unavailable.")
+    monkeypatch.setattr("app.clients.get_event_safety_checks", unavailable)
+    response = client.get("/equipment-reservations", headers=TS)
+    assert response.status_code == 503
+    assert response.json["message"] == "Safety feedback is unavailable."
 
 
 # Reservation AC1: the full pool remains usable without overlapping reservations.
@@ -172,23 +227,31 @@ def test_only_approved_requests_from_overlapping_events_reduce_available_stock(w
 
 
 # Reservation AC1: preserve equipment holds while overlapping events proceed through safety checks.
-def test_overlapping_event_pending_safety_check_still_holds_its_equipment(world, client):
+@pytest.mark.parametrize("event_status", ["Pending Safety Check", "Safety Changes Requested"])
+@pytest.mark.parametrize("request_status", ["Approved", "Pending", "Rejected"])
+def test_overlapping_safety_event_only_approved_equipment_holds_stock(world, client, event_status, request_status):
     """SCRUM-152 B7: SCRUM-149 moved approved-and-submitted events into
     'Pending Safety Check', outside the pre-Week-7 status list, which had
     silently freed their held equipment for a second overlapping event to
     take. 'Pending Safety Check' and 'Safety Changes Requested' are back in
     RESERVING_EVENT_STATUSES, so the hold survives a safety-check round.
     """
-    world.overlapping = [{"id": OTHER, "status": "Pending Safety Check"}]
+    world.overlapping = [{"id": OTHER, "status": event_status}]
     world.requests = [
-        line("r1", TARGET, MIC, 6),
-        line("held", OTHER, MIC, 4, "Approved"),
+        line("r1", TARGET, MIC, 7),
+        line("held", OTHER, MIC, 4, request_status),
     ]
 
     request = rows(client)[0]["requests"][0]
 
-    assert request["availability"] == {"reservedQuantity": 4, "availableStock": 6, "isInsufficient": False}
+    reserved = 4 if request_status == "Approved" else 0
+    assert request["availability"] == {
+        "reservedQuantity": reserved,
+        "availableStock": 10 - reserved,
+        "isInsufficient": request_status == "Approved",
+    }
     assert ("overlapping", START, END, RESERVING_EVENT_STATUSES, TARGET) in world.calls
+    assert ("list_requests", "Approved", [OTHER]) in world.calls
     assert "Pending Safety Check" in RESERVING_EVENT_STATUSES
     assert "Safety Changes Requested" in RESERVING_EVENT_STATUSES
     assert "Cancelled" not in RESERVING_EVENT_STATUSES
@@ -496,7 +559,7 @@ def assigned(world):
 
 
 # Create request AC1/AC2/AC3: forward event-linked equipment needs and return Pending lines.
-@pytest.mark.parametrize("event_status", ["Under Review"])
+@pytest.mark.parametrize("event_status", ["Under Review", "Safety Changes Requested"])
 def test_coordinator_creates_pending_lines_for_an_assigned_open_event(assigned, client, event_status):
     assigned.events[TARGET]["status"] = event_status
 
@@ -546,7 +609,7 @@ def test_create_is_blocked_once_the_event_is_no_longer_open(assigned, client, ev
     response = client.post(CREATE_URL, headers=COORDINATOR, json={"items": [new_item()]})
 
     assert response.status_code == 409
-    assert response.json["message"] == "Equipment can only be requested while the event is Under Review."
+    assert response.json["message"] == "Equipment can only be requested while the event is Under Review or Safety Changes Requested."
     assert not any(call[0] == "create_event_requests" for call in assigned.calls)
 
 

@@ -19,6 +19,7 @@ import { EquipmentRequestsPage } from './pages/EquipmentRequestsPage'
 import { SafetyChecksPage } from './pages/SafetyChecksPage'
 import { NewEquipmentRequestPage } from './pages/NewEquipmentRequestPage'
 import { VenueCataloguePage } from './pages/VenueCataloguePage'
+import { VenueRequestsPage } from './pages/VenueRequestsPage'
 import { VenueCalendarPage } from './pages/VenueCalendarPage'
 import { VenueDetailPage } from './pages/VenueDetailPage'
 import { VenueSearchPage } from './pages/VenueSearchPage'
@@ -45,6 +46,7 @@ const paths: Record<Route, string> = {
   venues: '/venues',
   venueDetail: '/venues',
   venueCalendar: '/venue-availability',
+  venueRequests: '/venue-requests',
   // Not '/venues/search': getRoute() reads any /venues/<something> as a
   // venue detail page.
   venueSearch: '/venue-search',
@@ -67,6 +69,7 @@ function getRoute(): Route {
   if (path === '/events/browse') return 'browseEvents'
   if (path === '/registrations') return 'myRegistrations'
   if (path === '/venue-availability') return 'venueCalendar'
+  if (path === '/venue-requests') return 'venueRequests'
   if (path === '/venues/new') return 'addVenue'
   if (/^\/venues\/[^/]+\/edit$/.test(path)) return 'editVenue'
   if (path === '/equipment') return 'equipment'
@@ -208,6 +211,7 @@ function App() {
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
+      {route === 'venueRequests' && <VenueRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
       {route === 'safetyChecks' && <SafetyChecksPage key={activeUser?.id} role={role} safetyOfficerId={activeUser?.id} onViewDetails={navigateToEvent} />}
       {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} onCreate={() => navigate('newEquipmentRequest')} />}

@@ -1,4 +1,5 @@
 import os
+import hmac
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -26,6 +27,7 @@ from app.models import (
     list_window_bookings,
     list_window_closures,
     reconcile_legacy_conflicts,
+    reset_safety_bookings,
     update_booking,
     _shift,
 )
@@ -75,6 +77,7 @@ def create_app(config=None):
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         CLOSURE_CONFIRMATION_KEY=os.getenv("CLOSURE_CONFIRMATION_KEY"),
+        INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN"),
         CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
         # The Vite dev server is pinned to 5174 (strictPort in
         # vite.config.ts), so that is the origin the browser sends.
@@ -376,6 +379,27 @@ def create_app(config=None):
                 conflictTypes=error.conflict_types,
             ), 409
         return jsonify(booking), 201
+
+    @app.post("/events/<uuid:event_id>/venue-bookings/safety-reset")
+    def safety_reset_bookings(event_id):
+        token = app.config["INTERNAL_SERVICE_TOKEN"]
+        if not token:
+            return jsonify(message="Internal service authentication is not configured."), 503
+        if not hmac.compare_digest(token, request.headers.get("X-Internal-Service-Token", "")):
+            return jsonify(message="Internal service credentials are required."), 403
+        data = request.get_json(silent=True)
+        raw_ids = data.get("bookingIds") if isinstance(data, dict) else None
+        if not isinstance(raw_ids, list) or not 1 <= len(raw_ids) <= 500:
+            return jsonify(message="Provide 1 to 500 bookingIds."), 400
+        booking_ids = [_parse_uuid(value) for value in raw_ids]
+        if None in booking_ids or len(set(booking_ids)) != len(booking_ids):
+            return jsonify(message="bookingIds must be distinct valid UUIDs."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured."), 503
+        try:
+            return jsonify(bookings=reset_safety_bookings(app.config["DATABASE_URL"], str(event_id), booking_ids))
+        except BookingNotFoundError:
+            return jsonify(message="Every booking must belong to this event."), 404
 
     @app.get("/events/<uuid:event_id>/venue-bookings")
     def get_event_bookings(event_id):

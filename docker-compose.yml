@@ -72,6 +72,8 @@ services:
       <<: *frontend-environment
       CALENDAR_DEV_MODE: "${CALENDAR_DEV_MODE:-false}"
       VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      VENUE_BOOKING_LEGACY_SCHEMA: "${VENUE_BOOKING_LEGACY_SCHEMA:-false}"
     ports:
       - "127.0.0.1:5008:5000"
 
@@ -90,6 +92,7 @@ services:
       - ./services/equipment-request-service/.env
     environment:
       <<: *frontend-environment
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
     ports:
       - "5011:5000"
 
@@ -102,12 +105,14 @@ services:
       EQUIPMENT_REQUEST_SERVICE_URL: http://equipment-request-service:5000
       EVENT_SERVICE_URL: http://event-service:5000
       EQUIPMENT_SERVICE_URL: http://equipment-service:5000
+      SAFETY_CHECK_RECORD_SERVICE_URL: http://safety-check-record-service:5000
     ports:
       - "5010:5000"
     depends_on:
       - equipment-request-service
       - event-service
       - equipment-service
+      - safety-check-record-service
 
   venue-service:
     build: ./services/venue-service
@@ -125,6 +130,12 @@ services:
     environment:
       <<: *frontend-environment
       VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
+      SAFETY_CHECK_RECORD_SERVICE_URL: http://safety-check-record-service:5000
+    depends_on:
+      - event-service
+      - venue-service
+      - venue-availability-service
+      - safety-check-record-service
     ports:
       - "5007:5000"
 

@@ -1,3 +1,5 @@
+import type { User } from '../../types'
+
 export interface VenueBooking {
   id: string
   eventId: string
@@ -10,6 +12,7 @@ export interface VenueBooking {
   status: string
   requestedBy: string
   reviewedBy: string | null
+  safetyFeedback?: { reason: string | null; requestedChanges: string[] } | null
   closureRejection?: { closureId: string; startDateTime: string; endDateTime: string; reason: string; rejectedAt: string } | null
 }
 
@@ -88,5 +91,28 @@ export async function cancelVenueBooking(
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ eventId, coordinatorId }),
+  })
+}
+
+export interface VenueRequestEvent {
+  eventId: string
+  eventName: string
+  eventStatus: string
+  coordinatorId: string | null
+  bookings: VenueBooking[]
+}
+
+export async function fetchVenueRequests(user: Pick<User, 'id' | 'role'>, status?: string): Promise<VenueRequestEvent[]> {
+  const body = await request(`/booking-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`, {
+    headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+  })
+  return body.events as VenueRequestEvent[]
+}
+
+export async function reviewVenueRequest(bookingId: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>): Promise<VenueBooking> {
+  return request(`/booking-requests/${encodeURIComponent(bookingId)}/review`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+    body: JSON.stringify({ status, reviewedBy: user.id }),
   })
 }

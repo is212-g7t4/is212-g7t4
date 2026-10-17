@@ -20,6 +20,7 @@ import { VenueBookingsPanel } from '../features/venue/VenueBookingsPanel'
 import { SafetySubmitPanel } from '../features/safety/SafetySubmitPanel'
 import { SafetyDecisionPanel } from '../features/safety/SafetyDecisionPanel'
 import { SafetyReview } from '../features/safety/SafetyReview'
+import { SafetyFeedbackPanel } from '../features/safety/SafetyFeedbackPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 import { isCoordinator, isLead } from '../roles'
 
@@ -142,6 +143,13 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
+      {canUpdate && event.status === 'Safety Changes Requested' && <SafetyFeedbackPanel
+        key={`${event.id}-${currentCoordinator.id}-${refresh}`}
+        eventId={event.id}
+        coordinatorId={currentCoordinator.id}
+        refreshKey={bookingsChanged}
+        onResubmitted={() => { setLoading(true); setRefresh((value) => value + 1) }}
+      />}
       {/* Reassignment: Lead-only, and never on a Rejected or Cancelled event.
           Taking the event away from a coordinator needs nothing else here —
           canUpdate below, venue bookings, equipment and safety checks all

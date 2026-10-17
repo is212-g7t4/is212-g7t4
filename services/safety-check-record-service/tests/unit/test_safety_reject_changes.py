@@ -103,6 +103,59 @@ def test_changes_requested_with_two_flags_inserts_both(setup):
     assert len(insert_calls) == 2
 
 
+def test_individual_technical_flags_persist_each_equipment_request_link(setup):
+    client, _, cursor = setup
+    request_ids = [f"77777777-7777-4777-8777-{index:012d}" for index in range(5)]
+    rows = [{**flag_row(area="technical arrangement"), "equip_request_id": request_id}
+        for request_id in request_ids]
+    cursor.fetchone.side_effect = [record_row(), record_row(),
+        record_row(status="Changes Requested", decided=True), *rows]
+    response = request_changes(client, flags=[{
+        "area": "technical arrangement", "equipmentRequestId": request_id, "changeRequired": "Move cables."
+    } for request_id in request_ids])
+    assert response.status_code == 200
+    assert [flag["equipmentRequestId"] for flag in response.json["flags"]] == request_ids
+    inserts = [call.args[1] for call in cursor.execute.call_args_list if 'INSERT INTO public."SafetyCheckFlag"' in call.args[0]]
+    assert inserts == [[RECORD_ID, "technical arrangement", "Move cables.", request_id, None] for request_id in request_ids]
+
+
+def test_targeted_venue_flags_persist_booking_ids(setup):
+    client, _, cursor = setup
+    booking_ids = [f"88888888-8888-4888-8888-{index:012d}" for index in range(4)]
+    rows = [{**flag_row(), "booking_id": booking_id} for booking_id in booking_ids]
+    cursor.fetchone.side_effect = [record_row(), record_row(), record_row(status="Changes Requested", decided=True), *rows]
+    response = request_changes(client, flags=[{"area": "venue arrangement", "bookingId": booking_id, "changeRequired": "Move stage."} for booking_id in booking_ids])
+    assert response.status_code == 200
+    assert [flag["bookingId"] for flag in response.json["flags"]] == booking_ids
+    inserts = [call.args[1] for call in cursor.execute.call_args_list if 'INSERT INTO public."SafetyCheckFlag"' in call.args[0]]
+    assert inserts == [[RECORD_ID, "venue arrangement", "Move stage.", None, booking_id] for booking_id in booking_ids]
+
+
+@pytest.mark.parametrize("area,reference", [("venue arrangement", "bad"), ("event details", EVENT_ID)])
+def test_targeted_venue_flags_validate_scope(setup, area, reference):
+    client, _, cursor = setup
+    assert request_changes(client, flags=[{"area": area, "bookingId": reference, "changeRequired": "Move."}]).status_code == 400
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("area,reference", [("technical arrangement", "bad"), ("venue arrangement", EVENT_ID)])
+def test_targeted_flags_validate_area_and_request_id(setup, area, reference):
+    client, _, cursor = setup
+    assert request_changes(client, flags=[{
+        "area": area, "equipmentRequestId": reference, "changeRequired": "Move."
+    }]).status_code == 400
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("references", [[EVENT_ID, EVENT_ID], [None, EVENT_ID], [EVENT_ID, None]])
+def test_targeted_flags_reject_duplicate_or_mixed_area_scope(setup, references):
+    client, _, cursor = setup
+    assert request_changes(client, flags=[{
+        "area": "technical arrangement", "equipmentRequestId": reference, "changeRequired": "Move."
+    } for reference in references]).status_code == 400
+    cursor.execute.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "flags",
     [

@@ -1,4 +1,5 @@
 import os
+import hmac
 import uuid
 
 import psycopg2
@@ -14,6 +15,7 @@ from app.models import (
     create_requests,
     get_request,
     list_requests,
+    reset_safety_requests,
     review_event_requests,
     review_request,
 )
@@ -64,6 +66,7 @@ def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
+        INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN"),
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
     app.config.update(config or {})
@@ -162,6 +165,30 @@ def create_app(config=None):
         except UnknownReferenceError:
             return jsonify(message="The event, requester or an equipment item no longer exists."), 404
         return jsonify(requests=created), 201
+
+    @app.post("/events/<event_id>/equipment-requests/safety-reset")
+    def event_requests_safety_reset(event_id):
+        configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
+        if not configured_token:
+            return jsonify(message="Internal service authentication is not configured."), 503
+        supplied_token = request.headers.get("X-Internal-Service-Token", "")
+        if not hmac.compare_digest(configured_token, supplied_token):
+            return jsonify(message="Internal service credentials are required."), 403
+        event_id = _uuid_or_none(event_id)
+        data = request.get_json(silent=True)
+        raw_ids = data.get("requestIds") if isinstance(data, dict) else None
+        if not event_id or not isinstance(raw_ids, list) or not 1 <= len(raw_ids) <= 500:
+            return jsonify(message="A valid event and 1 to 500 requestIds are required."), 400
+        request_ids = [_uuid_or_none(value) for value in raw_ids]
+        if None in request_ids or len(set(request_ids)) != len(request_ids):
+            return jsonify(message="requestIds must be distinct valid UUIDs."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Equipment Request Service."), 503
+        try:
+            updated = reset_safety_requests(app.config["DATABASE_URL"], event_id, request_ids)
+        except RequestNotFoundError:
+            return jsonify(message="Every equipment request must belong to this event."), 404
+        return jsonify(requests=updated)
 
     @app.patch("/events/<event_id>/equipment-requests")
     def event_requests_review(event_id):

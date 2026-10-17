@@ -52,6 +52,14 @@ def test_list_requests_with_no_event_ids_skips_the_call(sent):
     assert calls == []
 
 
+def test_safety_records_are_read_for_only_the_requested_event(sent, monkeypatch):
+    calls, fake = sent
+    monkeypatch.setenv("SAFETY_CHECK_RECORD_SERVICE_URL", "http://records:5000")
+    fake.response = FakeResponse(body={"safetyChecks": [{"roundNumber": 2}]})
+    assert clients.get_event_safety_checks("event-id") == [{"roundNumber": 2}]
+    assert calls[0] == ("GET", "http://records:5000/safety-check-records", {"timeout": 10, "params": {"eventId": "event-id"}})
+
+
 # Review AC1 (transport): support an unfiltered staff request-list lookup.
 def test_list_requests_without_filters(sent):
     calls, fake = sent

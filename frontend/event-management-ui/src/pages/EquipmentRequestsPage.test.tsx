@@ -68,6 +68,41 @@ test('AC1: defaults to all requests and shows equipment details', async () => {
   expect(fetchEventReservations).toHaveBeenCalledWith(user, undefined)
 })
 
+
+test('safety revision shows each equipment change and the officer reason in the last column', async () => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([
+    line({ safetyFeedback: { reason: 'Trip hazard.', requestedChanges: ['Reroute microphone cables.'] } }),
+    chair({ safetyFeedback: null, status: 'Approved' }),
+  ], { eventStatus: 'Safety Changes Requested' })])
+  show()
+  await screen.findByRole('heading', { name: 'Hackday' })
+  const headers = screen.getAllByRole('columnheader')
+  expect(headers.at(-1)).toHaveTextContent('Safety change reason')
+  const micRow = screen.getByText('Wireless mic').closest('tr')!
+  expect(within(micRow).getByText('Reroute microphone cables.')).toBeInTheDocument()
+  expect(within(micRow).getByText('Reason: Trip hazard.')).toBeInTheDocument()
+  const chairRow = screen.getByText('Folding chair').closest('tr')!
+  expect(within(chairRow).getByText('Not flagged')).toBeInTheDocument()
+  expect(within(chairRow).queryByText('Reason: Trip hazard.')).not.toBeInTheDocument()
+  expect(screen.getByRole('table')).toHaveClass('with-safety-feedback')
+  expect(screen.getByRole('region', { name: 'Hackday equipment requests' })).toHaveAttribute('tabindex', '0')
+})
+
+
+test.each(['Approved', 'Safety Changes Requested'])('safety column is hidden from coordinators on %s events', async (eventStatus) => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus })])
+  show('Event Coordinator')
+  await screen.findByRole('heading', { name: 'Hackday' })
+  expect(screen.queryByRole('columnheader', { name: 'Safety change reason' })).not.toBeInTheDocument()
+})
+
+
+test('ordinary equipment review has no safety-feedback column', async () => {
+  show()
+  await screen.findByRole('heading', { name: 'Hackday' })
+  expect(screen.queryByRole('columnheader', { name: 'Safety change reason' })).not.toBeInTheDocument()
+})
+
 // Review AC1/AC2 (supporting filter): distinguish Pending requests from already-decided requests.
 test('status filter shows only requests matching the selected status', async () => {
   const pending = line()
@@ -120,6 +155,7 @@ test('Confirmed events use the same success badge style as Approved events', asy
 test.each([
   ['Submitted', false],
   ['Under Review', true],
+  ['Safety Changes Requested', true],
   ['Approved', false],
   ['Confirmed', false],
   ['Rejected', false],
@@ -150,7 +186,8 @@ test.each([
 })
 
 // Review AC2/AC3 (access): assigned coordinators can view requests but cannot make staff decisions.
-test('assigned Event Coordinators can view requests but cannot review them', async () => {
+test.each(['Under Review', 'Safety Changes Requested'])('assigned Event Coordinators can view %s requests but cannot review them', async (eventStatus) => {
+  vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus })])
   show('Event Coordinator')
   expect(await screen.findByRole('heading', { name: 'Hackday' })).toBeInTheDocument()
   expect(fetchEventReservations).toHaveBeenCalledWith(coordinator, undefined)

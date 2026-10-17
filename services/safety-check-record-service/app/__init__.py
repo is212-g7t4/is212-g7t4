@@ -422,7 +422,8 @@ def _flags(data, status):
             jsonify(message="At least one area must be selected."),
             400,
         )
-    if len(raw) > len(FLAG_AREAS):
+    targeted = any(isinstance(item, dict) and (item.get("equipmentRequestId") or item.get("bookingId")) for item in raw)
+    if len(raw) > 500 or (len(raw) > len(FLAG_AREAS) and not targeted):
         return None, (jsonify(message="Each area may be flagged at most once."), 400)
 
     seen = set()
@@ -436,9 +437,23 @@ def _flags(data, status):
                 jsonify(message=f"area must be one of: {', '.join(FLAG_AREAS)}."),
                 400,
             )
-        if area in seen:
-            return None, (jsonify(message="Each area may be flagged at most once."), 400)
-        seen.add(area)
+        equipment_request_id = item.get("equipmentRequestId")
+        if equipment_request_id is not None:
+            equipment_request_id = _uuid_or_none(equipment_request_id)
+            if area != "technical arrangement" or not equipment_request_id:
+                return None, (jsonify(message="equipmentRequestId must identify a technical arrangement request."), 400)
+        booking_id = item.get("bookingId")
+        if booking_id is not None:
+            booking_id = _uuid_or_none(booking_id)
+            if area != "venue arrangement" or not booking_id:
+                return None, (jsonify(message="bookingId must identify a venue arrangement."), 400)
+        target_id = equipment_request_id or booking_id
+        identity = (area, target_id)
+        area_wide_exists = (area, None) in seen
+        mixed_scope = target_id is None and any(previous[0] == area for previous in seen)
+        if identity in seen or area_wide_exists or mixed_scope:
+            return None, (jsonify(message="Each request or area may be flagged at most once."), 400)
+        seen.add(identity)
         change_required = item.get("changeRequired")
         if not isinstance(change_required, str) or not change_required.strip():
             return None, (
@@ -450,5 +465,10 @@ def _flags(data, status):
                 jsonify(message=f"changeRequired must be {NOTES_LIMIT} characters or fewer."),
                 400,
             )
-        cleaned.append({"area": area, "changeRequired": change_required.strip()})
+        flag = {"area": area, "changeRequired": change_required.strip()}
+        if equipment_request_id:
+            flag["equipmentRequestId"] = equipment_request_id
+        if booking_id:
+            flag["bookingId"] = booking_id
+        cleaned.append(flag)
     return cleaned, None

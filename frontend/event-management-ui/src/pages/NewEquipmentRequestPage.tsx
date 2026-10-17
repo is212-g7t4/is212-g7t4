@@ -116,8 +116,8 @@ export function NewEquipmentRequestPage({ role, user, onBack, onCreated }: {
 
     <form noValidate className="panel form-panel" onSubmit={handleSubmit} aria-label="New equipment request">
       <fieldset disabled={pending} className="submission-fields">
-        <FormSection title="Event" hint="Only events assigned to you that are Under Review can take equipment requests.">
-          {events.length === 0 ? <p className="muted">You have no Under Review events assigned to you.</p> :
+        <FormSection title="Event" hint="Assigned events that are Under Review or Safety Changes Requested.">
+          {events.length === 0 ? <p className="muted">You have no eligible events assigned to you.</p> :
             <label className="field">
               <span>Event<span className="required"> *</span></span>
               <select value={eventId} onChange={(changeEvent) => setEventId(changeEvent.target.value)}>

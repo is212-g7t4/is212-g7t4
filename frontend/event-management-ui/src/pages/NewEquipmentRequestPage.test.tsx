@@ -218,7 +218,7 @@ test('a rejected submission shows the service message and keeps the form', async
 test('with no requestable events the form explains why and cannot be submitted', async () => {
   vi.mocked(fetchRequestableEvents).mockResolvedValue([])
   show()
-  expect(await screen.findByText('You have no Under Review events assigned to you.')).toBeInTheDocument()
+  expect(await screen.findByText('You have no eligible events assigned to you.')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Submit request' })).toBeDisabled()
 })
 
