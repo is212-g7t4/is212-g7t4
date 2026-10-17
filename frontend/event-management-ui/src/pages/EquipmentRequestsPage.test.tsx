@@ -40,9 +40,9 @@ const chair = (overrides: Partial<EquipmentRequest> = {}) => line({
 const event = (requests: EquipmentRequest[], overrides: Partial<EventReservation> = {}): EventReservation => ({
   eventId: 'ev1', eventName: 'Hackday', eventStatus: 'Under Review', coordinatorId: 'coord-1', startTime: '2026-10-01T09:00:00', endTime: '2026-10-01T17:00:00', requests, ...overrides,
 })
-const decided = (item: EquipmentRequest, status: 'Approved' | 'Rejected') => ({
+const decided = (item: EquipmentRequest, status: 'Approved' | 'Rejected', rejectionReason: string | null = null) => ({
   id: item.id, eventId: item.eventId, equipmentId: item.equipmentId, quantityRequested: item.quantityRequested,
-  technicalRequirements: item.technicalRequirements, status, reviewedBy: 'u1',
+  technicalRequirements: item.technicalRequirements, status, reviewedBy: 'u1', rejectionReason,
 })
 
 beforeEach(() => {
@@ -198,22 +198,29 @@ test.each(['Under Review', 'Safety Changes Requested'])('assigned Event Coordina
 })
 
 // Review AC3: show the updated status on the next mocked fetch; this does not test live push or DB persistence.
-test('assigned coordinator sees an updated request status after refreshing', async () => {
+test.each(['Approved', 'Rejected'] as const)('assigned coordinator sees %s and its reason after refreshing', async (status) => {
   const pendingEvent = event([line()])
-  const approvedEvent = event([line({ status: 'Approved', reviewedBy: user.id, availability: null })])
+  const rejectionReason = status === 'Rejected' ? 'No technician available.' : null
+  const decidedEvent = event([line({ status, rejectionReason, reviewedBy: user.id, availability: null })])
   vi.mocked(fetchEventReservations)
     .mockResolvedValueOnce([pendingEvent])
-    .mockResolvedValueOnce([approvedEvent])
+    .mockResolvedValueOnce([decidedEvent])
 
   show('Event Coordinator')
   const pendingRow = (await screen.findByText('Wireless mic')).closest('tr')!
   expect(within(pendingRow).getByText('Pending')).toBeInTheDocument()
+  expect(screen.queryByRole('columnheader', { name: 'Reject Reason' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
 
   await userEvent.click(screen.getByRole('button', { name: /Refresh requests/ }))
 
   const updatedRow = (await screen.findByText('Wireless mic')).closest('tr')!
-  expect(within(updatedRow).getByText('Approved')).toBeInTheDocument()
+  expect(within(updatedRow).getByText(status)).toBeInTheDocument()
+  if (rejectionReason) {
+    expect(screen.getByRole('columnheader', { name: 'Reject Reason' })).toBeInTheDocument()
+    expect(within(updatedRow).getByText(rejectionReason)).toBeInTheDocument()
+    expect(updatedRow.closest('table')).toHaveClass('with-reject-reason')
+  }
   expect(fetchEventReservations).toHaveBeenLastCalledWith(coordinator, undefined)
   expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
 })
@@ -314,6 +321,8 @@ test('batch Approve is enabled again once the insufficient line has been rejecte
   await screen.findByText('Folding chair')
   expect(screen.getByRole('button', { name: 'Approve All' })).toBeDisabled()
   await userEvent.click(within(screen.getByText('Folding chair').closest('tr')!).getByRole('button', { name: 'Reject' }))
+  await userEvent.type(screen.getByRole('textbox', { name: /Reason for rejection/ }), 'Insufficient stock.')
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }))
   expect(await screen.findByText('Folding chair')).toBeInTheDocument()
   expect(within(screen.getByText('Folding chair').closest('tr')!).getByText('Rejected')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Approve All' })).toBeEnabled()
@@ -355,12 +364,21 @@ test('AC2: Approve updates one equipment row and the other stays pending under A
 test('AC2: rejecting one row under the All filter updates only that row and removes its buttons', async () => {
   const second = line({ id: 'r2', equipmentId: 'eq2', equipment: { description: 'Folding chair', type: 'Chair', totalQuantity: 60, status: 'Available' } })
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
-  vi.mocked(reviewEquipmentRequest).mockResolvedValue(decided(line(), 'Rejected'))
+  vi.mocked(reviewEquipmentRequest).mockResolvedValue(decided(line(), 'Rejected', 'No technician available.'))
   show()
   await screen.findByText('Folding chair')
   await userEvent.click((await screen.findAllByRole('button', { name: 'Reject' }))[0])
+  const dialog = screen.getByRole('dialog', { name: 'Reject equipment request?' })
+  const confirm = within(dialog).getByRole('button', { name: 'Confirm rejection' })
+  expect(confirm).toBeDisabled()
+  expect(reviewEquipmentRequest).not.toHaveBeenCalled()
+  await userEvent.type(within(dialog).getByRole('textbox', { name: /Reason for rejection/ }), '  No technician available.  ')
+  await userEvent.click(confirm)
   await waitFor(() => expect(document.querySelectorAll('.status-badge.rejected')).toHaveLength(1))
-  expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Rejected', user)
+  expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Rejected', user, 'No technician available.')
+  expect(screen.getByRole('columnheader', { name: 'Reject Reason' })).toBeInTheDocument()
+  expect(within(screen.getByText('Wireless mic').closest('tr')!).getByText('No technician available.')).toBeInTheDocument()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(screen.getAllByRole('button', { name: 'Reject' })).toHaveLength(1)
   expect(screen.getByText('Reviewed')).toBeInTheDocument()
 })
@@ -384,12 +402,15 @@ test('Approve All approves every pending request in the event', async () => {
 test('Reject All works even when a line is insufficient and updates all rows under the All filter', async () => {
   const second = chair()
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line(), second])])
-  vi.mocked(reviewAllEventEquipmentRequests).mockResolvedValue([decided(line(), 'Rejected'), decided(second, 'Rejected')])
+  vi.mocked(reviewAllEventEquipmentRequests).mockResolvedValue([decided(line(), 'Rejected', 'Not supported.'), decided(second, 'Rejected', 'Not supported.')])
   show()
   await screen.findByText('Folding chair')
   await userEvent.click(await screen.findByRole('button', { name: 'Reject All' }))
+  await userEvent.type(screen.getByRole('textbox', { name: /Reason for rejection/ }), 'Not supported.')
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }))
   await waitFor(() => expect(document.querySelectorAll('.status-badge.rejected')).toHaveLength(2))
-  expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Rejected', user)
+  expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Rejected', user, 'Not supported.')
+  expect(screen.getAllByText('Not supported.')).toHaveLength(2)
   expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
 })
 
@@ -400,6 +421,25 @@ test('shows the service error when a review fails and keeps the request', async 
   await userEvent.click(await screen.findByRole('button', { name: 'Approve' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('insufficient stock')
   expect(screen.getByText('Wireless mic')).toBeInTheDocument()
+})
+
+// Review AC2: cancelling saves nothing, and failed rejection preserves the reason for retry.
+test('rejection can be cancelled and a failed save keeps the popup and reason', async () => {
+  vi.mocked(reviewEquipmentRequest).mockRejectedValue(new Error('Unable to save the decision.'))
+  show()
+  await userEvent.click(await screen.findByRole('button', { name: 'Reject' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(reviewEquipmentRequest).not.toHaveBeenCalled()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Reject' }))
+  await userEvent.type(screen.getByRole('textbox', { name: /Reason for rejection/ }), 'No technician available.')
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }))
+
+  const dialog = screen.getByRole('dialog', { name: 'Reject equipment request?' })
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('Unable to save the decision.')
+  expect(within(dialog).getByRole('textbox', { name: /Reason for rejection/ })).toHaveValue('No technician available.')
+  expect(within(screen.getByText('Wireless mic').closest('tr')!).getByText('Pending')).toBeInTheDocument()
 })
 
 // Review AC2 (failure): a failed bulk decision displays its service error.
@@ -423,14 +463,6 @@ test('shows a load error, and unknown equipment and empty requirements fall back
   expect(screen.getByText('Unknown event')).toBeInTheDocument()
   expect(screen.getByText('None')).toBeInTheDocument()
   expect(screen.getByText('—', { selector: 'td' })).toBeInTheDocument()
-})
-
-// Review AC3 (supporting refresh): reload requests to retrieve newly saved statuses.
-test('refresh reloads the list', async () => {
-  show()
-  await screen.findByText('Wireless mic')
-  await userEvent.click(screen.getByRole('button', { name: /Refresh requests/ }))
-  await waitFor(() => expect(fetchEventReservations).toHaveBeenCalledTimes(2))
 })
 
 // Create request AC1 (entry/access): only Event Coordinators can open the equipment recording form.

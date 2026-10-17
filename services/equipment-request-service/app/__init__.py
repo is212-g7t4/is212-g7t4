@@ -62,6 +62,15 @@ def _validate_items(payload):
     return cleaned, None
 
 
+def _rejection_reason(payload, status):
+    if status != "Rejected":
+        return None, None
+    reason = payload.get("rejectionReason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 500:
+        return None, "A rejection reason between 1 and 500 characters is required."
+    return reason.strip(), None
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
@@ -202,8 +211,11 @@ def create_app(config=None):
         status = payload.get("status") if isinstance(payload, dict) else None
         if status not in DECISIONS:
             return jsonify(message=f"status must be one of: {', '.join(DECISIONS)}."), 400
+        reason, error = _rejection_reason(payload, status)
+        if error:
+            return jsonify(message=error), 400
         try:
-            updated = review_event_requests(app.config["DATABASE_URL"], event_id, status, reviewer_id)
+            updated = review_event_requests(app.config["DATABASE_URL"], event_id, status, reviewer_id, reason)
         except RequestNotFoundError:
             return jsonify(message="No equipment requests found for this event."), 404
         except RequestAlreadyReviewedError:
@@ -222,8 +234,11 @@ def create_app(config=None):
         status = payload.get("status") if isinstance(payload, dict) else None
         if status not in DECISIONS:
             return jsonify(message=f"status must be one of: {', '.join(DECISIONS)}."), 400
+        reason, error = _rejection_reason(payload, status)
+        if error:
+            return jsonify(message=error), 400
         try:
-            updated = review_request(app.config["DATABASE_URL"], request_id, status, reviewer_id)
+            updated = review_request(app.config["DATABASE_URL"], request_id, status, reviewer_id, reason)
         except RequestNotFoundError:
             return jsonify(message="Equipment request not found."), 404
         except RequestAlreadyReviewedError:

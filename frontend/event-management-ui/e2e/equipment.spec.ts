@@ -105,14 +105,17 @@ test('other roles do not get the equipment page or nav item', async ({ page }) =
 
 // Safety revision AC3/AC4 (mocked browser): staff can re-review a flagged Pending request;
 // the unaffected Approved line stays reviewed and has no decision controls.
+// Review AC2/AC3: rejection requires a reason, which is returned and shown with the updated request.
 for (const decision of ['Approved', 'Rejected'] as const) {
   test(`technical support can mark safety-flagged equipment ${decision}`, async ({ page }, testInfo) => {
     await page.setViewportSize(decision === 'Approved' ? { width: 1440, height: 1000 } : { width: 390, height: 844 })
     await asUser(page, users.techSupport.user_id)
     let status = 'Pending'
+    const reason = 'Projector cables cannot be safely rerouted.'
     const flagged = () => ({
       id: 'flagged-request', eventId: 'fair', equipmentId: 'projector', quantityRequested: 1,
       technicalRequirements: 'Keep the accessible route clear.', status, reviewedBy: null,
+      rejectionReason: status === 'Rejected' ? reason : null,
       equipment: { description: 'Flagged projector', type: 'Projector', status: 'Available' },
       availability: { reservedQuantity: 0, availableStock: 5, isInsufficient: false },
       safetyFeedback: { reason: 'Trip hazards affect the accessible route.', requestedChanges: ['Move projector cables away from the walkway.'] },
@@ -124,7 +127,9 @@ for (const decision of ['Approved', 'Rejected'] as const) {
         equipment: { description: 'Unaffected chairs', type: 'Chair', status: 'Available' }, availability: null, safetyFeedback: null }],
     }] }))
     await mock(page, 'equipmentReservation', '/equipment-reservations/requests/flagged-request', (route) => {
-      expect(route.request().postDataJSON()).toEqual({ status: decision })
+      expect(route.request().postDataJSON()).toEqual({
+        status: decision, ...(decision === 'Rejected' ? { rejectionReason: reason } : {}),
+      })
       status = decision
       return json(route, { request: { ...flagged(), reviewedBy: users.techSupport.user_id } })
     })
@@ -144,6 +149,15 @@ for (const decision of ['Approved', 'Rejected'] as const) {
     expect(await scrollRegion.evaluate((element) => element.scrollLeft > 0)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`equipment-safety-review-${decision}.png`), fullPage: true })
     await flaggedRow.getByRole('button', { name: decision === 'Approved' ? 'Approve' : 'Reject', exact: true }).click()
+    if (decision === 'Rejected') {
+      const dialog = page.getByRole('dialog', { name: 'Reject equipment request?' })
+      await expect(dialog.getByRole('button', { name: 'Confirm rejection' })).toBeDisabled()
+      await dialog.getByRole('textbox', { name: /Reason for rejection/ }).fill(reason)
+      await dialog.getByRole('button', { name: 'Confirm rejection' }).click()
+      await expect(dialog).not.toBeVisible()
+      await expect(page.getByRole('columnheader', { name: 'Reject Reason' })).toBeVisible()
+      await expect(flaggedRow.getByRole('cell', { name: reason, exact: true })).toBeVisible()
+    }
     await expect(flaggedRow.locator('.status-badge')).toHaveText(decision)
     await expect(unaffectedRow.locator('.status-badge')).toHaveText('Approved')
     await expect(flaggedRow.getByRole('cell').last()).toContainText('Move projector cables away from the walkway.')

@@ -23,11 +23,11 @@ test('fetchEventReservations calls the reservation composite with the status fil
 // Review AC2 (transport): send an individual request's decision to the owning composite.
 test('reviewEquipmentRequest patches one request through the composite', async () => {
   const fn = stubFetch(true, { request: { id: 'r1', status: 'Rejected' } })
-  await expect(reviewEquipmentRequest('r1', 'Rejected', user)).resolves.toEqual({ id: 'r1', status: 'Rejected' })
+  await expect(reviewEquipmentRequest('r1', 'Rejected', user, 'Not supported.')).resolves.toEqual({ id: 'r1', status: 'Rejected' })
   const [url, init] = fn.mock.calls[0]
   expect(url).toBe('http://localhost:5010/equipment-reservations/requests/r1')
   expect(init.method).toBe('PATCH')
-  expect(JSON.parse(init.body)).toEqual({ status: 'Rejected' })
+  expect(JSON.parse(init.body)).toEqual({ status: 'Rejected', rejectionReason: 'Not supported.' })
 })
 
 // Review AC2 / Reservation AC2 (transport): scope a bulk decision to its event ID.

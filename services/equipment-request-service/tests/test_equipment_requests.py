@@ -124,6 +124,7 @@ def test_ac1_list_returns_requested_equipment_quantity_and_requirements(setup):
         "technicalRequirements": "For vendor booths",
         "status": "Pending",
         "reviewedBy": None,
+        "rejectionReason": None,
     }
     assert second["technicalRequirements"] == "" and second["reviewedBy"] == USER_ID
     assert "WHERE" not in cursor.execute.call_args[0][0]
@@ -197,12 +198,14 @@ def test_get_one_request_errors(setup):
     assert client.get(f"/equipment-requests/{REQUEST_ID}", headers={}).status_code == 401
 
 
-# Review AC2/AC3: coordinators may read a saved Approved status but cannot perform staff decisions.
+# Review AC2/AC3: coordinators can read a saved rejection and its reason but cannot make staff decisions.
 def test_ac3_event_coordinator_can_read_but_not_review(setup):
     client, cursor, _ = setup
-    cursor.fetchall.return_value = [db_row(status="Approved")]
+    cursor.fetchall.return_value = [db_row(status="Rejected", rejection_reason="No technician available.")]
 
-    assert client.get("/equipment-requests", headers=COORDINATOR).json["requests"][0]["status"] == "Approved"
+    saved = client.get("/equipment-requests", headers=COORDINATOR).json["requests"][0]
+    assert saved["status"] == "Rejected"
+    assert saved["rejectionReason"] == "No technician available."
     assert client.patch(f"/equipment-requests/{REQUEST_ID}", headers=COORDINATOR, json={"status": "Approved"}).status_code == 403
 
 
@@ -243,15 +246,18 @@ def test_missing_database_url_is_503():
 def test_ac2_pending_request_can_be_approved_or_rejected(setup, decision):
     # Review AC2 / Reservation AC2: save the decision and reviewer on the existing event-linked request.
     client, cursor, _ = setup
-    cursor.fetchone.return_value = db_row(status=decision, reviewed_by=USER_ID)
+    reason = "Equipment needs servicing." if decision == "Rejected" else None
+    cursor.fetchone.return_value = db_row(status=decision, reviewed_by=USER_ID, rejection_reason=reason)
 
-    response = client.patch(f"/equipment-requests/{REQUEST_ID}", headers=TS, json={"status": decision})
+    response = client.patch(f"/equipment-requests/{REQUEST_ID}", headers=TS, json={"status": decision, "rejectionReason": reason})
 
     assert response.status_code == 200
     assert response.json["request"]["status"] == decision
     assert response.json["request"]["reviewedBy"] == USER_ID
+    assert response.json["request"]["rejectionReason"] == reason
     sql, params = cursor.execute.call_args[0]
-    assert "status = 'Pending'" in sql and params == [decision, USER_ID, REQUEST_ID]
+    assert "rejection_reason = %s" in sql
+    assert "status = 'Pending'" in sql and params == [decision, USER_ID, reason, REQUEST_ID]
 
 
 # Review AC2 (conflict): an already-decided request cannot be reviewed a second time.
@@ -310,18 +316,30 @@ def test_cors_allows_configured_origin_with_patch(setup):
 def test_bulk_review_updates_all_pending_requests_for_event(setup, decision):
     # Review AC2 / Reservation AC2: update only Pending records belonging to the supplied event ID.
     client, cursor, _ = setup
+    reason = "No technician available." if decision == "Rejected" else None
     cursor.fetchall.return_value = [
-        db_row(status=decision, reviewed_by=USER_ID),
-        db_row(equipment_request_id="3b1bfb57-a3c0-4450-897e-cc5c73690000", status=decision, reviewed_by=USER_ID),
+        db_row(status=decision, reviewed_by=USER_ID, rejection_reason=reason),
+        db_row(equipment_request_id="3b1bfb57-a3c0-4450-897e-cc5c73690000", status=decision, reviewed_by=USER_ID, rejection_reason=reason),
     ]
 
-    response = client.patch(f"/events/{EVENT_ID}/equipment-requests", headers=TS, json={"status": decision})
+    response = client.patch(f"/events/{EVENT_ID}/equipment-requests", headers=TS, json={"status": decision, "rejectionReason": reason})
 
     assert response.status_code == 200
     assert [request["status"] for request in response.json["requests"]] == [decision, decision]
+    assert [request["rejectionReason"] for request in response.json["requests"]] == [reason, reason]
     sql, params = cursor.execute.call_args[0]
     assert "event_id = %s AND status = 'Pending'" in sql
-    assert params == [decision, USER_ID, EVENT_ID]
+    assert params == [decision, USER_ID, reason, EVENT_ID]
+
+
+# Review AC2: individual and bulk rejection require a nonblank, bounded reason before writing.
+@pytest.mark.parametrize("reason", [None, "  ", "x" * 501])
+def test_rejection_requires_a_valid_reason(setup, reason):
+    client, _, connect = setup
+    for url in (f"/equipment-requests/{REQUEST_ID}", f"/events/{EVENT_ID}/equipment-requests"):
+        response = client.patch(url, headers=TS, json={"status": "Rejected", "rejectionReason": reason})
+        assert response.status_code == 400
+    connect.assert_not_called()
 
 
 # Review AC2 (conflict): an event without Pending lines cannot receive another bulk decision.

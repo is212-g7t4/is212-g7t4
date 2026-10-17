@@ -52,13 +52,13 @@ class World:
     def get_request(self, headers, request_id):
         return next(r for r in self.requests if r["id"] == request_id)
 
-    def review_request(self, headers, request_id, status):
+    def review_request(self, headers, request_id, status, rejection_reason=None):
         self.calls.append(("review_request", request_id, status))
-        return {**self.get_request(headers, request_id), "status": status, "reviewedBy": USER}
+        return {**self.get_request(headers, request_id), "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason}
 
-    def review_event_requests(self, headers, event_id, status):
+    def review_event_requests(self, headers, event_id, status, rejection_reason=None):
         self.calls.append(("review_event_requests", event_id, status))
-        return [{**r, "status": status, "reviewedBy": USER} for r in self.requests if r["eventId"] == event_id and r["status"] == "Pending"]
+        return [{**r, "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason} for r in self.requests if r["eventId"] == event_id and r["status"] == "Pending"]
 
     def get_event_summaries(self, ids):
         return [self.events[i] for i in ids if i in self.events]
@@ -437,10 +437,11 @@ def test_batch_approve_is_blocked_when_any_line_is_insufficient(world, client):
 def test_batch_reject_is_allowed_even_when_a_line_is_insufficient(world, client):
     world.requests = [line("r1", TARGET, LAPTOP, 1), line("r2", TARGET, TABLE, 2)]
 
-    response = client.patch(f"/equipment-reservations/events/{TARGET}", headers=TS, json={"status": "Rejected"})
+    response = client.patch(f"/equipment-reservations/events/{TARGET}", headers=TS, json={"status": "Rejected", "rejectionReason": "No technician available."})
 
     assert response.status_code == 200
     assert [r["status"] for r in response.json["requests"]] == ["Rejected", "Rejected"]
+    assert [r["rejectionReason"] for r in response.json["requests"]] == ["No technician available."] * 2
     assert ("review_event_requests", TARGET, "Rejected") in world.calls
     assert not any(call[0] == "overlapping" for call in world.calls)
 
@@ -457,7 +458,7 @@ def test_batch_approve_succeeds_when_every_line_fits(world, client):
 
 # Review AC2 (conflict): surface the absence of Pending lines instead of reporting a new decision.
 def test_batch_approve_with_nothing_pending_defers_to_the_request_service(world, client, monkeypatch):
-    def conflict(headers, event_id, status):
+    def conflict(headers, event_id, status, rejection_reason=None):
         raise DownstreamError(409, "This event has no Pending equipment requests.")
 
     monkeypatch.setattr("app.clients.review_event_requests", conflict)
@@ -494,10 +495,11 @@ def test_rejecting_an_insufficient_line_needs_no_stock_check(world, client):
     rid = "00000000-0000-4000-8000-0000000000d3"
     world.requests = [line(rid, TARGET, LAPTOP, 5)]
 
-    response = client.patch(f"/equipment-reservations/requests/{rid}", headers=TS, json={"status": "Rejected"})
+    response = client.patch(f"/equipment-reservations/requests/{rid}", headers=TS, json={"status": "Rejected", "rejectionReason": "  Equipment unavailable.  "})
 
     assert response.status_code == 200
     assert world.calls == [("review_request", rid, "Rejected")]
+    assert response.json["request"]["rejectionReason"] == "Equipment unavailable."
 
 
 # Review AC2 (delegation): the owning atomic handles decisions on already-reviewed records.

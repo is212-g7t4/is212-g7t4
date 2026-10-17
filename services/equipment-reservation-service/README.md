@@ -42,7 +42,11 @@ DEV `X-Dev-User-Id` / `X-Dev-Role` headers are forwarded to the atomics.
   `{"status": "Approved" | "Rejected"}`. Approving an insufficient line is `409`.
 - `PATCH /equipment-reservations/events/<event_id>` — Technical Support only;
   the batch decision. Approving while any Pending line is insufficient is
-  `409`; Rejecting is always allowed.
+  `409`; rejection does not require sufficient stock.
+  Both decision endpoints require `rejectionReason` for `Rejected` decisions
+  (1-500 characters after trimming), forwarded to Equipment Request Service.
+  Bulk rejection uses the same reason for every Pending line; request reads
+  include the saved `rejectionReason` for staff and assigned coordinators.
 - `POST /equipment-reservations/events/<event_id>/requests` — Event Coordinator
   only; body `{"items": [{"equipmentId", "quantityRequested",
   "technicalRequirements"?}]}`. `403` unless the event is assigned to the
