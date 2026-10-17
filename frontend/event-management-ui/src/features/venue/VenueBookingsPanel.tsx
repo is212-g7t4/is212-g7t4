@@ -12,6 +12,7 @@ import { VenueBookingError, cancelVenueBooking, createVenueBooking, fetchVenueBo
 import type { VenueBooking } from './venueBookings'
 
 type Props = {
+  targetBookingId?: string
   eventId: string
   coordinatorId: string
   eventStart: string
@@ -46,6 +47,7 @@ const localDateTime = (value: string) => {
 }
 
 export function VenueBookingsPanel({
+  targetBookingId,
   eventId,
   coordinatorId,
   eventStart,
@@ -92,6 +94,13 @@ export function VenueBookingsPanel({
     return () => { active = false }
   }, [eventId, coordinatorId])
 
+  const target = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!loading && targetBookingId && target.current) {
+      target.current.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      target.current.focus({ preventScroll: true })
+    }
+  }, [loading, targetBookingId])
   const availableVenues = venues.filter((venue) => venue.status === 'Available')
   const overlapsActiveHold = (venueId: string) => {
     const bookingStart = Date.parse(singaporeInstant(start))
@@ -221,9 +230,10 @@ export function VenueBookingsPanel({
 
     {loading ? <InlineLoading label="Loading venue bookings…" /> : <>
       {loadError && <p className="field-error" role="alert">{loadError}</p>}
+      {targetBookingId && !bookings.some(booking => booking.id === targetBookingId) && <p role="status">The linked venue request is unavailable or you no longer have access. Your historical notification is retained.</p>}
       {bookings.length === 0 ? <p className="muted">No venue booking requests yet.</p> :
         <div className="venue-booking-list">
-          {bookings.map((booking) => <article className="venue-booking-item" key={booking.id}>
+          {bookings.map((booking) => <article id={`venue-booking-${booking.id}`} tabIndex={booking.id === targetBookingId ? -1 : undefined} ref={booking.id === targetBookingId ? target : undefined} className={`venue-booking-item${booking.id === targetBookingId ? ' notification-target' : ''}`} key={booking.id}>
             <header><strong>{booking.venueName}</strong><StatusBadge status={booking.status} /></header>
             <dl className="event-details">
               <div className="event-detail full"><dt>Date and time</dt><dd>{closureDate(booking.requestedStartTime)} – {closureDate(booking.requestedEndTime)}</dd></div>

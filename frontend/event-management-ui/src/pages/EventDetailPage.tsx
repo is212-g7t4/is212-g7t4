@@ -24,7 +24,7 @@ import { SafetyFeedbackPanel } from '../features/safety/SafetyFeedbackPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 import { isCoordinator, isLead } from '../roles'
 
-type EventDetailProps = { eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
+type EventDetailProps = { targetBookingId?: string; eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
 // `currentCoordinatorId` carries the active user, whatever their role.
 export function EventDetailPage(props: EventDetailProps) {
@@ -34,7 +34,7 @@ export function EventDetailPage(props: EventDetailProps) {
   return <CoordinatorEventDetail {...props} />
 }
 
-function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: EventDetailProps) {
+function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordinatorId, currentCoordinatorName, resolveUserName, backLabel, onBack }: EventDetailProps) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -190,7 +190,11 @@ function CoordinatorEventDetail({ eventId, role, currentCoordinatorId, currentCo
         /> : null}
       </section>}
 
+      {targetBookingId && (!canUpdate || event.status === 'Cancelled') && <p className="muted event-card-section" role="status">
+        The linked venue request is unavailable or you do not have access to it.
+      </p>}
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel
+        targetBookingId={targetBookingId}
         eventId={event.id}
         coordinatorId={currentCoordinator.id}
         eventStart={event.preferredStartDate}

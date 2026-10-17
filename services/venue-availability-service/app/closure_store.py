@@ -148,6 +148,19 @@ def create(dsn, data, staff, token, key):
                 ),
             )
             count = cursor.rowcount
+            # Intent and rejection are committed together. No broker/downstream I/O here.
+            from psycopg2.extras import Json
+            for booking in impact:
+                source = dict(
+                    closureId=result["closureId"], bookingId=booking["id"],
+                    eventId=booking["eventId"], venueId=data["venueId"],
+                    startDateTime=data["startDateTime"], endDateTime=data["endDateTime"],
+                    reason=data["reason"],
+                )
+                cursor.execute(
+                    'INSERT INTO public."VenueNotificationOutbox" (closure_id,booking_id,source) VALUES (%s,%s,%s)',
+                    (result["closureId"], booking["id"], Json(source)),
+                )
         connection.commit()
         return dict(closure=result, rejectedCount=count)
     except Exception:
