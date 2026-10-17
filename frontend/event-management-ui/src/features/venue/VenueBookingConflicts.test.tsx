@@ -5,6 +5,7 @@ import { VenueBookingsPanel } from './VenueBookingsPanel'
 function setup(body: unknown, status = 409) {
   const fetcher = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method) return new Response(JSON.stringify(body), { status })
+    if (url.includes('/venue-holds')) return new Response(JSON.stringify({ holds: [] }))
     return new Response(JSON.stringify(url.includes('/venues') ? { venues: [{ id: 'v', name: 'Hall', status: 'Available', capacity: 100 }] } : { bookings: [] }))
   })
   vi.stubGlobal('fetch', fetcher)
