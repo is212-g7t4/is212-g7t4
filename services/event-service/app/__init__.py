@@ -148,6 +148,19 @@ def create_app(config=None):
     def health():
         return jsonify(status="ok")
 
+    @app.get("/internal/events/<uuid:event_id>/notification-context")
+    def notification_context(event_id):
+        token = app.config.get("INTERNAL_SERVICE_TOKEN")
+        if not token or not hmac.compare_digest(token.encode(), request.headers.get("X-Internal-Token", "").encode()):
+            return jsonify(message="Internal token required."), 401
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="Event database unavailable."), 503
+        try:
+            event = get_event(app.config["DATABASE_URL"], str(event_id), None, view_all=True)
+        except EventNotFoundError:
+            return jsonify(message="Event not found."), 404
+        return jsonify(id=event["id"], eventName=event["eventName"], coordinatorId=event["coordinatorId"])
+
     @app.post("/events")
     def submit():
         data = request.get_json(silent=True)

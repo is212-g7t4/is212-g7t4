@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { NotificationBell } from '../features/notifications/NotificationCenter'
 import type { Role, Route, User } from '../types'
 import { routeTitles } from '../types'
 import { canViewCalendar } from '../features/calendar/permissions'
@@ -80,11 +81,12 @@ function NavButton({ active, onClick, icon, children }: { active: boolean; onCli
   )
 }
 
-export function Topbar({ route, title, users, activeUserId, onUserChange }: { route: Route; title?: string; users: User[]; activeUserId: string; onUserChange: (userId: string) => void }) {
+export function Topbar({ route, title, users, activeUserId, onUserChange, onNotifications }: { onNotifications?: () => void; route: Route; title?: string; users: User[]; activeUserId: string; onUserChange: (userId: string) => void }) {
   return (
     <header className="topbar">
       <h1>{title ?? routeTitles[route]}</h1>
 
+      {onNotifications && <NotificationBell onViewAll={onNotifications} />}
       <label className="role-switcher">
         Viewing as
         <select

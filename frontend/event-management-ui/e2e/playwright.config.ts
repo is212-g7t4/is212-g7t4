@@ -1,3 +1,15 @@
+/**
+ * # SCRUM-173 — Receive Venue Disruption Notifications
+ *
+ * As an Event Coordinator, I want to receive an in-app notification when a venue booking for an event assigned to me is affected, so that I know that alternative arrangements are required.
+ * AC1: Given a rejection is ready for notification, then the notification is addressed to the coordinator assigned to that event when the notification is created.
+ * AC2: The notification contains the event name, affected venue, closure start/end, rejection reason, and a link to the venue rejection.
+ * AC3: Given a temporary system failure occurs during notification dispatch, the system must ensure the notification is eventually delivered to the assigned coordinator without generating multiple duplicate alerts.
+ *
+ * ## Supporting test infrastructure
+ * Pin mocked API origins and disable server reuse; no direct acceptance assertions.
+ * Existing unrelated story browser settings are preserved.
+ */
 import { defineConfig, devices } from '@playwright/test'
 
 // Backend ports the frontend falls back to. Pinned below so a developer's local
@@ -15,6 +27,7 @@ export const SERVICE_PORTS = {
   equipmentReservation: 5010,
   safetyCheck: 5012,
   eventWorkflow: 5014,
+  notification: 5015,
 } as const
 
 const url = (port: number) => `http://localhost:${port}`
@@ -35,8 +48,9 @@ export default defineConfig({
     command: 'npm run dev',
     cwd: '..',
     url: 'http://localhost:5174',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     env: {
+      VITE_NOTIFICATION_SERVICE_URL: url(SERVICE_PORTS.notification),
       VITE_USER_SERVICE_URL: url(SERVICE_PORTS.user),
       VITE_EQUIPMENT_SERVICE_URL: url(SERVICE_PORTS.equipment),
       VITE_EVENT_SERVICE_URL: url(SERVICE_PORTS.event),

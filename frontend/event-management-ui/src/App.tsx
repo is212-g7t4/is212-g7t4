@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { NotificationProvider, NotificationsPage } from './features/notifications/NotificationCenter'
 import './App.css'
 import { Sidebar, Topbar } from './components/Navigation'
 import { DashboardPage } from './pages/DashboardPage'
@@ -33,6 +34,7 @@ import { HoldReminderAlert } from './features/venue/HoldReminderAlert'
 const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
 
 const paths: Record<Route, string> = {
+  notifications: '/notifications',
   dashboard: '/',
   submit: '/events/new',
   manage: '/events/evt-001/edit',
@@ -60,6 +62,7 @@ const paths: Record<Route, string> = {
 
 function getRoute(): Route {
   const path = window.location.pathname
+  if (path === '/notifications') return 'notifications'
   if (path === '/events/new') return 'submit'
   if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
@@ -94,6 +97,7 @@ function getVenueId(): string | null {
 }
 
 function App() {
+  const [targetBookingId, setTargetBookingId] = useState(() => new URLSearchParams(window.location.search).get('booking'))
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
   const [venueId, setVenueId] = useState<string | null>(getVenueId)
@@ -132,6 +136,7 @@ function App() {
       setRoute(getRoute())
       setEventId(getEventId())
       setVenueId(getVenueId())
+      setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -165,6 +170,7 @@ function App() {
 
   const navigateToEvent = (id: string) => {
     setNotice(null)
+    setTargetBookingId(null)
     setDetailOrigin(route)
     setEventId(id)
     window.history.pushState({}, '', `/events/${id}`)
@@ -194,10 +200,18 @@ function App() {
   const inEventsPage = eventTabs.includes(route)
   const resolveUserName = (userId: string | null | undefined) => users.find((user) => user.id === userId)?.username ?? null
 
-  return <div className="app-shell">
+  const openNotification = (path: string) => {
+    setNotice(null)
+    setDetailOrigin('notifications')
+    window.history.pushState({}, '', path)
+    setRoute(getRoute()); setEventId(getEventId())
+    setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
+  }
+  return <NotificationProvider user={activeUser} onNavigate={openNotification}><div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
     <main className={`main-content${route === 'venueCalendar' ? ' calendar-route' : ''}`}>
-      <Topbar route={route} title={inEventsPage ? 'Events' : undefined} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} />
+      <Topbar route={route} title={inEventsPage ? 'Events' : undefined} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} onNotifications={() => navigate('notifications')} />
+      {route === 'notifications' && <div className="page-stack"><NotificationsPage /></div>}
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
       <HoldReminderAlert user={activeUser} />
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
@@ -221,9 +235,9 @@ function App() {
       {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} coordinators={users.filter((u) => u.role === 'Event Coordinator' || u.role === 'Event Coordinator Lead')} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
       {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
-      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}`} eventId={eventId} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
+      {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}-${targetBookingId}`} targetBookingId={targetBookingId ?? undefined} eventId={eventId} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
-  </div>
+  </div></NotificationProvider>
 }
 
 export default App

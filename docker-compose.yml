@@ -139,6 +139,58 @@ services:
     ports:
       - "5007:5000"
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    # Stable node/data-directory identity across replacement, not only restart.
+    # Existing volumes need an explicit node-identity transition (see Notification README).
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-notification}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:-local-development-only}"
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - notification-rabbitmq-data:/var/lib/rabbitmq
+
+  notification-service:
+    build: ./services/notification-service
+    env_file:
+      - ./services/notification-service/.env
+    environment:
+      <<: *frontend-environment
+      NOTIFICATION_DEV_MODE: "${NOTIFICATION_DEV_MODE:-false}"
+    ports:
+      - "127.0.0.1:5015:5000"
+
+  notification-consumer:
+    build: ./services/notification-service
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.consumer"]
+    restart: unless-stopped
+    env_file:
+      - ./services/notification-service/.env
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
+    depends_on:
+      - rabbitmq
+
+  venue-notification-dispatcher:
+    build: ./services/venue-booking-service
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
+    restart: unless-stopped
+    env_file:
+      - ./services/venue-booking-service/.env
+    environment:
+      VENUE_AVAILABILITY_SERVICE_URL: "http://venue-availability-service:5000"
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      VENUE_SERVICE_URL: "http://venue-service:5000"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
+    depends_on:
+      - rabbitmq
+      - venue-availability-service
+      - event-service
+      - venue-service
+
   safety-check-record-service:
     build: ./services/safety-check-record-service
     env_file:
@@ -191,3 +243,5 @@ services:
       - venue-service
     ports:
       - "5014:5000"
+volumes:
+  notification-rabbitmq-data:

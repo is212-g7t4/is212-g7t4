@@ -1,3 +1,19 @@
+/**
+ * # SCRUM-173 — Receive Venue Disruption Notifications
+ *
+ * As an Event Coordinator, I want to receive an in-app notification when a venue booking for an event assigned to me is affected, so that I know that alternative arrangements are required.
+ * AC1: Given a rejection is ready for notification, then the notification is addressed to the coordinator assigned to that event when the notification is created.
+ * AC2: The notification contains the event name, affected venue, closure start/end, rejection reason, and a link to the venue rejection.
+ * AC3: Given a temporary system failure occurs during notification dispatch, the system must ensure the notification is eventually delivered to the assigned coordinator without generating multiple duplicate alerts.
+ *
+ * ## AC groups and layer
+ * Cross-ticket regressions / fixture infrastructure: preserve original story ownership.
+ * Only notification-specific additions support SCRUM-173 AC2; existing cases are not reattributed.
+ * AC1 recipient selection is backend evidence, not inferred from these mocks.
+ * AC2 content/navigation; AC3 supporting UI isolation/recovery.
+ * FIRST: synthetic independent fixtures, controlled I/O/clocks, automatic assertions.
+ * Historical tests are retrospective; no blanket historical TDD claim.
+ */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { assignmentApi, eventApi } from '../features/event/submission'
@@ -635,4 +651,19 @@ test('SCRUM-153 AC2: a plain edit entry lists its fields without the withdrawal 
 
   expect(screen.getByText('Changed: Event name, Purpose')).toBeInTheDocument()
   expect(screen.queryByText('Safety approval withdrawn')).not.toBeInTheDocument()
+})
+
+/** SCRUM-173 review P2: public event-detail DOM; existing panel/write guards stay intact. */
+test.each([
+  { label: 'cancelled assigned event', status: 'Cancelled' as const, role: 'Event Coordinator' as const, viewer: coordinatorId, assigned: coordinatorId },
+  { label: 'viewable reassigned event as Lead', status: 'Under Review' as const, role: 'Event Coordinator Lead' as const, viewer: leadId, assigned: newCoordinatorId },
+])('linked request explains unavailable access for $label', async ({ status, role, viewer, assigned }) => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status, coordinatorId: assigned, previousCoordinatorId: coordinatorId })
+  render(<EventDetailPage eventId={event.id} targetBookingId="40000000-0000-0000-0000-000000000001" role={role} currentCoordinatorId={viewer} backLabel="notifications" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+  expect(screen.getByRole('status')).toHaveTextContent('The linked venue request is unavailable or you do not have access to it.')
+  expect(screen.queryByLabelText('Venue bookings')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument()
+  if (viewer !== assigned) expect(screen.queryByRole('button', { name: 'Save progress' })).not.toBeInTheDocument()
+  expect(vi.mocked(eventApi).mock.calls.every(call => call.length === 1)).toBe(true)
 })
