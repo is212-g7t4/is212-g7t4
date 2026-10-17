@@ -45,6 +45,68 @@ def test_health(setup):
     assert client.get("/health").json == {"status": "ok"}
 
 
+# Safety revision AC3/AC4 (storage boundary): selected equipment IDs become Pending and lose their old reviewer.
+def test_safety_flag_resets_only_selected_event_requests_to_pending(setup):
+    client, cursor, _ = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-internal-token"
+    cursor.fetchall.side_effect = [[db_row(status="Approved", reviewed_by=USER_ID)], [db_row()]]
+    response = client.post(
+        f"/events/{EVENT_ID}/equipment-requests/safety-reset",
+        headers={"X-Internal-Service-Token": "test-internal-token"},
+        json={"requestIds": [REQUEST_ID]},
+    )
+    assert response.status_code == 200
+    assert response.json["requests"][0]["status"] == "Pending"
+    assert response.json["requests"][0]["reviewedBy"] is None
+    sql, params = cursor.execute.call_args[0]
+    assert "SET status = 'Pending', reviewed_by = NULL" in sql
+    assert params == [EVENT_ID, [REQUEST_ID]]
+
+
+def test_safety_reset_rejects_other_event_request_without_writes(setup):
+    client, cursor, _ = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-internal-token"
+    cursor.fetchall.return_value = []
+    response = client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
+        headers={"X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]})
+    assert response.status_code == 404
+    assert cursor.execute.call_count == 1
+
+
+@pytest.mark.parametrize("token,headers,code", [
+    (None, {}, 503), ("test-internal-token", {}, 403),
+    ("test-internal-token", TS, 403),
+])
+def test_safety_reset_requires_internal_credentials(setup, token, headers, code):
+    client, _, connect = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = token
+    assert client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
+        headers=headers, json={"requestIds": [REQUEST_ID]}).status_code == code
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("event_id,payload", [
+    ("bad", {"requestIds": [REQUEST_ID]}), (EVENT_ID, None), (EVENT_ID, {}),
+    (EVENT_ID, {"requestIds": []}), (EVENT_ID, {"requestIds": "bad"}),
+    (EVENT_ID, {"requestIds": ["bad"]}), (EVENT_ID, {"requestIds": [REQUEST_ID, REQUEST_ID]}),
+    (EVENT_ID, {"requestIds": [REQUEST_ID] * 501}),
+])
+def test_safety_reset_validates_ids(setup, event_id, payload):
+    client, _, connect = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-internal-token"
+    assert client.post(f"/events/{event_id}/equipment-requests/safety-reset",
+        headers={"X-Internal-Service-Token": "test-internal-token"}, json=payload).status_code == 400
+    connect.assert_not_called()
+
+
+def test_safety_reset_requires_database(setup):
+    client, _, connect = setup
+    client.application.config.update(INTERNAL_SERVICE_TOKEN="test-internal-token", DATABASE_URL=None)
+    assert client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
+        headers={"X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]}).status_code == 503
+    connect.assert_not_called()
+
+
 # Review AC1: return equipment IDs, quantities and technical requirements; catalogue types are composed separately.
 def test_ac1_list_returns_requested_equipment_quantity_and_requirements(setup):
     client, cursor, _ = setup

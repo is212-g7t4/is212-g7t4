@@ -83,6 +83,19 @@ def get_venues() -> list:
     return response.json()["venues"]
 
 
+def get_staff_events(viewer_id):
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events", params={"coordinatorId": viewer_id, "viewerRole": "Venue Staff"})
+    response.raise_for_status()
+    return response.json()["events"]
+
+
+def get_safety_records(event_id):
+    base = os.environ.get("SAFETY_CHECK_RECORD_SERVICE_URL") or "http://localhost:5013"
+    response = httpx.get(f"{base}/safety-check-records", params={"eventId": event_id})
+    response.raise_for_status()
+    return response.json()["safetyChecks"]
+
+
 def get_venue(venue_id: str) -> dict:
     response = httpx.get(f"{VENUE_SERVICE_URL}/venues/{venue_id}")
     response.raise_for_status()

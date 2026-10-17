@@ -1,4 +1,5 @@
 from contextlib import closing
+import os
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -15,12 +16,24 @@ register_uuid()
 # Only columns owned by Venue Availability Service; no queries to other
 # services' tables. This atomic owns both the booking records and the
 # overlap/conflict computation over them (merged design — see AGENTS.md).
-COLUMNS = (
+BASE_COLUMNS = (
     "booking_id, event_id, venue_id, requested_start_time, requested_end_time, "
     "required_capacity, venue_requirements, status, requested_by, reviewed_by, "
-    "rejection_closure_id, rejection_closure_start, rejection_closure_end, rejection_closure_reason, rejected_at"
+)
+COLUMNS = BASE_COLUMNS + "rejection_closure_id, rejection_closure_start, rejection_closure_end, rejection_closure_reason, rejected_at"
+LEGACY_COLUMNS = BASE_COLUMNS + (
+    "(to_jsonb(\"VenueBooking\")->>'rejection_closure_id')::uuid AS rejection_closure_id, "
+    "(to_jsonb(\"VenueBooking\")->>'rejection_closure_start')::timestamptz AS rejection_closure_start, "
+    "(to_jsonb(\"VenueBooking\")->>'rejection_closure_end')::timestamptz AS rejection_closure_end, "
+    "to_jsonb(\"VenueBooking\")->>'rejection_closure_reason' AS rejection_closure_reason, "
+    "(to_jsonb(\"VenueBooking\")->>'rejected_at')::timestamptz AS rejected_at"
 )
 FLAG_COLUMNS = f"{COLUMNS}, conflict_reason"
+
+
+def booking_columns():
+    return LEGACY_COLUMNS if os.getenv("VENUE_BOOKING_LEGACY_SCHEMA") == "true" else COLUMNS
+
 # A hold is an 'On Hold' VenueBooking row spanning held_at .. hold_expires_at.
 # The aliases keep serialize_hold's shape (and the HTTP API) unchanged.
 HOLD_COLUMNS = (
@@ -207,7 +220,7 @@ def list_bookings(
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             if setup_time_minutes == 0 and turnaround_time_minutes == 0:
                 cursor.execute(
-                    f"""SELECT {COLUMNS}, hold_expires_at FROM public."VenueBooking"
+                    f"""SELECT {booking_columns()}, hold_expires_at FROM public."VenueBooking"
                         WHERE (venue_id = %s OR venue_id IS NULL)
                           AND (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
                           AND (status IS NULL OR status <> 'On Hold' OR hold_expires_at IS NULL OR hold_expires_at > now())
@@ -220,7 +233,7 @@ def list_bookings(
                 )
             else:
                 cursor.execute(
-                    f"""SELECT {COLUMNS}, hold_expires_at FROM public."VenueBooking"
+                    f"""SELECT {booking_columns()}, hold_expires_at FROM public."VenueBooking"
                         WHERE (venue_id = %s OR venue_id IS NULL)
                           AND (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
                           AND (status IS NULL OR status <> 'On Hold' OR hold_expires_at IS NULL OR hold_expires_at > now())
@@ -386,7 +399,7 @@ def create_booking(
                      requested_end_time, required_capacity, venue_requirements,
                      status, requested_by)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, 'Pending Review', %s)
-                    RETURNING {COLUMNS}""",
+                    RETURNING {booking_columns()}""",
                 [
                     booking_id,
                     event_id,
@@ -419,7 +432,7 @@ def update_booking(
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             lock_booking_writes(cursor)
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {booking_columns()} FROM public."VenueBooking"
                     WHERE booking_id = %s AND event_id = %s FOR UPDATE""",
                 [booking_id, event_id],
             )
@@ -452,7 +465,7 @@ def update_booking(
                         venue_requirements = %s, status = 'Pending Review',
                         reviewed_by = NULL, conflict_reason = NULL
                     WHERE booking_id = %s AND event_id = %s
-                    RETURNING {COLUMNS}""",
+                    RETURNING {booking_columns()}""",
                 [
                     venue_id,
                     start,
@@ -473,7 +486,7 @@ def cancel_booking(database_url, booking_id, event_id):
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             lock_booking_writes(cursor)
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {booking_columns()} FROM public."VenueBooking"
                     WHERE booking_id = %s AND event_id = %s FOR UPDATE""",
                 [booking_id, event_id],
             )
@@ -489,11 +502,32 @@ def cancel_booking(database_url, booking_id, event_id):
                 f"""UPDATE public."VenueBooking"
                     SET status = 'Cancelled', conflict_reason = NULL
                     WHERE booking_id = %s AND event_id = %s
-                    RETURNING {COLUMNS}""",
+                    RETURNING {booking_columns()}""",
                 [booking_id, event_id],
             )
             cancelled = cursor.fetchone()
     return serialize(cancelled)
+
+
+def reset_safety_bookings(database_url, event_id, booking_ids):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            lock_booking_writes(cursor)
+            cursor.execute(
+                f'''SELECT {booking_columns()} FROM public."VenueBooking"
+                    WHERE event_id = %s AND booking_id = ANY(%s::uuid[]) FOR UPDATE''',
+                [event_id, booking_ids],
+            )
+            if len(cursor.fetchall()) != len(booking_ids):
+                raise BookingNotFoundError
+            cursor.execute(
+                f'''UPDATE public."VenueBooking" SET status = 'Pending Review', reviewed_by = NULL
+                    WHERE event_id = %s AND booking_id = ANY(%s::uuid[])
+                    AND status IN ('Approved', 'Pending', 'Pending Review')
+                    RETURNING {booking_columns()}''',
+                [event_id, booking_ids],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
 
 
 def list_event_bookings(database_url, event_id):
@@ -501,7 +535,7 @@ def list_event_bookings(database_url, event_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {booking_columns()} FROM public."VenueBooking"
                     WHERE event_id = %s
                     ORDER BY requested_start_time ASC, booking_id ASC""",
                 [event_id],
@@ -514,7 +548,7 @@ def get_booking(database_url, booking_id):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {booking_columns()} FROM public."VenueBooking"
                     WHERE booking_id = %s""",
                 [booking_id],
             )
@@ -625,7 +659,7 @@ def decide_booking(
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             lock_booking_writes(cursor)
             cursor.execute(
-                f"""SELECT {COLUMNS} FROM public."VenueBooking"
+                f"""SELECT {booking_columns()} FROM public."VenueBooking"
                     WHERE booking_id = %s FOR UPDATE""",
                 [booking_id],
             )
@@ -656,7 +690,7 @@ def decide_booking(
                 f"""UPDATE public."VenueBooking"
                     SET status = %s, reviewed_by = %s, conflict_reason = NULL
                     WHERE booking_id = %s
-                    RETURNING {COLUMNS}""",
+                    RETURNING {booking_columns()}""",
                 [status, reviewed_by, booking_id],
             )
             decided = _localize(cursor.fetchone())
@@ -679,7 +713,7 @@ def list_window_bookings(database_url, date_from, date_to, padding_minutes=0):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f"""SELECT {COLUMNS}, hold_expires_at FROM public."VenueBooking"
+                f"""SELECT {booking_columns()}, hold_expires_at FROM public."VenueBooking"
                     WHERE (status IS NULL OR status NOT IN ('Rejected', 'Cancelled', 'Expired'))
                       AND (status IS NULL OR status <> 'On Hold' OR hold_expires_at IS NULL OR hold_expires_at > now())
                       AND ((requested_start_time < %s AND requested_end_time > %s)
@@ -752,7 +786,7 @@ def reconcile_legacy_conflicts(
             # Buffer reconciliation is also a multi-row booking writer.
             lock_booking_writes(cursor)
             cursor.execute(
-                f"""SELECT {FLAG_COLUMNS}, hold_expires_at
+                f"""SELECT {booking_columns()}, conflict_reason, hold_expires_at
                     FROM public."VenueBooking"
                     WHERE venue_id = %s
                       AND (status = 'Approved'

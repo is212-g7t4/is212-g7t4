@@ -102,3 +102,50 @@ test('other roles do not get the equipment page or nav item', async ({ page }) =
   await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Equipment', exact: true })).toHaveCount(0)
   await expect(page.getByText('visible to Technical Support staff')).toBeVisible()
 })
+
+// Safety revision AC3/AC4 (mocked browser): staff can re-review a flagged Pending request;
+// the unaffected Approved line stays reviewed and has no decision controls.
+for (const decision of ['Approved', 'Rejected'] as const) {
+  test(`technical support can mark safety-flagged equipment ${decision}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(decision === 'Approved' ? { width: 1440, height: 1000 } : { width: 390, height: 844 })
+    await asUser(page, users.techSupport.user_id)
+    let status = 'Pending'
+    const flagged = () => ({
+      id: 'flagged-request', eventId: 'fair', equipmentId: 'projector', quantityRequested: 1,
+      technicalRequirements: 'Keep the accessible route clear.', status, reviewedBy: null,
+      equipment: { description: 'Flagged projector', type: 'Projector', status: 'Available' },
+      availability: { reservedQuantity: 0, availableStock: 5, isInsufficient: false },
+      safetyFeedback: { reason: 'Trip hazards affect the accessible route.', requestedChanges: ['Move projector cables away from the walkway.'] },
+    })
+    await mock(page, 'equipmentReservation', '/equipment-reservations', (route) => json(route, { events: [{
+      eventId: 'fair', eventName: 'Community Wellbeing Fair', eventStatus: 'Safety Changes Requested',
+      startTime: '2026-11-07T10:00:00', endTime: '2026-11-07T16:00:00', coordinatorId: users.coordinator.user_id,
+      requests: [flagged(), { ...flagged(), id: 'unaffected-request', equipmentId: 'chairs', status: 'Approved',
+        equipment: { description: 'Unaffected chairs', type: 'Chair', status: 'Available' }, availability: null, safetyFeedback: null }],
+    }] }))
+    await mock(page, 'equipmentReservation', '/equipment-reservations/requests/flagged-request', (route) => {
+      expect(route.request().postDataJSON()).toEqual({ status: decision })
+      status = decision
+      return json(route, { request: { ...flagged(), reviewedBy: users.techSupport.user_id } })
+    })
+    await page.goto('/equipment-requests')
+    const flaggedRow = page.getByRole('row').filter({ hasText: 'Flagged projector' })
+    const unaffectedRow = page.getByRole('row').filter({ hasText: 'Unaffected chairs' })
+    await expect(flaggedRow.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+    await expect(flaggedRow.getByRole('button', { name: 'Reject', exact: true })).toBeVisible()
+    await expect(unaffectedRow.getByRole('button')).toHaveCount(0)
+    await expect(page.getByRole('columnheader').last()).toHaveText('Safety change reason')
+    await expect(flaggedRow.getByRole('cell').last()).toContainText('Move projector cables away from the walkway.')
+    await expect(flaggedRow.getByRole('cell').last()).toContainText('Reason: Trip hazards affect the accessible route.')
+    await expect(unaffectedRow.getByRole('cell').last()).toHaveText('Not flagged')
+    const scrollRegion = page.getByRole('region', { name: 'Community Wellbeing Fair equipment requests' })
+    expect(await scrollRegion.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    await scrollRegion.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+    expect(await scrollRegion.evaluate((element) => element.scrollLeft > 0)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`equipment-safety-review-${decision}.png`), fullPage: true })
+    await flaggedRow.getByRole('button', { name: decision === 'Approved' ? 'Approve' : 'Reject', exact: true }).click()
+    await expect(flaggedRow.locator('.status-badge')).toHaveText(decision)
+    await expect(unaffectedRow.locator('.status-badge')).toHaveText('Approved')
+    await expect(flaggedRow.getByRole('cell').last()).toContainText('Move projector cables away from the walkway.')
+  })
+}

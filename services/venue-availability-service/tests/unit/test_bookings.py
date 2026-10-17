@@ -13,6 +13,7 @@ names and assertions specify the scenario. No group is credited with all five AC
 Venue Availability: booking creation, approval/rejection, and conflict-checking."""
 
 from datetime import datetime
+import pytest
 
 from app import create_app
 from app.models import _has_conflict
@@ -29,6 +30,67 @@ def test_health():
     client = create_app().test_client()
     response = client.get("/health")
     assert response.status_code == 200
+
+
+def test_booking_reads_project_optional_closure_history_without_requiring_migration(setup, monkeypatch):
+    monkeypatch.setenv("VENUE_BOOKING_LEGACY_SCHEMA", "true")
+    client, cursor = setup
+    cursor.fetchall.return_value = [booking_row()]
+    response = client.get(f"/events/{EVENT_ID}/venue-bookings")
+    assert response.status_code == 200
+    sql = cursor.execute.call_args.args[0]
+    assert 'to_jsonb("VenueBooking")->>\'rejection_closure_id\'' in sql
+    assert 'to_jsonb("VenueBooking")->>\'rejected_at\'' in sql
+
+
+# Safety revision AC2/AC4 (storage boundary): scope the reset to selected booking IDs and require staff review again.
+def test_safety_reset_returns_only_selected_active_bookings_to_review(setup):
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
+    cursor.fetchall.side_effect = [[booking_row(status="Approved")], [booking_row(status="Pending Review")]]
+    response = client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
+        headers={"X-Internal-Service-Token": "test-token"}, json={"bookingIds": [BOOKING_ID]})
+    assert response.status_code == 200
+    assert response.json["bookings"][0]["status"] == "Pending Review"
+    sql, params = cursor.execute.call_args.args
+    assert "reviewed_by = NULL" in sql
+    assert "status IN ('Approved', 'Pending', 'Pending Review')" in sql
+    assert params == [EVENT_ID, [BOOKING_ID]]
+
+
+def test_safety_reset_rejects_booking_from_another_event(setup):
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
+    cursor.fetchall.return_value = []
+    assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
+        headers={"X-Internal-Service-Token": "test-token"}, json={"bookingIds": [BOOKING_ID]}).status_code == 404
+    assert not any('UPDATE public."VenueBooking"' in call.args[0] for call in cursor.execute.call_args_list)
+
+
+@pytest.mark.parametrize("token,headers,code", [(None, {}, 503), ("test-token", {}, 403)])
+def test_safety_reset_requires_internal_authentication(setup, token, headers, code):
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = token
+    assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset", headers=headers,
+        json={"bookingIds": [BOOKING_ID]}).status_code == code
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"bookingIds": []}, {"bookingIds": ["bad"]},
+    {"bookingIds": [BOOKING_ID, BOOKING_ID]}, {"bookingIds": [BOOKING_ID] * 501}])
+def test_safety_reset_validates_booking_ids(setup, payload):
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
+    assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
+        headers={"X-Internal-Service-Token": "test-token"}, json=payload).status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_safety_reset_requires_database(setup):
+    client, _ = setup
+    client.application.config.update(INTERNAL_SERVICE_TOKEN="test-token", DATABASE_URL=None)
+    assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
+        headers={"X-Internal-Service-Token": "test-token"}, json={"bookingIds": [BOOKING_ID]}).status_code == 503
 
 
 def test_create_booking_succeeds_when_no_conflict(setup):
@@ -211,6 +273,7 @@ def test_get_event_bookings_lists_each_booking_separately(setup):
     assert params == [EVENT_ID]
 
 
+# Safety revision AC2/AC4 (revised-booking path): editing one booking clears its review without editing siblings.
 def test_update_booking_changes_only_selected_row_and_resets_review(setup):
     client, cursor = setup
     cursor.fetchone.side_effect = [

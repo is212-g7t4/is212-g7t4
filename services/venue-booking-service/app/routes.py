@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from uuid import UUID
 
 import httpx
 from flask import Blueprint, jsonify, request
@@ -18,6 +19,8 @@ from app.clients import (
     get_event_bookings,
     get_event,
     get_event_for_internal_viewer,
+    get_staff_events,
+    get_safety_records,
     get_venue,
     get_venues,
     reconcile_legacy_conflicts,
@@ -55,6 +58,72 @@ def _add_event_names(result, viewer_id, viewer_role):
 @bp.get("/health")
 def health():
     return jsonify(status="ok")
+
+
+def _venue_staff():
+    try:
+        viewer_id = str(UUID(request.headers.get("X-Dev-User-Id", "")))
+    except ValueError:
+        return None, (jsonify(message="A valid DEV user UUID is required."), 401)
+    if request.headers.get("X-Dev-Role") != "Venue Staff":
+        return None, (jsonify(message="Only Venue Staff can review venue requests."), 403)
+    return viewer_id, None
+
+
+@bp.get("/booking-requests")
+def staff_booking_requests():
+    viewer_id, failure = _venue_staff()
+    if failure:
+        return failure
+    status = request.args.get("status")
+    if status not in (None, "Pending", "Approved", "Rejected"):
+        return jsonify(message="Invalid booking status filter."), 400
+    try:
+        events = get_staff_events(viewer_id)
+        venues = {venue["id"]: venue["name"] for venue in get_venues()}
+        result = []
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            booking_lists = list(pool.map(get_event_bookings, [event["id"] for event in events]))
+        for event, bookings in zip(events, booking_lists):
+            selected = [booking for booking in bookings if status is None or
+                (booking["status"] in ("Pending", "Pending Review") if status == "Pending" else booking["status"] == status)]
+            if not selected:
+                continue
+            latest = None
+            if event["status"] == "Safety Changes Requested":
+                latest = max(get_safety_records(event["id"]), key=lambda review: review["roundNumber"], default=None)
+            for booking in selected:
+                booking["venueName"] = venues.get(booking["venueId"], "Unknown venue")
+                changes = [flag["changeRequired"] for flag in (latest or {}).get("flags", [])
+                    if flag["area"] == "venue arrangement" and flag.get("bookingId") in (None, booking["id"])]
+                booking["safetyFeedback"] = {"reason": latest.get("remarks"), "requestedChanges": changes} if changes and latest["status"] == "Changes Requested" else None
+            result.append({"eventId": event["id"], "eventName": event["eventName"], "eventStatus": event["status"],
+                "coordinatorId": event.get("coordinatorId"), "bookings": selected})
+    except httpx.TimeoutException:
+        return jsonify(message="Loading venue requests took too long."), 504
+    except Exception:
+        return jsonify(message="Unable to load venue requests right now."), 502
+    return jsonify(events=result)
+
+
+@bp.patch("/booking-requests/<booking_id>/review")
+def staff_review_booking(booking_id):
+    viewer_id, failure = _venue_staff()
+    if failure:
+        return failure
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("status") not in ("Approved", "Rejected") or data.get("reviewedBy") != viewer_id:
+        return jsonify(message="A valid decision and matching reviewedBy are required."), 400
+    try:
+        booking = get_booking(booking_id)
+        event = get_event_for_internal_viewer(booking["eventId"], viewer_id, "Venue Staff")
+        if event["status"] not in ("Under Review", "Approved", "Safety Changes Requested") or booking["status"] not in ("Pending", "Pending Review"):
+            return jsonify(message="This venue request is not awaiting staff review."), 409
+    except BookingNotFoundError:
+        return jsonify(message="Venue booking not found."), 404
+    except Exception:
+        return jsonify(message="Unable to check the venue request."), 502
+    return _decide(booking_id, data["status"])
 
 
 @bp.get("/venue-search")

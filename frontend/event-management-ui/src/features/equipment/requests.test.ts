@@ -77,7 +77,10 @@ test('fetchRequestableEvents keeps only assigned Under Review events and exclude
   const fn = stubFetch(true, { events: [
     { id: 'a', status: 'Submitted' }, { id: 'b', status: 'Under Review' },
     { id: 'c', status: 'Approved' }, { id: 'd', status: 'Confirmed' }, { id: 'e', status: 'Rejected' },
+    { id: 'f', status: 'Safety Changes Requested' },
   ] })
-  await expect(fetchRequestableEvents('c1')).resolves.toEqual([{ id: 'b', status: 'Under Review' }])
+  await expect(fetchRequestableEvents('c1')).resolves.toEqual([
+    { id: 'b', status: 'Under Review' }, { id: 'f', status: 'Safety Changes Requested' },
+  ])
   expect(fn.mock.calls[0][0]).toBe('http://localhost:5003/events?coordinatorId=c1')
 })

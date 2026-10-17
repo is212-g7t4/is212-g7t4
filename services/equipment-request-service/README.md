@@ -48,3 +48,14 @@ Service) until Supabase JWT verification lands.
 
 Because the status lives in this table, a coordinator reading
 `GET /equipment-requests?eventId=` sees a decision as soon as it is saved.
+
+### Safety re-review
+
+`POST /events/<event_id>/equipment-requests/safety-reset` accepts
+`{"requestIds": ["<uuid>"]}` (1-500 distinct IDs). It requires an
+`X-Internal-Service-Token` matching `INTERNAL_SERVICE_TOKEN`, shared with
+Safety Check Service. This is not a browser or staff decision endpoint.
+All IDs must belong to the event; otherwise nothing is updated. In one
+transaction, the selected requests become `Pending` and `reviewed_by` is
+cleared. Requests outside the selection are unchanged. Repeating the same
+reset before staff review has the same result.

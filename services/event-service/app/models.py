@@ -93,6 +93,7 @@ ALLOWED_TRANSITIONS = {
 # (SCRUM-151 AC4). SCRUM-164 adds "Safety Changes Requested": {"Pending Safety Check"}.
 SAFETY_TRANSITIONS = {
     "Approved": {"Pending Safety Check"},
+    "Safety Changes Requested": {"Pending Safety Check"},
     "Pending Safety Check": {"Confirmed", "Safety Changes Requested", "Cancelled"},
     # SCRUM-153 AC1: a high-impact change withdraws the approval, so
     # 'Confirmed' gains exactly one way out. It is legal only together with

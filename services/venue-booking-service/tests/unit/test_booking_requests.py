@@ -1,6 +1,7 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+import httpx
 
 from app import create_app
 from app.clients import (
@@ -59,6 +60,114 @@ def test_health():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
+
+
+STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
+STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+
+
+@patch("app.routes.get_safety_records")
+@patch("app.routes.get_event_bookings")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_staff_events")
+def test_staff_queue_includes_targeted_safety_feedback(events, venues, bookings, records):
+    events.return_value = [{**EVENT, "eventName": "Workshop", "status": "Safety Changes Requested"}]
+    venues.return_value = VENUES
+    bookings.return_value = [dict(BOOKING), {**BOOKING, "id": "other", "status": "Approved"}]
+    records.return_value = [{"roundNumber": 1, "status": "Changes Requested", "remarks": "Exit blocked.", "flags": [
+        {"area": "venue arrangement", "bookingId": "booking-1", "changeRequired": "Move stage."}]}]
+    response = create_app().test_client().get("/booking-requests", headers=STAFF_HEADERS)
+    assert response.status_code == 200
+    rows = response.json["events"][0]["bookings"]
+    assert rows[0]["safetyFeedback"] == {"reason": "Exit blocked.", "requestedChanges": ["Move stage."]}
+    assert rows[1]["safetyFeedback"] is None
+    assert rows[0]["venueName"] == "Grand Ballroom"
+
+
+@pytest.mark.parametrize("headers,code", [({}, 401), ({"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Event Coordinator"}, 403)])
+def test_staff_queue_requires_venue_staff(headers, code):
+    client = create_app().test_client()
+    assert client.get("/booking-requests", headers=headers).status_code == code
+    assert client.patch("/booking-requests/b/review", headers=headers, json={}).status_code == code
+
+
+# Safety revision AC2 (staff API): a reopened booking can receive a new Venue Staff decision during safety revision.
+@patch("app.routes.get_event_for_internal_viewer")
+@patch("app.routes.get_booking")
+@patch("app.routes.decide_booking")
+@pytest.mark.parametrize("status", ["Approved", "Rejected"])
+def test_staff_can_review_reopened_safety_booking(decide, booking, event, status):
+    booking.return_value = BOOKING
+    event.return_value = {"status": "Safety Changes Requested"}
+    decide.return_value = {**BOOKING, "status": status}
+    with patch("app.routes.get_venue", return_value=VENUES[1]):
+        response = create_app().test_client().patch("/booking-requests/booking-1/review", headers=STAFF_HEADERS,
+            json={"reviewedBy": STAFF_ID, "status": status})
+    assert response.status_code == 200
+    assert response.json["status"] == status
+
+
+@patch("app.routes.get_safety_records")
+@patch("app.routes.get_event_bookings")
+@patch("app.routes.get_venues")
+@patch("app.routes.get_staff_events")
+@pytest.mark.parametrize("status,count", [("Pending", 1), ("Approved", 1), ("Rejected", 0)])
+def test_staff_queue_filters_and_skips_safety_read_outside_revision(events, venues, bookings, records, status, count):
+    events.return_value = [{**EVENT, "eventName": "Workshop", "status": "Under Review"}]
+    venues.return_value = VENUES
+    bookings.return_value = [dict(BOOKING), {**BOOKING, "id": "approved", "status": "Approved"}]
+    response = create_app().test_client().get(f"/booking-requests?status={status}", headers=STAFF_HEADERS)
+    assert response.status_code == 200
+    assert len(response.json["events"]) == count
+    if count:
+        assert len(response.json["events"][0]["bookings"]) == 1
+    records.assert_not_called()
+
+
+def test_staff_queue_rejects_invalid_status():
+    assert create_app().test_client().get("/booking-requests?status=bad", headers=STAFF_HEADERS).status_code == 400
+
+
+@patch("app.routes.get_staff_events")
+@pytest.mark.parametrize("error,code", [(httpx.ReadTimeout("timeout"), 504), (RuntimeError(), 502)])
+def test_staff_queue_reports_downstream_failure(events, error, code):
+    events.side_effect = error
+    assert create_app().test_client().get("/booking-requests", headers=STAFF_HEADERS).status_code == code
+
+
+@pytest.mark.parametrize("data", [None, {}, {"status": "Pending", "reviewedBy": STAFF_ID}, {"status": "Approved", "reviewedBy": "someone-else"}])
+def test_staff_review_validates_decision_and_actor(data):
+    assert create_app().test_client().patch("/booking-requests/b/review", headers=STAFF_HEADERS, json=data).status_code == 400
+
+
+@patch("app.routes.get_event_for_internal_viewer")
+@patch("app.routes.get_booking")
+@pytest.mark.parametrize("event_status,booking_status", [("Confirmed", "Pending Review"), ("Under Review", "Approved")])
+def test_staff_review_blocks_stale_or_closed_requests(booking, event, event_status, booking_status):
+    booking.return_value = {**BOOKING, "status": booking_status}
+    event.return_value = {"status": event_status}
+    assert create_app().test_client().patch("/booking-requests/b/review", headers=STAFF_HEADERS,
+        json={"status": "Approved", "reviewedBy": STAFF_ID}).status_code == 409
+
+
+@patch("app.routes.get_booking")
+@pytest.mark.parametrize("error,code", [(BookingNotFoundError(), 404), (RuntimeError(), 502)])
+def test_staff_review_reports_lookup_failure(booking, error, code):
+    booking.side_effect = error
+    assert create_app().test_client().patch("/booking-requests/b/review", headers=STAFF_HEADERS,
+        json={"status": "Approved", "reviewedBy": STAFF_ID}).status_code == code
+
+
+@patch("app.clients.httpx.get")
+def test_staff_queue_clients_use_event_and_safety_owners(get):
+    from app import clients
+    response = MagicMock()
+    response.json.return_value = {"events": [EVENT], "safetyChecks": [{"roundNumber": 1}]}
+    get.return_value = response
+    assert clients.get_staff_events(STAFF_ID) == [EVENT]
+    assert get.call_args.kwargs["params"] == {"coordinatorId": STAFF_ID, "viewerRole": "Venue Staff"}
+    assert clients.get_safety_records("evt-1") == [{"roundNumber": 1}]
+    assert get.call_args.kwargs["params"] == {"eventId": "evt-1"}
 
 
 @patch("app.routes.create_booking")

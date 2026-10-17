@@ -65,6 +65,26 @@ def sent(monkeypatch):
 # --- Event Service -----------------------------------------------------------
 
 
+def test_reset_equipment_safety_requests_scopes_ids_and_uses_internal_auth(sent, monkeypatch):
+    calls, queue = sent
+    monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "test-token")
+    queue.append(Response(200, {"requests": [equipment_request("Pending")]}))
+    assert clients.reset_equipment_safety_requests(EVENT_ID, ["request-id"])[0]["status"] == "Pending"
+    assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/equipment-requests/safety-reset")
+    assert calls[0]["json"] == {"requestIds": ["request-id"]}
+    assert calls[0]["headers"] == {"X-Internal-Service-Token": "test-token"}
+
+
+def test_reset_venue_safety_bookings_uses_owner_and_internal_auth(sent, monkeypatch):
+    calls, queue = sent
+    monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "test-token")
+    queue.append(Response(200, {"bookings": []}))
+    assert clients.reset_venue_safety_bookings(EVENT_ID, [BOOKING_ID]) == []
+    assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/venue-bookings/safety-reset")
+    assert calls[0]["json"] == {"bookingIds": [BOOKING_ID]}
+    assert calls[0]["headers"] == {"X-Internal-Service-Token": "test-token"}
+
+
 def test_get_event_scopes_the_read_to_the_coordinator(sent):
     """Event Service does AC5's check, so the coordinator travels with the read."""
     calls, queue = sent

@@ -104,12 +104,15 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
       events.map(({ eventId, eventName, eventStatus, startTime, endTime, coordinatorId, requests: items }) => {
         // Availability and actions only matter while a decision is still open.
         const pendingItems = items.filter((request) => request.status === 'Pending')
-        const showStock = pendingItems.length > 0 && (eventStatus === 'Submitted' || eventStatus === 'Under Review')
-        const showActions = showStock && canReview && eventStatus === 'Under Review'
+        const reviewStage = eventStatus === 'Under Review' || eventStatus === 'Safety Changes Requested'
+        const showStock = pendingItems.length > 0 && (eventStatus === 'Submitted' || reviewStage)
+        const showActions = showStock && canReview && reviewStage
+        const showSafetyFeedback = canReview && eventStatus === 'Safety Changes Requested'
         const anyInsufficient = pendingItems.some((request) => request.availability?.isInsufficient)
-        const widths = showStock
+        const baseWidths = showStock
           ? showActions ? [27, 13, 12, 14, 19, 15] : [30, 15, 15, 18, 22]
           : [29, 16, 15, 40]
+        const widths = showSafetyFeedback ? [...baseWidths.map((width) => width * 10), 240] : baseWidths
         return <article key={eventId} className="panel event-card">
           <header className="event-card-header">
             <div className="event-card-title">
@@ -121,10 +124,10 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
               Coordinator: {resolveUserName?.(coordinatorId) ?? (coordinatorId ? 'Unknown' : 'Unassigned')}
             </span>
           </header>
-          <div className="table-scroll">
-            <table className="equipment-request-table">
-              <colgroup>{widths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
-              <thead><tr><th>Equipment</th><th>Type</th><th>Requested</th>{showStock && <th>Available</th>}<th>Requirements</th>{showActions && <th>Action</th>}</tr></thead>
+          <div className="table-scroll" role="region" aria-label={`${eventName} equipment requests`} tabIndex={0}>
+            <table className={`equipment-request-table${showSafetyFeedback ? ' with-safety-feedback' : ''}`}>
+              <colgroup>{widths.map((width, index) => <col key={index} style={{ width: `${width}${showSafetyFeedback ? 'px' : '%'}` }} />)}</colgroup>
+              <thead><tr><th>Equipment</th><th>Type</th><th>Requested</th>{showStock && <th>Available</th>}<th>Requirements</th>{showActions && <th>Action</th>}{showSafetyFeedback && <th>Safety change reason</th>}</tr></thead>
               <tbody>
                 {items.map((request) => {
                   const insufficient = request.availability?.isInsufficient ?? false
@@ -149,6 +152,12 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
                         <button className="button small reject" disabled={busy} onClick={() => review(request.id, 'Rejected')}>Reject</button>
                       </div>
                       : <span className="muted">Reviewed</span>}</td>}
+                    {showSafetyFeedback && <td>{request.safetyFeedback
+                      ? <div className="equipment-safety-feedback">
+                        {request.safetyFeedback.requestedChanges.map((change, index) => <p key={index}>{change}</p>)}
+                        {request.safetyFeedback.reason && <p className="muted">Reason: {request.safetyFeedback.reason}</p>}
+                      </div>
+                      : <span className="muted">Not flagged</span>}</td>}
                   </tr>
                 })}
               </tbody>
