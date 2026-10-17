@@ -6,6 +6,8 @@ import { InlineLoading } from '../../components/Loading'
 import { singaporeInput } from '../calendar/dates'
 import { fetchVenues } from './venues'
 import type { Venue } from './venues'
+import { fetchActiveVenueHolds } from './venueHolds'
+import type { VenueHold } from './venueHolds'
 import { VenueBookingError, cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
 import type { VenueBooking } from './venueBookings'
 
@@ -57,6 +59,8 @@ export function VenueBookingsPanel({
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [venueError, setVenueError] = useState('')
+  const [holdsError, setHoldsError] = useState('')
+  const [activeHolds, setActiveHolds] = useState<VenueHold[]>([])
   const [submitError, setSubmitError] = useState('')
   const draftRevision = useRef(0)
   const [submitMessage, setSubmitMessage] = useState('')
@@ -74,18 +78,28 @@ export function VenueBookingsPanel({
     Promise.allSettled([
       fetchVenueBookings(eventId, coordinatorId),
       fetchVenues(),
-    ]).then(([bookingResult, venueResult]) => {
+      fetchActiveVenueHolds(),
+    ]).then(([bookingResult, venueResult, holdsResult]) => {
       if (!active) return
       if (bookingResult.status === 'fulfilled') setBookings(bookingResult.value)
       else setLoadError(bookingResult.reason instanceof Error ? bookingResult.reason.message : 'Unable to load venue bookings.')
       if (venueResult.status === 'fulfilled') setVenues(venueResult.value)
       else setVenueError(venueResult.reason instanceof Error ? venueResult.reason.message : 'Unable to load venues.')
+      if (holdsResult.status === 'fulfilled') setActiveHolds(holdsResult.value)
+      else setHoldsError(holdsResult.reason instanceof Error ? holdsResult.reason.message : 'Unable to load active venue holds.')
       setLoading(false)
     })
     return () => { active = false }
   }, [eventId, coordinatorId])
 
   const availableVenues = venues.filter((venue) => venue.status === 'Available')
+  const overlapsActiveHold = (venueId: string) => {
+    const bookingStart = Date.parse(singaporeInstant(start))
+    const bookingEnd = Date.parse(singaporeInstant(end))
+    return activeHolds.some((hold) => hold.venueId === venueId
+      && bookingStart < Date.parse(hold.expiresAt)
+      && bookingEnd > Date.parse(hold.createdAt))
+  }
 
   const resetForm = () => {
     setSubmitError('')
@@ -234,11 +248,17 @@ export function VenueBookingsPanel({
       <form className="venue-booking-form" onSubmit={submit} onChangeCapture={() => { draftRevision.current += 1 }}>
         <h4>{editingId ? 'Edit venue booking' : 'Add venue booking'}</h4>
         <label className="field"><span>Venue <span className="required">*</span></span>
-          <select value={venueId} onChange={(change) => { setVenueId(change.target.value); setSubmitError('') }} disabled={Boolean(venueError)} required>
+          <select value={venueId} onChange={(change) => { setVenueId(change.target.value); setSubmitError('') }} disabled={Boolean(venueError || holdsError)} required>
             <option value="">Select a venue</option>
-            {availableVenues.map((venue) => <option key={venue.id} value={venue.id}>{venue.name} · capacity {venue.capacity ?? 'unknown'}</option>)}
+            {availableVenues.map((venue) => {
+              const isOnHold = overlapsActiveHold(venue.id)
+              return <option key={venue.id} value={venue.id} disabled={isOnHold}>
+                {venue.name} · capacity {venue.capacity ?? 'unknown'}{isOnHold ? ' (On Hold)' : ''}
+              </option>
+            })}
           </select>
           {venueError && <span className="field-error" role="alert">{venueError}</span>}
+          {holdsError && <span className="field-error" role="alert">{holdsError}</span>}
         </label>
         <div className="field-row">
           <Field label="Booking start" type="datetime-local" value={start} onChange={(value) => { setStart(value); setSubmitError('') }} required />
@@ -248,7 +268,7 @@ export function VenueBookingsPanel({
         <Field label="Venue requirements" value={requirements} onChange={(value) => { setRequirements(value); setSubmitError('') }} textarea placeholder="e.g. Theatre seating, stage and projector." />
         {submitError && <p className="field-error" role="alert">{submitError}</p>}
         {submitMessage && <p role="status">{submitMessage}</p>}
-        <button className="button primary" type="submit" disabled={saving || cancellingId !== null || Boolean(venueError)}>
+        <button className="button primary" type="submit" disabled={saving || cancellingId !== null || Boolean(venueError || holdsError)}>
           {saving ? 'Saving…' : editingId ? 'Save venue booking' : 'Submit venue booking'}
         </button>
         {editingId && <button className="button" type="button" disabled={saving} onClick={resetForm}>Discard changes</button>}
