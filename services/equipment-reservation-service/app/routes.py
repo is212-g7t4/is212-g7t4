@@ -65,6 +65,15 @@ def _decision():
     return status if status in DECISIONS else None
 
 
+def _rejection_reason(status):
+    if status != "Rejected":
+        return None, None
+    reason = request.get_json().get("rejectionReason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 500:
+        return None, "A rejection reason between 1 and 500 characters is required."
+    return reason.strip(), None
+
+
 @bp.errorhandler(DownstreamError)
 def downstream_failure(error):
     return jsonify(message=error.message), error.status
@@ -112,7 +121,10 @@ def request_review(request_id):
     status = _decision()
     if not status:
         return jsonify(message=f"status must be one of: {', '.join(DECISIONS)}."), 400
-    return jsonify(request=reservations.review_request(request.headers, request_id, status))
+    reason, error = _rejection_reason(status)
+    if error:
+        return jsonify(message=error), 400
+    return jsonify(request=reservations.review_request(request.headers, request_id, status, reason))
 
 
 @bp.patch("/equipment-reservations/events/<event_id>")
@@ -126,7 +138,10 @@ def event_review(event_id):
     status = _decision()
     if not status:
         return jsonify(message=f"status must be one of: {', '.join(DECISIONS)}."), 400
-    return jsonify(requests=reservations.review_event(request.headers, event_id, status))
+    reason, error = _rejection_reason(status)
+    if error:
+        return jsonify(message=error), 400
+    return jsonify(requests=reservations.review_event(request.headers, event_id, status, reason))
 
 
 @bp.post("/equipment-reservations/events/<event_id>/requests")

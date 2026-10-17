@@ -59,13 +59,19 @@ def get_request(headers, request_id):
     return _call("GET", _request_service(f"/equipment-requests/{request_id}"), headers=_identity(headers))["request"]
 
 
-def review_request(headers, request_id, status):
-    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json={"status": status}, headers=_identity(headers))
+def review_request(headers, request_id, status, rejection_reason=None):
+    payload = {"status": status}
+    if status == "Rejected":
+        payload["rejectionReason"] = rejection_reason
+    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload, headers=_identity(headers))
     return body["request"]
 
 
-def review_event_requests(headers, event_id, status):
-    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json={"status": status}, headers=_identity(headers))
+def review_event_requests(headers, event_id, status, rejection_reason=None):
+    payload = {"status": status}
+    if status == "Rejected":
+        payload["rejectionReason"] = rejection_reason
+    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload, headers=_identity(headers))
     return body["requests"]
 
 
