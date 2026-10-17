@@ -34,7 +34,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-test('the edit is PATCHed to Event Service with only the changed fields', async () => {
+test('the edit is PATCHed to Event Workflow Service with only the changed fields', async () => {
   vi.stubGlobal('fetch', respond(200, { id: eventId, status: 'Confirmed' }))
 
   const saved = await updateEventDetails(eventId, coordinatorId, {
@@ -43,7 +43,7 @@ test('the edit is PATCHed to Event Service with only the changed fields', async 
 
   expect(saved.status).toBe('Confirmed')
   const [url, init] = vi.mocked(fetch).mock.calls[0]
-  expect(String(url)).toBe(`http://localhost:5003/events/${eventId}/details`)
+  expect(String(url)).toBe(`http://localhost:5014/events/${eventId}/details`)
   expect(init?.method).toBe('PATCH')
   expect(JSON.parse(String(init?.body))).toEqual({
     coordinatorId,
@@ -116,6 +116,24 @@ test('a validation 400 carries its missing fields and errors', async () => {
   expect(error).toBeInstanceOf(EventEditError)
   expect(error.missingFields).toEqual(['Purpose'])
   expect(error.errors).toEqual(['Preferred End Date & Time must be after the start.'])
+})
+
+test('SCRUM-20 AC3: a contradiction carries every reason', async () => {
+  const conflicts = [
+    { field: 'preferredStartDate', area: 'venue', message: 'The new dates do not overlap the booking.' },
+    { field: 'preferredStartDate', area: 'equipment', message: 'Microphone: 2 requested but only 1 available.' },
+  ]
+  vi.stubGlobal('fetch', respond(409, {
+    code: 'CHANGE_CONTRADICTS_ARRANGEMENTS',
+    message: 'This change can’t be saved.',
+    conflicts,
+  }))
+
+  const error = await updateEventDetails(eventId, coordinatorId, {}).catch((cause) => cause)
+
+  expect(error).toBeInstanceOf(EventEditError)
+  expect(error.code).toBe('CHANGE_CONTRADICTS_ARRANGEMENTS')
+  expect(error.conflicts).toEqual(conflicts)
 })
 
 test('a refusal with no body still produces a readable message', async () => {

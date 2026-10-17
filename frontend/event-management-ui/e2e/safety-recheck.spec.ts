@@ -79,7 +79,7 @@ test('AC2: renaming a Confirmed event leaves it Confirmed', async ({ page, mockA
   const edits: Record<string, unknown>[] = []
   let current: Record<string, unknown> = confirmed
   await openAsCoordinator(page, mockApi, () => current)
-  await mock(page, 'event', `/events/${confirmed.id}/details`, (route) => {
+  await mock(page, 'eventWorkflow', `/events/${confirmed.id}/details`, (route) => {
     const body = route.request().postDataJSON()
     edits.push(body)
     current = { ...confirmed, eventName: 'Safety Recheck Expo (Autumn)' }
@@ -102,12 +102,44 @@ test('AC2: renaming a Confirmed event leaves it Confirmed', async ({ page, mockA
   })
 })
 
+test('SCRUM-20 AC3: a change that contradicts the venue is refused with an alert and no safety call', async ({ page, mockApi }) => {
+  const rechecks: Record<string, unknown>[] = []
+  await openAsCoordinator(page, mockApi, () => confirmed)
+  await mock(page, 'eventWorkflow', `/events/${confirmed.id}/details`, (route) => json(route, {
+    code: 'CHANGE_CONTRADICTS_ARRANGEMENTS',
+    message: 'This change can\'t be saved because it contradicts arrangements already made for the event.',
+    changedFields: ['expectedAttendance'],
+    highImpactFields: ['expectedAttendance'],
+    conflicts: [{
+      field: 'expectedAttendance',
+      area: 'venue',
+      message: 'Grand Hall holds up to 200 people, fewer than the new attendance of 400.',
+    }],
+  }, 409))
+  await mock(page, 'safetyCheck', '/safety-checks/recheck', (route) => {
+    rechecks.push(route.request().postDataJSON())
+    return json(route, {}, 500)
+  })
+
+  await page.goto(`/events/${confirmed.id}`)
+  await page.getByRole('button', { name: 'Edit details' }).click()
+  await page.getByLabel('Expected Attendance *').fill('400')
+  await page.getByRole('button', { name: 'Save details' }).click()
+
+  const banner = page.getByRole('alert').filter({ hasText: 'contradicts arrangements' })
+  await expect(banner).toBeVisible()
+  await expect(banner).toContainText('Grand Hall holds up to 200 people')
+  await expect(page.getByRole('heading', { name: 'Withdraw safety approval?' })).toHaveCount(0)
+  await expect(page.locator('.status-badge').first()).toContainText('Confirmed')
+  expect(rechecks).toEqual([])
+})
+
 test('AC1, AC3: changing expected attendance withdraws the approval after a confirm step', async ({ page, mockApi }) => {
   const rechecks: Record<string, unknown>[] = []
   let current: Record<string, unknown> = confirmed
   await openAsCoordinator(page, mockApi, () => current)
   // The gate: Event Service refuses the high-impact edit and says what it costs.
-  await mock(page, 'event', `/events/${confirmed.id}/details`, (route) => json(route, {
+  await mock(page, 'eventWorkflow', `/events/${confirmed.id}/details`, (route) => json(route, {
     code: 'SAFETY_RECHECK_REQUIRED',
     message: 'Changing Expected attendance will withdraw this event\'s safety approval. It will return to Pending Safety Check.',
     changedFields: ['expectedAttendance'],
@@ -170,7 +202,7 @@ test('AC1, AC3: changing expected attendance withdraws the approval after a conf
 test('AC1: "Go back" leaves the approval in place', async ({ page, mockApi }) => {
   const rechecks: Record<string, unknown>[] = []
   await openAsCoordinator(page, mockApi, () => confirmed)
-  await mock(page, 'event', `/events/${confirmed.id}/details`, (route) => json(route, {
+  await mock(page, 'eventWorkflow', `/events/${confirmed.id}/details`, (route) => json(route, {
     code: 'SAFETY_RECHECK_REQUIRED',
     message: 'Changing Expected attendance will withdraw this event\'s safety approval.',
     changedFields: ['expectedAttendance'],

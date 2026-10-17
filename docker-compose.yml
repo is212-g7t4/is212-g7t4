@@ -170,3 +170,24 @@ services:
       - equipment-service
     ports:
       - "5012:5000"
+
+  event-workflow-service:
+    build: ./services/event-workflow-service
+    environment:
+      <<: *frontend-environment
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      VENUE_AVAILABILITY_SERVICE_URL: "http://venue-availability-service:5000"
+      EQUIPMENT_REQUEST_SERVICE_URL: "http://equipment-request-service:5000"
+      EQUIPMENT_SERVICE_URL: "http://equipment-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
+      VENUE_SERVICE_URL: "http://venue-service:5000"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+    depends_on:
+      - event-service
+      - venue-availability-service
+      - equipment-request-service
+      - equipment-service
+      - user-service
+      - venue-service
+    ports:
+      - "5014:5000"

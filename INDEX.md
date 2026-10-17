@@ -27,7 +27,7 @@ is212-g7t4/
 ├── services/
 │   ├── _template-atomic-service/       # copy this to start any atomic service
 │   ├── _template-composite-service/    # copy this to start any composite service
-│   ├── event-workflow-service/         # composite (planned)
+│   ├── event-workflow-service/         # composite (built, edit validation)
 │   ├── coordinator-assignment-service/ # composite (built)
 │   ├── venue-booking-service/          # composite (built)
 │   ├── equipment-reservation-service/  # composite (built, availability check + review)
@@ -76,7 +76,7 @@ composites are allowed to call other services.
 
 | Service | Path | Calls | Description | Status |
 |---|---|---|---|---|
-| Event Workflow Service | `services/event-workflow-service/` | Booking Conflict, Equipment Request, Forum, Broker | Re-validates existing venue/equipment commitments on event change; cascades cancellations. **Provisional** — see open question below. | planned |
+| Event Workflow Service | `services/event-workflow-service/` | Event, User, Venue Availability, Venue, Equipment Request, Equipment | SCRUM-20, port 5014: `PATCH /events/:id/details` lets the assigned coordinator, or the Event Coordinator Lead when no coordinator is assigned (role looked up in User Service), edit an event. Event Service classifies the edit with a `dryRun`; a high-impact one is checked against venue bookings (new dates overlap none of the live bookings), equipment stock in the new window and venue capacity (attendance increase), and a contradiction is refused with `409 CHANGE_CONTRADICTS_ARRANGEMENTS` and the reasons. Otherwise Event Service saves it. The change/cancellation cascade, Forum and Broker are not built — **provisional**, see open question below. | built (edit validation) |
 | Coordinator Assignment Service | `services/coordinator-assignment-service/` | User, Event, Forum, Broker | Assigns/reassigns the Event Coordinator on an event; only the Event Coordinator Lead (role `Event Coordinator Lead`) may do so. No Forum call yet. | built |
 | Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Venue Availability, Forum, Broker | Submits independently evaluated venue requests (`POST /booking-requests`) with booking-level time, capacity and requirements; lists every request for an event (`GET /events/<id>/booking-requests`); supports venue-staff approval/rejection; and provides venue search (`GET /venue-search`, SCRUM-26). Validates event + venue, then persists/conflict-checks via Venue Availability Service. No Forum call/notification yet. | built |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment Availability, Forum, Broker | Two sub-flows: request submission, and technical-support approval/rejection. | planned |
