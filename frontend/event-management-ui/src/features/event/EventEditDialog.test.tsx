@@ -267,6 +267,47 @@ test('EVENT_UNDER_SAFETY_REVIEW is shown inline, with no confirm step', async ()
   expect(recheckSafety).not.toHaveBeenCalled()
 })
 
+test('SCRUM-20 AC3: a contradiction is shown as an alert banner with each reason, and no confirm step', async () => {
+  vi.mocked(updateEventDetails).mockRejectedValue(new EventEditError(
+    'This change can’t be saved because it contradicts arrangements already made for the event.',
+    {
+      code: 'CHANGE_CONTRADICTS_ARRANGEMENTS',
+      conflicts: [{
+        field: 'expectedAttendance',
+        area: 'venue',
+        message: 'Hall A holds up to 150 people, fewer than the new attendance of 400.',
+      }],
+    },
+  ))
+  renderDialog()
+
+  changeAttendance()
+  save()
+
+  const banner = await screen.findByRole('alert')
+  expect(banner).toHaveTextContent('contradicts arrangements already made')
+  expect(banner).toHaveTextContent('Hall A holds up to 150 people')
+  expect(banner).toHaveTextContent('Nothing was changed')
+  expect(screen.queryByText('Withdraw safety approval?')).not.toBeInTheDocument()
+  expect(recheckSafety).not.toHaveBeenCalled()
+  expect(onSaved).not.toHaveBeenCalled()
+})
+
+test('editing again clears the contradiction banner', async () => {
+  vi.mocked(updateEventDetails).mockRejectedValue(new EventEditError('Refused.', {
+    code: 'CHANGE_CONTRADICTS_ARRANGEMENTS',
+    conflicts: [{ field: 'expectedAttendance', area: 'venue', message: 'Too many people.' }],
+  }))
+  renderDialog()
+  changeAttendance()
+  save()
+  await screen.findByRole('alert')
+
+  fireEvent.change(screen.getByLabelText('Expected Attendance *'), { target: { value: '130' } })
+
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
 test('a pending event says which details it will not accept yet', () => {
   renderDialog('Pending Safety Check')
 
