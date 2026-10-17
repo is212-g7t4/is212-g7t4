@@ -1,3 +1,7 @@
+# SCRUM-173: synthetic CLOSURE_CONFIRMATION_KEY used only by a unit test with
+# mocked database I/O; not a deployed credential. Ignore only this exact finding.
+2b620e5141cbf146782db621d57869d28ae6665b:services/venue-availability-service/tests/unit/test_notification_scrum173.py:generic-api-key:270
+
 # Supabase publishable key and project URL in .env.example. Both are public by
 # design (access is enforced by RLS), flagged by the generic-api-key rule.
 8677a61644e52d3c6785b2dfcedf6fec2ae0e78c:.env.example:generic-api-key:7
