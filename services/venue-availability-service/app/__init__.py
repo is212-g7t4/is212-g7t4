@@ -603,4 +603,6 @@ def create_app(config=None):
     from app.closures import bp as closures_bp
 
     app.register_blueprint(closures_bp)
+    from app.outbox import bp as outbox_bp
+    app.register_blueprint(outbox_bp)
     return app
