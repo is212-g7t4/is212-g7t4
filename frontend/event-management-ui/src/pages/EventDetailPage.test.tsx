@@ -418,7 +418,7 @@ test.each(['Venue Staff', 'Technical Support'] as const)('AC5: %s cannot submit 
   expect(safetyPanel()).not.toBeInTheDocument()
 })
 
-test.each(['Submitted', 'Under Review', 'Rejected', 'Confirmed', 'Safety Changes Requested'] as const)(
+test.each(['Submitted', 'Under Review', 'Clarification Requested', 'Rejected', 'Confirmed', 'Safety Changes Requested'] as const)(
   'the panel is hidden on a %s event', async (status) => {
     vi.mocked(eventApi).mockResolvedValue({ ...event, status })
     render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
@@ -540,7 +540,7 @@ test.each(['Submitted', 'Under Review', 'Approved', 'Pending Safety Check', 'Con
   },
 )
 
-test.each(['Rejected', 'Cancelled'] as const)(
+test.each(['Rejected', 'Cancelled', 'Clarification Requested'] as const)(
   'SCRUM-153: a %s event has no details left to edit',
   async (status) => {
     vi.mocked(eventApi).mockResolvedValue({ ...event, status })

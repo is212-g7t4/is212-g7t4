@@ -60,6 +60,10 @@ def conflicts(changes, high):
     return checks.find_conflicts(EVENT, changes, high, COORDINATOR_ID)
 
 
+def test_clarification_keeps_approved_equipment_allocations_reserved():
+    assert "Clarification Requested" in checks.RESERVING_EVENT_STATUSES
+
+
 # --- dates vs venue bookings ---------------------------------------------------
 
 

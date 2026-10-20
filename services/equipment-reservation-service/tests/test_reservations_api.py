@@ -254,6 +254,7 @@ def test_overlapping_safety_event_only_approved_equipment_holds_stock(world, cli
     assert ("list_requests", "Approved", [OTHER]) in world.calls
     assert "Pending Safety Check" in RESERVING_EVENT_STATUSES
     assert "Safety Changes Requested" in RESERVING_EVENT_STATUSES
+    assert "Clarification Requested" in RESERVING_EVENT_STATUSES
     assert "Cancelled" not in RESERVING_EVENT_STATUSES
 
 

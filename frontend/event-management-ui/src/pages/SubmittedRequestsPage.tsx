@@ -11,6 +11,7 @@ import { SubmissionPopup } from '../components/SubmissionPopup'
 import { RejectionDialog } from '../components/RejectionDialog'
 import { ArrowRightIcon, RefreshIcon } from '../components/Icon'
 import { EventCardSkeletonList, Spinner } from '../components/Loading'
+import { ClarificationDialog } from '../features/event/ClarificationDialog'
 
 export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoordinatorName, resolveUserName, onViewDetails }: { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
@@ -20,6 +21,9 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
   const [decisionId, setDecisionId] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<SubmittedEvent | null>(null)
   const [reason, setReason] = useState('')
+  const [clarifying, setClarifying] = useState<SubmittedEvent | null>(null)
+  const [clarificationMessage, setClarificationMessage] = useState('')
+  const [clarificationError, setClarificationError] = useState('')
   const [coordinators, setCoordinators] = useState<Coordinator[]>([])
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
 
@@ -95,6 +99,31 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
     }
   }
 
+  const requestClarification = async () => {
+    if (!clarifying || !clarificationMessage.trim()) return
+    const event = clarifying
+    setDecisionId(event.id)
+    setClarificationError('')
+    try {
+      await eventApi(
+        `/events/${event.id}/clarification-request`,
+        { coordinatorId: currentCoordinator.id, message: clarificationMessage.trim() },
+        'PATCH',
+      )
+      setEvents((current) => current.filter((item) => item.id !== event.id))
+      setClarifying(null)
+      setClarificationMessage('')
+      setPopup({
+        title: 'Clarification Requested',
+        messages: [`Your question was sent to the organiser of ${event.eventName}.`],
+      })
+    } catch (cause) {
+      setClarificationError(cause instanceof Error ? cause.message : 'Unable to request clarification.')
+    } finally {
+      setDecisionId(null)
+    }
+  }
+
   if (!isCoordinator(role)) return <RoleWarning>Submitted event requests are visible to Event Coordinators.</RoleWarning>
 
   return <div className="page-stack">
@@ -125,11 +154,13 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
               {event.coordinatorId === currentCoordinator.id && <div className="table-actions">
                 <button className="button approve" disabled={decisionId === event.id} onClick={() => approve(event)}>{decisionId === event.id && <Spinner size={12} />}{decisionId === event.id ? 'Processing…' : 'Approve Request'}</button>
                 <button className="button reject" disabled={decisionId === event.id} onClick={() => { setRejecting(event); setReason('') }}>Reject Request</button>
+                <button className="button secondary" disabled={decisionId === event.id} onClick={() => { setClarifying(event); setClarificationMessage(''); setClarificationError('') }}>Request clarification</button>
               </div>}
             </div>
           : isLead(role) && <p className="muted">Not assigned yet. Assign it from Unassigned requests.</p>}
       </article>)}
     {rejecting && <RejectionDialog eventName={rejecting.eventName} reason={reason} submitting={decisionId === rejecting.id} onReasonChange={setReason} onCancel={() => { setRejecting(null); setReason('') }} onConfirm={reject} />}
+    {clarifying && <ClarificationDialog eventName={clarifying.eventName} message={clarificationMessage} submitting={decisionId === clarifying.id} error={clarificationError} onMessageChange={setClarificationMessage} onCancel={() => { setClarifying(null); setClarificationMessage(''); setClarificationError('') }} onConfirm={requestClarification} />}
   </div>
 }
 
