@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { assignmentApi, eventApi } from '../features/event/submission'
 import type { Coordinator, SubmittedEvent } from '../features/event/submission'
@@ -55,4 +55,25 @@ test('the Lead sees the Reassign option', async () => {
   render(<SubmittedRequestsPage role="Event Coordinator Lead" currentCoordinatorId={leadId} currentCoordinatorName="Grace Lee" onViewDetails={vi.fn()} />)
 
   expect(await screen.findByRole('button', { name: 'Reassign Coordinator' })).toBeInTheDocument()
+})
+
+test('assigned coordinator must enter a question before requesting clarification', async () => {
+  vi.mocked(eventApi)
+    .mockResolvedValueOnce({ events: [event] })
+    .mockResolvedValueOnce({ ...event, status: 'Clarification Requested' })
+  render(<SubmittedRequestsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Request clarification' }))
+  const submit = screen.getByRole('button', { name: 'Send request' })
+  expect(submit).toBeDisabled()
+  fireEvent.change(screen.getByLabelText(/Question or message/), { target: { value: 'Who is the intended audience?' } })
+  fireEvent.click(submit)
+
+  await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
+    `/events/${event.id}/clarification-request`,
+    { coordinatorId, message: 'Who is the intended audience?' },
+    'PATCH',
+  ))
+  expect(await screen.findByText(/question was sent/i)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Community Workshop' })).not.toBeInTheDocument()
 })

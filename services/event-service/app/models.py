@@ -50,7 +50,13 @@ def _local(value):
 
 # Event lifecycle, in order. Defined once here so the safety-check stories
 # (SCRUM-149/150/151/153) reuse these names instead of re-typing the strings.
-PRE_SAFETY_STATUSES = ("Submitted", "Under Review", "Approved", "Rejected")
+PRE_SAFETY_STATUSES = (
+    "Submitted",
+    "Under Review",
+    "Clarification Requested",
+    "Approved",
+    "Rejected",
+)
 # Set only by the safety-check workflow (SCRUM-149/150/151), never by PATCH /progress.
 SAFETY_STATUSES = (
     "Pending Safety Check",
@@ -67,15 +73,19 @@ ALL_STATUSES = (*PRE_SAFETY_STATUSES, *SAFETY_STATUSES)
 PREPARATION_STATUS = "Confirmed"
 
 # What PATCH /progress accepts, keyed by the event's current status. A "self"
-# transition is a save that keeps the status and updates the action details, so
-# every status lists itself. The frontend's src/features/event/eventStatus.ts
-# mirrors this table.
+# transition is a save that keeps the status and updates the action details.
+# Clarification Requested is deliberately locked and lists no transition. The
+# frontend's src/features/event/eventStatus.ts mirrors this table.
 #
 # Safety-workflow moves do NOT belong here — they live in SAFETY_TRANSITIONS
 # below and are reachable only through PATCH /events/<id>/safety-status.
 ALLOWED_TRANSITIONS = {
     "Submitted": {"Submitted", "Under Review"},
     "Under Review": {"Under Review", "Approved", "Rejected"},
+    # Only the dedicated clarification response endpoint may leave this state.
+    # An empty set also prevents PATCH /progress from changing action metadata
+    # while the organiser is answering the coordinator's question.
+    "Clarification Requested": set(),
     # SCRUM-152: `Approved -> Confirmed` was removed. The next step is
     # SCRUM-149's submit-for-safety-check, not this endpoint.
     "Approved": {"Approved"},
@@ -197,6 +207,9 @@ SAFETY_BLOCK_MESSAGES = {
         "This event must be approved and pass its Operational Safety Check "
         "before it can progress to Confirmed."
     ),
+    "Clarification Requested": (
+        "This event is waiting for the Event Organiser's clarification response."
+    ),
     "Approved": (
         "Submit this event for safety check for it to progress to Confirmed."
     ),
@@ -225,7 +238,7 @@ def unpack_description(value):
 
 
 def unpack_decision(value):
-    description, purpose, decision, history, _, _ = unpack_metadata(value)
+    description, purpose, decision, history, _, _, _ = unpack_metadata(value)
     return description, purpose, decision, history
 
 
@@ -233,7 +246,7 @@ def unpack_metadata(value):
     try:
         details = json.loads(value or "")
     except (ValueError, TypeError):
-        return value or "", "", None, [], "", []
+        return value or "", "", None, [], "", [], []
     if (
         isinstance(details, dict)
         and details.get("_connectsphere") == "event-submission-v1"
@@ -259,6 +272,9 @@ def unpack_metadata(value):
         action_history = details.get("actionHistory")
         if not isinstance(action_history, list):
             action_history = []
+        clarification_history = details.get("clarificationHistory")
+        if not isinstance(clarification_history, list):
+            clarification_history = []
         return (
             details["description"],
             details["purpose"],
@@ -266,8 +282,9 @@ def unpack_metadata(value):
             history,
             action_details,
             action_history,
+            clarification_history,
         )
-    return value or "", "", None, [], "", []
+    return value or "", "", None, [], "", [], []
 
 
 def serialize(row):
@@ -279,6 +296,7 @@ def serialize(row):
         history,
         action_details,
         action_history,
+        clarification_history,
     ) = unpack_metadata(row["description"])
     for key in ("preferredStartDate", "preferredEndDate"):
         result[key] = _local(result[key]).isoformat() if result[key] else ""
@@ -302,6 +320,7 @@ def serialize(row):
         decisionHistory=history,
         actionDetails=action_details,
         actionHistory=action_history,
+        clarificationHistory=clarification_history,
     )
     return result
 
@@ -448,6 +467,16 @@ class RejectionReasonError(Exception):
     pass
 
 
+class ClarificationNotAllowedError(Exception):
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class ClarificationNotOpenError(Exception):
+    pass
+
+
 class InvalidStatusTransitionError(Exception):
     """PATCH /progress raises this bare; the safety endpoint names the status
     it refused to move from, so the composite can report it (SCRUM-149)."""
@@ -483,7 +512,7 @@ class SafetyApprovalRequiredError(Exception):
 
 
 class EventClosedError(Exception):
-    """Reassignment: a Rejected or Cancelled event can't change coordinator."""
+    """Reassignment is blocked for terminal events and an open clarification."""
 
     def __init__(self, current_status):
         super().__init__(current_status)
@@ -533,7 +562,9 @@ class NoCoordinatorChangeError(Exception):
 
 
 # Events whose coordinator can no longer be changed.
-CLOSED_STATUSES = ("Rejected", "Cancelled")
+# Clarification is temporarily non-reassignable so the organiser's response
+# returns to the same coordinator who asked the question (clarification AC4).
+CLOSED_STATUSES = ("Rejected", "Cancelled", "Clarification Requested")
 
 
 def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by):
@@ -719,6 +750,7 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 decision_history,
                 _,
                 action_history,
+                clarification_history,
             ) = unpack_metadata(event["description"])
             recorded_at = datetime.now(UTC).isoformat()
             action = {
@@ -749,6 +781,7 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 "decisionHistory": decision_history,
                 "actionDetails": action_details,
                 "actionHistory": action_history,
+                "clarificationHistory": clarification_history,
             }
             cursor.execute(
                 f"""UPDATE public."Event"
@@ -850,6 +883,7 @@ def update_event_safety_status(
                 decision_history,
                 action_details,
                 action_history,
+                clarification_history,
             ) = unpack_metadata(event["description"])
             recorded_at = datetime.now(UTC).isoformat()
 
@@ -915,6 +949,7 @@ def update_event_safety_status(
                 "decisionHistory": decision_history,
                 "actionDetails": action_details,
                 "actionHistory": [*action_history, action],
+                "clarificationHistory": clarification_history,
             }
             cursor.execute(
                 f"""UPDATE public."Event"
@@ -1092,6 +1127,7 @@ def update_event_details(
                 decision_history,
                 action_details,
                 action_history,
+                clarification_history,
             ) = unpack_metadata(event["description"])
             description = merged["description"]
             purpose = merged["purpose"]
@@ -1142,6 +1178,7 @@ def update_event_details(
                 "decisionHistory": decision_history,
                 "actionDetails": action_details,
                 "actionHistory": [*action_history, action],
+                "clarificationHistory": clarification_history,
             }
             assignments = ", ".join(f"{column} = %s" for column in DETAIL_COLUMNS.values())
             values = []
@@ -1167,6 +1204,149 @@ def update_event_details(
                     new_status,
                     event_id,
                 ],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def request_event_clarification(database_url, event_id, coordinator_id, message):
+    """Open one clarification round without changing any submitted fields."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
+                raise EventNotAssignedError
+            if event["status"] not in ("Submitted", "Under Review"):
+                raise ClarificationNotAllowedError(event["status"])
+
+            (
+                description,
+                purpose,
+                decision,
+                decision_history,
+                action_details,
+                action_history,
+                clarification_history,
+            ) = unpack_metadata(event["description"])
+            requested_at = datetime.now(UTC).isoformat()
+            clarification = {
+                "id": str(uuid4()),
+                "question": message,
+                "requestedBy": coordinator_id,
+                "requestedAt": requested_at,
+                "response": None,
+                "respondedBy": None,
+                "respondedAt": None,
+            }
+            action = {
+                "status": "Clarification Requested",
+                "details": "Clarification requested from the Event Organiser.",
+                "coordinatorId": coordinator_id,
+                "recordedAt": requested_at,
+            }
+            metadata = {
+                "_connectsphere": "event-submission-v1",
+                "description": description,
+                "purpose": purpose,
+                "decision": decision,
+                "decisionHistory": decision_history,
+                "actionDetails": action_details,
+                "actionHistory": [*action_history, action],
+                "clarificationHistory": [*clarification_history, clarification],
+            }
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET status = 'Clarification Requested', description = %s
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [json.dumps(metadata, ensure_ascii=False), event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def respond_to_event_clarification(database_url, event_id, organiser_id, response):
+    """Answer the open clarification and return the assigned event to Submitted."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
+                raise EventNotOwnedError
+            if event["status"] != "Clarification Requested":
+                raise ClarificationNotOpenError
+
+            (
+                description,
+                purpose,
+                decision,
+                decision_history,
+                action_details,
+                action_history,
+                clarification_history,
+            ) = unpack_metadata(event["description"])
+            open_index = next(
+                (
+                    index
+                    for index in range(len(clarification_history) - 1, -1, -1)
+                    if clarification_history[index].get("response") is None
+                ),
+                None,
+            )
+            if open_index is None:
+                raise ClarificationNotOpenError
+
+            responded_at = datetime.now(UTC).isoformat()
+            answered = {
+                **clarification_history[open_index],
+                "response": response,
+                "respondedBy": organiser_id,
+                "respondedAt": responded_at,
+            }
+            clarification_history = [*clarification_history]
+            clarification_history[open_index] = answered
+            action = {
+                "status": "Submitted",
+                "details": "Event Organiser responded to the clarification request.",
+                "organiserId": organiser_id,
+                "recordedAt": responded_at,
+            }
+            metadata = {
+                "_connectsphere": "event-submission-v1",
+                "description": description,
+                "purpose": purpose,
+                "decision": decision,
+                "decisionHistory": decision_history,
+                "actionDetails": action_details,
+                "actionHistory": [*action_history, action],
+                "clarificationHistory": clarification_history,
+            }
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET status = 'Submitted', description = %s
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [json.dumps(metadata, ensure_ascii=False), event_id],
             )
             updated = cursor.fetchone()
     return serialize(updated)
@@ -1209,6 +1389,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                 history,
                 action_details,
                 action_history,
+                clarification_history,
             ) = unpack_metadata(event["description"])
             decided_at = datetime.now(UTC).isoformat()
             decision = {
@@ -1233,7 +1414,8 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                             ),
                             'decisionHistory', %s::jsonb,
                             'actionDetails', %s,
-                            'actionHistory', %s::jsonb
+                            'actionHistory', %s::jsonb,
+                            'clarificationHistory', %s::jsonb
                         )::text
                     WHERE event_id = %s
                     RETURNING {ROW_COLUMNS}""",
@@ -1248,6 +1430,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                     json.dumps(decision_history),
                     action_details,
                     json.dumps(action_history),
+                    json.dumps(clarification_history),
                     event_id,
                 ],
             )

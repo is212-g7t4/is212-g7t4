@@ -38,7 +38,7 @@ async function openPicker() {
 test.each<[EventStatus, boolean]>([
   ['Under Review', true], ['Approved', true], ['Pending Safety Check', true],
   ['Confirmed', true], ['Safety Changes Requested', true],
-  ['Rejected', false], ['Cancelled', false],
+  ['Rejected', false], ['Cancelled', false], ['Clarification Requested', false],
 ])('canReassign: %s → %s', (status, expected) => {
   expect(canReassign({ ...event, status })).toBe(expected)
 })

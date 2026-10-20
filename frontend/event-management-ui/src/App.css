@@ -911,6 +911,7 @@ textarea:disabled {
 
 .status-badge.pending-safety-check,
 .status-badge.safety-changes-requested,
+.status-badge.clarification-requested,
 .status-badge.pending-review {
   background: var(--color-warning-soft);
   color: var(--color-warning);

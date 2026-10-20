@@ -8,6 +8,7 @@ import type { EventStatus, SubmittedEvent } from './submission'
 export const ALLOWED_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
   Submitted: ['Submitted', 'Under Review'],
   'Under Review': ['Under Review', 'Approved', 'Rejected'],
+  'Clarification Requested': [],
   // A coordinator can't confirm an event; the safety workflow does that, so
   // 'Approved' offers only itself. The next step is submit-for-safety-check.
   Approved: ['Approved'],
@@ -30,6 +31,7 @@ export const PREPARATION_STATUS = 'Confirmed' as const
 const SAFETY_BLOCK_MESSAGES: Record<Exclude<EventStatus, typeof PREPARATION_STATUS>, string> = {
   Submitted: 'This event must be approved and pass its Operational Safety Check before it can progress to Confirmed.',
   'Under Review': 'This event must be approved and pass its Operational Safety Check before it can progress to Confirmed.',
+  'Clarification Requested': "This event is waiting for the Event Organiser's clarification response.",
   Approved: 'Submit this event for safety check for it to progress to Confirmed.',
   Rejected: "This event was rejected, so it can't progress to Confirmed.",
   'Pending Safety Check': "This event is waiting for the Safety Officer's decision.",
@@ -60,7 +62,7 @@ export function showsSafetyHint(status: EventStatus) {
 // Mirrors CLOSED_STATUSES in services/event-service/app/models.py: these
 // events keep their coordinator. Event Service enforces it; the UI just
 // doesn't offer a reassignment that would 409.
-const CLOSED_STATUSES: EventStatus[] = ['Rejected', 'Cancelled']
+const CLOSED_STATUSES: EventStatus[] = ['Rejected', 'Cancelled', 'Clarification Requested']
 
 export function canReassign(event: SubmittedEvent) {
   return Boolean(event.coordinatorId) && !CLOSED_STATUSES.includes(event.status)

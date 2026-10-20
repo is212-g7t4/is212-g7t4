@@ -23,6 +23,7 @@ import { SafetyReview } from '../features/safety/SafetyReview'
 import { SafetyFeedbackPanel } from '../features/safety/SafetyFeedbackPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 import { isCoordinator, isLead } from '../roles'
+import { ClarificationHistory } from '../features/event/ClarificationHistory'
 
 type EventDetailProps = { targetBookingId?: string; eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
@@ -95,6 +96,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
     draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
   )
   const canUpdate = Boolean(isCoordinator(role) && event && event.coordinatorId === currentCoordinator.id)
+  const canUpdateProgress = canUpdate && event?.status !== 'Clarification Requested'
   const availableStatuses = event ? ALLOWED_TRANSITIONS[event.status] : []
   // SCRUM-152 AC1: 'Confirmed' is never offered to a coordinator — only the
   // safety workflow sets it — so instead of a dead option the field explains
@@ -107,6 +109,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
   // the same on its side.
   const canEditDetails = (canUpdate || (isLead(role) && !event?.coordinatorId)) && event !== null
     && event.status !== 'Rejected' && event.status !== 'Cancelled'
+    && event.status !== 'Clarification Requested'
 
   const saveProgress = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
@@ -150,6 +153,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
         </button>}
       </div></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
+      <ClarificationHistory clarifications={event.clarificationHistory || []} resolveUserName={resolveUserName} />
       {canUpdate && event.status === 'Safety Changes Requested' && <SafetyFeedbackPanel
         key={`${event.id}-${currentCoordinator.id}-${refresh}`}
         eventId={event.id}
@@ -206,7 +210,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
 
       <section className="event-card-section">
         <h3>Event progress</h3>
-        {canUpdate ? <form onSubmit={saveProgress}>
+        {canUpdateProgress ? <form onSubmit={saveProgress}>
           <div className="field-row">
             {/* Explicitly associated rather than wrapping, so the safety hint
                 below can live in the same field without becoming label text. */}
@@ -233,7 +237,9 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
           <button className="button primary" type="submit" disabled={!hasUnsavedChanges || !actionDetails.trim() || saving}>
             {saving ? 'Saving…' : 'Save progress'}
           </button>
-        </form> : <p className="muted">Only the assigned Event Coordinator can update this event.</p>}
+        </form> : event.status === 'Clarification Requested' && canUpdate
+          ? <p className="muted">Progress and event details are locked while the Event Organiser prepares a clarification response.</p>
+          : <p className="muted">Only the assigned Event Coordinator can update this event.</p>}
 
         {/* SCRUM-149: the next step the safety hint above points at. Only the
             event's own assigned coordinator sees it (AC5), and only while the

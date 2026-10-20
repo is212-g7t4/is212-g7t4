@@ -17,6 +17,8 @@ from app.models import (
     SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
     UNDER_SAFETY_REVIEW_MESSAGE,
+    ClarificationNotAllowedError,
+    ClarificationNotOpenError,
     EventClosedError,
     EventNotAssignedError,
     EventNotEditableError,
@@ -43,6 +45,8 @@ from app.models import (
     list_submitted,
     list_unassigned,
     reject_event,
+    request_event_clarification,
+    respond_to_event_clarification,
     submit_event,
     update_event_coordinator,
     update_event_details,
@@ -735,6 +739,76 @@ def create_app(config=None):
                 message="Only submitted or under-review event requests can be approved."
             ), 409
         return jsonify(approved), 200
+
+    @app.patch("/events/<uuid:event_id>/clarification-request")
+    def request_clarification(event_id):
+        data = request.get_json(silent=True)
+        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
+        message = data.get("message") if isinstance(data, dict) else None
+        try:
+            coordinator_id = str(UUID(coordinator_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+        if not isinstance(message, str) or not message.strip():
+            return jsonify(message="A clarification question is required."), 400
+        message = message.strip()
+        if len(message) > 1000:
+            return jsonify(message="A clarification question must be 1000 characters or fewer."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = request_event_clarification(
+                app.config["DATABASE_URL"], str(event_id), coordinator_id, message
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(
+                message="This event request is not assigned to the current coordinator."
+            ), 403
+        except ClarificationNotAllowedError as blocked:
+            return jsonify(
+                code="CLARIFICATION_NOT_ALLOWED",
+                message=(
+                    "Clarification can only be requested for a submitted or "
+                    "under-review event request."
+                ),
+                currentStatus=blocked.current_status,
+            ), 409
+        return jsonify(updated), 200
+
+    @app.patch("/events/<uuid:event_id>/clarification-response")
+    def respond_to_clarification(event_id):
+        data = request.get_json(silent=True)
+        organiser_id = data.get("organiserId", "") if isinstance(data, dict) else ""
+        response = data.get("response") if isinstance(data, dict) else None
+        try:
+            organiser_id = str(UUID(organiser_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current organiser ID is required."), 400
+        if not isinstance(response, str) or not response.strip():
+            return jsonify(message="A clarification response is required."), 400
+        response = response.strip()
+        if len(response) > 1000:
+            return jsonify(message="A clarification response must be 1000 characters or fewer."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = respond_to_event_clarification(
+                app.config["DATABASE_URL"], str(event_id), organiser_id, response
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotOwnedError:
+            return jsonify(
+                message="You can only respond to clarification requests for events you created."
+            ), 403
+        except ClarificationNotOpenError:
+            return jsonify(
+                code="CLARIFICATION_NOT_OPEN",
+                message="This event does not have an open clarification request.",
+            ), 409
+        return jsonify(updated), 200
 
     @app.patch("/events/<uuid:event_id>/reject")
     def reject(event_id):
