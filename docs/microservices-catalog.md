@@ -98,6 +98,13 @@ data store (Postgres unless noted).
 | **Notification** | Notification records; consumes off the Message Broker and calls the Email/SMS Wrapper to deliver |
 | **Forum / Communication** | **NoSQL (MongoDB).** All communication tied to a request — clarification requests, approval/rejection reasons, comments — keyed by entityType + entityId |
 
+> **Current implementation note:** Forum Service is still planned. The event
+> clarification user story is therefore stored provisionally as append-only
+> `clarificationHistory` metadata owned by Event Service. Its dedicated
+> endpoints change only the Event-owned status/metadata and preserve the
+> original request fields. Move that history behind Forum Service when the
+> planned service is built; do not add a second live copy in the meantime.
+
 ## Infrastructure
 
 - **Message Broker (RabbitMQ)** — the only asynchronous path in the system.

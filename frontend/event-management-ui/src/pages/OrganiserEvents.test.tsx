@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { MyEventsPage } from './MyEventsPage'
 import { EventDetailPage } from './EventDetailPage'
@@ -121,4 +121,49 @@ test('organiser detail shows a registrations error', async () => {
   vi.mocked(fetchRegistrations).mockRejectedValue(new Error('Unable to load registrations.'))
   renderDetail()
   expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load registrations.')
+})
+
+test('organiser can answer the open clarification without editing the request', async () => {
+  const clarificationEvent = {
+    ...events[1],
+    status: 'Clarification Requested',
+    coordinatorId: '11111111-1111-4111-8111-111111111111',
+    clarificationHistory: [{
+      id: 'clarification-1',
+      question: 'Who is the intended audience?',
+      requestedBy: '11111111-1111-4111-8111-111111111111',
+      requestedAt: '2026-10-20T01:00:00+00:00',
+      response: null,
+      respondedBy: null,
+      respondedAt: null,
+    }],
+  }
+  vi.mocked(eventApi)
+    .mockResolvedValueOnce(clarificationEvent)
+    .mockResolvedValueOnce({
+      ...clarificationEvent,
+      status: 'Submitted',
+      clarificationHistory: [{
+        ...clarificationEvent.clarificationHistory[0],
+        response: 'All enrolled students.',
+        respondedBy: ORGANISER_ID,
+        respondedAt: '2026-10-20T02:00:00+00:00',
+      }],
+    })
+  render(<EventDetailPage eventId="submitted-1" role="Event Organiser" currentCoordinatorId={ORGANISER_ID} backLabel="My events" onBack={vi.fn()} />)
+
+  expect(await screen.findByText('Who is the intended audience?')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument()
+  const submit = screen.getByRole('button', { name: 'Submit response' })
+  expect(submit).toBeDisabled()
+  fireEvent.change(screen.getByLabelText(/Clarification response/), { target: { value: 'All enrolled students.' } })
+  fireEvent.click(submit)
+
+  await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
+    '/events/submitted-1/clarification-response',
+    { organiserId: ORGANISER_ID, response: 'All enrolled students.' },
+    'PATCH',
+  ))
+  expect(await screen.findByText(/back with the same Event Coordinator/i)).toBeInTheDocument()
+  expect(screen.getByText('All enrolled students.')).toBeInTheDocument()
 })

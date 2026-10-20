@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
 import { fetchRegistrations } from '../features/registration/registrations'
@@ -8,6 +9,7 @@ import { EventOverview } from '../features/event/EventOverview'
 import { StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
 import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
+import { ClarificationHistory } from '../features/event/ClarificationHistory'
 
 export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName, backLabel, onBack }: { eventId: string; organiserId?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
@@ -17,6 +19,10 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
   const [registrations, setRegistrations] = useState<Registration[]>([])
   const [registrationsError, setRegistrationsError] = useState('')
   const [registrationsLoading, setRegistrationsLoading] = useState(true)
+  const [response, setResponse] = useState('')
+  const [responding, setResponding] = useState(false)
+  const [responseError, setResponseError] = useState('')
+  const [responseMessage, setResponseMessage] = useState('')
 
   useEffect(() => {
     if (!organiserId) return
@@ -47,6 +53,28 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
   const confirmed = registrations.filter((registration) => registration.status === 'Confirmed').length
   const withdrawn = registrations.filter((registration) => registration.status === 'Withdrawn').length
 
+  const submitClarificationResponse = async (formEvent: FormEvent) => {
+    formEvent.preventDefault()
+    if (!event || !organiserId || !response.trim()) return
+    setResponding(true)
+    setResponseError('')
+    setResponseMessage('')
+    try {
+      const updated = await eventApi(
+        `/events/${event.id}/clarification-response`,
+        { organiserId, response: response.trim() },
+        'PATCH',
+      )
+      setEvent(updated)
+      setResponse('')
+      setResponseMessage('Your clarification response was submitted. The request is back with the same Event Coordinator.')
+    } catch (cause) {
+      setResponseError(cause instanceof Error ? cause.message : 'Unable to submit your clarification response.')
+    } finally {
+      setResponding(false)
+    }
+  }
+
   return <div className="page-stack">
     <section className="intro">
       <button className="button small" onClick={onBack}><ArrowLeftIcon size={13} /> Back to {backLabel}</button>{' '}
@@ -55,6 +83,21 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
+
+      {event.status === 'Clarification Requested' && <section className="event-card-section">
+        <h3>Response required</h3>
+        <p>The assigned Event Coordinator needs more information. Reply below; the original request fields remain unchanged.</p>
+        <form onSubmit={submitClarificationResponse}>
+          <label className="field"><span>Clarification response <span className="required">*</span></span>
+            <textarea value={response} onChange={(change) => { setResponse(change.target.value); setResponseError(''); setResponseMessage('') }} maxLength={1000} required placeholder="Provide the information requested by the coordinator." disabled={responding} />
+            <small>{response.length}/1000 characters</small>
+          </label>
+          {responseError && <p className="field-error" role="alert">{responseError}</p>}
+          <button className="button primary" type="submit" disabled={!response.trim() || responding}>{responding ? 'Submitting…' : 'Submit response'}</button>
+        </form>
+      </section>}
+      {responseMessage && <p className="event-card-section" role="status">{responseMessage}</p>}
+      <ClarificationHistory clarifications={event.clarificationHistory || []} resolveUserName={resolveUserName} />
 
       <div className="event-card-section">
         <h3>Registrations</h3>

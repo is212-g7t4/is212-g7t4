@@ -14,6 +14,7 @@ RESERVING_EVENT_STATUSES = (
     "Approved",
     "Confirmed",
     "Under Review",
+    "Clarification Requested",
     "Pending Safety Check",
     "Safety Changes Requested",
 )

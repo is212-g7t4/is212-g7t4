@@ -11,7 +11,7 @@ import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 import { OrganiserEventsPage } from './OrganiserEventsPage'
 
 const STATUS_OPTIONS = [
-  '', 'Submitted', 'Under Review', 'Approved', 'Rejected',
+  '', 'Submitted', 'Under Review', 'Clarification Requested', 'Approved', 'Rejected',
   'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled',
 ]
 
