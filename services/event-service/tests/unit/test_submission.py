@@ -273,9 +273,9 @@ def test_reassign_replaces_the_coordinator_and_records_the_previous_one(setup, s
     assert cursor.execute.call_count == 2
 
 
-@pytest.mark.parametrize("status", ["Rejected", "Cancelled"])
+@pytest.mark.parametrize("status", ["Rejected", "Cancelled", "Clarification Requested"])
 def test_reassign_is_blocked_for_closed_events(setup, status):
-    """Reassignment: Rejected and Cancelled events keep their coordinator."""
+    """Closed events and an open clarification keep their coordinator."""
     client, _, cursor = setup
     cursor.fetchone.return_value = {"coordinator_id": COORDINATOR_ID, "status": status}
 

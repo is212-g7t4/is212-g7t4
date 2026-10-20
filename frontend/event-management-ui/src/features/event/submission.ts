@@ -14,6 +14,17 @@ export interface SubmittedEvent extends EventData {
   decisionHistory: EventDecision[]
   actionDetails: string
   actionHistory: EventAction[]
+  clarificationHistory?: EventClarification[]
+}
+
+export interface EventClarification {
+  id: string
+  question: string
+  requestedBy: string
+  requestedAt: string
+  response: string | null
+  respondedBy: string | null
+  respondedAt: string | null
 }
 
 export interface EventDecision {
@@ -26,7 +37,9 @@ export interface EventDecision {
 export interface EventAction {
   status: EventStatus
   details: string
-  coordinatorId: string
+  coordinatorId?: string
+  /** Set when the Event Organiser answers a clarification request. */
+  organiserId?: string
   recordedAt: string
   /** Set on the Safety Officer's decision entries (SCRUM-150/151). */
   remarks?: string | null
@@ -51,7 +64,7 @@ export interface EventProgressUpdate {
 // safety workflow sets it (SCRUM-152). Mirrors ALL_STATUSES in
 // services/event-service/app/models.py.
 export type EventStatus =
-  | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected'
+  | 'Submitted' | 'Under Review' | 'Clarification Requested' | 'Approved' | 'Rejected'
   | 'Pending Safety Check' | 'Confirmed' | 'Safety Changes Requested' | 'Cancelled'
 
 export interface Coordinator {
@@ -101,7 +114,9 @@ export class SubmissionError extends Error {
 
 export async function eventApi(
   path: string,
-  data?: (EventData & { organiserId?: string }) | EventProgressUpdate | { coordinatorId: string; reason?: string },
+  data?: (EventData & { organiserId?: string }) | EventProgressUpdate
+    | { coordinatorId: string; reason?: string; message?: string }
+    | { organiserId: string; response: string },
   method?: 'POST' | 'PATCH',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}

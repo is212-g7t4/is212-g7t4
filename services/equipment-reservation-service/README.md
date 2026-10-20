@@ -19,7 +19,7 @@ polled or stored, and `Equipment.operational_status` is never changed.
 1. **Physical check** — equipment that is not `Available` has effective stock `0`.
 2. **Temporal check** — stock is a shared pool. `reserved` is the sum of
    `quantityRequested` over **Approved** requests belonging to *other* events
-  whose status is `Approved`, `Confirmed`, `Under Review`,
+  whose status is `Approved`, `Confirmed`, `Under Review`, `Clarification Requested`,
   `Pending Safety Check` or `Safety Changes Requested`
   (Submitted events do not reserve stock) and whose window overlaps:
    `other.start < target.end AND other.end > target.start`.

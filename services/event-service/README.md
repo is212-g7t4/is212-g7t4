@@ -72,6 +72,26 @@ calls this endpoint directly.
 Decisions are returned in `decision` and retained in `decisionHistory`. Each decision
 records its status, coordinator ID, UTC timestamp, and rejection reason when present.
 
+## Event clarification
+
+An assigned coordinator can call `PATCH /events/<id>/clarification-request`
+with `{coordinatorId, message}` while the event is `Submitted` or `Under
+Review`. The row is locked, the assignment is checked again, and the event
+moves to `Clarification Requested`. The original event fields are not changed.
+
+The owning organiser answers through `PATCH
+/events/<id>/clarification-response` with `{organiserId, response}`. This
+returns the event to `Submitted` and deliberately leaves `coordinator_id`
+untouched. Reassignment is blocked while the clarification is open, ensuring
+the response returns to the same coordinator who asked the question. Both
+endpoints require non-blank text of at most 1000 characters.
+
+Every round is append-only in the event metadata's `clarificationHistory`.
+It records the question, requesting coordinator and UTC timestamp, then the
+response, responding organiser and UTC timestamp. Only one round can be open
+at a time; earlier answered rounds remain visible to both parties. This is a
+temporary Event-owned implementation until the planned Forum Service exists.
+
 ## Event progress and the safety gate
 
 `PATCH /events/<id>/progress` is the only endpoint that moves an event through
@@ -80,6 +100,8 @@ until the event has passed its Operational Safety Check.
 
 ```
 Submitted → Under Review → Approved ──(SCRUM-149)──► Pending Safety Check
+              │
+              └──► Clarification Requested ──(organiser response)──► Submitted
                          ↘ Rejected                    │       ▲
                                     (SCRUM-150) ◄──────┼───────┼──► (SCRUM-151)
                                          │             │       │        │
@@ -104,6 +126,7 @@ What this endpoint accepts, by the event's current status:
 | --- | --- |
 | Submitted | Submitted, Under Review |
 | Under Review | Under Review, Approved, Rejected |
+| Clarification Requested | None — only the dedicated response endpoint returns it to Submitted |
 | Approved | Approved |
 | Rejected | Rejected |
 | Pending Safety Check | Pending Safety Check |
@@ -111,10 +134,11 @@ What this endpoint accepts, by the event's current status:
 | Safety Changes Requested | Safety Changes Requested |
 | Cancelled | Cancelled |
 
-Every status lists itself and nothing else past approval: a "self" transition is
-a save that keeps the status and updates the action details, and that keeps
-working at every stage. Only the pre-safety transitions (SCRUM-19) actually move
-an event, which is what keeps AC2 true.
+Every status except `Clarification Requested` lists itself. A "self"
+transition is a save that keeps the status and updates the action details.
+Progress and detail edits are locked during clarification; only the organiser's
+dedicated response endpoint can return the request to `Submitted`. Only the
+pre-safety transitions actually move an event through the review lifecycle.
 
 SCRUM-152 AC1's guarantee that `Confirmed` can't be reached "through ... the
 API" covers `PATCH /events/<id>/safety-status` too, not just `/progress`:

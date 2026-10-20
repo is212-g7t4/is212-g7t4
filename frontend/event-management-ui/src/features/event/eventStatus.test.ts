@@ -9,6 +9,7 @@ test('the transition table matches the backend', () => {
   expect(ALLOWED_TRANSITIONS).toEqual({
     Submitted: ['Submitted', 'Under Review'],
     'Under Review': ['Under Review', 'Approved', 'Rejected'],
+    'Clarification Requested': [],
     Approved: ['Approved'],
     Rejected: ['Rejected'],
     'Pending Safety Check': ['Pending Safety Check'],
@@ -20,7 +21,8 @@ test('the transition table matches the backend', () => {
 
 test("AC1: no status lets a coordinator move an event into 'Confirmed'", () => {
   for (const [status, targets] of Object.entries(ALLOWED_TRANSITIONS)) {
-    // 'Confirmed' lists itself, as every status does, for action-detail saves.
+    // 'Confirmed' lists itself for action-detail saves; clarification is the
+    // deliberate exception and is locked behind its response endpoint.
     if (status === PREPARATION_STATUS) continue
     expect(targets).not.toContain(PREPARATION_STATUS)
   }
@@ -39,6 +41,7 @@ test.each([
   ['Approved', 'Submit this event for safety check for it to progress to Confirmed.'],
   ['Submitted', 'This event must be approved and pass its Operational Safety Check before it can progress to Confirmed.'],
   ['Under Review', 'This event must be approved and pass its Operational Safety Check before it can progress to Confirmed.'],
+  ['Clarification Requested', "This event is waiting for the Event Organiser's clarification response."],
   ['Rejected', "This event was rejected, so it can't progress to Confirmed."],
   ['Pending Safety Check', "This event is waiting for the Safety Officer's decision."],
   ['Safety Changes Requested', 'The Safety Officer has requested changes that must be made and resubmitted.'],
@@ -51,6 +54,6 @@ test('the hint shows only where the coordinator can act on it', () => {
   const actionable: EventStatus[] = ['Approved', 'Pending Safety Check', 'Safety Changes Requested']
   expect(actionable.every(showsSafetyHint)).toBe(true)
   // Confirmed has progressed; the rest aren't at the safety stage yet.
-  const quiet: EventStatus[] = ['Submitted', 'Under Review', 'Rejected', 'Confirmed', 'Cancelled']
+  const quiet: EventStatus[] = ['Submitted', 'Under Review', 'Clarification Requested', 'Rejected', 'Confirmed', 'Cancelled']
   expect(quiet.some(showsSafetyHint)).toBe(false)
 })
