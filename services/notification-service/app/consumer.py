@@ -65,6 +65,14 @@ def validate(value):
         raise ValueError("Unknown destination")
     for key in (("eventId",) if destination["kind"] == "event-details" else ("eventId", "bookingId")):
         UUID(destination[key])
+    if value["type"] == "event.approval":
+        if destination["kind"] != "event-details":
+            raise ValueError("Approval requires event details")
+        details = value["details"]
+        if not isinstance(details.get("eventName"), str) or not details["eventName"].strip():
+            raise ValueError("Missing approval event name")
+        if details.get("decision") != "Approved":
+            raise ValueError("Invalid approval decision")
     if value["type"] == "event.rejection":
         if destination["kind"] != "event-details":
             raise ValueError("Rejection requires event details")
