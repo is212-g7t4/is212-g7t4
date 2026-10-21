@@ -1,4 +1,8 @@
-"""Disposable local SCRUM-45 integration infrastructure, never production configuration."""
+"""SCRUM-45 user story: As an Event Organiser, I want to receive an in-app
+notification when the Lead Coordinator approves or rejects my event request,
+so that I know the outcome and who is responsible for coordinating my event.
+AC1–AC4: shared disposable delivery infrastructure, including real User lookup.
+"""
 
 import json
 import os
@@ -11,6 +15,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 ROOT = Path(__file__).resolve().parents[4]
 ORGANISER = "10000000-0000-0000-0000-000000000001"
 ACTOR = "10000000-0000-0000-0000-000000000002"
@@ -47,7 +52,7 @@ def free_port():
 
 @pytest.fixture
 def system(tmp_path):
-    """Owned disposable containers and two separate owner databases; no .env."""
+    """Owned disposable containers and three separate owner databases; no .env."""
     import psycopg2
     subprocess.run(["docker", "info"], check=True, capture_output=True, timeout=20)
     names, processes, logs = [], [], []
@@ -109,7 +114,7 @@ def system(tmp_path):
                                    capture_output=True, timeout=15).returncode == 0)
         migrations = ROOT / "database/supabase/migrations"
         baseline = re.sub(r"--[^\n]*", "", (migrations / "20261011140000_baseline_schema.sql").read_text())
-        for database, tables in [("events", {"Event", "User"}), ("notifications", {"Event", "User", "Notification"})]:
+        for database, tables in [("events", {"Event", "User"}), ("notifications", {"Event", "User", "Notification"}), ("users", {"User"})]:
             connection = psycopg2.connect(admin)
             connection.autocommit = True
             with connection.cursor() as cursor:
@@ -120,22 +125,23 @@ def system(tmp_path):
                 target = re.search(r'(?:TABLE(?: IF NOT EXISTS| ONLY)?|ON) "public"\."([^"]+)"', statement)
                 if target and target.group(1) in tables:
                     sql(database, statement)
-            migration = "20261021000000_event_notification_outbox.sql" if database == "events" else "20261017000000_notification_inbox.sql"
-            sql(database, (migrations / migration).read_text())
             if database == "events":
-                for extension in sorted(migrations.glob("*_event_approval_notifications.sql")):
-                    sql(database, extension.read_text())
+                for migration in sorted([*migrations.glob("*event_notification*.sql"), *migrations.glob("*_event_approval_notifications.sql")]):
+                    sql(database, migration.read_text())
+            elif database == "notifications":
+                sql(database, (migrations / "20261017000000_notification_inbox.sql").read_text())
             for identity, role in [(ORGANISER, "Event Organiser"), (ACTOR, "Event Coordinator")]:
                 sql(database, 'INSERT INTO public."User"(user_id,username,role) VALUES (%s,%s,%s)',
                     (identity, "Synthetic " + role, role))
-        for service, database in [("event-service", "events"), ("notification-service", "notifications")]:
+        for service, database in [("event-service", "events"), ("notification-service", "notifications"), ("user-service", "users")]:
             port = free_port()
             urls[service] = f"http://127.0.0.1:{port}"
             start(service, ["-m", "flask", "--app", "app", "run", "--host", "127.0.0.1", "--port", str(port)], database)
             wait(lambda: http(service, "GET", "/health").status_code == 200)
         env["EVENT_SERVICE_URL"] = urls["event-service"]
+        env["USER_SERVICE_URL"] = urls["user-service"]
         event_id = str(uuid4())
-        for database in dsns:
+        for database in ("events", "notifications"):
             sql(database, 'INSERT INTO public."Event"(event_id,event_name,coordinator_id,organiser_id,status) VALUES (%s,%s,%s,%s,%s)',
                 (event_id, "Community Workshop", ACTOR, ORGANISER, "Under Review"))
         def replay(envelope):
