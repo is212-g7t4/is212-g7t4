@@ -53,9 +53,11 @@ def dispatch_once(api, publish):
             if envelope is None:
                 source = job["source"]
                 envelope = dict(
-                    version=1, id=job["id"], type="event.rejection",
+                    version=1, id=job["id"],
+                    type="event.approval" if source["decision"] == "Approved" else "event.rejection",
                     recipientId=source["recipientId"], createdAt=job["createdAt"],
-                    message=f"{source['eventName']} was rejected: {source['reason']}",
+                    message=(f"{source['eventName']} was approved" if source["decision"] == "Approved"
+                             else f"{source['eventName']} was rejected: {source['reason']}"),
                     destination=dict(kind="event-details", eventId=source["eventId"]),
                     details=source,
                 )

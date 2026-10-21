@@ -794,6 +794,8 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
             updated = cursor.fetchone()
             if status == "Rejected" and event["status"] != status:
                 record_rejection(cursor, event, action_details)
+            if status == "Approved" and event["status"] != status:
+                record_approval(cursor, event)
     return serialize(updated)
 
 
@@ -1440,11 +1442,26 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
             decided = cursor.fetchone()
             if status == "Rejected":
                 record_rejection(cursor, event, reason_text)
+            if status == "Approved":
+                record_approval(cursor, event)
     return serialize(decided)
 
 
 def approve_event(database_url, event_id, coordinator_id):
     return decide_event(database_url, event_id, coordinator_id, "Approved")
+
+
+def record_approval(cursor, event):
+    """Save approval facts in the decision transaction without outward calls."""
+    if not event.get("organiser_id"):
+        logging.getLogger(__name__).warning("Approval notification missing organiser event=%s", event["event_id"])
+        return
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  recipientId=str(event["organiser_id"]), decision="Approved")
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), "event.approval", Json(source)),
+    )
 
 
 def record_rejection(cursor, event, reason):
