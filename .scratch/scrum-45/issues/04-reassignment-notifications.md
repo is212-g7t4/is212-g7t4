@@ -4,11 +4,13 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] AC4 reassignment names new coordinator.
-- [ ] Alice-to-Bob rapid changes preserve each identity; retries preserve frozen content.
-- [ ] Unchanged assignment creates no new work; real reassignment integration.
+Verified final integration merge `1e0586b`: all ACs covered; 20 real integration tests passed on identical tree; final affected unit suites passed; independent spec review passed and both standards findings resolved. Full frontend/browser verification recorded in docs/scrum-45-final-verification.md.
+
+- [x] AC4 reassignment names new coordinator.
+- [x] Alice-to-Bob rapid changes preserve each identity; retries preserve frozen content.
+- [x] Unchanged assignment creates no new work; real reassignment integration.
 
 ## Mandatory TDD
 
