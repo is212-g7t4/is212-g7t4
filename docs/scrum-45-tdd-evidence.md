@@ -1,5 +1,7 @@
 # SCRUM-45 — TDD execution evidence
 
+This is the original first-slice record, preserved chronologically. Subsequent GREEN/REFACTOR and real integration evidence appear in the ticket 01–04 evidence files and `scrum-45-final-verification.md`; the statuses below describe this original step only.
+
 ## First slice: RED verified
 
 Test: `services/notification-service/tests/unit/test_event_notifications.py::test_rejection_notification_with_event_details_destination_is_stored`
