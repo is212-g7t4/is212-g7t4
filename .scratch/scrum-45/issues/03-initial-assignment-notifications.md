@@ -4,11 +4,13 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] AC4 initial assignment names saved coordinator identity.
-- [ ] Temporary name lookup retries; missing/blank name diagnosed without blocking unrelated work.
-- [ ] Real initial-assignment delivery integration.
+Verified in integration merge `94078fe`: all affected service suites pass and 18 real isolated integration tests pass. Combined review remains the final spec gate.
+
+- [x] AC4 initial assignment names saved coordinator identity.
+- [x] Temporary name lookup retries; missing/blank name diagnosed without blocking unrelated work.
+- [x] Real initial-assignment delivery integration.
 
 ## Mandatory TDD
 
