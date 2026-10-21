@@ -574,6 +574,8 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
     Venue bookings, equipment requests and safety checks all authorise against
     the event's current coordinator_id, so changing it here hands every linked
     record to the new coordinator and takes it away from the previous one.
+    Each successful change records the same assignment notification contract,
+    with its own identity and saved recipient/event/coordinator facts.
     """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -608,14 +610,16 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
-            if not current["coordinator_id"] and not assigned.get("organiser_id"):
+            if not assigned.get("organiser_id"):
                 logging.getLogger(__name__).warning("Assignment notification missing organiser event=%s", event_id)
-            elif not current["coordinator_id"]:
-                source = dict(eventId=str(assigned["event_id"]), eventName=assigned["event_name"],
-                              recipientId=str(assigned["organiser_id"]), coordinatorId=coordinator_id)
+            else:
+                assignment_source = dict(
+                    eventId=str(assigned["event_id"]), eventName=assigned["event_name"],
+                    recipientId=str(assigned["organiser_id"]), coordinatorId=coordinator_id,
+                )
                 cursor.execute(
                     'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
-                    (str(uuid4()), "event.coordinator-assignment", Json(source)),
+                    (str(uuid4()), "event.coordinator-assignment", Json(assignment_source)),
                 )
     return serialize(assigned)
 
