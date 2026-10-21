@@ -105,8 +105,10 @@ def validate_envelope(value, row):
         raise ValueError("Invalid destination")
     if value.get("details") != source:
         raise ValueError("Invalid historical content")
-    if value.get("message") != f"{source['eventName']} was rejected: {source['reason']}":
-        raise ValueError("Invalid rejection message")
+    message = (f"{source['eventName']} was approved" if row["type"] == "event.approval"
+               else f"{source['eventName']} was rejected: {source['reason']}")
+    if value.get("message") != message:
+        raise ValueError("Invalid decision message")
 
 
 @bp.before_request
