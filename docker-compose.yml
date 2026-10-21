@@ -223,6 +223,18 @@ services:
     ports:
       - "5012:5000"
 
+  event-notification-dispatcher:
+    build: ./services/event-workflow-service
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
+    restart: unless-stopped
+    environment:
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
+    depends_on:
+      - event-service
+      - rabbitmq
+
   event-workflow-service:
     build: ./services/event-workflow-service
     environment:

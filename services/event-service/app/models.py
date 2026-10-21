@@ -1,11 +1,12 @@
 import json
+import logging
 from contextlib import closing
 from datetime import UTC, datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 
 # Safe both ways: validation.py imports nothing from here.
 from app import validation
@@ -791,6 +792,8 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 [status, json.dumps(metadata, ensure_ascii=False), event_id],
             )
             updated = cursor.fetchone()
+            if status == "Rejected" and event["status"] != status:
+                record_rejection(cursor, event, action_details)
     return serialize(updated)
 
 
@@ -1435,11 +1438,26 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                 ],
             )
             decided = cursor.fetchone()
+            if status == "Rejected":
+                record_rejection(cursor, event, reason_text)
     return serialize(decided)
 
 
 def approve_event(database_url, event_id, coordinator_id):
     return decide_event(database_url, event_id, coordinator_id, "Approved")
+
+
+def record_rejection(cursor, event, reason):
+    """Save notification intent on the mutation's transaction, never call outward."""
+    if not event.get("organiser_id"):
+        logging.getLogger(__name__).warning("Rejection notification missing organiser event=%s", event["event_id"])
+        return
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  recipientId=str(event.get("organiser_id")), decision="Rejected", reason=reason)
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), "event.rejection", Json(source)),
+    )
 
 
 def reject_event(database_url, event_id, coordinator_id, reason):

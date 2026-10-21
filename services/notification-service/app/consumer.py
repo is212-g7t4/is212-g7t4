@@ -60,11 +60,18 @@ def validate(value):
     destination = value["destination"]
     if (
         not isinstance(destination, dict)
-        or destination.get("kind") != "event-venue-request"
+        or destination.get("kind") not in ("event-venue-request", "event-details")
     ):
         raise ValueError("Unknown destination")
-    for key in ("eventId", "bookingId"):
+    for key in (("eventId",) if destination["kind"] == "event-details" else ("eventId", "bookingId")):
         UUID(destination[key])
+    if value["type"] == "event.rejection":
+        if destination["kind"] != "event-details":
+            raise ValueError("Rejection requires event details")
+        details = value["details"]
+        for key in ("eventName", "reason"):
+            if not isinstance(details.get(key), str) or not details[key].strip():
+                raise ValueError("Missing rejection display content")
     if value["type"] == "venue.closure-rejection":
         details = value["details"]
         if not isinstance(details, dict):
