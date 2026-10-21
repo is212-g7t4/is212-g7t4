@@ -27,6 +27,7 @@ def serialize(row):
     return dict(
         id=str(row["source_id"]),
         source=row["source"],
+        type=row.get("type", "event.rejection"),
         envelope=row["envelope"],
         leaseToken=str(row["lease_token"]),
         attempts=row["attempts"],
@@ -39,7 +40,7 @@ def claim(dsn):
         cursor.execute(
             """WITH candidate AS (
             SELECT source_id FROM public."EventNotificationOutbox"
-            WHERE published_at IS NULL AND available_at<=now() AND (lease_until IS NULL OR lease_until<=now())
+            WHERE published_at IS NULL AND held_at IS NULL AND available_at<=now() AND (lease_until IS NULL OR lease_until<=now())
             ORDER BY available_at,source_id FOR UPDATE SKIP LOCKED LIMIT 1
         ) UPDATE public."EventNotificationOutbox" o SET lease_token=%s,lease_until=now()+interval '60 seconds',attempts=attempts+1
           FROM candidate c WHERE o.source_id=c.source_id RETURNING o.*""",
@@ -74,6 +75,14 @@ def mutate(dsn, identifier, token, action, data):
                 'UPDATE public."EventNotificationOutbox" SET published_at=now(),lease_until=NULL,lease_token=NULL,last_error=NULL WHERE source_id=%s',
                 (identifier,),
             )
+        elif action == "hold":
+            error = data.get("error")
+            if not isinstance(error, str):
+                raise ValueError("error must be text")
+            cursor.execute(
+                'UPDATE public."EventNotificationOutbox" SET held_at=now(),lease_until=NULL,lease_token=NULL,last_error=%s WHERE source_id=%s',
+                (error[:2000], identifier),
+            )
         else:
             error = data.get("error")
             if not isinstance(error, str):
@@ -103,10 +112,20 @@ def validate_envelope(value, row):
         raise ValueError("Invalid creation instant")
     if destination != dict(kind="event-details", eventId=source["eventId"]):
         raise ValueError("Invalid destination")
-    if value.get("details") != source:
+    details = value.get("details")
+    if row["type"] == "event.coordinator-assignment":
+        name = details.get("coordinatorName") if isinstance(details, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Missing coordinator name")
+        expected_details = {**source, "coordinatorName": name}
+        message = f"{name} has been assigned to coordinate {source['eventName']}."
+    else:
+        expected_details = source
+        message = f"{source['eventName']} was rejected: {source['reason']}"
+    if details != expected_details:
         raise ValueError("Invalid historical content")
-    if value.get("message") != f"{source['eventName']} was rejected: {source['reason']}":
-        raise ValueError("Invalid rejection message")
+    if value.get("message") != message:
+        raise ValueError("Invalid notification message")
 
 
 @bp.before_request
@@ -115,6 +134,21 @@ def authenticate():
     supplied = request.headers.get("X-Internal-Token", "")
     if not expected or not hmac.compare_digest(expected.encode(), supplied.encode()):
         return jsonify(message="Internal token required."), 401
+
+
+@bp.get("/internal/notification-outbox/held")
+def held():
+    dsn = current_app.config.get("DATABASE_URL")
+    if not dsn:
+        return jsonify(message="Outbox database unavailable."), 503
+    try:
+        with transaction(dsn) as cursor:
+            cursor.execute('SELECT source_id,source,last_error,held_at FROM public."EventNotificationOutbox" WHERE held_at IS NOT NULL AND published_at IS NULL ORDER BY held_at,source_id')
+            jobs = [dict(id=str(row["source_id"]), source=row["source"], error=row["last_error"],
+                         heldAt=row["held_at"].isoformat()) for row in cursor.fetchall()]
+        return jsonify(jobs=jobs)
+    except psycopg2.Error:
+        return jsonify(message="Outbox storage unavailable."), 503
 
 
 @bp.post("/internal/notification-outbox/claim")
@@ -126,7 +160,16 @@ def operate(identifier=None, action=None):
     try:
         if identifier is None:
             return jsonify(jobs=claim(dsn))
-        if action not in {"freeze", "published", "retry"}:
+        if action == "release":
+            with transaction(dsn) as cursor:
+                cursor.execute(
+                    'UPDATE public."EventNotificationOutbox" SET held_at=NULL,last_error=NULL,available_at=now() WHERE source_id=%s AND held_at IS NOT NULL AND published_at IS NULL RETURNING source_id',
+                    (str(identifier),),
+                )
+                released = cursor.fetchone()
+            return ((jsonify(id=str(identifier), status="released"), 200) if released
+                    else (jsonify(message="Held work not found."), 409))
+        if action not in {"freeze", "published", "retry", "hold"}:
             return jsonify(message="Unknown operation."), 404
         data = request.get_json(silent=True)
         if not isinstance(data, dict):

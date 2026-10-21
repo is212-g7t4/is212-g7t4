@@ -608,6 +608,15 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
+            if not current["coordinator_id"] and not assigned.get("organiser_id"):
+                logging.getLogger(__name__).warning("Assignment notification missing organiser event=%s", event_id)
+            elif not current["coordinator_id"]:
+                source = dict(eventId=str(assigned["event_id"]), eventName=assigned["event_name"],
+                              recipientId=str(assigned["organiser_id"]), coordinatorId=coordinator_id)
+                cursor.execute(
+                    'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+                    (str(uuid4()), "event.coordinator-assignment", Json(source)),
+                )
     return serialize(assigned)
 
 

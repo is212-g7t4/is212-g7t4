@@ -14,6 +14,10 @@ QUEUE = "notifications.v1"
 
 LOG = logging.getLogger(__name__)
 
+class CoordinatorNameUnavailable(Exception):
+    """Saved coordinator cannot be named; retain intent for operator repair."""
+
+
 class OutboxAPI:
     def __init__(self):
         self.base = os.environ["EVENT_SERVICE_URL"].rstrip("/")
@@ -23,6 +27,18 @@ class OutboxAPI:
         response = httpx.request(method, url, headers=self.headers, timeout=5, **kwargs)
         response.raise_for_status()
         return response.json()
+
+    def coordinator_name(self, identifier):
+        try:
+            user = self.call("GET", os.environ["USER_SERVICE_URL"].rstrip("/") + f"/users/{identifier}")
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 404:
+                raise CoordinatorNameUnavailable from error
+            raise
+        name = user.get("username") if isinstance(user, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise CoordinatorNameUnavailable
+        return name
 
     def claim(self):
         return self.call(
@@ -42,6 +58,9 @@ class OutboxAPI:
     def published(self, job):
         return self.operation(job, "published")
 
+    def hold(self, job, error):
+        return self.operation(job, "hold", error=error)
+
     def retry(self, job, error):
         return self.operation(job, "retry", error=error)
 
@@ -52,16 +71,31 @@ def dispatch_once(api, publish):
             envelope = job["envelope"]
             if envelope is None:
                 source = job["source"]
+                kind = job.get("type", "event.rejection")
+                details = source
+                if kind == "event.coordinator-assignment":
+                    name = api.coordinator_name(source["coordinatorId"])
+                    details = {**source, "coordinatorName": name}
+                    message = f"{name} has been assigned to coordinate {source['eventName']}."
+                else:
+                    message = f"{source['eventName']} was rejected: {source['reason']}"
                 envelope = dict(
-                    version=1, id=job["id"], type="event.rejection",
+                    version=1, id=job["id"], type=kind,
                     recipientId=source["recipientId"], createdAt=job["createdAt"],
-                    message=f"{source['eventName']} was rejected: {source['reason']}",
+                    message=message,
                     destination=dict(kind="event-details", eventId=source["eventId"]),
-                    details=source,
+                    details=details,
                 )
                 envelope = api.freeze(job, envelope)
             publish(envelope)
             api.published(job)
+        except CoordinatorNameUnavailable:
+            diagnosis = f"CoordinatorNameUnavailable coordinatorId={job['source']['coordinatorId']}"
+            LOG.warning("Dispatch hold source=%s error=%s", job["id"], diagnosis)
+            try:
+                api.hold(job, diagnosis)
+            except Exception:
+                LOG.warning("Hold update failed; lease will recover source=%s", job["id"])
         except Exception as error:
             LOG.warning("Dispatch retry source=%s error=%s", job["id"], type(error).__name__)
             try:
