@@ -847,4 +847,6 @@ def create_app(config=None):
             ), 400
         return jsonify(rejected), 200
 
+    from app.outbox import bp as outbox_bp
+    app.register_blueprint(outbox_bp)
     return app

@@ -82,6 +82,12 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
       <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
+      {event.decision?.status === 'Rejected' && <section className="event-card-section">
+        <h3>Event request decision</h3>
+        <p>Rejected</p>
+        <h4>Rejection reason</h4>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{event.decision.reason}</p>
+      </section>}
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
 
       {event.status === 'Clarification Requested' && <section className="event-card-section">

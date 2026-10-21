@@ -37,3 +37,44 @@ uv run pytest
 ```
 
 Calls: Event, User, Venue Availability, Venue, Equipment Request, Equipment.
+
+## SCRUM-45 rejection dispatcher
+
+Run a separate `uv run python -m app.dispatcher` process; Flask requests never
+publish notifications. Compose starts `event-notification-dispatcher` from this
+same image. Configure `EVENT_SERVICE_URL`, `INTERNAL_SERVICE_TOKEN` (must match
+Event Service) and `RABBITMQ_URL`. Missing/mismatched tokens fail closed.
+
+Install `20261021000000_event_notification_outbox.sql` on the **Event-owned**
+database before enabling new rejections. The existing Notification inbox
+migration belongs on its own database. This slice adds no backfill, approval or
+assignment notifications. Both rejection entry paths save historical source
+facts in the same transaction as the event mutation. Ownerless legacy changes
+remain actionable but log a missing-organiser diagnostic without broadcast.
+
+Event's internal claim/freeze/published/retry HTTP APIs use a fenced 60-second
+lease, one job per claim, immutable source/envelope and retry scheduling. A
+50-second subprocess budget includes claim, preparation and publication.
+Unknown outcomes recover with the same identity after lease expiry. Inbox
+source-ID deduplication preserves read state. A publisher confirmation is not
+an inbox receipt. Diagnose worker logs and Event-owned pending rows/last_error.
+No atomic calls other services or RabbitMQ.
+
+### Real isolated acceptance run
+
+With Docker Desktop running and `postgres:17` / `rabbitmq:4-management`
+available, first `uv sync --locked` in Event, Notification and Event Workflow,
+then from Event Workflow:
+
+```sh
+uv run --with psycopg2-binary python -m pytest -m integration --no-cov
+```
+
+The tests own disposable UUID-named containers, two separate databases, real
+HTTP/consumer/worker processes, synthetic identities and finally cleanup.
+They disable dotenv and never use a remote database. They check both rejection
+paths, broker outage/recovery, duplicate delivery/read-state preservation,
+recipient isolation and real mutation rollback. Use `python -m pytest` so uv's
+overlay driver is available; the bare pytest executable uses its venv shebang.
+Browser checks remain separate mocked Playwright journeys, not persistence
+proof (`event-rejection-notifications.spec.ts` and existing `notifications.spec.ts`).
