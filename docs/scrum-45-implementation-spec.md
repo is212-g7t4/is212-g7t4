@@ -1,6 +1,8 @@
 # SCRUM-45 — Event Organiser Status and Update Notifications
 
-Status: agreed design and testing boundaries; specification and first RED test preparation only. Production implementation has not begun. Tracker publication is not yet verified.
+Status (October 21, 2026): implemented across tickets 01–04; combined ticket 05 verification is recorded in `scrum-45-final-verification.md`. Independent standards/specification review and ticket closure remain parent-owned and pending. Tracker publication is not asserted here.
+
+Historical baseline: this specification was originally written during design/first-RED preparation, before production implementation. The original plan below remains a requirements/chronology record, not a current claim that implementation is absent.
 
 ## Problem Statement
 
@@ -120,6 +122,6 @@ Lead/coordinator recipient notifications, submission alerts, email/SMS/push, ins
 
 ## Further Notes
 
-The approved design and ADR are the architectural basis. The working checkout is currently a different story's notification branch with pre-existing local edits. Before production implementation, verify the latest intended base and availability of its notification foundation; isolate SCRUM-45 changes without overwriting local work. Do not silently switch branches, stash work, or assume the foundation is merged.
+The approved design and ADR are the architectural basis. At specification creation the checkout was another story's notification branch with pre-existing local edits; verifying the intended base and isolating SCRUM-45 was a prerequisite, not a current blocker. Implementation and final verification now use the dedicated `SCRUM-45-event-organiser-status-and-update-notifications` integration branch. Preserve original worktrees and do not silently stash or overwrite local work.
 
 Publish to the project's configured tracker with the ready-for-agent label only when the tracker configuration and label mapping are verified. If configuration is absent, run /setup-matt-pocock-skills; local specification creation is not tracker publication.

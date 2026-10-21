@@ -50,10 +50,11 @@ database before enabling new rejections. The existing Notification inbox
 migration belongs on its own database. Also apply
 `20261021000100_event_approval_notifications.sql` and
 `20261021020000_event_notification_assignments.sql` on the Event-owned database
-before enabling approval and initial assignment notifications. Both forward
+before enabling approval, initial assignment and reassignment notifications. Both forward
 migrations extend the installed type constraint rather than replacing other
-supported types. This slice adds no backfill or reassignment notifications.
-Both approval/rejection entry paths and initial assignment save historical
+supported types. Reassignment reuses the assignment type and requires no additional
+migration. There is no historical backfill.
+Both approval/rejection entry paths and initial assignment/reassignment save historical
 source facts in the same transaction as the event mutation. Ownerless legacy changes
 remain actionable but log a missing-organiser diagnostic without broadcast.
 
@@ -85,7 +86,8 @@ recipient isolation and real mutation rollback. Use `python -m pytest` so uv's
 overlay driver is available; the bare pytest executable uses its venv shebang.
 Browser checks remain separate mocked Playwright journeys, not persistence
 proof (`event-approval-notifications.spec.ts`, `event-rejection-notifications.spec.ts`,
-`event-assignment-notifications.spec.ts` and existing `notifications.spec.ts`).
+`event-assignment-notifications.spec.ts`, `event-reassignment-notifications.spec.ts`
+and existing `notifications.spec.ts`).
 
 
 ### Initial assignment preparation and name repair (AC4 / DR6)

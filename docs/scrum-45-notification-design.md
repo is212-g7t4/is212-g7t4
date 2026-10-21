@@ -1,6 +1,8 @@
 # SCRUM-45 — Event Organiser Status and Update Notifications
 
-Status: design interview in progress; implementation not authorised.
+Status (October 21, 2026): agreed design implemented across tickets 01–04; see `scrum-45-final-verification.md` for combined verification. Independent review and ticket closure remain pending.
+
+Historical note: this document began as an interview with implementation not yet authorised. The confirmation and verification sections below preserve that original design-stage chronology, not the current delivery status.
 
 ## Confirmed scope
 
@@ -39,9 +41,9 @@ Reuse the organiser event-details page for both notification types. Add the reco
 - Generate notifications only for decisions and assignments recorded after feature enablement. No historical backfill.
 - Reuse the current development-only notification identity mechanism for the project demo. Test recipient isolation under that mechanism; do not claim production-authenticated security. Production authentication remains a separate requirement.
 
-## Remaining approval
+## Original interview-stage remaining approval (historical)
 - Confirm shared understanding before implementation; select the implementation branch/base separately.
 
-## Verification required when implemented
+## Original verification requirements (now mapped in final verification)
 
 Tests must trace to the supplied ACs and cover both decision mutation paths, initial assignment, reassignment, separate approval/assignment notifications, correct recipient isolation, rejection reason and destination rendering, retries/deduplication, failed and unchanged actions, successive assignments, and missing legacy recipients. No implementation tests have been run during this interview.
