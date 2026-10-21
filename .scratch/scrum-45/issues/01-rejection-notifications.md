@@ -4,12 +4,14 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] AC2/AC3 through both decision paths; event name, rejection reason and event-details link reach submitting organiser.
-- [ ] Transactional intent and Event Workflow worker deliver via existing RabbitMQ pipeline.
-- [ ] Failed-action rollback and ownerless legacy diagnostics are covered.
-- [ ] Real rejection-to-inbox integration and separate browser verification.
+Verified integration merge: `ce20a760e73755b2acb5a321c3062bad8fff19ae`. Independent rerun: Event 490 passed; Event Workflow 75 passed; Notification 86 passed; real isolated integration 4 passed. Browser evidence is separate in the ticket evidence document. No push or production deployment.
+
+- [x] AC2/AC3 through both decision paths; event name, rejection reason and event-details link reach submitting organiser.
+- [x] Transactional intent and Event Workflow worker deliver via existing RabbitMQ pipeline.
+- [x] Failed-action rollback and ownerless legacy diagnostics are covered.
+- [x] Real rejection-to-inbox integration and separate browser verification.
 
 ## Mandatory TDD
 
