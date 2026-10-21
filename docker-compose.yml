@@ -229,10 +229,12 @@ services:
     restart: unless-stopped
     environment:
       EVENT_SERVICE_URL: "http://event-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
       INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
     depends_on:
       - event-service
+      - user-service
       - rabbitmq
 
   event-workflow-service:
