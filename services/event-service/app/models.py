@@ -610,17 +610,10 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
-            if not assigned.get("organiser_id"):
-                logging.getLogger(__name__).warning("Assignment notification missing organiser event=%s", event_id)
-            else:
-                assignment_source = dict(
-                    eventId=str(assigned["event_id"]), eventName=assigned["event_name"],
-                    recipientId=str(assigned["organiser_id"]), coordinatorId=coordinator_id,
-                )
-                cursor.execute(
-                    'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
-                    (str(uuid4()), "event.coordinator-assignment", Json(assignment_source)),
-                )
+            _record_notification(
+                cursor, assigned, "event.coordinator-assignment", "Assignment",
+                coordinatorId=coordinator_id,
+            )
     return serialize(assigned)
 
 
@@ -1464,29 +1457,28 @@ def approve_event(database_url, event_id, coordinator_id):
     return decide_event(database_url, event_id, coordinator_id, "Approved")
 
 
-def record_approval(cursor, event):
-    """Save approval facts in the decision transaction without outward calls."""
+def _record_notification(cursor, event, notification_type, label, **facts):
+    """Save frozen source facts using the mutation's existing transaction cursor."""
     if not event.get("organiser_id"):
-        logging.getLogger(__name__).warning("Approval notification missing organiser event=%s", event["event_id"])
+        logging.getLogger(__name__).warning("%s notification missing organiser event=%s", label, event["event_id"])
         return
     source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
-                  recipientId=str(event["organiser_id"]), decision="Approved")
+                  recipientId=str(event["organiser_id"]), **facts)
     cursor.execute(
         'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
-        (str(uuid4()), "event.approval", Json(source)),
+        (str(uuid4()), notification_type, Json(source)),
     )
+
+
+def record_approval(cursor, event):
+    """Save approval facts in the decision transaction without outward calls."""
+    _record_notification(cursor, event, "event.approval", "Approval", decision="Approved")
 
 
 def record_rejection(cursor, event, reason):
     """Save notification intent on the mutation's transaction, never call outward."""
-    if not event.get("organiser_id"):
-        logging.getLogger(__name__).warning("Rejection notification missing organiser event=%s", event["event_id"])
-        return
-    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
-                  recipientId=str(event.get("organiser_id")), decision="Rejected", reason=reason)
-    cursor.execute(
-        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
-        (str(uuid4()), "event.rejection", Json(source)),
+    _record_notification(
+        cursor, event, "event.rejection", "Rejection", decision="Rejected", reason=reason,
     )
 
 
