@@ -133,13 +133,30 @@ def test_retry_state_outage_does_not_block_unrelated_pending_notification():
 
 def test_worker_runner_retries_then_polls_until_stopped():
     """DR3: exercise public long-running worker entry with process/time mocked;
-    transient failure backs off, empty work polls, keyboard interrupt exits.
+    timeout/child failure back off, empty work polls, success resets backoff
+    without sleeping, and keyboard interrupt exits through the real attempt.
     """
     import app.dispatcher as worker
-    from unittest.mock import patch
-    with patch.object(worker, "attempt", side_effect=[RuntimeError(), 0, 1, KeyboardInterrupt()]), patch("time.sleep") as sleep:
+    import subprocess
+    import sys
+    from unittest.mock import call, patch
+    outcomes = [
+        subprocess.TimeoutExpired("worker", 50),
+        subprocess.CalledProcessError(1, "worker"),
+        subprocess.CalledProcessError(3, "worker"),
+        subprocess.CalledProcessError(1, "worker"),
+        subprocess.CalledProcessError(1, "worker"),
+        subprocess.CompletedProcess("worker", 0),
+        subprocess.CalledProcessError(1, "worker"),
+        KeyboardInterrupt(),
+    ]
+    with patch("subprocess.run", side_effect=outcomes) as run, patch("time.sleep") as sleep:
         worker.run()
-        assert [call.args[0] for call in sleep.call_args_list] == [1, 1]
+        assert run.call_args_list == [call(
+            [sys.executable, "-m", "app.dispatcher", "--attempt"],
+            timeout=50, check=True,
+        )] * 8
+        assert sleep.call_args_list == [call(1), call(2), call(1), call(1), call(2), call(1)]
 
 def test_worker_module_attempt_entry_reports_empty_claim(monkeypatch):
     """DR3: launch module entry in process context with HTTP mocked; empty
