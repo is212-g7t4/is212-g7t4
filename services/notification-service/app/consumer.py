@@ -72,6 +72,15 @@ def validate(value):
         for key in ("eventName", "reason"):
             if not isinstance(details.get(key), str) or not details[key].strip():
                 raise ValueError("Missing rejection display content")
+    if value["type"] == "event.coordinator-assignment":
+        if destination["kind"] != "event-details":
+            raise ValueError("Assignment requires event details")
+        details = value.get("details")
+        if not isinstance(details, dict):
+            raise ValueError("Missing assignment details")
+        for key in ("eventName", "coordinatorName"):
+            if not isinstance(details.get(key), str) or not details[key].strip():
+                raise ValueError("Missing assignment display content")
     if value["type"] == "venue.closure-rejection":
         details = value["details"]
         if not isinstance(details, dict):

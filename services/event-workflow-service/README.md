@@ -38,18 +38,20 @@ uv run pytest
 
 Calls: Event, User, Venue Availability, Venue, Equipment Request, Equipment.
 
-## SCRUM-45 rejection dispatcher
+## SCRUM-45 event notification dispatcher
 
 Run a separate `uv run python -m app.dispatcher` process; Flask requests never
 publish notifications. Compose starts `event-notification-dispatcher` from this
 same image. Configure `EVENT_SERVICE_URL`, `INTERNAL_SERVICE_TOKEN` (must match
-Event Service) and `RABBITMQ_URL`. Missing/mismatched tokens fail closed.
+Event Service), `USER_SERVICE_URL` and `RABBITMQ_URL`. Missing/mismatched tokens fail closed.
 
 Install `20261021000000_event_notification_outbox.sql` on the **Event-owned**
 database before enabling new rejections. The existing Notification inbox
-migration belongs on its own database. This slice adds no backfill, approval or
-assignment notifications. Both rejection entry paths save historical source
-facts in the same transaction as the event mutation. Ownerless legacy changes
+migration belongs on its own database. Also apply
+`20261021020000_event_notification_assignments.sql` on the Event-owned database
+before enabling initial assignment notifications. This slice adds no backfill
+or reassignment notifications. Both rejection entry paths and initial assignment
+save historical source facts in the same transaction as the event mutation. Ownerless legacy changes
 remain actionable but log a missing-organiser diagnostic without broadcast.
 
 Event's internal claim/freeze/published/retry HTTP APIs use a fenced 60-second
@@ -63,18 +65,46 @@ No atomic calls other services or RabbitMQ.
 ### Real isolated acceptance run
 
 With Docker Desktop running and `postgres:17` / `rabbitmq:4-management`
-available, first `uv sync --locked` in Event, Notification and Event Workflow,
+available, first `uv sync --locked` in Event, Notification, User and Event Workflow,
 then from Event Workflow:
 
 ```sh
 uv run --with psycopg2-binary python -m pytest -m integration --no-cov
 ```
 
-The tests own disposable UUID-named containers, two separate databases, real
-HTTP/consumer/worker processes, synthetic identities and finally cleanup.
+The tests own disposable UUID-named containers, separate Event/Notification/User
+databases, real HTTP/consumer/worker processes, synthetic identities and finally
+cleanup. The User lookup is the real User Service, not an HTTP mock server.
 They disable dotenv and never use a remote database. They check both rejection
 paths, broker outage/recovery, duplicate delivery/read-state preservation,
 recipient isolation and real mutation rollback. Use `python -m pytest` so uv's
 overlay driver is available; the bare pytest executable uses its venv shebang.
 Browser checks remain separate mocked Playwright journeys, not persistence
 proof (`event-rejection-notifications.spec.ts` and existing `notifications.spec.ts`).
+
+
+### Initial assignment preparation and name repair (AC4 / DR6)
+
+Initial assignment retains event name, submitting organiser ID and assigned
+coordinator ID on Event's transaction. The worker looks up that **saved** ID at
+`GET /users/<id>`; the User Service returns `username` (not `name`). Freeze saves
+that name and the envelope once, before RabbitMQ publication. Publication retries
+never look up or rewrite the prepared name.
+
+User timeouts/5xx retry with the existing durable backoff. User 404 or absent,
+blank or non-string username produces `CoordinatorNameUnavailable` plus the
+saved coordinator ID. The authenticated `hold` operation clears its lease and
+excludes it from claims; unrelated work continues. Operators can inspect holds
+with `GET /internal/notification-outbox/held` using `X-Internal-Token`. After
+repairing the saved user's data, use authenticated
+`POST /internal/notification-outbox/<source-id>/release` (JSON `{}`) to make that
+same historical change eligible again. This does not alter assignment or
+substitute the current coordinator. Held work is never deleted or automatically
+published with an ID-only placeholder.
+
+`test_initial_assignment_delivery.py` additionally verifies real User lookup,
+missing/blank-name hold/release, unrelated rejection delivery, transient User
+503 recovery, assignment transaction rollback, broker recovery with a renamed
+user after freeze and duplicate consumption. The browser regression
+`event-assignment-notifications.spec.ts` separately checks the existing bell,
+inbox name rendering and event-only link using mocked APIs. No new UI is added.
