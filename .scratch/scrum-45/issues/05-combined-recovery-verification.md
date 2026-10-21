@@ -4,11 +4,13 @@
 
 **Blocked by:** 02, 04
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Approval and assignment yield two distinct notifications.
-- [ ] Real broker outage/recovery and duplicate redelivery tests.
-- [ ] Recipient isolation, regression suites and separate browser evidence.
+Verified final integration merge `1e0586b`: all ACs covered; 20 real integration tests passed on identical tree; final affected unit suites passed; independent spec review passed and both standards findings resolved. Full frontend/browser verification recorded in docs/scrum-45-final-verification.md.
+
+- [x] Approval and assignment yield two distinct notifications.
+- [x] Real broker outage/recovery and duplicate redelivery tests.
+- [x] Recipient isolation, regression suites and separate browser evidence.
 
 ## Mandatory TDD
 
