@@ -17,7 +17,7 @@ live DB writes or frontend edits were performed for this implementation.
 | `tests/test_calendar.py` | Route/time/status/role/error/CORS tests plus SQL bind assertions |
 | `tests/test_calendar_sql.py` | Real in-memory SQL predicate execution, including NULL and venue isolation; not a mocked overlap algorithm |
 | `tests/test_write_regressions.py` | Naive write times, Pending Review status, no DEV gate on writes, validation/failure regressions |
-| `tests/test_live_calendar.py` | Explicit opt-in live GET through Flask; every DB connection set read-only, no personal rows printed |
+| `tests/live/test_calendar.py` | Explicit opt-in live GET through Flask; every DB connection set read-only, no personal rows printed |
 | `.env.example`, `README.md`, `uv.lock` | Exact opt-in/header/run contract and reproducible service dependencies |
 | Root `docker-compose.yml` | New existing-service entry on loopback host port 5008, root `.env`, disabled-by-default DEV mode |
 | `docs/supabase-setup.md` | Corrected ownership/Event SQL/migration claims against checked source; documented live read findings and DEV-only auth scope |
@@ -56,7 +56,7 @@ cd services/venue-availability-service
 uv sync --locked
 uv run pytest --cov=app --cov-branch --cov-report=term-missing -q
 uvx ruff check --isolated --select E4,E7,E9,F,I app tests
-RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest tests/test_live_calendar.py -q -s
+RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest tests/live/test_calendar.py -m live --no-cov -q -s
 CALENDAR_DEV_MODE=true uv run --env-file ../../.env flask --app app run --host 127.0.0.1 --port 5008
 ```
 

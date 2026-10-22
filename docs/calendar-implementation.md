@@ -814,7 +814,7 @@ Retained exact half-open/microsecond utilities, API validation, SQL overlap/stat
 | `test_calendar_sql.py` | 18 | 0 | Actual read predicate against in-memory SQLite: statuses, overlap, malformed/NULL candidates, venue isolation, excluded cancelled data; not a PostgreSQL driver test |
 | `test_bookings.py` | 9 | 0 | Health, GET, create/approve/reject, existing overlap conflicts and 404/order behavior |
 | `test_write_regressions.py` | 15 | 0 | Unchanged write/decision validation, DB-unconfigured behavior, naive timestamp/Pending Review output, no DEV gate on existing writes, Approved-only conflict SQL |
-| `test_live_calendar.py` | 0 | 1 | Explicit opt-in read-only PostgreSQL smoke, skipped in normal suite |
+| `live/test_calendar.py` | 0 | 1 | Explicit opt-in read-only PostgreSQL smoke, skipped in normal suite |
 | **Total** | **120** | **1** | **No failures** |
 
 Actual verification commands/results:
