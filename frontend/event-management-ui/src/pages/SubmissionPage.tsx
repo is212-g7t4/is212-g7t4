@@ -1,13 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { SubmissionPopup } from '../components/SubmissionPopup'
-import { eventApi, SubmissionError, validateEvent } from '../features/event/submission'
+import { eventApi, SubmissionError, validateDraft, validateEvent } from '../features/event/submission'
 import type { EventData, Role } from '../types'
 import { Field, FormSection, RoleWarning } from '../components/FormControls'
 import { Spinner } from '../components/Loading'
 
-export function SubmissionPage({ role, currentOrganiserId }: { role: Role; currentOrganiserId?: string }) {
-  const [pending, setPending] = useState(false)
+const EVENT_FIELDS: (keyof EventData)[] = [
+  'eventName', 'description', 'purpose', 'preferredStartDate', 'preferredEndDate', 'expectedAttendance',
+  'venueRequirements', 'accessibilityNeeds', 'equipmentRequirements', 'registrationNeeds',
+]
+
+// `draftId` opens one of the organiser's drafts; without it the form starts empty.
+export function SubmissionPage({ role, currentOrganiserId, draftId: openedDraftId }: { role: Role; currentOrganiserId?: string; draftId?: string }) {
+  // Set by the first save, so saving again updates this draft instead of creating another.
+  const [draftId, setDraftId] = useState(openedDraftId)
+  const [draftNotice, setDraftNotice] = useState('')
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(openedDraftId))
+  // Which action is in flight, so only that button shows a progress label.
+  const [pending, setPending] = useState<'draft' | 'submit' | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
   const [attendanceError, setAttendanceError] = useState('')
@@ -24,11 +35,46 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
     registrationNeeds: '',
   })
 
+  useEffect(() => {
+    if (!openedDraftId || !currentOrganiserId) return
+    let active = true
+    eventApi(`/events/${openedDraftId}?organiserId=${currentOrganiserId}`).then((draft) => {
+      if (active) setEvent(Object.fromEntries(EVENT_FIELDS.map((field) => [field, draft[field] ?? ''])) as unknown as EventData)
+    }).catch((cause: Error) => {
+      if (active) setPopup({ title: 'Unable to Open Draft', messages: [cause.message] })
+    }).finally(() => { if (active) setLoadingDraft(false) })
+    return () => { active = false }
+  }, [openedDraftId, currentOrganiserId])
+
   const updateEvent = (field: keyof EventData, value: string) => {
+    setDraftNotice('')
     setEvent((previousEvent) => ({
       ...previousEvent,
       [field]: value,
     }))
+  }
+
+  const handleSaveDraft = async () => {
+    if (pending || submitted || !currentOrganiserId) return
+    const { missingFields, errors } = validateDraft(event)
+    if (missingFields.length || errors.length) {
+      setPopup({ title: missingFields.length ? 'Name Your Draft' : 'Check Event Details', messages: [...missingFields, ...errors] })
+      return
+    }
+    setPending('draft')
+    try {
+      const saved = draftId
+        ? await eventApi(`/events/drafts/${draftId}`, { ...event, organiserId: currentOrganiserId }, 'PATCH')
+        : await eventApi('/events/drafts', { ...event, organiserId: currentOrganiserId })
+      setDraftId(saved.id)
+      setDraftNotice('Draft saved. Only you can see it; find it under My events.')
+    } catch (cause) {
+      setPopup({ title: 'Draft Not Saved', messages: [
+        cause instanceof SubmissionError ? cause.message : 'Unable to reach the Event Service. Your form has been kept; please try again.',
+      ] })
+    } finally {
+      setPending(null)
+    }
   }
 
   const handleSubmit = async (submitEvent: FormEvent<HTMLFormElement>) => {
@@ -43,9 +89,11 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
       setPopup({ title: missingFields.length ? 'Missing Required Fields' : 'Check Event Details', messages: [...missingFields, ...errors] })
       return
     }
-    setPending(true)
+    setPending('submit')
     try {
-      const saved = await eventApi('/events', currentOrganiserId ? { ...event, organiserId: currentOrganiserId } : event)
+      const saved = draftId && currentOrganiserId
+        ? await eventApi(`/events/drafts/${draftId}/submit`, { ...event, organiserId: currentOrganiserId })
+        : await eventApi('/events', currentOrganiserId ? { ...event, organiserId: currentOrganiserId } : event)
       setSubmitted(true)
       setPopup({ title: 'Event Submitted', messages: [
         `${saved.eventName} was submitted on ${new Date(saved.submittedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT.`,
@@ -56,7 +104,7 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
         messages: cause.missingFields.length || cause.errors.length ? [...cause.missingFields, ...cause.errors] : [cause.message],
       } : { title: 'Submission Failed', messages: ['Unable to reach the Event Service. Your form has been kept; please try again.'] })
     } finally {
-      setPending(false)
+      setPending(null)
     }
   }
   if (role !== 'Event Organiser') return <RoleWarning>Only Event Organisers can submit event requests.</RoleWarning>
@@ -65,8 +113,9 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
     <div className="page-stack">
       {popup && <SubmissionPopup {...popup} onClose={() => setPopup(null)} />}
       {submitted && <p role="status">Status: Submitted. Your request is in the coordinator queue.</p>}
+      {draftNotice && !submitted && <p role="status">{draftNotice}</p>}
       <section className="intro">
-        <h1>Create Event Request</h1>
+        <h1>{draftId ? 'Edit Draft Event Request' : 'Create Event Request'}</h1>
 
         <p className="muted">
           Provide the details and requirements for your event.
@@ -79,7 +128,7 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
         className="panel form-panel"
         onSubmit={handleSubmit}
       >
-        <fieldset disabled={pending || submitted} className="submission-fields">
+        <fieldset disabled={pending !== null || submitted || loadingDraft} className="submission-fields">
         <FormSection
           title="Event Information"
           hint="Provide the basic information about your event."
@@ -203,12 +252,18 @@ export function SubmissionPage({ role, currentOrganiserId }: { role: Role; curre
         </FormSection>
 
         <div className="form-actions">
+          {currentOrganiserId && !submitted && (
+            <button type="button" className="button" onClick={handleSaveDraft}>
+              {pending === 'draft' && <Spinner size={13} />}
+              {pending === 'draft' ? 'Saving…' : 'Save as Draft'}
+            </button>
+          )}
           <button
             type="submit"
             className="button primary"
           >
-            {pending && <Spinner size={13} />}
-            {pending ? 'Submitting…' : submitted ? 'Submitted' : 'Submit Request'}
+            {pending === 'submit' && <Spinner size={13} />}
+            {pending === 'submit' ? 'Submitting…' : submitted ? 'Submitted' : 'Submit Request'}
           </button>
         </div>
         </fieldset>

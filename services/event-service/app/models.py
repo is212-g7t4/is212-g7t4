@@ -66,6 +66,13 @@ SAFETY_STATUSES = (
 )
 ALL_STATUSES = (*PRE_SAFETY_STATUSES, *SAFETY_STATUSES)
 
+# An organiser's unsubmitted request. Deliberately not in ALL_STATUSES, so
+# /progress, /overlapping and the status filter can never reach it; only the
+# owning organiser sees a draft, and only the draft functions below touch it.
+DRAFT_STATUS = "Draft"
+# Appended to every query that isn't the owner's own draft lookup.
+NOT_DRAFT = f"status IS DISTINCT FROM '{DRAFT_STATUS}'"
+
 # SCRUM-152: 'Confirmed' *is* "in preparation" — an event that has passed its
 # Operational Safety Check is the one that may proceed. So the gate is simply
 # that nothing here can move an event into 'Confirmed'; only the safety
@@ -399,7 +406,7 @@ def list_active_events(database_url):
     """Every active event, assigned or not, for the Lead's workload view."""
     query = f"""SELECT {ROW_COLUMNS}
                 FROM public."Event"
-                WHERE status NOT IN %s
+                WHERE status NOT IN %s AND {NOT_DRAFT}
                 ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC"""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -429,7 +436,7 @@ def list_event_summaries(database_url, event_ids):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
-                f'SELECT {SUMMARY_COLUMNS} FROM public."Event" WHERE event_id = ANY(%s::uuid[])',
+                f'SELECT {SUMMARY_COLUMNS} FROM public."Event" WHERE event_id = ANY(%s::uuid[]) AND {NOT_DRAFT}',
                 [event_ids],
             )
             return [_summary(row) for row in cursor.fetchall()]
@@ -584,7 +591,7 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 [event_id],
             )
             current = cursor.fetchone()
-            if not current:
+            if not current or current["status"] == DRAFT_STATUS:
                 raise EventNotFoundError
             if current["status"] in CLOSED_STATUSES:
                 raise EventClosedError(current["status"])
@@ -620,7 +627,7 @@ def list_events(
     view_all=False,
 ):
     if view_all:
-        conditions = []
+        conditions = [NOT_DRAFT]
         params = []
     else:
         conditions = ["coordinator_id = %s"]
@@ -638,7 +645,7 @@ def list_events(
     if date_from:
         conditions.append("preferred_end_date >= %s")
         params.append(_aware(date_from))
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where_clause = f"WHERE {' AND '.join(conditions)}"
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -670,7 +677,7 @@ def list_organiser_events(database_url, organiser_id):
             cursor.execute(
                 f"""SELECT {ROW_COLUMNS}
                     FROM public."Event"
-                    WHERE organiser_id = %s
+                    WHERE organiser_id = %s AND {NOT_DRAFT}
                     ORDER BY preferred_start_date ASC NULLS LAST, event_id ASC""",
                 [organiser_id],
             )
@@ -704,7 +711,8 @@ def get_event(database_url, event_id, coordinator_id, view_all=False):
                 [event_id],
             )
             event = cursor.fetchone()
-    if not event:
+    # A draft is visible to its organiser only, through get_organiser_event.
+    if not event or event["status"] == DRAFT_STATUS:
         raise EventNotFoundError
     if not view_all and (
         not event["coordinator_id"] or str(event["coordinator_id"]) != coordinator_id
@@ -1444,3 +1452,117 @@ def approve_event(database_url, event_id, coordinator_id):
 
 def reject_event(database_url, event_id, coordinator_id, reason):
     return decide_event(database_url, event_id, coordinator_id, "Rejected", reason)
+
+
+class EventNotDraftError(Exception):
+    """The request has been submitted, so the draft endpoints no longer apply."""
+
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+def _draft_values(details):
+    """`details` as column values in FIELDS order; a blank field is stored as NULL."""
+    stored = {key: (details.get(key) or "").strip() or None for key in FIELDS}
+    stored["description"] = json.dumps(
+        {
+            "_connectsphere": "event-submission-v1",
+            "description": (details.get("description") or "").strip(),
+            "purpose": (details.get("purpose") or "").strip(),
+        },
+        ensure_ascii=False,
+    )
+    if stored["expectedAttendance"]:
+        stored["expectedAttendance"] = int(stored["expectedAttendance"])
+    for key in ("preferredStartDate", "preferredEndDate"):
+        if stored[key]:
+            stored[key] = _aware(stored[key])
+    return [stored[key] for key in FIELDS]
+
+
+def _owned_draft(cursor, event_id, organiser_id):
+    """Lock the draft, refusing anyone but its organiser (AC4) and any submitted request."""
+    cursor.execute(
+        f"""SELECT {ROW_COLUMNS}
+            FROM public."Event"
+            WHERE event_id = %s
+            FOR UPDATE""",
+        [event_id],
+    )
+    event = cursor.fetchone()
+    if not event:
+        raise EventNotFoundError
+    if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
+        raise EventNotOwnedError
+    if event["status"] != DRAFT_STATUS:
+        raise EventNotDraftError(event["status"])
+    return event
+
+
+def save_draft(database_url, organiser_id, details):
+    """Store an incomplete request as a 'Draft' (AC1). It has no submission time yet."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""INSERT INTO public."Event"
+                    (event_id, {COLUMNS}, status, submission_date, organiser_id)
+                    VALUES (%s, {", ".join(["%s"] * len(FIELDS))},
+                            '{DRAFT_STATUS}', NULL, %s)
+                    RETURNING {ROW_COLUMNS}""",
+                [str(uuid4()), *_draft_values(details), organiser_id],
+            )
+            saved = cursor.fetchone()
+    return serialize(saved)
+
+
+def list_organiser_drafts(database_url, organiser_id):
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE organiser_id = %s AND status = '{DRAFT_STATUS}'
+                    ORDER BY event_name ASC NULLS LAST, event_id ASC""",
+                [organiser_id],
+            )
+            return [serialize(row) for row in cursor.fetchall()]
+
+
+def _write_draft(database_url, event_id, organiser_id, details, status):
+    assignments = ", ".join(f"{column} = %s" for column in FIELDS.values())
+    submission_date = "now()" if status != DRAFT_STATUS else "NULL"
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            _owned_draft(cursor, event_id, organiser_id)
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET {assignments}, status = %s, submission_date = {submission_date}
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [*_draft_values(details), status, event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def update_draft(database_url, event_id, organiser_id, details):
+    """Replace one draft's details; every other draft is untouched (AC2)."""
+    return _write_draft(database_url, event_id, organiser_id, details, DRAFT_STATUS)
+
+
+def submit_draft(database_url, event_id, organiser_id, details):
+    """Save the completed details and submit the draft in one UPDATE (AC5)."""
+    return _write_draft(database_url, event_id, organiser_id, details, "Submitted")
+
+
+def delete_draft(database_url, event_id, organiser_id):
+    """Permanently remove a draft (AC3). A submitted request can't be deleted here."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            _owned_draft(cursor, event_id, organiser_id)
+            cursor.execute(
+                f"""DELETE FROM public."Event"
+                    WHERE event_id = %s AND status = '{DRAFT_STATUS}'""",
+                [event_id],
+            )

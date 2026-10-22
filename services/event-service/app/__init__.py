@@ -20,6 +20,7 @@ from app.models import (
     ClarificationNotAllowedError,
     ClarificationNotOpenError,
     EventClosedError,
+    EventNotDraftError,
     EventNotAssignedError,
     EventNotEditableError,
     EventNotFoundError,
@@ -34,11 +35,13 @@ from app.models import (
     SafetyRecheckRequiredError,
     StaleSafetyCheckError,
     approve_event,
+    delete_draft,
     get_event,
     get_organiser_event,
     list_active_events,
     list_event_summaries,
     list_events,
+    list_organiser_drafts,
     list_confirmed_events,
     list_organiser_events,
     list_overlapping_events,
@@ -47,13 +50,16 @@ from app.models import (
     reject_event,
     request_event_clarification,
     respond_to_event_clarification,
+    save_draft,
+    submit_draft,
     submit_event,
     update_event_coordinator,
     update_event_details,
     update_event_progress,
     update_event_safety_status,
+    update_draft,
 )
-from app.validation import validate
+from app.validation import validate, validate_draft
 
 # Roles that see every event rather than only the ones assigned to them,
 # passed as ?viewerRole=. Until services verify a JWT (AGENTS.md) the role is
@@ -99,6 +105,46 @@ def _safety_recheck(data):
     return cleaned, None
 
 
+def _organiser_id(raw):
+    try:
+        return str(UUID(raw)), None
+    except (ValueError, TypeError, AttributeError):
+        return None, (jsonify(message="A valid current organiser ID is required."), 400)
+
+
+def _draft_details(data, validator):
+    """The organiser and event details from a draft request body, or the 400 to send."""
+    if not isinstance(data, dict):
+        return None, None, (jsonify(message="Send a JSON object."), 400)
+    organiser_id, failure = _organiser_id(data.get("organiserId", ""))
+    if failure:
+        return None, None, failure
+    missing, errors = validator(data)
+    if missing or errors:
+        return None, None, (
+            jsonify(
+                message="Please correct the event details.",
+                missingFields=missing,
+                errors=errors,
+            ),
+            400,
+        )
+    return organiser_id, {key: data.get(key) or "" for key in (*FIELDS, "purpose")}, None
+
+
+def _draft_not_writable(error):
+    """The response for a draft another organiser owns or that is already submitted (AC4)."""
+    if isinstance(error, EventNotFoundError):
+        return jsonify(message="Draft not found."), 404
+    if isinstance(error, EventNotOwnedError):
+        return jsonify(message="You can only change drafts you created."), 403
+    return jsonify(
+        code="EVENT_NOT_DRAFT",
+        message=f"This request is '{error.current_status}', not a draft.",
+        currentStatus=error.current_status,
+    ), 409
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
@@ -135,7 +181,7 @@ def create_app(config=None):
                 "Content-Type, Authorization, Accept"
             )
             response.headers["Access-Control-Allow-Methods"] = (
-                "GET, POST, PATCH, OPTIONS"
+                "GET, POST, PATCH, DELETE, OPTIONS"
             )
         if request.method == "OPTIONS":
             response.status_code = 200
@@ -189,6 +235,74 @@ def create_app(config=None):
             except (ValueError, TypeError, AttributeError):
                 return jsonify(message="A valid organiser ID is required."), 400
         return jsonify(submit_event(app.config["DATABASE_URL"], details)), 201
+
+    @app.post("/events/drafts")
+    def create_draft():
+        organiser_id, details, failure = _draft_details(
+            request.get_json(silent=True), validate_draft
+        )
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(save_draft(app.config["DATABASE_URL"], organiser_id, details)), 201
+
+    @app.get("/events/drafts")
+    def drafts():
+        organiser_id, failure = _organiser_id(request.args.get("organiserId", ""))
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        return jsonify(events=list_organiser_drafts(app.config["DATABASE_URL"], organiser_id))
+
+    @app.patch("/events/drafts/<uuid:event_id>")
+    def edit_draft(event_id):
+        organiser_id, details, failure = _draft_details(
+            request.get_json(silent=True), validate_draft
+        )
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            saved = update_draft(
+                app.config["DATABASE_URL"], str(event_id), organiser_id, details
+            )
+        except (EventNotFoundError, EventNotOwnedError, EventNotDraftError) as error:
+            return _draft_not_writable(error)
+        return jsonify(saved), 200
+
+    @app.post("/events/drafts/<uuid:event_id>/submit")
+    def submit_existing_draft(event_id):
+        # The full submission rules, the same as POST /events (AC5).
+        organiser_id, details, failure = _draft_details(
+            request.get_json(silent=True), validate
+        )
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            submitted_event = submit_draft(
+                app.config["DATABASE_URL"], str(event_id), organiser_id, details
+            )
+        except (EventNotFoundError, EventNotOwnedError, EventNotDraftError) as error:
+            return _draft_not_writable(error)
+        return jsonify(submitted_event), 200
+
+    @app.delete("/events/drafts/<uuid:event_id>")
+    def remove_draft(event_id):
+        organiser_id, failure = _organiser_id(request.args.get("organiserId", ""))
+        if failure:
+            return failure
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            delete_draft(app.config["DATABASE_URL"], str(event_id), organiser_id)
+        except (EventNotFoundError, EventNotOwnedError, EventNotDraftError) as error:
+            return _draft_not_writable(error)
+        return "", 204
 
     @app.get("/events/submitted")
     def submitted():
