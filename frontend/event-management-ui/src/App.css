@@ -341,6 +341,32 @@ textarea:disabled {
   color: var(--color-faint);
 }
 
+.event-list-section {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.event-list-heading {
+  margin: var(--space-2) 0 0;
+  font-size: 15px;
+}
+
+/* Unstyled button filling the draft card, so the card reads the same as the other event rows. */
+.draft-row-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .event-row-date {
   display: flex;
   flex: none;
@@ -877,6 +903,11 @@ textarea:disabled {
 .status-badge.submitted {
   background: var(--color-primary-soft);
   color: var(--color-primary);
+}
+
+.status-badge.draft {
+  background: var(--color-background);
+  color: var(--color-muted);
 }
 
 .status-badge.under-review {

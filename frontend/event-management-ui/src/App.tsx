@@ -58,6 +58,7 @@ const paths: Record<Route, string> = {
   equipmentRequests: '/equipment-requests',
   safetyChecks: '/safety-checks',
   newEquipmentRequest: '/equipment-requests/new',
+  editDraft: '/drafts',
 }
 
 function getRoute(): Route {
@@ -83,11 +84,17 @@ function getRoute(): Route {
   if (path === '/venue-search') return 'venueSearch'
   if (/^\/venues\/[^/]+$/.test(path)) return 'venueDetail'
   if (/^\/events\/[^/]+$/.test(path)) return 'detail'
+  if (/^\/drafts\/[^/]+$/.test(path)) return 'editDraft'
   return 'dashboard'
 }
 
 function getEventId(): string | null {
   const match = window.location.pathname.match(/^\/events\/([^/]+)$/)
+  return match ? match[1] : null
+}
+
+function getDraftId(): string | null {
+  const match = window.location.pathname.match(/^\/drafts\/([^/]+)$/)
   return match ? match[1] : null
 }
 
@@ -101,6 +108,7 @@ function App() {
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
   const [venueId, setVenueId] = useState<string | null>(getVenueId)
+  const [draftId, setDraftId] = useState<string | null>(getDraftId)
   const [detailOrigin, setDetailOrigin] = useState<Route>('review')
   const [users, setUsers] = useState<User[]>([])
   const [activeUserId, setActiveUserId] = useState<string>(() => {
@@ -136,6 +144,7 @@ function App() {
       setRoute(getRoute())
       setEventId(getEventId())
       setVenueId(getVenueId())
+      setDraftId(getDraftId())
       setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
     }
     window.addEventListener('popstate', handlePopState)
@@ -177,6 +186,13 @@ function App() {
     setRoute('detail')
   }
 
+  const navigateToDraft = (id: string) => {
+    setNotice(null)
+    setDraftId(id)
+    window.history.pushState({}, '', `/drafts/${id}`)
+    setRoute('editDraft')
+  }
+
   const navigateToVenue = (id: string) => {
     setNotice(null)
     setVenueId(id)
@@ -216,12 +232,13 @@ function App() {
       <HoldReminderAlert user={activeUser} />
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
       {route === 'submit' && <SubmissionPage role={role} currentOrganiserId={activeUser?.id} />}
+      {route === 'editDraft' && draftId && <SubmissionPage key={`${draftId}-${activeUser?.id}`} role={role} currentOrganiserId={activeUser?.id} draftId={draftId} />}
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {inEventsPage && <EventsTabs tabs={eventTabs} route={route} onNavigate={navigate} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'queue' && <UnassignedQueuePage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'workload' && <CoordinatorWorkloadPage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
-      {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} />}
+      {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} onOpenDraft={navigateToDraft} />}
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
