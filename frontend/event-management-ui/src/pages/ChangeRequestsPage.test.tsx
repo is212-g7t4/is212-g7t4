@@ -113,6 +113,6 @@ test('an impact conflict remains visible and the request stays pending', async (
 
 test('non-coordinators cannot view the queue', () => {
   render(<ChangeRequestsPage role="Event Organiser" coordinatorId="organiser" />)
-  expect(screen.getByRole('alert')).toHaveTextContent('visible to Event Coordinators')
+  expect(screen.getByText('Change requests are visible to Event Coordinators.')).toBeInTheDocument()
   expect(fetchPendingChangeRequests).not.toHaveBeenCalled()
 })
