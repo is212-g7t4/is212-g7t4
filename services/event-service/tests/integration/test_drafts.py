@@ -1,9 +1,12 @@
-"""SCRUM-12 Save Event Request as Draft: integration tests, route to real Postgres.
+"""SCRUM-12 Save Event Request as Draft: Event Service integration tests.
 
-Real: the Flask app and routes, validation, app/models.py SQL, postgres:17.6 with the full
-migration chain. Doubled: nothing (Event Service makes no outbound calls). Identity is the
-organiserId / coordinatorId the caller sends, as in production today, so these tests prove
-the ownership rules given an asserted ID, not authentication.
+Story:      As an Event Organiser, I want to save an incomplete Event Request as a draft,
+            so that I can complete or review it later to avoid losing progress
+Real:       Flask app and routes, validation, app/models.py SQL, postgres:17.6 with the
+            full migration chain.
+Doubled:    nothing (Event Service makes no outbound calls).
+Not proven: authentication; identity is the organiserId / coordinatorId the caller sends,
+            so the ownership rules are proven given an asserted ID.
 
 AC1  Saving some (not necessarily all) details stores the request as 'Draft', not visible
      to any Event Coordinator.
@@ -50,8 +53,8 @@ def draft_names(client, organiser_id=ORGANISER_ID):
 # AC1 ---------------------------------------------------------------------
 
 
-def test_saving_only_a_name_stores_a_draft_with_no_submission_time(client, db):
-    """SCRUM-12 AC1 (normal): partial details are stored as 'Draft', blanks as NULL."""
+def test_ac1_saving_only_a_name_stores_a_draft_with_no_submission_time(client, db):
+    """Normal: partial details are stored as 'Draft', blanks as NULL."""
     response = client.post("/events/drafts", json={"eventName": "Spring Fair", "organiserId": ORGANISER_ID})
 
     assert response.status_code == 201
@@ -67,6 +70,38 @@ def test_saving_only_a_name_stores_a_draft_with_no_submission_time(client, db):
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        f"/events/submitted?coordinatorId={LEAD_ID}&viewerRole={LEAD}",
+        "/events/unassigned",
+        "/events/active",
+        f"/events?coordinatorId={LEAD_ID}&viewerRole={LEAD}",
+    ],
+)
+def test_ac1_coordinator_lists_leave_out_drafts(client, db, path):
+    """Normal: coordinator views list the submitted request, never the draft."""
+    make_event(db, status="Draft", event_name="Secret Draft")
+    make_event(db, status="Submitted", event_name="Submitted Fair")
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    names = [event["eventName"] for event in response.get_json()["events"]]
+    assert names == ["Submitted Fair"]
+
+
+def test_ac1_event_summaries_leave_out_drafts(client, db):
+    """Normal: the cross-service name lookup doesn't reveal drafts either."""
+    draft_id = make_event(db, status="Draft", event_name="Secret Draft")
+    submitted_id = make_event(db, status="Submitted", event_name="Submitted Fair")
+
+    response = client.get(f"/events/summaries?ids={draft_id},{submitted_id}")
+
+    assert response.status_code == 200
+    assert [event["id"] for event in response.get_json()["events"]] == [submitted_id]
+
+
+@pytest.mark.parametrize(
     ("details", "stored"),
     [
         ({"expectedAttendance": "1"}, {"expected_attendance": 1}),
@@ -77,8 +112,8 @@ def test_saving_only_a_name_stores_a_draft_with_no_submission_time(client, db):
     ],
     ids=["attendance-of-one", "end-one-minute-after-start"],
 )
-def test_draft_values_at_the_lower_limit_are_saved(client, db, details, stored):
-    """SCRUM-12 AC1 (boundary): the smallest valid attendance and period are accepted."""
+def test_ac1_draft_values_at_the_lower_limit_are_saved(client, db, details, stored):
+    """Boundary: the smallest valid attendance and period are accepted."""
     response = client.post("/events/drafts", json={"eventName": "Spring Fair", "organiserId": ORGANISER_ID, **details})
 
     assert response.status_code == 201
@@ -98,8 +133,8 @@ def test_draft_values_at_the_lower_limit_are_saved(client, db, details, stored):
     ],
     ids=["attendance-of-zero", "end-equals-start"],
 )
-def test_draft_values_just_past_the_limit_are_refused_and_nothing_is_stored(client, db, details, error):
-    """SCRUM-12 AC1 (boundary): whatever is filled in must already be valid."""
+def test_ac1_draft_values_just_past_the_limit_are_refused_and_nothing_is_stored(client, db, details, error):
+    """Boundary: whatever is filled in must already be valid."""
     response = client.post("/events/drafts", json={"eventName": "Spring Fair", "organiserId": ORGANISER_ID, **details})
 
     assert response.status_code == 400
@@ -107,70 +142,8 @@ def test_draft_values_just_past_the_limit_are_refused_and_nothing_is_stored(clie
     assert db.event_count() == 0
 
 
-def test_a_draft_without_a_name_is_refused_and_nothing_is_stored(client, db):
-    """SCRUM-12 AC1 (failure): Event Name is the one field a draft needs."""
-    response = client.post("/events/drafts", json={"description": "No name yet", "organiserId": ORGANISER_ID})
-
-    assert response.status_code == 400
-    assert response.get_json()["missingFields"] == ["Event Name"]
-    assert db.event_count() == 0
-
-
-def test_a_draft_for_an_organiser_who_is_not_a_user_is_refused_and_nothing_is_stored(client, db):
-    """SCRUM-12 AC1 (failure): Event.organiser_id has a real foreign key to User.
-
-    Only asserts that it is refused; today it surfaces as a 503 "database connection"
-    message, which is reported separately rather than locked in here.
-    """
-    response = client.post("/events/drafts", json={"eventName": "Spring Fair", "organiserId": UNKNOWN_ID})
-
-    assert response.status_code >= 400
-    assert db.event_count() == 0
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        f"/events/submitted?coordinatorId={LEAD_ID}&viewerRole={LEAD}",
-        "/events/unassigned",
-        "/events/active",
-        f"/events?coordinatorId={LEAD_ID}&viewerRole={LEAD}",
-    ],
-)
-def test_coordinator_lists_leave_out_drafts(client, db, path):
-    """SCRUM-12 AC1 (visibility): coordinator views list the submitted request, never the draft."""
-    make_event(db, status="Draft", event_name="Secret Draft")
-    make_event(db, status="Submitted", event_name="Submitted Fair")
-
-    response = client.get(path)
-
-    assert response.status_code == 200
-    names = [event["eventName"] for event in response.get_json()["events"]]
-    assert names == ["Submitted Fair"]
-
-
-def test_event_summaries_leave_out_drafts(client, db):
-    """SCRUM-12 AC1 (visibility): the cross-service name lookup doesn't reveal drafts either."""
-    draft_id = make_event(db, status="Draft", event_name="Secret Draft")
-    submitted_id = make_event(db, status="Submitted", event_name="Submitted Fair")
-
-    response = client.get(f"/events/summaries?ids={draft_id},{submitted_id}")
-
-    assert response.status_code == 200
-    assert [event["id"] for event in response.get_json()["events"]] == [submitted_id]
-
-
-def test_a_coordinator_cannot_open_a_draft_by_id(client, db):
-    """SCRUM-12 AC1 (visibility): even the Lead, who sees every event, gets 404 for a draft."""
-    draft_id = make_event(db, status="Draft")
-
-    response = client.get(f"/events/{draft_id}?coordinatorId={LEAD_ID}&viewerRole={LEAD}")
-
-    assert response.status_code == 404
-
-
-def test_the_lead_cannot_assign_a_coordinator_to_a_draft(client, db):
-    """SCRUM-12 AC1 (conflict): a draft never reaches the coordinator workflow."""
+def test_ac1_the_lead_cannot_assign_a_coordinator_to_a_draft(client, db):
+    """Conflict: a draft never reaches the coordinator workflow."""
     make_user(db, COORDINATOR_ID, role="Event Coordinator")
     make_user(db, LEAD_ID, role=LEAD)
     draft_id = make_event(db, status="Draft")
@@ -183,11 +156,41 @@ def test_the_lead_cannot_assign_a_coordinator_to_a_draft(client, db):
     assert row["status"] == "Draft"
 
 
+def test_ac1_a_draft_without_a_name_is_refused_and_nothing_is_stored(client, db):
+    """Failure: Event Name is the one field a draft needs."""
+    response = client.post("/events/drafts", json={"description": "No name yet", "organiserId": ORGANISER_ID})
+
+    assert response.status_code == 400
+    assert response.get_json()["missingFields"] == ["Event Name"]
+    assert db.event_count() == 0
+
+
+def test_ac1_a_draft_for_an_organiser_who_is_not_a_user_is_refused_and_nothing_is_stored(client, db):
+    """Failure: Event.organiser_id has a real foreign key to User.
+
+    Only asserts that it is refused; today it surfaces as a 503 "database connection"
+    message, which is reported separately rather than locked in here.
+    """
+    response = client.post("/events/drafts", json={"eventName": "Spring Fair", "organiserId": UNKNOWN_ID})
+
+    assert response.status_code >= 400
+    assert db.event_count() == 0
+
+
+def test_ac1_a_coordinator_cannot_open_a_draft_by_id(client, db):
+    """Failure: even the Lead, who sees every event, gets 404 for a draft."""
+    draft_id = make_event(db, status="Draft")
+
+    response = client.get(f"/events/{draft_id}?coordinatorId={LEAD_ID}&viewerRole={LEAD}")
+
+    assert response.status_code == 404
+
+
 # AC2 ---------------------------------------------------------------------
 
 
-def test_the_draft_list_holds_each_of_the_organisers_drafts_and_nothing_else(client, db):
-    """SCRUM-12 AC2 (normal): separate drafts, not submitted requests or other people's."""
+def test_ac2_the_draft_list_holds_each_of_the_organisers_drafts_and_nothing_else(client, db):
+    """Normal: separate drafts, not submitted requests or other people's."""
     make_event(db, status="Draft", event_name="Winter Gala")
     make_event(db, status="Draft", event_name="Autumn Fair")
     make_event(db, status="Submitted", event_name="Submitted Fair")
@@ -196,8 +199,8 @@ def test_the_draft_list_holds_each_of_the_organisers_drafts_and_nothing_else(cli
     assert draft_names(client) == ["Autumn Fair", "Winter Gala"]
 
 
-def test_opening_a_draft_returns_its_saved_details(client, db):
-    """SCRUM-12 AC2 (normal): the organiser can open their draft to continue it."""
+def test_ac2_opening_a_draft_returns_its_saved_details(client, db):
+    """Normal: the organiser can open their draft to continue it."""
     draft_id = make_event(db, status="Draft", event_name="Winter Gala", description="Year-end party", expected_attendance=80)
 
     response = client.get(f"/events/{draft_id}?organiserId={ORGANISER_ID}")
@@ -209,8 +212,8 @@ def test_opening_a_draft_returns_its_saved_details(client, db):
     )
 
 
-def test_editing_one_draft_leaves_the_other_draft_untouched(client, db):
-    """SCRUM-12 AC2 (normal): drafts are edited independently."""
+def test_ac2_editing_one_draft_leaves_the_other_draft_untouched(client, db):
+    """Normal: drafts are edited independently."""
     edited_id = make_event(db, status="Draft", event_name="Spring Fair")
     other_id = make_event(db, status="Draft", event_name="Winter Gala", expected_attendance=80)
     other_before = db.event(other_id)
@@ -227,8 +230,8 @@ def test_editing_one_draft_leaves_the_other_draft_untouched(client, db):
     assert db.event(other_id) == other_before
 
 
-def test_clearing_a_field_when_editing_a_draft_stores_it_as_empty(client, db):
-    """SCRUM-12 AC2 (boundary): an edit replaces the draft's details, including blanks."""
+def test_ac2_clearing_a_field_when_editing_a_draft_stores_it_as_empty(client, db):
+    """Boundary: an edit replaces the draft's details, including blanks."""
     draft_id = make_event(db, status="Draft", venue_requirements="Main hall")
 
     response = client.patch(
@@ -240,8 +243,8 @@ def test_clearing_a_field_when_editing_a_draft_stores_it_as_empty(client, db):
     assert db.event(draft_id)["venue_requirements"] is None
 
 
-def test_a_submitted_request_cannot_be_edited_as_a_draft(client, db):
-    """SCRUM-12 AC2 (conflict): once submitted, the draft endpoints no longer apply."""
+def test_ac2_a_submitted_request_cannot_be_edited_as_a_draft(client, db):
+    """Conflict: once submitted, the draft endpoints no longer apply."""
     event_id = make_event(db, status="Submitted")
     before = db.event(event_id)
 
@@ -255,8 +258,8 @@ def test_a_submitted_request_cannot_be_edited_as_a_draft(client, db):
 # AC3 ---------------------------------------------------------------------
 
 
-def test_deleting_a_draft_removes_it_permanently(client, db):
-    """SCRUM-12 AC3 (normal): the row is gone and the draft list no longer shows it."""
+def test_ac3_deleting_a_draft_removes_it_permanently(client, db):
+    """Normal: the row is gone and the draft list no longer shows it."""
     deleted_id = make_event(db, status="Draft", event_name="Spring Fair")
     make_event(db, status="Draft", event_name="Winter Gala")
 
@@ -267,23 +270,23 @@ def test_deleting_a_draft_removes_it_permanently(client, db):
     assert draft_names(client) == ["Winter Gala"]
 
 
-def test_deleting_a_draft_that_does_not_exist_returns_404(client, db):
-    """SCRUM-12 AC3 (failure): an unknown ID, and a second delete of the same draft."""
-    draft_id = make_event(db, status="Draft")
-
-    assert client.delete(f"/events/drafts/{UNKNOWN_ID}?organiserId={ORGANISER_ID}").status_code == 404
-    assert client.delete(f"/events/drafts/{draft_id}?organiserId={ORGANISER_ID}").status_code == 204
-    assert client.delete(f"/events/drafts/{draft_id}?organiserId={ORGANISER_ID}").status_code == 404
-
-
-def test_a_submitted_request_cannot_be_deleted_through_the_draft_route(client, db):
-    """SCRUM-12 AC3 (conflict): only drafts can be deleted here."""
+def test_ac3_a_submitted_request_cannot_be_deleted_through_the_draft_route(client, db):
+    """Conflict: only drafts can be deleted here."""
     event_id = make_event(db, status="Submitted")
 
     response = client.delete(f"/events/drafts/{event_id}?organiserId={ORGANISER_ID}")
 
     assert response.status_code == 409
     assert db.event(event_id) is not None
+
+
+def test_ac3_deleting_a_draft_that_does_not_exist_returns_404(client, db):
+    """Failure: an unknown ID, and a second delete of the same draft."""
+    draft_id = make_event(db, status="Draft")
+
+    assert client.delete(f"/events/drafts/{UNKNOWN_ID}?organiserId={ORGANISER_ID}").status_code == 404
+    assert client.delete(f"/events/drafts/{draft_id}?organiserId={ORGANISER_ID}").status_code == 204
+    assert client.delete(f"/events/drafts/{draft_id}?organiserId={ORGANISER_ID}").status_code == 404
 
 
 # AC4 ---------------------------------------------------------------------
@@ -299,8 +302,8 @@ def test_a_submitted_request_cannot_be_deleted_through_the_draft_route(client, d
     ],
     ids=["view", "edit", "delete", "submit"],
 )
-def test_another_organiser_cannot_touch_someone_elses_draft(client, db, method, path, body):
-    """SCRUM-12 AC4 (failure): 403, and the owner's draft is exactly as it was."""
+def test_ac4_another_organiser_cannot_touch_someone_elses_draft(client, db, method, path, body):
+    """Failure: 403, and the owner's draft is exactly as it was."""
     draft_id = make_event(db, status="Draft")
     before = db.event(draft_id)
 
@@ -322,8 +325,8 @@ def test_another_organiser_cannot_touch_someone_elses_draft(client, db, method, 
     ],
     ids=["create", "list", "edit", "delete", "submit"],
 )
-def test_draft_routes_refuse_a_missing_or_invalid_organiser_id(client, db, method, path, body, organiser_id):
-    """SCRUM-12 AC4 (failure): no organiser, no access; nothing is written."""
+def test_ac4_draft_routes_refuse_a_missing_or_invalid_organiser_id(client, db, method, path, body, organiser_id):
+    """Failure: no organiser, no access; nothing is written."""
     draft_id = make_event(db, status="Draft")
     before = db.event(draft_id)
     url = path.format(id=draft_id)
@@ -342,8 +345,8 @@ def test_draft_routes_refuse_a_missing_or_invalid_organiser_id(client, db, metho
 # AC5 ---------------------------------------------------------------------
 
 
-def test_submitting_a_complete_draft_moves_it_to_submitted(client, db):
-    """SCRUM-12 AC5 (normal): 'Submitted', time recorded, out of the drafts, into the Lead's queue."""
+def test_ac5_submitting_a_complete_draft_moves_it_to_submitted(client, db):
+    """Normal: 'Submitted', time recorded, out of the drafts, into the Lead's queue."""
     draft_id = make_event(db, status="Draft", event_name="Community Workshop")
 
     response = client.post(f"/events/drafts/{draft_id}/submit", json={**COMPLETE, "organiserId": ORGANISER_ID})
@@ -359,22 +362,8 @@ def test_submitting_a_complete_draft_moves_it_to_submitted(client, db):
     assert [event["id"] for event in unassigned] == [draft_id]
 
 
-def test_submitting_an_incomplete_draft_lists_what_is_missing_and_keeps_it_a_draft(client, db):
-    """SCRUM-12 AC5 (failure): refused, fields listed, saved details unchanged."""
-    draft_id = make_event(db, status="Draft", event_name="Spring Fair", venue_requirements="Main hall")
-    before = db.event(draft_id)
-
-    response = client.post(f"/events/drafts/{draft_id}/submit", json={"eventName": "Spring Fair", "organiserId": ORGANISER_ID})
-
-    assert response.status_code == 400
-    assert response.get_json()["missingFields"] == [
-        "Description", "Purpose", "Preferred Start Date & Time", "Preferred End Date & Time", "Expected Attendance",
-    ]
-    assert db.event(draft_id) == before
-
-
-def test_submitting_a_draft_whose_end_equals_its_start_is_refused(client, db):
-    """SCRUM-12 AC5 (boundary): the full format rules apply on submit."""
+def test_ac5_submitting_a_draft_whose_end_equals_its_start_is_refused(client, db):
+    """Boundary: the full format rules apply on submit."""
     draft_id = make_event(db, status="Draft")
     before = db.event(draft_id)
 
@@ -388,8 +377,8 @@ def test_submitting_a_draft_whose_end_equals_its_start_is_refused(client, db):
     assert db.event(draft_id) == before
 
 
-def test_a_request_that_is_already_submitted_cannot_be_submitted_again(client, db):
-    """SCRUM-12 AC5 (conflict): 409, and the original submission time stands."""
+def test_ac5_a_request_that_is_already_submitted_cannot_be_submitted_again(client, db):
+    """Conflict: 409, and the original submission time stands."""
     event_id = make_event(db, status="Submitted")
     before = db.event(event_id)
 
@@ -398,3 +387,17 @@ def test_a_request_that_is_already_submitted_cannot_be_submitted_again(client, d
     assert response.status_code == 409
     assert response.get_json()["code"] == "EVENT_NOT_DRAFT"
     assert db.event(event_id) == before
+
+
+def test_ac5_submitting_an_incomplete_draft_lists_what_is_missing_and_keeps_it_a_draft(client, db):
+    """Failure: refused, fields listed, saved details unchanged."""
+    draft_id = make_event(db, status="Draft", event_name="Spring Fair", venue_requirements="Main hall")
+    before = db.event(draft_id)
+
+    response = client.post(f"/events/drafts/{draft_id}/submit", json={"eventName": "Spring Fair", "organiserId": ORGANISER_ID})
+
+    assert response.status_code == 400
+    assert response.get_json()["missingFields"] == [
+        "Description", "Purpose", "Preferred Start Date & Time", "Preferred End Date & Time", "Expected Attendance",
+    ]
+    assert db.event(draft_id) == before
