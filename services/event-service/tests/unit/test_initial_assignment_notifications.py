@@ -1,6 +1,7 @@
-"""SCRUM-45 user story: As an Event Organiser I want in-app updates about
-who coordinates my event. AC4 initial assignment; DR2 atomic intent, DR4 saved
-identity and DR5 legacy missing-organiser diagnosis. Test owning HTTP boundaries.
+"""SCRUM-45 user story: As an Event Organiser, I want to receive an in-app
+notification when the Lead Coordinator approves or rejects my event request,
+so that I know the outcome and who is responsible for coordinating my event.
+AC4 initial assignment; DR2/DR3/DR4 durable intent, freeze and retry; DR6 name repair.
 """
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -116,6 +117,11 @@ def test_claim_exposes_assignment_type_and_freeze_accepts_named_saved_identity(b
         json=dict(leaseToken=LEASE, envelope=envelope))
     assert result.status_code == 200
     assert result.json["envelope"] == envelope
+    writes = [call.args for call in cursor.execute.call_args_list
+              if call.args[0].lstrip().startswith('UPDATE public."EventNotificationOutbox" SET envelope=')]
+    assert len(writes) == 1, "Freeze must persist, not merely return a configured read fixture"
+    assert writes[0][1][0].adapted == envelope
+    assert writes[0][1][1] == JOB_ID
 
 
 def test_name_hold_releases_lease_and_excludes_held_work_from_claims(boundary):

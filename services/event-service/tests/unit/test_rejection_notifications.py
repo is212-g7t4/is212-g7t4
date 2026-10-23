@@ -1,7 +1,7 @@
-"""User story (SCRUM-45): As an Event Organiser, I want in-app notification
-when the Lead Coordinator rejects my event request, so I know the outcome
-and who coordinates it. AC2/AC3: rejection reason, event name and details link.
-DR2/DR3/DR4/DR5: atomic intent, retry identity, frozen facts and legacy diagnosis.
+"""SCRUM-45 user story: As an Event Organiser, I want to receive an in-app
+notification when the Lead Coordinator approves or rejects my event request,
+so that I know the outcome and who is responsible for coordinating my event.
+AC2/AC3 rejection content/link; DR2/DR3/DR4/DR5 intent, retry, freeze, legacy diagnosis.
 """
 
 from datetime import UTC, datetime
@@ -102,6 +102,11 @@ def test_pending_rejection_can_be_claimed_frozen_and_completed(boundary):
                          json={"leaseToken": LEASE, "envelope": envelope}, headers=HEADERS)
     assert freeze.status_code == 200
     assert freeze.json["envelope"] == envelope
+    writes = [call.args for call in cursor.execute.call_args_list
+              if call.args[0].lstrip().startswith('UPDATE public."EventNotificationOutbox" SET envelope=')]
+    assert len(writes) == 1, "Freeze must persist, not merely return a configured read fixture"
+    assert writes[0][1][0].adapted == envelope
+    assert writes[0][1][1] == JOB_ID
     complete = client.post(f"/internal/notification-outbox/{JOB_ID}/published",
                            json={"leaseToken": LEASE}, headers=HEADERS)
     assert complete.status_code == 200

@@ -6,7 +6,7 @@ AC2/AC3 rejection delivery and reason; DR2 atomic intent; DR3/DR4 recovery and s
 import subprocess
 from uuid import uuid4
 import pytest
-from tests.integration.system import ACTOR, ORGANISER, HEADERS, REASON, command, wait
+from tests.integration.system import ACTOR, ORGANISER, HEADERS, REASON, command, wait, replay_barrier
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -38,6 +38,10 @@ def test_real_rejection_outage_recovery_deduplication_and_recipient_isolation(sy
     freeze = s["http"]("event-service", "POST", f"/internal/notification-outbox/{job['id']}/freeze", headers=HEADERS,
                        json=dict(leaseToken=job["leaseToken"], envelope={"replacement": True}))
     assert freeze.json()["envelope"] == envelope
+    assert envelope["type"] == "event.rejection"
+    assert envelope["message"] == "Community Workshop was rejected: " + REASON
+    assert envelope["details"] == dict(eventId=s["event"], eventName="Community Workshop",
+                                       recipientId=ORGANISER, decision="Rejected", reason=REASON)
     assert envelope["recipientId"] == ORGANISER
     assert envelope["details"]["reason"] == REASON
     assert envelope["destination"] == dict(kind="event-details", eventId=s["event"])
@@ -56,10 +60,10 @@ def test_real_rejection_outage_recovery_deduplication_and_recipient_isolation(sy
     assert s["http"]("notification-service", "PATCH", f"/notifications/{notification_id}", headers=own, json=dict(read=True)).status_code == 200
     read_at = inbox()[0]["readAt"]
     # Simulate lost published receipt: same immutable identity must deduplicate.
-    s["replay"](envelope)
-    wait(lambda: "notifications.v1\t0" in command(["docker", "exec", "-u", "rabbitmq", s["rabbit"], "rabbitmqctl", "list_queues", "-q", "name", "messages"]))
-    assert inbox()[0]["readAt"] == read_at
-    assert len(inbox()) == 1
+    assert read_at is not None
+    replayed = replay_barrier(s, envelope, inbox)
+    assert replayed["id"] == notification_id
+    assert replayed["readAt"] == read_at
     other = {"X-Dev-User-Id": ACTOR, "X-Dev-Role": "Event Coordinator"}
     assert s["http"]("notification-service", "GET", "/notifications", headers=other).json()["notifications"] == []
     assert s["http"]("event-service", "POST", "/internal/notification-outbox/claim", headers=HEADERS, json={}).json()["jobs"] == []

@@ -1,10 +1,11 @@
-"""SCRUM-45 user story: As an Event Organiser I want an in-app update naming
-my initial coordinator. AC4; DR2 transaction, DR3 real delivery/deduplication,
-DR4 historical identity and DR6 name repair. Real PostgreSQL/RabbitMQ and real
-User Service HTTP against its own isolated local database; no mock User server.
+"""SCRUM-45 user story: As an Event Organiser, I want to receive an in-app
+notification when the Lead Coordinator approves or rejects my event request,
+so that I know the outcome and who is responsible for coordinating my event.
+AC4 initial assignment; DR2 transaction; DR3 delivery/deduplication; DR4 history; DR6 repair.
+Real owner-specific PostgreSQL databases, User/Assignment HTTP and RabbitMQ.
 """
 import pytest
-from tests.integration.system import wait, HEADERS, ORGANISER, ACTOR
+from tests.integration.system import wait, HEADERS, ORGANISER, ACTOR, assign_as_lead
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -30,7 +31,11 @@ def test_real_initial_assignment_delivers_username_event_link_and_deduplicates(s
     user = s["http"]("user-service", "GET", f"/users/{ACTOR}")
     assert user.status_code == 200 and user.json()["username"] == "Synthetic Event Coordinator"
     assert "name" not in user.json()
-    result = assign(s)
+    refused = s["http"]("coordinator-assignment-service", "POST",
+        f"/events/{s['event']}/assign-coordinator/{ACTOR}", json={"actingUserId": ORGANISER})
+    assert refused.status_code == 403
+    assert not s["worker"]()
+    result = assign_as_lead(s, ACTOR)
     assert result.status_code == 200, result.text
     assert s["worker"]()
     s["start"]("notification-service", ["-m", "app.consumer"], "notifications")
@@ -42,7 +47,7 @@ def test_real_initial_assignment_delivers_username_event_link_and_deduplicates(s
         recipientId=ORGANISER, coordinatorId=ACTOR, coordinatorName="Synthetic Event Coordinator")
     assert payload["message"] == "Synthetic Event Coordinator has been assigned to coordinate Community Workshop."
     assert payload["destination"] == dict(kind="event-details", eventId=s["event"])
-    assert assign(s).status_code == 409
+    assert assign_as_lead(s, ACTOR).status_code == 409
     assert not s["worker"]()
     s["replay"](payload)
     # A subsequent FIFO sentinel publication makes duplicate consumption observable.

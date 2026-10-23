@@ -5,7 +5,7 @@ AC1/AC3 approval delivery and details; DR2 atomic intent; DR4 saved facts.
 """
 import subprocess
 import pytest
-from tests.integration.system import ACTOR, ORGANISER, HEADERS, command, wait
+from tests.integration.system import ACTOR, ORGANISER, HEADERS, command, wait, replay_barrier
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -48,13 +48,41 @@ def test_real_approval_is_retrievable_after_broker_outage_with_saved_facts(syste
     assert envelope["destination"] == dict(kind="event-details", eventId=s["event"])
     assert s["http"]("notification-service", "PATCH", f"/notifications/{items[0]['id']}", headers=own, json=dict(read=True)).status_code == 200
     read_at = inbox()[0]["readAt"]
-    s["replay"](envelope)
-    wait(lambda: "notifications.v1\t0" in command(["docker", "exec", "-u", "rabbitmq", s["rabbit"], "rabbitmqctl", "list_queues", "-q", "name", "messages"]))
-    assert len(inbox()) == 1
-    assert inbox()[0]["readAt"] == read_at
+    assert read_at is not None
+    replayed = replay_barrier(s, envelope, inbox)
+    assert replayed["id"] == items[0]["id"]
+    assert replayed["readAt"] == read_at
     other = {"X-Dev-User-Id": ACTOR, "X-Dev-Role": "Event Coordinator"}
     assert s["http"]("notification-service", "GET", "/notifications", headers=other).json()["notifications"] == []
     assert s["http"]("event-service", "POST", "/internal/notification-outbox/claim", headers=HEADERS, json={}).json()["jobs"] == []
+
+
+@pytest.mark.parametrize("route", ["approve", "progress"])
+def test_original_recipient_can_open_delivered_approval_details(system, route):
+    """AC1/AC3: normal ownership, real delivery, follow the delivered destination
+    as the original recipient and independently verify decision and event name.
+    Separate from the historical owner-change/outage scenario above.
+    """
+    s = system
+    body = dict(coordinatorId=ACTOR)
+    if route == "progress":
+        body.update(status="Approved", actionDetails="Ready for approval")
+    result = s["http"]("event-service", "PATCH", f"/events/{s['event']}/{route}", json=body)
+    assert result.status_code == 200
+    s["start"]("notification-service", ["-m", "app.consumer"], "notifications")
+    assert s["worker"]()
+    own = {"X-Dev-User-Id": ORGANISER, "X-Dev-Role": "Event Organiser"}
+    items = wait(lambda: s["http"]("notification-service", "GET", "/notifications", headers=own).json()["notifications"])
+    assert len(items) == 1
+    payload = items[0]["payload"]
+    assert payload["message"] == "Community Workshop was approved"
+    assert payload["destination"] == dict(kind="event-details", eventId=s["event"])
+    linked = s["http"]("event-service", "GET",
+        f"/events/{payload['destination']['eventId']}", params={"organiserId": ORGANISER})
+    assert linked.status_code == 200
+    assert linked.json()["eventName"] == "Community Workshop"
+    assert linked.json()["decision"]["status"] == "Approved"
+    assert linked.json()["decision"]["reason"] is None
 
 
 @pytest.mark.parametrize("route", ["approve", "progress"])

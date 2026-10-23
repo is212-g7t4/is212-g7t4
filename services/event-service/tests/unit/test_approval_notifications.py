@@ -125,6 +125,11 @@ def test_approval_envelope_can_be_frozen_and_read_back(boundary):
                          json={"leaseToken": LEASE, "envelope": ENVELOPE})
     assert result.status_code == 200
     assert result.json["envelope"] == ENVELOPE
+    writes = [call.args for call in cursor.execute.call_args_list
+              if call.args[0].lstrip().startswith('UPDATE public."EventNotificationOutbox" SET envelope=')]
+    assert len(writes) == 1, "Freeze must persist, not merely return a configured read fixture"
+    assert writes[0][1][0].adapted == ENVELOPE
+    assert writes[0][1][1] == JOB_ID
 
 
 @pytest.mark.parametrize("change", [
