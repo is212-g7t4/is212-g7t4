@@ -1,13 +1,14 @@
-"""SCRUM-45 user story: As a submitting Event Organiser I want an in-app
-update naming my replacement coordinator, without rewriting earlier updates.
+"""SCRUM-45 user story: As an Event Organiser, I want to receive an in-app
+notification when the Lead Coordinator approves or rejects my event request,
+so that I know the outcome and who is responsible for coordinating my event.
 AC4 reassignment; DR2 no-op/rollback; DR3 retry/deduplication; DR4 frozen history.
-Real Event/User/Notification HTTP services, isolated PostgreSQL and RabbitMQ.
+Real Event/User/Assignment/Notification HTTP, owner-specific PostgreSQL and RabbitMQ.
 """
 from uuid import uuid4
 
 import pytest
 
-from tests.integration.system import ACTOR, HEADERS, ORGANISER, command, wait
+from tests.integration.system import ACTOR, HEADERS, ORGANISER, command, wait, assign_as_lead
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 ALICE = "10000000-0000-0000-0000-000000000003"
@@ -39,9 +40,9 @@ def test_rapid_reassignments_keep_saved_identity_and_frozen_name_across_retry(sy
     import subprocess
     s = system
     seed_replacements(s)
-    assert assign(s, ALICE).status_code == 200
-    assert assign(s, BOB).status_code == 200
-    assert assign(s, BOB).status_code == 409
+    assert assign_as_lead(s, ALICE).status_code == 200
+    assert assign_as_lead(s, BOB).status_code == 200
+    assert assign_as_lead(s, BOB).status_code == 409
     current = s["http"]("event-service", "GET", f"/events/{s['event']}?organiserId={ORGANISER}")
     assert current.json()["coordinatorId"] == BOB
     command(["docker", "stop", s["rabbit"]])
