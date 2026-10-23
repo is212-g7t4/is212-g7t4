@@ -6,9 +6,8 @@ AC2/AC3 rejection delivery and reason; DR2 atomic intent; DR3/DR4 recovery and s
 import subprocess
 from uuid import uuid4
 import pytest
-from tests.integration.system import ACTOR, ORGANISER, HEADERS, REASON, command, wait, replay_barrier
+from e2e.scrum45.system import ACTOR, ORGANISER, HEADERS, REASON, command, wait, replay_barrier
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 @pytest.mark.parametrize("route", ["reject", "progress"])
 def test_real_rejection_outage_recovery_deduplication_and_recipient_isolation(system, route):

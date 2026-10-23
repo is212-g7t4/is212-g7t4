@@ -21,13 +21,14 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "-m", "not integration",
+    "-m", "not integration and not live",
     "--cov",
     "--cov-report=term-missing",
     "--disable-socket",
 ]
 markers = [
     "integration: needs a real external system (database, another service); opt-in, never run in CI",
+    "live: hits the real Supabase project; opt-in, locally only, never run in CI",
 ]
 xfail_strict = true
 

@@ -10,7 +10,7 @@ AC3: Given a temporary system failure occurs during notification dispatch, the s
 AC1: preparation assignment and immutable recipient. AC2: exact complete content.
 AC3: outbox atomicity, outage/lease recovery, unknown publish/ack, dedup/read state.
 Infrastructure owns UUID-named containers, all databases, ports and processes.
-Run: uv run --with psycopg2-binary python tests/integration/verify_scrum173_backend.py --evidence /absolute/path
+Run from the repo root: uv run --no-project --with psycopg2-binary python e2e/verify_scrum173_backend.py --evidence /absolute/path
 No .env is read; all service environment settings are pinned to synthetic values.
 
 
@@ -38,7 +38,7 @@ import urllib.request
 import urllib.error
 import psycopg2
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "scrum173-isolated-test-token-not-production"
 KEY = "scrum173-isolated-preview-key-not-production"
 A = "10000000-0000-0000-0000-000000000001"

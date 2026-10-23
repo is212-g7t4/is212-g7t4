@@ -9,9 +9,8 @@ import subprocess
 import httpx
 import pytest
 
-from tests.integration.system import HEADERS, LEAD, ORGANISER, ROOT, free_port, wait
+from e2e.scrum45.system import HEADERS, LEAD, ORGANISER, ROOT, free_port, wait
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 
 def test_lead_rejection_reaches_organiser_inbox_and_linked_details_in_real_browser(system, tmp_path):

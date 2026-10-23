@@ -23,6 +23,7 @@ below for how this should shape commits.
 
 ```
 is212-g7t4/
+├── e2e/                             # cross-service end-to-end harnesses (real services); opt-in
 ├── frontend/                        # React SPA (Event Management System UI)
 ├── services/
 │   ├── <name>-service/              # one Flask app per microservice
@@ -282,8 +283,9 @@ Only `docker-build` still consults the `changes` job.
   `.env.example`) are listed in `.github/.gitleaksignore`. Run it locally with
   `gitleaks detect --gitleaks-ignore-path .github/.gitleaksignore`.
 - **Not covered:** Python lint/format, frontend formatting, real-database or
-  full-stack e2e, and the opt-in live Supabase test
-  (`venue-availability-service/tests/integration/test_live_calendar.py`) — it
+  full-stack e2e (the repo-root `e2e/` harnesses are opt-in; SCRUM-173's has
+  its own manual workflow), and the opt-in live Supabase test
+  (`venue-availability-service/tests/live/test_calendar.py`, `live` marker) — it
   needs Supabase credentials, which CI deliberately does not have.
 
 ## Secrets & environment

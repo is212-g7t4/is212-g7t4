@@ -5,9 +5,8 @@ AC1/AC3 approval delivery and details; DR2 atomic intent; DR4 saved facts.
 """
 import subprocess
 import pytest
-from tests.integration.system import ACTOR, ORGANISER, HEADERS, command, wait, replay_barrier
+from e2e.scrum45.system import ACTOR, ORGANISER, HEADERS, command, wait, replay_barrier
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 
 @pytest.mark.parametrize("route", ["approve", "progress"])

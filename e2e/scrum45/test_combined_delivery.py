@@ -6,9 +6,8 @@ Uses isolated PostgreSQL/RabbitMQ and actual local User Service, never remote DB
 """
 from uuid import uuid4
 import pytest
-from tests.integration.system import ACTOR, ORGANISER, ROOT, wait
+from e2e.scrum45.system import ACTOR, ORGANISER, ROOT, wait
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 
 @pytest.mark.parametrize("existing_rejection", [False, True], ids=["clean", "existing-rejection"])

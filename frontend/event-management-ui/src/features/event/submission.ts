@@ -62,7 +62,8 @@ export interface EventProgressUpdate {
 // The lifecycle, in order. `Confirmed` means the event passed its Operational
 // Safety Check and may proceed — it is the preparation stage — and only the
 // safety workflow sets it (SCRUM-152). Mirrors ALL_STATUSES in
-// services/event-service/app/models.py.
+// services/event-service/app/models.py. An organiser's 'Draft' is deliberately
+// not here: drafts never reach a coordinator, as DRAFT_STATUS there.
 export type EventStatus =
   | 'Submitted' | 'Under Review' | 'Clarification Requested' | 'Approved' | 'Rejected'
   | 'Pending Safety Check' | 'Confirmed' | 'Safety Changes Requested' | 'Cancelled'
@@ -98,6 +99,19 @@ export function validateEvent(event: EventData) {
   return { missingFields, errors }
 }
 
+// A draft needs only its name; anything else filled in must already be valid.
+// Mirrors validate_draft in services/event-service/app/validation.py.
+export function validateDraft(event: EventData) {
+  const missingFields = event.eventName.trim() ? [] : ['Event Name']
+  const { errors } = validateEvent(event)
+  const startOnly = event.preferredStartDate && !event.preferredEndDate ? [event.preferredStartDate] : []
+  const endOnly = event.preferredEndDate && !event.preferredStartDate ? [event.preferredEndDate] : []
+  if ([...startOnly, ...endOnly].some((value) => !Number.isFinite(Date.parse(value)))) {
+    errors.push('Preferred dates must be valid dates and times.')
+  }
+  return { missingFields, errors }
+}
+
 export class SubmissionError extends Error {
   missingFields: string[]
   errors: string[]
@@ -117,7 +131,7 @@ export async function eventApi(
   data?: (EventData & { organiserId?: string }) | EventProgressUpdate
     | { coordinatorId: string; reason?: string; message?: string }
     | { organiserId: string; response: string },
-  method?: 'POST' | 'PATCH',
+  method?: 'POST' | 'PATCH' | 'DELETE',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}
   const response = await fetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}${path}`, {

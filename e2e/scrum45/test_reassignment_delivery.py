@@ -8,9 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from tests.integration.system import ACTOR, HEADERS, ORGANISER, command, wait, assign_as_lead
+from e2e.scrum45.system import ACTOR, HEADERS, ORGANISER, command, wait, assign_as_lead
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 ALICE = "10000000-0000-0000-0000-000000000003"
 BOB = "10000000-0000-0000-0000-000000000004"
 

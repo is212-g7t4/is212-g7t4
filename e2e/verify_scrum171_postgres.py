@@ -59,7 +59,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (
     ROOT / "database/supabase/migrations/20261016000000_booking_closure_rejection.sql"
 )

@@ -98,11 +98,12 @@ def main():
     if args.integration or args.integration_only:
         ready = run("docker-ready", ["docker", "info", "--format", "{{.ServerVersion}}"])
         if not ready:
-            run("real-integration-pytest", ["uv", "run", "--no-env-file", "--with", "psycopg2-binary", "python", "-m", "pytest",
-                "tests/integration/test_scrum173_real.py", "-m", "integration", "--force-enable-socket", "--no-cov",
+            # e2e/ belongs to no service, so it runs in a throwaway environment, not a service's venv.
+            run("real-integration-pytest", ["uv", "run", "--no-project", "--no-env-file", "--with", "pytest",
+                "--with", "psycopg2-binary", "python", "-m", "pytest", "e2e/test_scrum173_real.py",
                 "--basetemp=" + str(evidence / "pytest-owned-temp"),
                 "-p", "scrum173_pytest_evidence", "--junitxml=" + str(evidence / "integration-junit.xml")],
-                ROOT / "services/venue-booking-service",
+                ROOT,
                 {"SCRUM173_INTEGRATION_EVIDENCE": str(evidence / "real-integration"),
                  "SCRUM173_PYTEST_EVIDENCE": str(evidence / "integration-cases.jsonl")})
     run("whitespace", ["git", "diff", "--check"])

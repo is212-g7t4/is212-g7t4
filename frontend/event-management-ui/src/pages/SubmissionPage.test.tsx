@@ -14,6 +14,8 @@ vi.mock('../components/SubmissionPopup', () => ({
   ),
 }))
 
+const ORGANISER_ID = '33333333-3333-4333-8333-333333333333'
+
 async function completeForm(expectedAttendance: string) {
   const user = userEvent.setup()
   await user.type(screen.getByLabelText(/Event Name/), 'Community Workshop')
@@ -70,6 +72,87 @@ describe('event request submission', () => {
       attendance ? 'Expected Attendance must be a positive whole number' : 'Expected Attendance is required.',
     ))
     expect(eventApi).not.toHaveBeenCalled()
+  })
+
+  test('AC1: saves partial details as a draft without requiring the other fields', async () => {
+    vi.mocked(eventApi).mockResolvedValue({ id: 'draft-1', status: 'Draft' })
+    render(<SubmissionPage role="Event Organiser" currentOrganiserId={ORGANISER_ID} />)
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText(/Event Name/), 'Community Workshop')
+
+    await user.click(screen.getByRole('button', { name: 'Save as Draft' }))
+
+    expect(await screen.findByText(/Draft saved\. Only you can see it/)).toBeInTheDocument()
+    expect(eventApi).toHaveBeenCalledExactlyOnceWith('/events/drafts', expect.objectContaining({
+      eventName: 'Community Workshop', description: '', expectedAttendance: '', organiserId: ORGANISER_ID,
+    }))
+  })
+
+  test('AC1: while a draft saves, only the save button shows progress', async () => {
+    vi.mocked(eventApi).mockReturnValue(new Promise(() => {}))
+    render(<SubmissionPage role="Event Organiser" currentOrganiserId={ORGANISER_ID} />)
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText(/Event Name/), 'Community Workshop')
+
+    await user.click(screen.getByRole('button', { name: 'Save as Draft' }))
+
+    expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Submit Request' })).toBeDisabled()
+    expect(screen.queryByText('Submitting…')).not.toBeInTheDocument()
+  })
+
+  test('AC1: asks for an Event Name before saving a draft', async () => {
+    render(<SubmissionPage role="Event Organiser" currentOrganiserId={ORGANISER_ID} />)
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Save as Draft' }))
+
+    expect(screen.getByRole('region', { name: 'Name Your Draft' })).toHaveTextContent('Event Name')
+    expect(eventApi).not.toHaveBeenCalled()
+  })
+
+  test('AC2: opening a draft pre-fills the form and saving updates that same draft', async () => {
+    vi.mocked(eventApi).mockResolvedValueOnce({ id: 'draft-2', eventName: 'Winter Gala', description: 'Year-end party', status: 'Draft' })
+      .mockResolvedValue({ id: 'draft-2', status: 'Draft' })
+    render(<SubmissionPage role="Event Organiser" currentOrganiserId={ORGANISER_ID} draftId="draft-2" />)
+    const user = userEvent.setup()
+
+    expect(await screen.findByDisplayValue('Winter Gala')).toBeInTheDocument()
+    expect(eventApi).toHaveBeenCalledWith(`/events/draft-2?organiserId=${ORGANISER_ID}`)
+    await user.type(screen.getByLabelText(/Purpose/), 'Celebrate')
+    await user.click(screen.getByRole('button', { name: 'Save as Draft' }))
+    await screen.findByText(/Draft saved/)
+    await user.click(screen.getByRole('button', { name: 'Save as Draft' }))
+
+    await waitFor(() => expect(eventApi).toHaveBeenCalledTimes(3))
+    for (const call of vi.mocked(eventApi).mock.calls.slice(1)) {
+      expect(call).toEqual(['/events/drafts/draft-2', expect.objectContaining({ eventName: 'Winter Gala', purpose: 'Celebrate' }), 'PATCH'])
+    }
+  })
+
+  test('AC5: submitting an opened draft submits that draft, not a new request', async () => {
+    vi.mocked(eventApi).mockResolvedValueOnce({ id: 'draft-2', eventName: 'Community Workshop', status: 'Draft' })
+      .mockResolvedValue({ eventName: 'Community Workshop', submittedAt: '2026-10-21T01:30:00+00:00' })
+    render(<SubmissionPage role="Event Organiser" currentOrganiserId={ORGANISER_ID} draftId="draft-2" />)
+    await screen.findByDisplayValue('Community Workshop')
+    await userEvent.setup().clear(screen.getByLabelText(/Event Name/))
+    const user = await completeForm('40')
+
+    await user.click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    expect(await screen.findByText(/Community Workshop was submitted on/)).toBeInTheDocument()
+    expect(eventApi).toHaveBeenLastCalledWith('/events/drafts/draft-2/submit', expect.objectContaining({ organiserId: ORGANISER_ID, expectedAttendance: '40' }))
+    expect(eventApi).not.toHaveBeenCalledWith('/events', expect.anything())
+  })
+
+  test('AC5: submitting an incomplete draft lists the missing fields and does not submit', async () => {
+    vi.mocked(eventApi).mockResolvedValueOnce({ id: 'draft-2', eventName: 'Winter Gala', status: 'Draft' })
+    render(<SubmissionPage role="Event Organiser" currentOrganiserId={ORGANISER_ID} draftId="draft-2" />)
+    await screen.findByDisplayValue('Winter Gala')
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Submit Request' }))
+
+    expect(screen.getByRole('region', { name: 'Missing Required Fields' })).toHaveTextContent('Description')
+    expect(eventApi).toHaveBeenCalledOnce()  // only the draft load
   })
 
   test('rejects non-numeric attendance before submission', () => {

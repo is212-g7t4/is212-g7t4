@@ -5,9 +5,8 @@ AC4 initial assignment; DR2 transaction; DR3 delivery/deduplication; DR4 history
 Real owner-specific PostgreSQL databases, User/Assignment HTTP and RabbitMQ.
 """
 import pytest
-from tests.integration.system import wait, HEADERS, ORGANISER, ACTOR, assign_as_lead
+from e2e.scrum45.system import wait, HEADERS, ORGANISER, ACTOR, assign_as_lead
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 
 def initial_event(s):
@@ -123,7 +122,7 @@ def test_real_user_outage_retries_and_broker_retry_preserves_first_prepared_name
     real broker outage freezes name; rename user and recover broker, inbox keeps
     the first prepared name without depending on current User display content.
     """
-    from tests.integration.system import command
+    from e2e.scrum45.system import command
     import subprocess
     s = system
     initial_event(s)
