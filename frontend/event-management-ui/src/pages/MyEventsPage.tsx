@@ -15,12 +15,12 @@ const STATUS_OPTIONS = [
   'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled',
 ]
 
-type MyEventsProps = { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void }
+type MyEventsProps = { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; onViewDetails: (id: string) => void; onOpenDraft?: (id: string) => void }
 
 // `currentCoordinatorId` / `currentCoordinatorName` carry the active user, whatever their role.
 export function MyEventsPage(props: MyEventsProps) {
   if (props.role === 'Event Organiser') {
-    return <OrganiserEventsPage organiserId={props.currentCoordinatorId} organiserName={props.currentCoordinatorName} onViewDetails={props.onViewDetails} />
+    return <OrganiserEventsPage organiserId={props.currentCoordinatorId} organiserName={props.currentCoordinatorName} onViewDetails={props.onViewDetails} onOpenDraft={props.onOpenDraft} />
   }
   return <InternalMyEvents {...props} />
 }

@@ -17,8 +17,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[2]
 ORGANISER = "10000000-0000-0000-0000-000000000001"
 ACTOR = "10000000-0000-0000-0000-000000000002"
 LEAD = "10000000-0000-0000-0000-000000000005"
@@ -84,6 +83,10 @@ def wait_group_gone(pgid, seconds):
             os.killpg(pgid, 0)
         except ProcessLookupError:
             return True
+        except PermissionError:
+            # macOS may briefly return EPERM while a killed group is reaped.
+            # It is not proof of absence: keep polling for ESRCH, bounded below.
+            pass
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.05)

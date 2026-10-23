@@ -6,7 +6,19 @@ DR3 verification infrastructure: isolated fixtures must report cleanup honestly.
 from unittest.mock import Mock, patch
 import subprocess
 
-from tests.integration.system import cleanup_owned_resources
+from e2e.scrum45.system import cleanup_owned_resources, wait_group_gone
+
+
+def test_group_absence_wait_retries_transient_permission_without_claiming_success():
+    """DR3: macOS can report EPERM during group reaping; only ESRCH proves gone."""
+    with patch("e2e.scrum45.system.os.killpg", side_effect=[PermissionError(), ProcessLookupError()]):
+        assert wait_group_gone(905, seconds=1)
+
+
+def test_group_absence_wait_never_treats_persistent_permission_as_absence():
+    """DR3: a genuinely inaccessible group must time out, not pass cleanup."""
+    with patch("e2e.scrum45.system.os.killpg", side_effect=PermissionError()):
+        assert not wait_group_gone(905, seconds=0)
 
 
 def test_cleanup_attempts_all_resources_despite_process_log_and_container_failures():
@@ -23,7 +35,7 @@ def test_cleanup_attempts_all_resources_despite_process_log_and_container_failur
         if args[:3] == ["docker", "rm", "-fv"] and args[-1] == "owned-two":
             return subprocess.CompletedProcess(args, 1, "", "removal refused")
         return subprocess.CompletedProcess(args, 0, "", "")
-    with patch("tests.integration.system.wait_group_gone", return_value=True), patch("tests.integration.system.os.killpg") as kill, patch("tests.integration.system.subprocess.run", side_effect=docker):
+    with patch("e2e.scrum45.system.wait_group_gone", return_value=True), patch("e2e.scrum45.system.os.killpg") as kill, patch("e2e.scrum45.system.subprocess.run", side_effect=docker):
         failures = cleanup_owned_resources(processes, logs, ["owned-one", "owned-two"])
     assert [call.args[0] for call in kill.call_args_list] == [902, 901]
     assert all(log.close.call_count == 1 for log in logs)
@@ -41,7 +53,7 @@ def test_cleanup_reports_remaining_container_even_after_successful_removal_respo
     """
     results = [subprocess.CompletedProcess([], 0, "owned", ""),
                subprocess.CompletedProcess([], 0, "owned\n", "")]
-    with patch("tests.integration.system.subprocess.run", side_effect=results):
+    with patch("e2e.scrum45.system.subprocess.run", side_effect=results):
         failures = cleanup_owned_resources([], [], ["owned"])
     assert len(failures) == 1
     assert "absence unverified owned" in failures[0]
@@ -53,8 +65,8 @@ def test_cleanup_kills_timed_out_process_group_and_continues_after_missing_group
     """
     processes = [Mock(pid=903), Mock(pid=904)]
     processes[0].wait.side_effect = [subprocess.TimeoutExpired("owned", 10), 0]
-    with patch("tests.integration.system.wait_group_gone", side_effect=[True, False, True]), patch("tests.integration.system.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
-        "tests.integration.system.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
+    with patch("e2e.scrum45.system.wait_group_gone", side_effect=[True, False, True]), patch("e2e.scrum45.system.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
+        "e2e.scrum45.system.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
     ) as docker:
         assert cleanup_owned_resources(processes, [], ["owned"]) == []
     assert [call.args[0] for call in kill.call_args_list] == [904, 903, 903]

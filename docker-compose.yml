@@ -13,21 +13,16 @@ services:
 
   event-service:
     build: ./services/event-service
-    # INTERNAL_SERVICE_TOKEN comes from the root .env via env_file, not from
-    # environment:. `environment:` always overrides env_file for a key it
-    # names — including with an empty string when the root value is unset —
-    # so naming it there (as this block used to) silently blanked out a token
-    # already configured in this service's own .env, unlocking
-    # /safety-status for anyone who hadn't also set it in the root .env.
-    # Service file last, as venue-availability-service does, so nothing the
-    # root .env happens to carry (DATABASE_URL, …) overrides this service's
-    # own settings.
+    # Preserve service-specific database settings. Require the shared root
+    # token explicitly below: never silently inject an empty token that
+    # disables an internal endpoint's guard.
     env_file:
       - path: ./.env
         required: false
       - ./services/event-service/.env
     environment:
       <<: *frontend-environment
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
     ports:
       - "5003:5000"
 
@@ -72,7 +67,7 @@ services:
       <<: *frontend-environment
       CALENDAR_DEV_MODE: "${CALENDAR_DEV_MODE:-false}"
       VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
-      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
       VENUE_BOOKING_LEGACY_SCHEMA: "${VENUE_BOOKING_LEGACY_SCHEMA:-false}"
     ports:
       - "127.0.0.1:5008:5000"
@@ -92,7 +87,7 @@ services:
       - ./services/equipment-request-service/.env
     environment:
       <<: *frontend-environment
-      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
     ports:
       - "5011:5000"
 
@@ -129,6 +124,7 @@ services:
       - ./services/venue-booking-service/.env
     environment:
       <<: *frontend-environment
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
       VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
       SAFETY_CHECK_RECORD_SERVICE_URL: http://safety-check-record-service:5000
     depends_on:
@@ -155,10 +151,10 @@ services:
 
   notification-service:
     build: ./services/notification-service
-    env_file:
-      - ./services/notification-service/.env
+    # Compose uses root settings; no notification-specific .env is needed.
     environment:
       <<: *frontend-environment
+      DATABASE_URL: "${NOTIFICATION_DATABASE_URL:-${DATABASE_URL}}"
       NOTIFICATION_DEV_MODE: "${NOTIFICATION_DEV_MODE:-false}"
     ports:
       - "127.0.0.1:5015:5000"
@@ -167,9 +163,8 @@ services:
     build: ./services/notification-service
     command: ["uv", "run", "--no-dev", "python", "-m", "app.consumer"]
     restart: unless-stopped
-    env_file:
-      - ./services/notification-service/.env
     environment:
+      DATABASE_URL: "${NOTIFICATION_DATABASE_URL:-${DATABASE_URL}}"
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
     depends_on:
       - rabbitmq
@@ -178,9 +173,9 @@ services:
     build: ./services/venue-booking-service
     command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
     restart: unless-stopped
-    env_file:
-      - ./services/venue-booking-service/.env
+    # This worker calls HTTP APIs; it does not need database credentials.
     environment:
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
       VENUE_AVAILABILITY_SERVICE_URL: "http://venue-availability-service:5000"
       EVENT_SERVICE_URL: "http://event-service:5000"
       VENUE_SERVICE_URL: "http://venue-service:5000"
@@ -211,7 +206,7 @@ services:
       USER_SERVICE_URL: "http://user-service:5000"
       VENUE_SERVICE_URL: "http://venue-service:5000"
       EQUIPMENT_SERVICE_URL: "http://equipment-service:5000"
-      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
     depends_on:
       - event-service
       - venue-availability-service
@@ -247,7 +242,7 @@ services:
       EQUIPMENT_SERVICE_URL: "http://equipment-service:5000"
       USER_SERVICE_URL: "http://user-service:5000"
       VENUE_SERVICE_URL: "http://venue-service:5000"
-      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
     depends_on:
       - event-service
       - venue-availability-service

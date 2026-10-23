@@ -5,9 +5,8 @@ AC1–AC4/DR4: real PostgreSQL owner API freeze persistence, not mocked readback
 """
 import pytest
 
-from tests.integration.system import ACTOR, HEADERS, ORGANISER, assign_as_lead, wait
+from e2e.scrum45.system import ACTOR, HEADERS, ORGANISER, assign_as_lead, wait
 
-pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 
 @pytest.mark.parametrize("kind", ["approval", "rejection", "coordinator-assignment"])

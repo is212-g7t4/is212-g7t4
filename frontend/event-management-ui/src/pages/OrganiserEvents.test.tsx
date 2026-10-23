@@ -27,13 +27,18 @@ beforeEach(() => {
   vi.resetAllMocks()
 })
 
+// The page loads submitted events and drafts separately; answer each request on its own.
+function mockOrganiserApi(loadEvents: () => Promise<unknown>, drafts: object[] = []) {
+  vi.mocked(eventApi).mockImplementation(async (path: string) => path.startsWith('/events/drafts') ? { events: drafts } : loadEvents())
+}
+
 function renderList(onViewDetails = vi.fn()) {
   render(<MyEventsPage role="Event Organiser" currentCoordinatorId={ORGANISER_ID} currentCoordinatorName="Michael" onViewDetails={onViewDetails} />)
   return onViewDetails
 }
 
 test('organiser list shows every event they created; every event opens; only approved ones show a registration count', async () => {
-  vi.mocked(eventApi).mockResolvedValue({ events })
+  mockOrganiserApi(async () => ({ events }))
   vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'approved-1': { total: 3, confirmed: 2 } })
   const onViewDetails = renderList()
 
@@ -56,7 +61,7 @@ test('organiser list shows every event they created; every event opens; only app
 })
 
 test('organiser list still shows events when counts cannot be loaded', async () => {
-  vi.mocked(eventApi).mockResolvedValue({ events })
+  mockOrganiserApi(async () => ({ events }))
   vi.mocked(fetchRegistrationCounts).mockRejectedValue(new Error('down'))
   renderList()
 
@@ -66,16 +71,70 @@ test('organiser list still shows events when counts cannot be loaded', async () 
 })
 
 test('organiser with no events sees an empty state', async () => {
-  vi.mocked(eventApi).mockResolvedValue({ events: [] })
+  mockOrganiserApi(async () => ({ events: [] }))
   vi.mocked(fetchRegistrationCounts).mockResolvedValue({})
   renderList()
   expect(await screen.findByText('You have not created any events yet.')).toBeInTheDocument()
 })
 
 test('organiser list shows the service error', async () => {
-  vi.mocked(eventApi).mockRejectedValue(new Error('Event service unavailable'))
+  mockOrganiserApi(async () => { throw new Error('Event service unavailable') })
   renderList()
   expect(await screen.findByRole('alert')).toHaveTextContent('Event service unavailable')
+})
+
+const drafts = [
+  { ...baseEvent, id: 'draft-1', eventName: 'Spring Fair', status: 'Draft', preferredStartDate: '', preferredEndDate: '' },
+  { ...baseEvent, id: 'draft-2', eventName: 'Winter Gala', status: 'Draft', preferredStartDate: '', preferredEndDate: '' },
+]
+
+test('AC2: lists each draft separately and opens the chosen one', async () => {
+  mockOrganiserApi(async () => ({ events: [] }), drafts)
+  const onOpenDraft = vi.fn()
+  render(<MyEventsPage role="Event Organiser" currentCoordinatorId={ORGANISER_ID} onViewDetails={vi.fn()} onOpenDraft={onOpenDraft} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Open draft Winter Gala' }))
+
+  expect(eventApi).toHaveBeenCalledWith(`/events/drafts?organiserId=${ORGANISER_ID}`)
+  expect(screen.getByRole('button', { name: 'Open draft Spring Fair' })).toBeInTheDocument()
+  expect(onOpenDraft).toHaveBeenCalledExactlyOnceWith('draft-2')
+})
+
+test('AC3: deleting a draft removes it from the draft list', async () => {
+  mockOrganiserApi(async () => ({ events: [] }), drafts)
+  renderList()
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete draft Spring Fair' }))
+  expect(screen.getByRole('dialog', { name: 'Delete draft?' })).toHaveTextContent('Spring Fair')
+  fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }))
+
+  await waitFor(() => expect(screen.queryByText('Spring Fair')).not.toBeInTheDocument())
+  expect(eventApi).toHaveBeenCalledWith(`/events/drafts/draft-1?organiserId=${ORGANISER_ID}`, undefined, 'DELETE')
+  expect(screen.getByText('Winter Gala')).toBeInTheDocument()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+test('AC2: clicking Delete on a draft card does not also open the draft', async () => {
+  mockOrganiserApi(async () => ({ events: [] }), drafts)
+  const onOpenDraft = vi.fn()
+  render(<MyEventsPage role="Event Organiser" currentCoordinatorId={ORGANISER_ID} onViewDetails={vi.fn()} onOpenDraft={onOpenDraft} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete draft Spring Fair' }))
+
+  expect(screen.getByRole('dialog', { name: 'Delete draft?' })).toBeInTheDocument()
+  expect(onOpenDraft).not.toHaveBeenCalled()
+})
+
+test('AC3: cancelling the delete confirmation keeps the draft', async () => {
+  mockOrganiserApi(async () => ({ events: [] }), drafts)
+  renderList()
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete draft Spring Fair' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByText('Spring Fair')).toBeInTheDocument()
+  expect(eventApi).not.toHaveBeenCalledWith(expect.stringContaining('/events/drafts/draft-1'), undefined, 'DELETE')
 })
 
 function renderDetail() {

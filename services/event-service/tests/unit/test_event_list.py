@@ -179,7 +179,8 @@ def test_lead_sees_events_regardless_of_coordinator(setup):
     assert len(response.json["events"]) == 2
     query, params = cursor.execute.call_args.args
     assert "coordinator_id = %s" not in query
-    assert "WHERE" not in query
+    # The only condition is the draft exclusion (drafts AC1).
+    assert "WHERE status IS DISTINCT FROM 'Draft'\n" in query
     assert params == []
 
 
@@ -251,7 +252,10 @@ def test_organiser_lists_only_their_own_events_in_all_statuses(setup):
     assert [e["status"] for e in response.json["events"]] == ["Approved", "Rejected"]
     assert response.json["events"][0]["organiserId"] == ORGANISER_ID
     query, params = cursor.execute.call_args.args
-    assert "organiser_id = %s" in query and "status" not in query.split("WHERE")[1]
+    # Every status except their drafts, which have their own list (drafts AC2).
+    where = query.split("WHERE")[1]
+    assert "organiser_id = %s" in where
+    assert where.replace("status IS DISTINCT FROM 'Draft'", "").count("status") == 0
     assert params == [ORGANISER_ID]
 
 
