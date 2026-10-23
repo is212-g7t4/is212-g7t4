@@ -93,7 +93,7 @@ their offset.
 | Table | Owning service | Key columns |
 |---|---|---|
 | `public."Event"` | Event | `event_id` (PK), `event_name`, `status`, `organiser_id`, `coordinator_id`, `registration_enabled` (an event's venue is its `VenueBooking` rows) |
-| `public."EventChangeReq"` | Event | `change_id` (PK), `event_id`, `requested_changes` (jsonb), `reviewed_by` |
+| `public."EventChangeReq"` | Event | `change_id` (PK), `event_id`, `requested_changes` (jsonb), `status`, `request_date`, `requested_by`, `reason`, `reviewed_by` |
 | `public."Equipment"` | Equipment | `equipment_id` (PK), `equipment_type`, `total_quantity`, `operational_status` |
 | `public."User"` | User | `user_id` (PK), `username`, `email` (unique), `role` (the Lead is role `Event Coordinator Lead`) |
 | `public."Venue"` | Venue | `venue_id` (PK), `venue_name`, `max_capacity`, `facilities` (jsonb), `setup_time_minutes`, `turnaround_time_minutes`, `operational_status` |

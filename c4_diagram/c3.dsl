@@ -39,7 +39,7 @@ workspace "ConnectSphere" "C3 — API Application Components" {
                 # folded into relationships owned by the atomic component that holds
                 # the resulting record (see relationships below)
                 userModule                  = component "User Module" "Owns user accounts, roles (including Event Coordinator Lead and Safety Officer), and login/JWT issuance." "Python module" "Atomic Module"
-                eventModule                 = component "Event Module" "Owns the Event entity and coordinates assignment (queue, assign, reassign), change/cancellation, and status workflows. Only a safety approval sets Confirmed." "Python module" "Atomic Module"
+                eventModule                 = component "Event Module" "Owns Event and EventChangeReq records and coordinates assignment (queue, assign, reassign), change/cancellation, and status workflows. Only a safety approval sets Confirmed." "Python module" "Atomic Module"
                 venueModule                 = component "Venue Module" "Owns the venue catalogue (including setup/turnaround times and safety information) and the suitability-check computation." "Python module" "Atomic Module"
                 venueAvailabilitiesModule   = component "Venue Availabilities Module" "Owns venue booking, hold, and closure records and coordinates the venue-booking workflow, including buffer-aware conflict checks." "Python module" "Atomic Module"
                 equipmentModule             = component "Equipment Module" "Owns the equipment catalogue only — no reservation data." "Python module" "Atomic Module"
@@ -109,7 +109,7 @@ workspace "ConnectSphere" "C3 — API Application Components" {
 
         # Atomic modules -> data stores (cloud-hosted, outside the system boundary)
         connectSphere.apiApplication.userModule -> supabase "Authenticates users & reads/writes accounts in" "HTTPS/SQL"
-        connectSphere.apiApplication.eventModule -> supabase "Reads/writes event and assignment records in" "HTTPS/SQL"
+        connectSphere.apiApplication.eventModule -> supabase "Reads/writes event, change-request, and assignment records in" "HTTPS/SQL"
         connectSphere.apiApplication.venueModule -> supabase "Reads/writes venue catalogue in" "HTTPS/SQL"
         connectSphere.apiApplication.venueAvailabilitiesModule -> supabase "Reads/writes booking, hold, and closure records in" "HTTPS/SQL"
         connectSphere.apiApplication.equipmentModule -> supabase "Reads/writes equipment catalogue in" "HTTPS/SQL"
