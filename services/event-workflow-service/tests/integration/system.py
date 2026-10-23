@@ -74,6 +74,21 @@ def replay_barrier(s, envelope, inbox):
     return originals[0]
 
 
+def wait_group_gone(pgid, seconds):
+    """Observe ESRCH, not leader exit. Zombies may keep a group observable until
+    their parent/init reaps them; timeout reports unverified absence, not success.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
 def cleanup_owned_resources(processes, logs, names):
     """DR3 test isolation: attempt all owned resources and verify container absence.
     Return diagnostics so fixture reporting cannot mask an active setup exception.
@@ -88,8 +103,17 @@ def cleanup_owned_resources(processes, logs, names):
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                pass
+            # All entries are session leaders created with start_new_session=True.
+            # A reaped leader does not prove that its children have exited.
+            if not wait_group_gone(process.pid, seconds=1):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 process.wait(timeout=5)
+                if not wait_group_gone(process.pid, seconds=5):
+                    raise RuntimeError("owned group absence unverified after SIGKILL (may include unreaped zombies)")
         except Exception as error:
             failures.append(f"process {process.pid}: {type(error).__name__}: {error}")
     for logfile in logs:
