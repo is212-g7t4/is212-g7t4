@@ -171,6 +171,11 @@ EDITABLE_STATUSES = (
     "Pending Safety Check",
 )
 
+# The organiser-facing proposal workflow is deliberately narrower than a
+# coordinator edit. A proposal records intent only; it never mutates the Event
+# row or changes its lifecycle status.
+CHANGE_REQUEST_STATUSES = ("Submitted", "Under Review", "Approved")
+
 UNDER_SAFETY_REVIEW_MESSAGE = (
     "This event is waiting for its Operational Safety Check. Change date/time, "
     "attendance, venue, equipment or accessibility details after the Safety "
@@ -466,6 +471,27 @@ class EventNotOwnedError(Exception):
     pass
 
 
+class ChangeRequestNotAllowedError(Exception):
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class ChangeRequestAlreadyPendingError(Exception):
+    pass
+
+
+class NoProposedChangesError(Exception):
+    pass
+
+
+class InvalidProposedChangesError(Exception):
+    def __init__(self, missing, errors):
+        super().__init__(*errors)
+        self.missing = missing
+        self.errors = errors
+
+
 class EventNotSubmittedError(Exception):
     pass
 
@@ -699,6 +725,59 @@ def get_organiser_event(database_url, event_id, organiser_id):
     if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
         raise EventNotOwnedError
     return serialize(event)
+
+
+def create_change_request(database_url, event_id, organiser_id, changes, reason):
+    """Record one organiser proposal without changing the event itself."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
+                raise EventNotOwnedError
+            if event["status"] not in CHANGE_REQUEST_STATUSES:
+                raise ChangeRequestNotAllowedError(event["status"])
+
+            current = serialize(event)
+            changed_fields, _ = _changed_fields(changes, current)
+            if not changed_fields:
+                raise NoProposedChangesError
+            proposed = {field: changes[field].strip() for field in changed_fields}
+            missing, errors = validation.validate({**current, **proposed})
+            if missing or errors:
+                raise InvalidProposedChangesError(missing, errors)
+
+            cursor.execute(
+                """INSERT INTO public."EventChangeReq"
+                    (event_id, requested_changes, status, request_date,
+                     requested_by, reason)
+                    VALUES (%s, %s, 'Pending Review', now(), %s, %s)
+                    ON CONFLICT (event_id) WHERE status = 'Pending Review'
+                    DO NOTHING
+                    RETURNING change_id, event_id, requested_changes, status,
+                              request_date, requested_by, reason""",
+                [event_id, json.dumps(proposed, ensure_ascii=False), organiser_id, reason],
+            )
+            saved = cursor.fetchone()
+            if not saved:
+                raise ChangeRequestAlreadyPendingError
+    return {
+        "id": str(saved["change_id"]),
+        "eventId": str(saved["event_id"]),
+        "proposedChanges": saved["requested_changes"],
+        "status": saved["status"],
+        "requestedAt": saved["request_date"].astimezone(UTC).isoformat(),
+        "requestedBy": str(saved["requested_by"]),
+        "reason": saved["reason"],
+    }
 
 
 def get_event(database_url, event_id, coordinator_id, view_all=False):

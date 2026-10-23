@@ -92,6 +92,32 @@ response, responding organiser and UTC timestamp. Only one round can be open
 at a time; earlier answered rounds remain visible to both parties. This is a
 temporary Event-owned implementation until the planned Forum Service exists.
 
+## Event Organiser change requests
+
+The owning organiser can call `POST /events/<id>/change-requests` while the
+event is `Submitted`, `Under Review` or `Approved`:
+
+```json
+{
+  "organiserId": "<user UUID>",
+  "changes": {
+    "preferredStartDate": "2026-11-05T09:00",
+    "expectedAttendance": "80"
+  },
+  "reason": "The keynote speaker and guest list changed."
+}
+```
+
+The proposed fields use the same validation rules as event submission and at
+least one value must differ from the current event. A successful request is
+stored in `EventChangeReq` as `Pending Review`, with its organiser and UTC
+submission time. The Event row and lifecycle status are not changed.
+
+All other lifecycle states are refused. A partial unique database index also
+guarantees that an event cannot have two `Pending Review` requests, including
+when submissions race. Supporting-document attachments are intentionally not
+part of this story.
+
 ## Event progress and the safety gate
 
 `PATCH /events/<id>/progress` is the only endpoint that moves an event through
