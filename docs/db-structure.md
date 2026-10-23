@@ -18,6 +18,48 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 
 ## Event service
 
+The diagram below is the Event Service portion of the relational model. It
+shows the two user references recorded for a change request without implying a
+new service-to-service call; the foreign keys are stored in the shared
+Supabase Postgres schema.
+
+```mermaid
+erDiagram
+    USER ||--o{ EVENT : organises
+    USER ||--o{ EVENT_CHANGE_REQUEST : requests
+    USER o|--o{ EVENT_CHANGE_REQUEST : reviews
+    EVENT ||--o{ EVENT_CHANGE_REQUEST : has
+
+    USER {
+        UUID user_id PK
+    }
+
+    EVENT {
+        UUID event_id PK
+        VARCHAR event_name
+        VARCHAR status
+        UUID organiser_id FK
+    }
+
+    EVENT_CHANGE_REQUEST {
+        UUID change_id PK
+        UUID event_id FK
+        JSONB requested_changes
+        VARCHAR status
+        TIMESTAMPTZ request_date
+        UUID requested_by FK
+        TEXT reason
+        TEXT rejection_reason
+        TIMESTAMPTZ review_date
+        UUID reviewed_by FK
+    }
+```
+
+`EVENT_CHANGE_REQUEST` represents the database table
+`public."EventChangeReq"`. An event can retain multiple historical change
+requests, while a partial unique index permits at most one request with the
+status `Pending Review` for that event.
+
 ### Event
 
 | Column | Type / constraint | Change | What it is for and how it is used |
@@ -52,9 +94,14 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 | requested_changes | JSONB | | The fields and new values requested, applied to the event if approved. |
 | status | VARCHAR(50) | | Whether the request is pending, approved or rejected. |
 | request_date | TIMESTAMPTZ | changed | When the organiser submitted the change request, used to order the coordinator's queue. |
+| requested_by | UUID (FK User) | new | The Event Organiser who submitted the request. |
+| reason | TEXT | new | The organiser's required justification for the proposed changes. |
 | rejection_reason | TEXT | | The coordinator's reason for refusing the change, shown to the organiser. |
 | review_date | TIMESTAMPTZ | changed | When the coordinator decided on the request. |
 | reviewed_by | UUID (FK User) | | The coordinator who decided, kept for accountability. |
+
+A partial unique index on `event_id` where `status = 'Pending Review'` permits
+history while ensuring an event has at most one request awaiting review.
 
 ---
 
