@@ -1,7 +1,7 @@
 // The Event Coordinator Lead assigns coordinators and otherwise works as an
 // Event Coordinator (docs/db-structure.md, User.role).
 export type Role = 'Event Organiser' | 'Event Coordinator' | 'Event Coordinator Lead' | 'Venue Staff' | 'Technical Support' | 'Safety Officer' | 'Attendee'
-export type Route = 'notifications' | 'dashboard' | 'submit' | 'manage' | 'review' | 'queue' | 'workload' | 'detail' | 'myEvents' | 'browseEvents' | 'myRegistrations' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests' | 'safetyChecks' | 'newEquipmentRequest' | 'venueRequests' | 'editDraft'
+export type Route = 'notifications' | 'dashboard' | 'submit' | 'manage' | 'review' | 'changeRequests' | 'queue' | 'workload' | 'detail' | 'myEvents' | 'browseEvents' | 'myRegistrations' | 'venues' | 'venueDetail' | 'venueCalendar' | 'venueSearch' | 'addVenue' | 'editVenue' | 'equipment' | 'equipmentRequests' | 'safetyChecks' | 'newEquipmentRequest' | 'venueRequests' | 'editDraft'
 
 export const routeTitles: Record<Route, string> = {
   notifications: 'Notifications',
@@ -9,6 +9,7 @@ export const routeTitles: Record<Route, string> = {
   submit: 'Submit an event',
   manage: 'Event information',
   review: 'Request review',
+  changeRequests: 'Change requests',
   queue: 'Unassigned requests',
   workload: 'Coordinator workload',
   detail: 'Event record',

@@ -20,5 +20,5 @@ export const INTERNAL_EVENT_ACCESS_MESSAGE =
 // Event Coordinators (and the Lead) see their event screens as tabs of one
 // Events page. The unassigned queue is Lead-only.
 export function coordinatorEventTabs(role: Role): Route[] {
-  return isLead(role) ? ['queue', 'workload', 'myEvents', 'review'] : ['myEvents', 'review']
+  return isLead(role) ? ['queue', 'workload', 'myEvents', 'review', 'changeRequests'] : ['myEvents', 'review', 'changeRequests']
 }
