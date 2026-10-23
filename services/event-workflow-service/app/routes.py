@@ -14,6 +14,7 @@ from app import checks, clients
 bp = Blueprint("event_workflow_service", __name__)
 
 LEAD_ROLE = "Event Coordinator Lead"
+COORDINATOR_ROLES = {"Event Coordinator", LEAD_ROLE}
 
 UNREADABLE = (
     "Unable to check this change against the event's venue and equipment "
@@ -112,3 +113,108 @@ def _lead_role(coordinator_id):
     """The Lead role if the caller holds it, else None (Event Service then checks assignment)."""
     role = clients.get_user(coordinator_id).get("role")
     return LEAD_ROLE if role == LEAD_ROLE else None
+
+
+def _coordinator_role(coordinator_id):
+    role = clients.get_user(coordinator_id).get("role")
+    if role not in COORDINATOR_ROLES:
+        raise clients.UserNotFoundError
+    return role
+
+
+def _workflow_failure(error):
+    if isinstance(error, clients.UserNotFoundError):
+        return jsonify(
+            code="COORDINATOR_REQUIRED",
+            message="Only an Event Coordinator can review change requests.",
+        ), 403
+    if isinstance(error, clients.EventRejectedError):
+        return jsonify(error.body), error.status
+    if isinstance(error, clients.DownstreamTimeout):
+        return jsonify(message=UNREADABLE), 504
+    return jsonify(message=UNREADABLE), 502
+
+
+@bp.get("/change-requests")
+def pending_change_requests():
+    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
+    if not coordinator_id:
+        return jsonify(message="A valid current coordinator ID is required."), 400
+    try:
+        _coordinator_role(coordinator_id)
+        changes = clients.list_pending_change_requests(coordinator_id)
+    except (
+        clients.UserNotFoundError,
+        clients.EventRejectedError,
+        clients.DownstreamTimeout,
+        clients.DownstreamError,
+    ) as error:
+        return _workflow_failure(error)
+    return jsonify(changeRequests=changes), 200
+
+
+@bp.patch("/change-requests/<change_request_id>")
+def process_change_request(change_request_id):
+    change_request_id = _uuid_or_none(change_request_id)
+    data = request.get_json(silent=True)
+    if not change_request_id:
+        return jsonify(message="A valid change request ID is required."), 400
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
+    if not coordinator_id:
+        return jsonify(message="A valid current coordinator ID is required."), 400
+    decision = data.get("decision")
+    if decision not in ("Approved", "Rejected"):
+        return jsonify(message="decision must be Approved or Rejected."), 400
+    reason = data.get("reason")
+    if decision == "Rejected":
+        if not isinstance(reason, str) or not reason.strip():
+            return jsonify(message="A rejection reason is required."), 400
+        reason = reason.strip()
+        if len(reason) > 2000:
+            return jsonify(message="A rejection reason must be 2000 characters or fewer."), 400
+    else:
+        reason = None
+
+    try:
+        role = _coordinator_role(coordinator_id)
+        change = clients.get_change_request(change_request_id, coordinator_id)
+        if decision == "Approved":
+            actor_role = LEAD_ROLE if role == LEAD_ROLE else None
+            preview = clients.preview_event_details(
+                change["eventId"],
+                coordinator_id,
+                change["proposedChanges"],
+                actor_role,
+            )
+            high = preview["highImpactFields"]
+            if high:
+                conflicts = checks.find_conflicts(
+                    preview["event"],
+                    change["proposedChanges"],
+                    high,
+                    coordinator_id,
+                )
+                if conflicts:
+                    return jsonify(
+                        code="CHANGE_CONTRADICTS_ARRANGEMENTS",
+                        message=(
+                            "This request can't be approved because it contradicts "
+                            "arrangements already made for the event."
+                        ),
+                        changedFields=preview["changedFields"],
+                        highImpactFields=high,
+                        conflicts=conflicts,
+                    ), 409
+        decided = clients.decide_change_request(
+            change_request_id, coordinator_id, decision, reason
+        )
+    except (
+        clients.UserNotFoundError,
+        clients.EventRejectedError,
+        clients.DownstreamTimeout,
+        clients.DownstreamError,
+    ) as error:
+        return _workflow_failure(error)
+    return jsonify(decided), 200

@@ -84,6 +84,13 @@ class Database:
         rows = self.execute('SELECT * FROM public."Event" WHERE event_id = %s', [event_id])
         return rows[0] if rows else None
 
+    def change_request(self, change_id):
+        rows = self.execute(
+            'SELECT * FROM public."EventChangeReq" WHERE change_id = %s',
+            [change_id],
+        )
+        return rows[0] if rows else None
+
     def event_count(self):
         return self.execute('SELECT count(*) AS n FROM public."Event"')[0]["n"]
 
