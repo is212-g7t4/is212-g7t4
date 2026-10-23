@@ -17,6 +17,8 @@ from app.models import (
     SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
     UNDER_SAFETY_REVIEW_MESSAGE,
+    ChangeRequestAlreadyPendingError,
+    ChangeRequestNotAllowedError,
     ClarificationNotAllowedError,
     ClarificationNotOpenError,
     EventClosedError,
@@ -28,6 +30,8 @@ from app.models import (
     EventNotSubmittedError,
     EventUnderSafetyReviewError,
     InvalidStatusTransitionError,
+    InvalidProposedChangesError,
+    NoProposedChangesError,
     NoCoordinatorChangeError,
     RejectionReasonError,
     SafetyApprovalRequiredError,
@@ -35,6 +39,7 @@ from app.models import (
     SafetyRecheckRequiredError,
     StaleSafetyCheckError,
     approve_event,
+    create_change_request,
     delete_draft,
     get_event,
     get_organiser_event,
@@ -486,6 +491,63 @@ def create_app(config=None):
                 message="This event request is not assigned to the current coordinator."
             ), 403
         return jsonify(event), 200
+
+    @app.post("/events/<uuid:event_id>/change-requests")
+    def request_changes(event_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        organiser_id, failure = _organiser_id(data.get("organiserId", ""))
+        if failure:
+            return failure
+        changes = data.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            return jsonify(message="Propose at least one event detail change."), 400
+        unknown = sorted(set(changes) - set(EDITABLE_FIELDS))
+        if unknown:
+            return jsonify(
+                message="One or more proposed fields cannot be changed.",
+                invalidFields=unknown,
+            ), 400
+        if any(not isinstance(value, str) for value in changes.values()):
+            return jsonify(message="Every proposed value must be text."), 400
+        reason = data.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            return jsonify(message="A reason or justification is required."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            saved = create_change_request(
+                app.config["DATABASE_URL"],
+                str(event_id),
+                organiser_id,
+                changes,
+                reason.strip(),
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event not found."), 404
+        except EventNotOwnedError:
+            return jsonify(message="You can only request changes to events you submitted."), 403
+        except ChangeRequestNotAllowedError as error:
+            return jsonify(
+                code="CHANGE_REQUEST_NOT_ALLOWED",
+                message=f"Changes cannot be requested while this event is '{error.current_status}'.",
+                currentStatus=error.current_status,
+            ), 409
+        except ChangeRequestAlreadyPendingError:
+            return jsonify(
+                code="CHANGE_REQUEST_ALREADY_PENDING",
+                message="This event already has a change request pending review.",
+            ), 409
+        except NoProposedChangesError:
+            return jsonify(message="At least one proposed value must differ from the event's current details."), 400
+        except InvalidProposedChangesError as error:
+            return jsonify(
+                message="Please correct the proposed event details.",
+                missingFields=error.missing,
+                errors=error.errors,
+            ), 400
+        return jsonify(saved), 201
 
     @app.patch("/events/<uuid:event_id>")
     def assign_coordinator(event_id):

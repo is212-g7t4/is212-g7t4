@@ -52,9 +52,14 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 | requested_changes | JSONB | | The fields and new values requested, applied to the event if approved. |
 | status | VARCHAR(50) | | Whether the request is pending, approved or rejected. |
 | request_date | TIMESTAMPTZ | changed | When the organiser submitted the change request, used to order the coordinator's queue. |
+| requested_by | UUID (FK User) | new | The Event Organiser who submitted the request. |
+| reason | TEXT | new | The organiser's required justification for the proposed changes. |
 | rejection_reason | TEXT | | The coordinator's reason for refusing the change, shown to the organiser. |
 | review_date | TIMESTAMPTZ | changed | When the coordinator decided on the request. |
 | reviewed_by | UUID (FK User) | | The coordinator who decided, kept for accountability. |
+
+A partial unique index on `event_id` where `status = 'Pending Review'` permits
+history while ensuring an event has at most one request awaiting review.
 
 ---
 
