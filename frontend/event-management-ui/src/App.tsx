@@ -9,6 +9,7 @@ import { MyEventsPage } from './pages/MyEventsPage'
 import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
 import { AttendeeRegistrationsPage } from './pages/AttendeeRegistrationsPage'
 import { SubmittedRequestsPage } from './pages/SubmittedRequestsPage'
+import { ChangeRequestsPage } from './pages/ChangeRequestsPage'
 import { UnassignedQueuePage } from './pages/UnassignedQueuePage'
 import { CoordinatorWorkloadPage } from './pages/CoordinatorWorkloadPage'
 import { EventsTabs } from './components/EventsTabs'
@@ -39,6 +40,7 @@ const paths: Record<Route, string> = {
   submit: '/events/new',
   manage: '/events/evt-001/edit',
   review: '/requests/review',
+  changeRequests: '/change-requests',
   queue: '/requests/queue',
   workload: '/requests/workload',
   detail: '/events',
@@ -67,6 +69,7 @@ function getRoute(): Route {
   if (path === '/events/new') return 'submit'
   if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
+  if (path === '/change-requests') return 'changeRequests'
   if (path === '/requests/queue') return 'queue'
   if (path === '/requests/workload') return 'workload'
   if (path === '/my-events') return 'myEvents'
@@ -236,6 +239,7 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {inEventsPage && <EventsTabs tabs={eventTabs} route={route} onNavigate={navigate} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
+      {route === 'changeRequests' && <ChangeRequestsPage key={activeUser?.id} role={role} coordinatorId={activeUser?.id} coordinatorName={activeUser?.username} />}
       {route === 'queue' && <UnassignedQueuePage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'workload' && <CoordinatorWorkloadPage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} onOpenDraft={navigateToDraft} />}

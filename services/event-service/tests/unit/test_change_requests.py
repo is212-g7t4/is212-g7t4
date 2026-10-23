@@ -11,6 +11,8 @@ from app.models import FIELDS
 EVENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 ORGANISER_ID = "11111111-1111-4111-8111-111111111111"
 OTHER_ID = "22222222-2222-4222-8222-222222222222"
+COORDINATOR_ID = "33333333-3333-4333-8333-333333333333"
+CHANGE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
 def event_row(status="Submitted", organiser_id=ORGANISER_ID):
@@ -46,6 +48,22 @@ def change_row():
         "request_date": datetime(2026, 10, 23, 4, 5, tzinfo=UTC),
         "requested_by": ORGANISER_ID,
         "reason": "More guests accepted the invitation.",
+    }
+
+
+def review_row(change_status="Pending Review", coordinator_id=COORDINATOR_ID):
+    return {
+        **event_row("Approved"),
+        "coordinator_id": coordinator_id,
+        "change_id": CHANGE_ID,
+        "requested_changes": {"expectedAttendance": "40"},
+        "change_request_status": change_status,
+        "request_date": datetime(2026, 10, 23, 4, 5, tzinfo=UTC),
+        "requested_by": ORGANISER_ID,
+        "reason": "More guests accepted the invitation.",
+        "rejection_reason": None,
+        "review_date": None,
+        "reviewed_by": None,
     }
 
 
@@ -198,3 +216,256 @@ def test_missing_event_returns_not_found(setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = None
     assert post(client).status_code == 404
+
+
+def test_review_ac1_ac2_lists_pending_requests_for_events_managed_by_the_coordinator(setup):
+    client, _, cursor = setup
+    cursor.fetchall.return_value = [review_row()]
+
+    response = client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}")
+
+    assert response.status_code == 200
+    change = response.json["changeRequests"][0]
+    assert change["id"] == CHANGE_ID
+    assert change["event"]["eventName"] == "Community Workshop"
+    assert change["event"]["expectedAttendance"] == "30"
+    assert change["proposedChanges"] == {"expectedAttendance": "40"}
+    assert change["reason"] == "More guests accepted the invitation."
+    query, params = cursor.execute.call_args.args
+    assert "request.status = 'Pending Review'" in query
+    assert "event.coordinator_id = %s" in query
+    assert params == [COORDINATOR_ID]
+
+
+def test_review_ac3_approval_updates_event_and_decision_in_one_transaction(setup):
+    client, _, cursor = setup
+    updated_event = event_row("Approved")
+    updated_event.update(coordinator_id=COORDINATOR_ID, expected_attendance=40)
+    cursor.fetchone.side_effect = [
+        review_row(),
+        updated_event,
+        {
+            "status": "Approved",
+            "review_date": datetime(2026, 10, 24, 2, 0, tzinfo=UTC),
+            "reviewed_by": COORDINATOR_ID,
+            "rejection_reason": None,
+        },
+    ]
+
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    )
+
+    assert response.status_code == 200
+    assert response.json["status"] == "Approved"
+    assert response.json["reviewedBy"] == COORDINATOR_ID
+    assert response.json["event"]["expectedAttendance"] == "40"
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert 'UPDATE public."Event"' in statements[1]
+    assert 'UPDATE public."EventChangeReq"' in statements[2]
+    assert cursor.execute.call_args_list[2].args[1][:3] == [
+        "Approved", COORDINATOR_ID, None,
+    ]
+
+
+def test_review_ac4_rejection_records_required_reason_without_updating_event(setup):
+    client, _, cursor = setup
+    cursor.fetchone.side_effect = [
+        review_row(),
+        {
+            "status": "Rejected",
+            "review_date": datetime(2026, 10, 24, 2, 0, tzinfo=UTC),
+            "reviewed_by": COORDINATOR_ID,
+            "rejection_reason": "The revised capacity cannot be supported.",
+        },
+    ]
+
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={
+            "coordinatorId": COORDINATOR_ID,
+            "decision": "Rejected",
+            "reason": "The revised capacity cannot be supported.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json["rejectionReason"] == "The revised capacity cannot be supported."
+    statements = [call.args[0] for call in cursor.execute.call_args_list]
+    assert all('UPDATE public."Event"' not in statement for statement in statements)
+    assert 'UPDATE public."EventChangeReq"' in statements[1]
+
+
+def test_review_rejection_reason_is_required_before_database_access(setup):
+    client, _, cursor = setup
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Rejected", "reason": "  "},
+    )
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_review_only_the_assigned_coordinator_can_read_or_decide(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = review_row(coordinator_id=OTHER_ID)
+
+    assert client.get(
+        f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"
+    ).status_code == 403
+    assert client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    ).status_code == 403
+
+
+def test_review_assigned_coordinator_can_open_request_details(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = review_row()
+    response = client.get(
+        f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"
+    )
+    assert response.status_code == 200
+    assert response.json["id"] == CHANGE_ID
+    assert response.json["event"]["expectedAttendance"] == "30"
+
+
+def test_review_a_decided_request_cannot_be_processed_again(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = review_row(change_status="Approved")
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "CHANGE_REQUEST_ALREADY_DECIDED"
+
+
+def test_review_missing_request_returns_not_found_for_read_and_decision(setup):
+    client, _, cursor = setup
+    cursor.fetchone.return_value = None
+    assert client.get(
+        f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"
+    ).status_code == 404
+    assert client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    ).status_code == 404
+
+
+def test_review_approval_is_refused_if_event_stage_has_moved_on(setup):
+    client, _, cursor = setup
+    row = review_row()
+    row["status"] = "Confirmed"
+    cursor.fetchone.return_value = row
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "CHANGE_REQUEST_NOT_APPLICABLE"
+
+
+def test_review_invalid_stored_proposal_is_refused(setup):
+    client, _, cursor = setup
+    row = review_row()
+    row["requested_changes"] = {"status": "Cancelled"}
+    cursor.fetchone.return_value = row
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "INVALID_STORED_PROPOSAL"
+
+
+def test_review_stored_proposal_must_still_form_a_valid_event(setup):
+    client, _, cursor = setup
+    row = review_row()
+    row["requested_changes"] = {"preferredEndDate": "2026-11-01T08:00"}
+    cursor.fetchone.return_value = row
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "INVALID_STORED_PROPOSAL"
+    assert response.json["errors"] == ["Preferred End Date & Time must be after the start."]
+
+
+def test_review_already_applied_values_can_still_close_the_request(setup):
+    client, _, cursor = setup
+    row = review_row()
+    row["requested_changes"] = {"expectedAttendance": "30"}
+    cursor.fetchone.side_effect = [
+        row,
+        {
+            "status": "Approved",
+            "review_date": datetime(2026, 10, 24, 2, 0, tzinfo=UTC),
+            "reviewed_by": COORDINATOR_ID,
+            "rejection_reason": None,
+        },
+    ]
+    response = client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    )
+    assert response.status_code == 200
+    assert all(
+        'UPDATE public."Event"' not in call.args[0]
+        for call in cursor.execute.call_args_list
+    )
+
+
+@pytest.mark.parametrize(
+    "path,method,body",
+    [
+        ("/change-requests", "get", None),
+        (f"/change-requests/{CHANGE_ID}", "get", None),
+        (f"/change-requests/{CHANGE_ID}/decision", "patch", None),
+        (f"/change-requests/{CHANGE_ID}/decision", "patch", {"coordinatorId": "bad", "decision": "Approved"}),
+        (f"/change-requests/{CHANGE_ID}/decision", "patch", {"coordinatorId": COORDINATOR_ID, "decision": "Maybe"}),
+        (f"/change-requests/{CHANGE_ID}/decision", "patch", {"coordinatorId": COORDINATOR_ID, "decision": "Rejected", "reason": "x" * 2001}),
+    ],
+)
+def test_review_malformed_requests_are_rejected_before_database_access(setup, path, method, body):
+    client, _, cursor = setup
+    if method == "get":
+        response = client.get(path)
+    else:
+        response = client.patch(path, json=body) if body is not None else client.patch(path, data="x")
+    assert response.status_code == 400
+    cursor.execute.assert_not_called()
+
+
+def test_review_unconfigured_database_returns_service_unavailable():
+    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    assert client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}").status_code == 503
+    assert client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}").status_code == 503
+    assert client.patch(
+        f"/change-requests/{CHANGE_ID}/decision",
+        json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+    ).status_code == 503
+
+
+def test_review_internal_endpoints_honor_the_configured_service_token(monkeypatch):
+    connection = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
+    client = create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "INTERNAL_SERVICE_TOKEN": "secret",
+    }).test_client()
+
+    responses = [
+        client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}"),
+        client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"),
+        client.patch(
+            f"/change-requests/{CHANGE_ID}/decision",
+            json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [403, 403, 403]
+    connection.cursor.assert_not_called()

@@ -92,6 +92,44 @@ def test_save_is_not_a_dry_run_and_omits_a_missing_role(send, monkeypatch):
     assert sent[0][2]["headers"] == {"X-Internal-Service-Token": ""}
 
 
+def test_change_request_wrappers_use_event_service_and_internal_token(send, monkeypatch):
+    sent, replies = send
+    monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "secret")
+    replies.extend([
+        Reply(200, {"changeRequests": [{"id": "c1"}]}),
+        Reply(200, {"id": "c1"}),
+        Reply(200, {"id": "c1", "status": "Rejected"}),
+    ])
+
+    assert clients.list_pending_change_requests("u1") == [{"id": "c1"}]
+    assert clients.get_change_request("c1", "u1") == {"id": "c1"}
+    assert clients.decide_change_request("c1", "u1", "Rejected", "No") == {
+        "id": "c1", "status": "Rejected"
+    }
+    assert sent[0][2]["params"] == {"coordinatorId": "u1"}
+    assert sent[1][2]["params"] == {"coordinatorId": "u1"}
+    assert sent[2][2]["json"] == {
+        "coordinatorId": "u1", "decision": "Rejected", "reason": "No"
+    }
+    assert all(call[2]["headers"] == {"X-Internal-Service-Token": "secret"} for call in sent)
+
+
+def test_change_request_approval_omits_a_rejection_reason(send):
+    sent, replies = send
+    replies.append(Reply(200, {"status": "Approved"}))
+    clients.decide_change_request("c1", "u1", "Approved")
+    assert sent[0][2]["json"] == {"coordinatorId": "u1", "decision": "Approved"}
+
+
+def test_change_request_event_service_refusal_is_preserved(send):
+    _, replies = send
+    replies.append(Reply(409, {"code": "ALREADY_DECIDED"}))
+    with pytest.raises(clients.EventRejectedError) as raised:
+        clients.get_change_request("c1", "u1")
+    assert raised.value.status == 409
+    assert raised.value.body == {"code": "ALREADY_DECIDED"}
+
+
 @pytest.mark.parametrize("status", [400, 403, 404, 409])
 def test_event_service_refusals_keep_their_status_and_body(send, status):
     _, replies = send
