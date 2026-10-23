@@ -8,13 +8,17 @@ AGENTS.md still describes the old setup in places; see
 [Transition](#transition-target-state-vs-today) and
 [§12.3](#123-doc-disagreements-to-resolve-not-by-the-agent).
 
+Before writing or reviewing any integration test, read the scope rules in
+[§1.1–§1.2](#11-single-service-scope) and the naming and documentation
+conventions in [§6.1](#61-naming-and-documenting-tests-traceability).
+
 ---
 
 ## 1. What an integration test is in this repo
 
 **Real components working together, with only the external boundary controlled.**
 
-- One service at a time (single-service scope).
+- One service at a time (single-service scope, §1.1).
 - The request enters through the **Flask test client** and runs through the
   **real** route → identity/role checks → business logic → data-access code →
   a **real, throwaway Postgres**.
@@ -24,14 +28,62 @@ AGENTS.md still describes the old setup in places; see
 *Why:* unit tests check each side of a boundary in isolation, and both sides
 can pass while the boundary itself is broken. Integration tests exist to exercise the boundary.
 
-| | Unit (`tests/unit/`) | Integration (`tests/integration/`) | E2E (`frontend/.../e2e/`) |
-|---|---|---|---|
-| Scope | One function/class | One service, route to DB | UI journey in a browser |
-| Database | Mocked (`psycopg2.connect` patched) | Real Postgres in a throwaway container | Mocked via `page.route()` |
-| Other services | Mocked | Stubbed/faked at the HTTP layer | Mocked |
-| Speed | Milliseconds | Seconds | Seconds to minutes |
+| | Unit (`tests/unit/`) | Integration (`tests/integration/`) | Frontend e2e (`frontend/.../e2e/`) | Repo e2e (`e2e/` at the repo root) |
+|---|---|---|---|---|
+| Scope | One function/class | One service, route to DB | UI journey in a browser | A flow across several real services, sometimes from a real browser |
+| Database | Mocked (`psycopg2.connect` patched) | Real Postgres in a throwaway container | Mocked via `page.route()` | Real Postgres in containers the harness owns |
+| Other services | Mocked | Stubbed/faked at the HTTP layer | Mocked | Real, started as processes; real RabbitMQ where needed |
+| Speed | Milliseconds | Seconds | Seconds to minutes | Minutes |
 
-**Out of scope for this file:** cross-service tests via `docker compose`, tests
+### 1.1 Single-service scope
+
+Each service's integration tests live in **that service's**
+`tests/integration/` and exercise only that service's code.
+
+**Allowed:**
+
+- The service's own Flask app, routes, business logic and data-access code.
+- A throwaway Postgres container loaded with the full migration chain,
+  including tables that other services own (§4).
+- Inserting parent rows into other services' tables with factories, so real
+  foreign keys are satisfied (§4, §5). This writes to the shared schema; it
+  does not run or call the other service.
+- `test_infra_*` checks of the service's own wiring, e.g. that it connects to
+  the test database (§6.1).
+
+**Not allowed:**
+
+- Starting, calling or importing another ConnectSphere service. Its HTTP API
+  is stubbed with `respx` instead (§3, §7).
+- A real RabbitMQ broker, `docker compose`, or starting services as
+  subprocesses.
+- The live Supabase project (that's the `live` tier, §2).
+
+A test that needs two or more real services is an **end-to-end test**, not an
+integration test, and doesn't belong in any service. Because it spans
+services, it lives in the repo-root `e2e/` folder (§2). If a requirement seems
+to need one, **stop and ask** (§11). The existing SCRUM-171 and SCRUM-173
+harnesses are tests of this kind.
+
+### 1.2 Atomic vs composite services
+
+Both kinds get integration tests. What differs is where the boundary is.
+
+| | Atomic (DB-backed) | Composite (no database) |
+|---|---|---|
+| Boundary under test | Route → business logic → SQL → Postgres | Route → orchestration → outbound HTTP to the atomics |
+| Real | Flask app, logic, data-access code, Postgres container | Flask app, orchestration logic, the real HTTP client code in `app/clients.py` (`httpx`) |
+| Doubled | Anything outside the service (rare for atomics) | Every atomic it calls, stubbed at the HTTP layer with `respx`; the RabbitMQ publisher, with a recording fake |
+| Postgres container | Yes (§4) | No. Composites have no database |
+| Assert on | The HTTP response **and** the persisted rows, read directly from the database | The HTTP response, **exactly** what was sent to each stub (method, URL, JSON body), that every stub was hit, and any recorded message |
+| Can't prove | Anything owned by another service | Rules that run inside the atomics (e.g. the venue overlap rule), or that the real atomics accept the payload sent |
+
+*Why composites still get integration tests:* the orchestration, the
+request-building and the handling of downstream 4xx/5xx/timeouts all run in
+the composite, and only a route-level test through the real `httpx` client
+shows they work together. Only the network response is faked.
+
+**Out of scope for this file:** cross-service tests (repo-root `e2e/`), tests
 against the live Supabase project (the `live` tier below), contract tests, and
 continuous delivery.
 
@@ -44,12 +96,20 @@ continuous delivery.
 | Unit | `tests/unit/` | none | mocked | Every CI run; enforces the coverage floor |
 | Integration | `tests/integration/` | `integration` | `postgres:17.6` via Testcontainers | Every CI run (separate job); needs Docker, no secrets |
 | Live | `tests/live/` | `live` | The real Supabase project | Opt-in, locally only, **never in CI** |
+| Repo e2e | `e2e/` (repo root) | none | Its own containers (Postgres, RabbitMQ), several real services | Opt-in, dedicated workflow or by hand; never in the CI matrix |
 
 ```
 uv run pytest                            # unit only (the default selection)
 uv run pytest -m integration --no-cov    # integration tier (Docker must be running)
 uv run pytest -m live --no-cov           # live tier, needs real credentials in .env
+python3 scripts/verify_scrum173.py --integration-only   # repo e2e, SCRUM-173; Docker, takes minutes
 ```
+
+This file covers the integration tier only. Repo-root `e2e/` belongs to no
+service: it has no `pyproject.toml` and no marker, and no service's
+`uv run pytest` collects it. Its harnesses run in a throwaway `uv run
+--no-project` environment and start each service from that service's own
+`.venv`.
 
 - Integration tests run with `--no-cov`. *Why:* the `fail_under` ratchet is
   defined against the unit run, so integration tests can't be used to paper
@@ -70,19 +130,21 @@ uv run pytest -m live --no-cov           # live tier, needs real credentials in 
 The table above is the **target state**. Moving to it requires changes the
 agent must **not** make unless the user explicitly asks:
 
-- **Move existing live-Supabase tests into `tests/live/`** under a new `live`
-  marker. For example,
-  `venue-availability-service/tests/integration/test_live_calendar.py` hits
-  live Supabase.
-- **Give the SCRUM-173 harness its own marker.** Its files in
-  `venue-booking-service/tests/integration/` (`test_scrum173_real.py`,
-  `verify_scrum173_backend.py`) drive Docker, a real RabbitMQ and subprocesses,
-  and take minutes. It currently shares the `integration` marker and has its
-  own workflow, `.github/workflows/scrum173-integration.yml`.
-- **Register both markers and keep them deselected by default** in each
-  service's `pyproject.toml`. Make the marker descriptions consistent: Venue
-  Availability's says "never run in CI", Venue Booking's says "opt-in
-  dedicated isolated job".
+Already done:
+
+- Venue Availability's live smoke test is in `tests/live/test_calendar.py`
+  under the `live` marker.
+- The SCRUM-171/173 harnesses moved from Venue Booking to the repo-root `e2e/`.
+  `scripts/verify_scrum173.py` runs the SCRUM-173 one from there.
+  - The `verify_*.py` files are standalone scripts that pytest doesn't
+    collect. `e2e/` allows that; §6.1's rule covers `tests/integration/` only.
+- Venue Availability registers the `live` marker and deselects it by default.
+  Venue Booking's `integration` marker description now matches the others.
+
+Still to do:
+
+- **Register a `live` marker in any other service** that grows such a test,
+  using the same pattern (`-m "not integration and not live"`).
 - **Make Equipment Request and Equipment Reservation tier-ready.** They need
   `pytest-socket`, a registered `integration` marker, `-m "not integration"`,
   `fail_under`, and their tests moved under `tests/unit/`.
@@ -107,12 +169,7 @@ say so**. Don't work around it.
 | RabbitMQ publisher | **Fake** that records published messages | Keeps the broker out of the test while still letting you assert on the message. |
 | Email/SMS, any third-party API | **Fake** | Cost, rate limits, nondeterminism. |
 
-- **Atomic services:** the database is the boundary. Exercise route → SQL →
-  Postgres and assert on what was persisted.
-- **Composite services:** the atomics' HTTP APIs are the boundary, and no
-  composite has a database. Exercise route → orchestration → outbound HTTP,
-  with the atomics stubbed. Assert on the response, on exactly what was sent
-  to each atomic, and on any published message.
+- **What each kind of service exercises and asserts on is defined in §1.2.**
 - **Composites freeze base URLs and `INTERNAL_SERVICE_TOKEN` at import** (all
   except Equipment Reservation). Stub against the URL actually held in
   `app.clients`, and change the token with `monkeypatch.setattr` on that
@@ -232,11 +289,100 @@ say so**. Don't work around it.
    new files while the SCRUM-173 harness still shares the marker), run the
    unit tier too, then report (§10).
 
-**Naming:** use story-based file names (`tests/integration/test_<story>.py`),
-mirroring the unit-test convention, with test names that read as the AC, e.g.
-`test_overlapping_booking_for_same_venue_is_rejected`. Each test's docstring
-gives the Jira key and the AC it covers. *Why:* this gives traceability from
-requirement to test, which the rubric grades.
+Name and document every file and test as §6.1 describes.
+
+### 6.1 Naming and documenting tests (traceability)
+
+The goal: someone with a Jira story can find its tests with `ls`, and the
+`pytest -v` output reads as a checklist of its ACs. *Why:* traceability from
+requirement to code to test is graded, and the team has to explain every test
+in the Week 13 Q&A.
+
+```
+services/<name>-service/tests/integration/
+├── __init__.py
+├── conftest.py                  # fixtures only
+├── factories.py                 # inserting builders only
+├── test_drafts.py               # one feature (story) per file
+├── test_submission.py
+└── test_infra_db_connection.py  # not tied to a story
+```
+
+**File names**
+
+- **`test_<feature>.py`**, naming the feature in words. **Never put the Jira
+  key in the file name** (no `test_scrum12_drafts.py`). *Why:* it matches the
+  unit-test convention in AGENTS.md; the key goes in the module header.
+- **If the feature already has a unit-test file, use the same name**
+  (`tests/unit/test_drafts.py` ↔ `tests/integration/test_drafts.py`). *Why:*
+  one name finds both tiers. Both folders are packages, so identical file names
+  don't clash.
+- **When a story touches several services, give each service's file the same
+  feature name.** Each file still tests only its own service (§1.1).
+- **One feature per file.** Don't add a different story's tests to an
+  existing file. If it's unclear which feature a test belongs to, ask.
+- **Tests not tied to a story** (database connectivity, migrations loading,
+  health) go in `test_infra_<topic>.py`, e.g. `test_infra_db_connection.py`.
+- **Only `test_*.py` files, `conftest.py` and `factories.py` belong in
+  `tests/integration/`.** No standalone scripts (`verify_*.py`). *Why:* pytest
+  never collects them, so they look like tests but never run.
+
+**Test function names**
+
+- **`test_ac<N>_<behaviour>`**, where the behaviour reads as the AC outcome,
+  not the implementation. For example:
+  `test_ac2_overlapping_booking_for_same_venue_is_rejected`. *Why:* `pytest -v`
+  prints names, not docstrings, and `pytest -k ac2` runs one AC.
+- **If a test covers more than one AC, prefix the AC it mainly proves** and
+  name the others in its docstring.
+- Tests in `test_infra_*` files have no AC prefix.
+
+**Test docstrings**
+
+One line: `"""<Scenario>: <why this case matters>."""`, where `<Scenario>` is
+`Normal`, `Boundary`, `Conflict` or `Failure` (§6 step 3). Don't repeat the
+story key; it's in the module header.
+
+```python
+def test_ac1_a_draft_without_a_name_is_refused_and_nothing_is_stored(client, db):
+    """Failure: Event Name is the one field a draft needs."""
+```
+
+**Module docstring (the file header)**
+
+Every story file starts with this header:
+
+```python
+"""SCRUM-12 Save Event Request as Draft: Event Service integration tests.
+
+Story:      As an Event Organiser, I want to ..., so that ....
+Real:       Flask app and routes, validation, app/models.py SQL, postgres:17.6
+            with the full migration chain.
+Doubled:    nothing (Event Service makes no outbound calls).
+Not proven: authentication; identity is the organiserId the caller sends.
+
+AC1  <AC text exactly as in Jira>
+AC2  <AC text exactly as in Jira>
+AC3  Not covered here: <reason, e.g. the rule runs in Venue Availability>.
+"""
+```
+
+- **Copy the Jira key, title, story sentence and AC text word for word from
+  Jira.** If you don't have them, ask (§6 step 1). Never paraphrase or invent
+  them.
+- **List every AC of the story, including the ones this file doesn't cover,**
+  and give the reason for each uncovered one. *Why:* a gap stays visible in the
+  code rather than only in a chat.
+- **Fill in `Real` and `Doubled` from §1.2 and §3.** `Not proven` is the
+  file-wide part of the §10 report.
+- **For a `test_infra_*` file,** replace the first line with
+  `Infra: <topic>: <Service> integration tests.` and the `Story` line with
+  `Why: <what would break unnoticed without it>`. Name the Jira ticket if
+  there is one. No AC lines.
+
+**Layout inside the file:** group tests under `# AC1 ----` comment banners,
+in AC order, with normal, then boundary, conflict and failure tests under each
+banner.
 
 ---
 
@@ -332,6 +478,9 @@ Venue Availability's tests do) or that the real atomics accept this payload."*
 *Why:* to judge what doubled or generated tests actually prove.
 This keeps the remaining gaps visible to the team.
 
+Whatever applies to the whole file also goes in the module header's
+`Not proven` line (§6.1), so it stays in the repo and isn't lost with the chat.
+
 ---
 
 ## 11. Stop and ask when
@@ -339,6 +488,11 @@ This keeps the remaining gaps visible to the team.
 - A test seems to need an atomic to call another service, or a composite to
   read another service's database. That's a design question; see AGENTS.md's
   service boundaries.
+- A test seems to need two or more real services (an end-to-end test for the
+  repo-root `e2e/`, §1.1).
+- You'd need to rename, move or edit tests in a service the user doesn't own.
+  The team member who owns that service makes those changes. Report what
+  should change instead.
 - The architecture docs disagree with each other (see §12.3), or a test
   touches one of the open architecture questions listed in AGENTS.md.
 - You'd need to change `pyproject.toml` markers or coverage settings,

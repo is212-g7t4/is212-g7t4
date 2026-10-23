@@ -9,16 +9,13 @@ AC3: Given a temporary system failure occurs during notification dispatch, the s
 Runs the established real HTTP/PostgreSQL/RabbitMQ acceptance harness under pytest.
 Not a mocked replacement: creates four owned databases and actual service/worker
 processes. setup() and finally cleanup() belong to this test, including failures.
-Default pytest excludes this marker and does not import the optional driver.
+Lives in the repo-root e2e/, outside every service, so no service's default
+pytest run collects it; scripts/verify_scrum173.py runs it.
 The 22 verification groups are recorded separately, not counted as 22 direct ACs.
 """
 import importlib.util
 import os
 from pathlib import Path
-
-import pytest
-
-pytestmark = pytest.mark.integration
 
 
 def test_isolated_notification_delivery_and_recovery(tmp_path):

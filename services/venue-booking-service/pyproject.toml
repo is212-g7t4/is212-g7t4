@@ -32,7 +32,7 @@ addopts = [
     "--disable-socket",
 ]
 markers = [
-    "integration: real external systems; opt-in dedicated isolated job, excluded from default unit CI",
+    "integration: needs a real external system (database, another service); opt-in, never run in CI",
 ]
 xfail_strict = true
 
