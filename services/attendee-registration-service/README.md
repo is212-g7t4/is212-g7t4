@@ -1,16 +1,17 @@
 # Attendee Registration Service
 
-Composite service for registering an attendee for a confirmed event. It checks
-Event Service for the event status and start time, then asks Registration
-Service to atomically enforce duplicate-email and capacity rules and create the
-registration.
+Composite service for registering or withdrawing an attendee for a confirmed
+event. Registration checks status, start time and capacity. Withdrawal uses the
+organiser's optional deadline, or the event start when none was set, before
+asking Registration Service to timestamp the status change atomically.
 
 ## Endpoint
 
-- `POST /registrations` with `eventId`, `attendeeId`, `fullName`, `email`, and
-  optional `organization`.
+- `POST /registrations` with `eventId` and `attendeeId`.
 - `GET /registrations?attendeeId=<uuid>` returns that attendee's registration
   records combined with their confirmed event details.
+- `PATCH /registrations/<registrationId>/withdraw` with `attendeeId` withdraws
+  the attendee's own registration before the applicable deadline.
 
 No database is owned by this composite and no database schema changes are
 required.

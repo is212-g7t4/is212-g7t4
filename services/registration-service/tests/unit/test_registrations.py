@@ -9,7 +9,15 @@ import psycopg2.errors
 import pytest
 
 from app import create_app
-from app.models import CapacityReachedError, DuplicateRegistrationError, create_registration
+from app.models import (
+    CapacityReachedError,
+    DuplicateRegistrationError,
+    RegistrationAlreadyWithdrawnError,
+    RegistrationNotFoundError,
+    RegistrationOwnershipError,
+    create_registration,
+    withdraw_registration,
+)
 
 EVENT_ID = "25c9fe40-c44d-4d79-8d5d-de66d40c1678"
 ATTENDEE_ID = "56b34ab1-92cd-4b35-83c7-f04e176e2bd0"
@@ -22,6 +30,7 @@ def registration_row(**overrides):
         "attendee_id": None,
         "registration_date": datetime(2026, 9, 13, 1, 15, tzinfo=UTC),
         "status": "Confirmed",
+        "withdrawn_at": None,
     }
     row.update(overrides)
     return row
@@ -108,7 +117,7 @@ def test_registration_rows_carry_no_attendee_details(setup):
     response = client.get(f"/registrations?eventId={EVENT_ID}")
 
     assert set(response.json["registrations"][0]) == {
-        "registration_id", "event_id", "attendee_id", "registration_date", "status",
+            "registration_id", "event_id", "attendee_id", "registration_date", "status", "withdrawn_at",
     }
     query = cursor.execute.call_args.args[0]
     assert "attendee_email" not in query
@@ -199,6 +208,86 @@ def test_counts_reports_missing_database_url(setup):
     client, _, _ = setup
     client.application.config["DATABASE_URL"] = None
     assert client.get(f"/registrations/counts?eventIds={EVENT_ID}").status_code == 503
+
+
+def test_withdrawal_records_status_and_timestamp(setup):
+    """Withdrawal AC2/AC3: status and audit timestamp are saved together."""
+    _, _, cursor = setup
+    cursor.fetchone.side_effect = [
+        registration_row(attendee_id=ATTENDEE_ID),
+        registration_row(
+            attendee_id=ATTENDEE_ID,
+            status="Withdrawn",
+            withdrawn_at=datetime(2026, 10, 24, 2, 30, tzinfo=UTC),
+        ),
+    ]
+
+    result = withdraw_registration("unused-test-url", registration_row()["registration_id"], ATTENDEE_ID)
+
+    assert result["status"] == "Withdrawn"
+    assert result["withdrawn_at"] == "2026-10-24T02:30:00+00:00"
+    update_query, update_params = cursor.execute.call_args.args
+    assert "SET status = 'Withdrawn', withdrawn_at = %s" in update_query
+    assert update_params[1] == registration_row()["registration_id"]
+
+
+@pytest.mark.parametrize(
+    ("row", "error"),
+    [
+        (None, RegistrationNotFoundError),
+        (registration_row(attendee_id="11111111-1111-4111-8111-111111111111"), RegistrationOwnershipError),
+        (registration_row(attendee_id=ATTENDEE_ID, status="Withdrawn"), RegistrationAlreadyWithdrawnError),
+    ],
+)
+def test_withdrawal_refuses_missing_foreign_or_already_withdrawn_registration(setup, row, error):
+    cursor = setup[2]
+    cursor.fetchone.return_value = row
+    with pytest.raises(error):
+        withdraw_registration("unused-test-url", registration_row()["registration_id"], ATTENDEE_ID)
+
+
+def test_withdrawal_endpoint_returns_updated_record(setup, monkeypatch):
+    client = setup[0]
+    saved = registration_row(attendee_id=ATTENDEE_ID, status="Withdrawn")
+    withdraw = MagicMock(return_value={**saved, "withdrawn_at": "2026-10-24T02:30:00+00:00"})
+    monkeypatch.setattr("app.withdraw_registration", withdraw)
+
+    response = client.patch(
+        f"/registrations/{saved['registration_id']}/withdraw",
+        json={"attendeeId": ATTENDEE_ID},
+    )
+
+    assert response.status_code == 200
+    assert response.json["registration"]["status"] == "Withdrawn"
+    withdraw.assert_called_once_with("unused-test-url", saved["registration_id"], ATTENDEE_ID)
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    [
+        (RegistrationNotFoundError(), 404, "REGISTRATION_NOT_FOUND"),
+        (RegistrationOwnershipError(), 403, "REGISTRATION_NOT_OWNED"),
+        (RegistrationAlreadyWithdrawnError(), 409, "REGISTRATION_ALREADY_WITHDRAWN"),
+    ],
+)
+def test_withdrawal_endpoint_maps_domain_errors(setup, monkeypatch, error, status, code):
+    client = setup[0]
+    monkeypatch.setattr("app.withdraw_registration", MagicMock(side_effect=error))
+    response = client.patch(
+        f"/registrations/{registration_row()['registration_id']}/withdraw",
+        json={"attendeeId": ATTENDEE_ID},
+    )
+    assert response.status_code == status
+    assert response.json["code"] == code
+
+
+def test_withdrawal_endpoint_validates_body_and_configuration(setup):
+    client = setup[0]
+    path = f"/registrations/{registration_row()['registration_id']}/withdraw"
+    assert client.patch(path).status_code == 400
+    assert client.patch(path, json={"attendeeId": "bad"}).status_code == 400
+    client.application.config["DATABASE_URL"] = None
+    assert client.patch(path, json={"attendeeId": ATTENDEE_ID}).status_code == 503
 
 
 def registration_payload(**overrides):
