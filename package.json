@@ -6,10 +6,18 @@
     "dev": "concurrently -n frontend,backend -c blue,green \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "npm --prefix frontend/event-management-ui run dev",
     "dev:backend": "docker compose up",
+    "test:journeys": "playwright test -c e2e/journeys",
+    "codegen": "playwright codegen http://localhost:5174",
+    "journey:fixtures": "tsx e2e/journeys/scripts/fixtures.ts",
+    "journey:fixtures:clean": "tsx e2e/journeys/scripts/fixtures.ts clean",
     "test:backend": "for d in services/*/; do (cd \"$d\" && uv run pytest) || exit 1; done",
     "stop": "docker compose down --remove-orphans && (lsof -ti :5174 | xargs kill -9 2>/dev/null; true)"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@playwright/test": "^1.63.0",
+    "@types/pg": "^8.23.1",
+    "concurrently": "^9.1.0",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15"
   }
 }
