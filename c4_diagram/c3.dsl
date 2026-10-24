@@ -89,7 +89,7 @@ workspace "ConnectSphere" "C3 — API Application Components" {
         connectSphere.apiApplication.equipmentAvailabilityModule -> connectSphere.messageBroker "Publishes equipment-decision notifications to" "AMQP (async)"
 
         # Registration Module — owns the attendee registration/withdrawal workflow
-        connectSphere.apiApplication.registrationModule -> connectSphere.apiApplication.eventModule "Validates the event is open for registration via"
+        connectSphere.apiApplication.registrationModule -> connectSphere.apiApplication.eventModule "Validates registration availability and the withdrawal deadline via"
         connectSphere.apiApplication.registrationModule -> connectSphere.messageBroker "Publishes registration-confirmed notifications to" "AMQP (async)"
 
         # Safety Check Module — owns the safety-check workflow
