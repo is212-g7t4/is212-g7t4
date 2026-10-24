@@ -244,6 +244,36 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   or secrets. A request a test hasn't mocked fails the test. Add new mocks via
   `mock()` in `e2e/fixtures.ts`. First run needs `npx playwright install chromium`.
 
+## E2E journeys (`e2e/journeys/`)
+
+Real-stack Playwright journeys, one per Jira "E2E Testing J<n>" task. They are
+manual and opt-in, never in CI: start the stack (`npm run dev`), then
+`npm run test:journeys` from the repo root. They are a different tier from the
+mocked suite in `frontend/event-management-ui/e2e/` and from the Python
+harnesses in the repo-root `e2e/*.py`; don't merge or delete either.
+
+When adding a journey, follow J5b (`J5b-equipment-over-allocation/`):
+
+- **One folder and one spec per journey**, named `J<n>[a|b]-<name>/J<n>[a|b]-<name>.spec.ts`.
+  Each test is a specific scenario, split into `test.step`s that match the
+  journey flow in the Jira task.
+- **Header comment** on every spec: the journey's Jira task, the user stories it
+  exercises, and the stories its fixture setup relies on, using real SCRUM keys
+  (never invent one; ask). Add a row to `e2e/journeys/TRACEABILITY.md` too.
+- **Set up data through the service APIs** in `helpers/` (see `helpers/stack.ts`),
+  not by clicking through the UI. Log in per role with `openAs()`; the UI reads
+  `activeUserId` from localStorage.
+- **Clean up after yourself.** The tests write to the shared Supabase database.
+  Fixture event names must be `J<n>[a|b] Event ...` (the pattern in `helpers/cleanup.ts`), which runs
+  before and after the journey. Use far-future random dates (`randomWindow()`) so
+  runs never collide with real events or stock.
+- **Placeholders:** a journey blocked on an unbuilt story is a spec with
+  `test.fixme`, its flow written as comments, and the blocking tickets named.
+- **Codegen** (`npm run codegen`, with `npm run journey:fixtures` to seed J5b
+  data) is only for drafting selectors. Turn the output into `getByRole`/`getByLabel`
+  locators, steps and assertions; don't commit raw recordings.
+- Never commit `e2e/journeys/test-results/` or `e2e/journeys/report/`.
+
 ## CI
 
 A single workflow, `.github/workflows/ci.yml`, runs on every pull request, on
