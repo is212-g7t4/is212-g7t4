@@ -12,6 +12,6 @@ Other journeys (J1 to J4, J6 to J8; SCRUM-255 to 258, 260 to 262) get a row here
 ## Adding a journey
 
 1. Create `J<n>-<name>/J<n>-<name>.spec.ts`, with the story keys in the header comment.
-2. Put setup in `helpers/` (API calls, not UI clicks) and make fixture event names match the pattern in `helpers/cleanup.ts` (`J5% Event %` today; extend it for new journeys) so they are removed after the run.
+2. Put setup in `helpers/` (API calls, not UI clicks) and make fixture event names follow `J<n>[a|b] Event ...` (the pattern in `helpers/cleanup.ts`) so they are removed after the run.
 3. Use `test.step` for each stage of the journey.
 4. Add the row above.
