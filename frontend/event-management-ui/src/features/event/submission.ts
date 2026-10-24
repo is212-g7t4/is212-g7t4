@@ -84,7 +84,7 @@ export const requiredFields: [keyof EventData, string][] = [
 ]
 
 export function validateEvent(event: EventData) {
-  const missingFields = requiredFields.filter(([key]) => !event[key].trim()).map(([, label]) => label)
+  const missingFields = requiredFields.filter(([key]) => !event[key]?.trim()).map(([, label]) => label)
   const errors: string[] = []
   if (event.expectedAttendance.trim() && (!/^\d+$/.test(event.expectedAttendance.trim()) ||
       Number(event.expectedAttendance) < 1 || Number(event.expectedAttendance) > 2147483647)) {
@@ -95,6 +95,13 @@ export function validateEvent(event: EventData) {
     const end = Date.parse(event.preferredEndDate)
     if (!Number.isFinite(start) || !Number.isFinite(end)) errors.push('Preferred dates must be valid dates and times.')
     else if (end <= start) errors.push('Preferred End Date & Time must be after the start.')
+  }
+  if (event.withdrawalDeadline) {
+    const deadline = Date.parse(event.withdrawalDeadline)
+    const start = Date.parse(event.preferredStartDate)
+    if (!Number.isFinite(deadline) || !Number.isFinite(start) || deadline > start) {
+      errors.push('Withdrawal Deadline must be a valid date and time no later than the event start.')
+    }
   }
   return { missingFields, errors }
 }

@@ -85,7 +85,7 @@ def test_ac1_save_as_draft_stores_partial_details_with_status_draft(setup):
     assert UUID(params[0])
     assert params[1] == "Community Workshop"
     # Unfilled typed columns are NULL rather than failing the insert.
-    assert params[3:] == [None] * 7 + [ORGANISER_ID]
+    assert params[3:] == [None] * 8 + [ORGANISER_ID]
 
 
 @pytest.mark.parametrize(
@@ -99,6 +99,12 @@ def test_ac1_save_as_draft_stores_partial_details_with_status_draft(setup):
             "Preferred End Date & Time must be after the start.",
         ),
         ({"eventName": "Workshop", "preferredStartDate": "tomorrow"}, "Preferred dates must be valid"),
+        ({"eventName": "Workshop", "withdrawalDeadline": "tomorrow"}, "Withdrawal Deadline"),
+        ({
+            "eventName": "Workshop",
+            "preferredStartDate": "2026-12-01T10:00",
+            "withdrawalDeadline": "2026-12-01T10:01",
+        }, "Withdrawal Deadline"),
     ],
 )
 def test_ac1_save_as_draft_rejects_missing_name_or_malformed_fields(setup, details, problem):

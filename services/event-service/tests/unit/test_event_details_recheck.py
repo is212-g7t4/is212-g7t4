@@ -921,7 +921,11 @@ def test_every_editable_field_is_classified_exactly_once():
     assert not set(LOW_IMPACT_FIELDS) & set(HIGH_IMPACT_FIELDS)
     # Every editable field is a column this service owns, or lives in the
     # `description` JSON (`purpose`).
-    assert set(EDITABLE_FIELDS) - {"purpose"} == set(FIELDS)
+    # withdrawalDeadline is set by the organiser during event creation and is
+    # deliberately not part of coordinator edits or safety re-checks.
+    assert set(EDITABLE_FIELDS) - {"purpose"} == set(FIELDS) - {
+        "withdrawalDeadline"
+    }
 
 
 def test_details_without_database_url(no_database):

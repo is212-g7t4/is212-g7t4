@@ -32,3 +32,17 @@ def event_has_started(event, now=None):
     if current.tzinfo is None:
         current = current.replace(tzinfo=SGT)
     return start <= current
+
+
+def withdrawal_deadline_has_passed(event, now=None):
+    """Use the organiser's cutoff, falling back to the event start time."""
+    raw_deadline = event.get("withdrawalDeadline") or event.get("preferredStartDate")
+    if not raw_deadline:
+        raise ValueError("Withdrawal deadline is unavailable.")
+    deadline = datetime.fromisoformat(str(raw_deadline).replace("Z", "+00:00"))
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=SGT)
+    current = now or datetime.now(SGT)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=SGT)
+    return deadline <= current

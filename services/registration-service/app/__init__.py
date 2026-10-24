@@ -10,10 +10,14 @@ load_dotenv()
 from app.models import (
     CapacityReachedError,
     DuplicateRegistrationError,
+    RegistrationAlreadyWithdrawnError,
+    RegistrationNotFoundError,
+    RegistrationOwnershipError,
     count_registrations,
     create_registration,
     list_attendee_registrations,
     list_registrations,
+    withdraw_registration,
 )
 
 
@@ -39,7 +43,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
         return response
@@ -48,7 +52,7 @@ def create_app(config=None):
     def database_failure(error):
         # Do not expose credentials, SQL or database internals in the response/log.
         return jsonify(
-            message="Unable to load registrations. Please check the Registration Service database connection and schema."
+            message="Unable to save or load registrations. Please check the Registration Service database connection and schema."
         ), 503
 
     @app.get("/health")
@@ -116,5 +120,34 @@ def create_app(config=None):
         except CapacityReachedError:
             return jsonify(code="EVENT_FULL", message="This event has reached maximum capacity."), 409
         return jsonify(registration=registration), 201
+
+    @app.patch("/registrations/<uuid:registration_id>/withdraw")
+    def withdraw(registration_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(message="Send a JSON object."), 400
+        try:
+            attendee_id = str(UUID(data.get("attendeeId", "")))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid attendeeId is required."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
+        try:
+            registration = withdraw_registration(
+                app.config["DATABASE_URL"], str(registration_id), attendee_id
+            )
+        except RegistrationNotFoundError:
+            return jsonify(code="REGISTRATION_NOT_FOUND", message="Registration not found."), 404
+        except RegistrationOwnershipError:
+            return jsonify(
+                code="REGISTRATION_NOT_OWNED",
+                message="You can only withdraw your own registration.",
+            ), 403
+        except RegistrationAlreadyWithdrawnError:
+            return jsonify(
+                code="REGISTRATION_ALREADY_WITHDRAWN",
+                message="This registration has already been withdrawn.",
+            ), 409
+        return jsonify(registration=registration), 200
 
     return app
