@@ -27,7 +27,11 @@ def setup(monkeypatch):
     monkeypatch.setattr(
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
+    app = create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "FRONTEND_ORIGIN": "http://localhost:5174",
+    })
     return app.test_client(), connection, cursor
 
 
@@ -74,7 +78,7 @@ def test_ac1_ac2_ac3_submit_existing_columns_and_return_confirmation_data(setup)
     assert parameters[4] == datetime(2026, 10, 1, 17, tzinfo=SINGAPORE)
     assert parameters[5] == 25
     assert json.loads(parameters[2])["purpose"] == "Learning"
-    assert parameters[6:] == ["", "", "", "", None]  # last: organiser_id (not supplied)
+    assert parameters[6:] == ["", "", "", "", None, None]  # deadline + organiser are absent
     connection.__exit__.assert_called_once()
     connection.close.assert_called_once()
 
@@ -88,7 +92,45 @@ def test_optional_details_roundtrip(setup):
         "/events", json={**VALID, "equipmentRequirements": "Projector"}
     )
     assert response.json["equipmentRequirements"] == "Projector"
-    assert cursor.execute.call_args.args[1][-3] == "Projector"
+    assert cursor.execute.call_args.args[1][8] == "Projector"
+
+
+def test_optional_withdrawal_deadline_roundtrips_as_singapore_local_time(setup):
+    client, _, cursor = setup
+    row = saved_row()
+    row["withdrawal_deadline"] = datetime(2026, 9, 30, 18, 0, tzinfo=UTC)
+    cursor.fetchone.return_value = row
+
+    response = client.post(
+        "/events", json={**VALID, "withdrawalDeadline": "2026-10-01T02:00"}
+    )
+
+    assert response.status_code == 201
+    assert response.json["withdrawalDeadline"] == "2026-10-01T02:00:00"
+    assert cursor.execute.call_args.args[1][10] == datetime(
+        2026, 10, 1, 2, tzinfo=SINGAPORE
+    )
+
+
+@pytest.mark.parametrize(
+    "deadline",
+    ["invalid", "2026-10-01T09:01"],
+)
+def test_withdrawal_deadline_must_be_valid_and_no_later_than_start(setup, deadline):
+    response = setup[0].post(
+        "/events", json={**VALID, "withdrawalDeadline": deadline}
+    )
+    assert response.status_code == 400
+    assert "Withdrawal Deadline" in response.json["errors"][0]
+    setup[2].execute.assert_not_called()
+
+
+def test_withdrawal_deadline_must_be_text(setup):
+    response = setup[0].post(
+        "/events", json={**VALID, "withdrawalDeadline": 123}
+    )
+    assert response.status_code == 400
+    assert "withdrawalDeadline must be text" in response.json["errors"][0]
 
 
 @pytest.mark.parametrize(

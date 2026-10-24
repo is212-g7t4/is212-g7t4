@@ -9,6 +9,7 @@ import { Spinner } from '../components/Loading'
 const EVENT_FIELDS: (keyof EventData)[] = [
   'eventName', 'description', 'purpose', 'preferredStartDate', 'preferredEndDate', 'expectedAttendance',
   'venueRequirements', 'accessibilityNeeds', 'equipmentRequirements', 'registrationNeeds',
+  'withdrawalDeadline',
 ]
 
 // `draftId` opens one of the organiser's drafts; without it the form starts empty.
@@ -33,6 +34,7 @@ export function SubmissionPage({ role, currentOrganiserId, draftId: openedDraftI
     accessibilityNeeds: '',
     equipmentRequirements: '',
     registrationNeeds: '',
+    withdrawalDeadline: '',
   })
 
   useEffect(() => {
@@ -249,6 +251,16 @@ export function SubmissionPage({ role, currentOrganiserId, draftId: openedDraftI
             placeholder="e.g. Attendee registration is required."
             textarea
           />
+
+          <Field
+            label="Withdrawal Deadline"
+            type="datetime-local"
+            value={event.withdrawalDeadline || ''}
+            onChange={(value) => updateEvent('withdrawalDeadline', value)}
+          />
+          <p className="muted">
+            Optional. If left blank, attendees may withdraw until the event starts.
+          </p>
         </FormSection>
 
         <div className="form-actions">

@@ -71,3 +71,19 @@ def save_registration(data: dict) -> dict:
         )
     response.raise_for_status()
     return response.json()["registration"]
+
+
+def withdraw_saved_registration(registration_id: str, attendee_id: str) -> dict:
+    response = httpx.patch(
+        f"{REGISTRATION_SERVICE_URL}/registrations/{registration_id}/withdraw",
+        json={"attendeeId": attendee_id},
+        timeout=5,
+    )
+    if response.status_code in (403, 404, 409):
+        body = response.json()
+        raise RegistrationConflictError(
+            body.get("code", "WITHDRAWAL_CONFLICT"),
+            body.get("message", "Unable to withdraw this registration."),
+        )
+    response.raise_for_status()
+    return response.json()["registration"]
