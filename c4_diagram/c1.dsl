@@ -5,7 +5,7 @@ workspace "ConnectSphere" "Event Planning and Venue Booking System" {
         eo = person "Event Organiser" "External client who submits and manages event requests." {
             tags "External Actor"
         }
-        attendee = person "Attendee" "External user who registers for confirmed events." {
+        attendee = person "Attendee" "External user who registers for and withdraws from confirmed events." {
             tags "External Actor"
         }
         ec = person "Event Coordinator" "Internal staff who coordinates the event lifecycle." {
@@ -41,7 +41,7 @@ workspace "ConnectSphere" "Event Planning and Venue Booking System" {
         // --- High-Level Relationships ---
         // Actors connect directly to the main system
         eo -> connectsphere "Submits and manages event requests using" "HTTPS"
-        attendee -> connectsphere "Registers for events using" "HTTPS"
+        attendee -> connectsphere "Registers for and withdraws from events using" "HTTPS"
         ec -> connectsphere "Plans events, books venues and equipment, and submits safety checks using" "HTTPS"
         lead -> connectsphere "Views the unassigned queue, assigns and reassigns coordinators using" "HTTPS"
         vs -> connectsphere "Manages venues and holds, and approves venue requests using" "HTTPS"

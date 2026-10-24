@@ -21,6 +21,7 @@ FIELDS = {
     "accessibilityNeeds": "accessibility_needs",
     "equipmentRequirements": "equipment_requirements",
     "registrationNeeds": "registration_needs",
+    "withdrawalDeadline": "withdrawal_deadline",
 }
 COLUMNS = ", ".join(FIELDS.values())
 ROW_COLUMNS = (
@@ -324,7 +325,7 @@ def serialize(row):
         action_history,
         clarification_history,
     ) = unpack_metadata(row["description"])
-    for key in ("preferredStartDate", "preferredEndDate"):
+    for key in ("preferredStartDate", "preferredEndDate", "withdrawalDeadline"):
         result[key] = _local(result[key]).isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
     result.update(
@@ -366,6 +367,9 @@ def submit_event(database_url, data):
         "expectedAttendance": int(data["expectedAttendance"]),
         "preferredStartDate": _aware(data["preferredStartDate"]),
         "preferredEndDate": _aware(data["preferredEndDate"]),
+        "withdrawalDeadline": _aware(data["withdrawalDeadline"])
+        if data.get("withdrawalDeadline")
+        else None,
     }
     values = [stored[key] for key in FIELDS]
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -1768,7 +1772,7 @@ def _draft_values(details):
     )
     if stored["expectedAttendance"]:
         stored["expectedAttendance"] = int(stored["expectedAttendance"])
-    for key in ("preferredStartDate", "preferredEndDate"):
+    for key in ("preferredStartDate", "preferredEndDate", "withdrawalDeadline"):
         if stored[key]:
             stored[key] = _aware(stored[key])
     return [stored[key] for key in FIELDS]

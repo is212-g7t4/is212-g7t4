@@ -62,6 +62,7 @@ export interface EventData {
   accessibilityNeeds: string
   equipmentRequirements: string
   registrationNeeds: string
+  withdrawalDeadline?: string
 }
 
 export interface MockRequest {

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS "public"."Event" (
     "accessibility_needs" "text",
     "equipment_requirements" "text",
     "registration_needs" "text",
+    "withdrawal_deadline" timestamp with time zone,
     "purpose" "text",
     "registration_enabled" boolean DEFAULT false NOT NULL,
     "rejection_reason" "text",
@@ -87,7 +88,8 @@ CREATE TABLE IF NOT EXISTS "public"."Registration" (
     "event_id" "uuid",
     "attendee_id" "uuid",
     "registration_date" timestamp with time zone,
-    "status" character varying(50)
+    "status" character varying(50),
+    "withdrawn_at" timestamp with time zone
 );
 
 CREATE TABLE IF NOT EXISTS "public"."SafetyCheck" (

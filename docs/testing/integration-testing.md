@@ -592,6 +592,8 @@ able to fail (§6 step 5) before being listed here. Copy the fixture *patterns*
 | Kind | Suite | Use it for |
 |---|---|---|
 | DB-backed atomic | `services/event-service/tests/integration/` | `conftest.py` (session container, migration loading, localhost guard, both-channel `DATABASE_URL`, per-test truncate, `db` helper for arrange/assert), `factories.py` (inserting builders incl. FK parents) |
+| DB-backed atomic | `services/registration-service/tests/integration/` | Auditable status transitions, direct persisted-state assertions, and proving that withdrawn rows no longer consume confirmed capacity |
+| Composite | `services/attendee-registration-service/tests/integration/` | `respx` HTTP-boundary stubs, exact downstream request assertions, deadline short-circuiting, and downstream failure handling |
 
 **Adding to this table:** once a new suite passes and every test has been
 proven able to fail, add one row here: its kind, its path, and what it is the
@@ -600,9 +602,8 @@ general sections above, not here.
 
 #### Still to build
 
-No composite or publisher suite exists yet, so the `respx` stubs and the
-recording publisher have no reference implementation. Recommended first
-examples:
+No publisher suite exists yet, so a recording publisher has no reference
+implementation. Other recommended examples:
 
 - **Atomic: Venue Availability, `POST /venue-bookings`.** It holds the SQL
   overlap-plus-buffer conflict check, which is exactly what unit tests can't

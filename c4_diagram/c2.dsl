@@ -19,7 +19,7 @@ workspace "ConnectSphere" "C2 — Containers" {
         eo = person "Event Organiser" "External client who submits and manages event requests." {
             tags "External"
         }
-        attendee = person "Attendee" "External user who registers for confirmed events." {
+        attendee = person "Attendee" "External user who registers for and withdraws from confirmed events." {
             tags "External"
         }
         ec = person "Event Coordinator" "Internal staff who coordinates the event lifecycle." {
@@ -57,7 +57,7 @@ workspace "ConnectSphere" "C2 — Containers" {
         # ================= Relationships =================
 
         eo       -> connectSphere.frontEndApp "Submits and manages event requests using" "HTTPS"
-        attendee -> connectSphere.frontEndApp "Registers for events using" "HTTPS"
+        attendee -> connectSphere.frontEndApp "Registers for and withdraws from events using" "HTTPS"
         ec       -> connectSphere.frontEndApp "Plans events, books venues and equipment, and submits safety checks using" "HTTPS"
         lead     -> connectSphere.frontEndApp "Views the unassigned queue, assigns and reassigns coordinators using" "HTTPS"
         vs       -> connectSphere.frontEndApp "Manages venues and holds, and approves venue requests using" "HTTPS"

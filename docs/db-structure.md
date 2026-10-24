@@ -79,6 +79,7 @@ status `Pending Review` for that event.
 | accessibility_needs | TEXT | | Accessibility requirements, read by the coordinator and the Safety Officer. |
 | equipment_requirements | TEXT | | Equipment the organiser asks for, used by the coordinator to raise equipment requests. |
 | registration_needs | TEXT | | Free-text notes on how attendee registration should work. |
+| withdrawal_deadline | TIMESTAMPTZ, nullable | new | Optional organiser-set cutoff for attendee withdrawals; the event start is used when empty. |
 | registration_enabled | BOOLEAN NOT NULL DEFAULT FALSE | new | Switch that tells the system whether attendees may register for this event. |
 | rejection_reason | TEXT | new | The coordinator's reason when the request is rejected, shown to the organiser. |
 | assigned_by | UUID (FK User) | | The Lead who made the latest assignment, shown on the event detail page. |
@@ -238,6 +239,7 @@ The time window for availability comes from the event's `preferred_start_date` a
 | attendee_id | UUID (FK User) | | The attendee's account, used to look up their name, email and organisation. |
 | registration_date | TIMESTAMPTZ | changed | When the attendee registered, shown on the coordinator's registration list. |
 | status | VARCHAR(50) | | Confirmed or Withdrawn; confirmed rows are counted against expected attendance. |
+| withdrawn_at | TIMESTAMPTZ | new | When the attendee withdrew, retained for auditability and cleared if they register again. |
 | UNIQUE (event_id, attendee_id) | table rule | new | Stops the same attendee registering twice; re-registering after withdrawal reuses the row. |
 
 Removed: `attendee_name`, `attendee_email`, `attendee_organization` (these come from `User`).

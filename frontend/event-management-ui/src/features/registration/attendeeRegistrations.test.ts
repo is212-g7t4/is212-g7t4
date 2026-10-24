@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetchApprovedVenueId } from '../venue/eventVenue'
 import { fetchVenue } from '../venue/venues'
-import { loadAttendeeRegistrations } from './attendeeRegistrations'
+import { loadAttendeeRegistrations, withdrawRegistration } from './attendeeRegistrations'
 
 vi.mock('../venue/venues', () => ({ fetchVenue: vi.fn() }))
 vi.mock('../venue/eventVenue', () => ({ fetchApprovedVenueId: vi.fn() }))
@@ -43,7 +43,7 @@ test('loads attendee-scoped registrations with event and venue details', async (
   expect(fetchApprovedVenueId).toHaveBeenCalledWith(event.id)
   expect(fetchVenue).toHaveBeenCalledWith(venue.id)
   expect(result[0]).toMatchObject({
-    id: 'registration-1', attendeeId, status: 'Confirmed',
+    id: 'registration-1', attendeeId, status: 'Confirmed', withdrawnAt: null,
     attendeeName: 'Adam Yeo', event, venue,
   })
 })
@@ -63,4 +63,39 @@ test('reports composite service errors', async () => {
     json: () => Promise.resolve({ message: 'Unable to load your registrations right now.' }),
   } as Response)
   await expect(loadAttendeeRegistrations(attendeeId)).rejects.toThrow('Unable to load your registrations right now.')
+})
+
+test('withdraws the attendee registration through the composite service', async () => {
+  fetcher.mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({
+      message: 'Registration withdrawn for Community Workshop.',
+      registration: { status: 'Withdrawn', withdrawn_at: '2026-10-24T02:30:00+00:00' },
+    }),
+  } as Response)
+
+  const result = await withdrawRegistration('registration-1', attendeeId)
+
+  expect(fetcher).toHaveBeenCalledWith('http://localhost:5009/registrations/registration-1/withdraw', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attendeeId }),
+  })
+  expect(result).toEqual({
+    message: 'Registration withdrawn for Community Workshop.',
+    status: 'Withdrawn',
+    withdrawnAt: '2026-10-24T02:30:00+00:00',
+  })
+})
+
+test('surfaces the withdrawal deadline message from the composite', async () => {
+  fetcher.mockResolvedValue({
+    ok: false,
+    json: () => Promise.resolve({
+      message: 'The withdrawal deadline has passed. Please contact the event organisers.',
+    }),
+  } as Response)
+  await expect(withdrawRegistration('registration-1', attendeeId)).rejects.toThrow(
+    'The withdrawal deadline has passed. Please contact the event organisers.',
+  )
 })
