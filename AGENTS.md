@@ -24,6 +24,7 @@ below for how this should shape commits.
 ```
 is212-g7t4/
 ├── e2e/                             # cross-service end-to-end harnesses (real services); opt-in
+│   └── journeys/                    # Playwright user journeys on the real stack; manual, see TRACEABILITY.md
 ├── frontend/                        # React SPA (Event Management System UI)
 ├── services/
 │   ├── <name>-service/              # one Flask app per microservice
