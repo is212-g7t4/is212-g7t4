@@ -232,6 +232,10 @@ __marimo__/
 reports/
 junit.xml
 
+# e2e test reports
+e2e/journeys/scripts
+e2e/journeys/report
+
 .DS_Store
 
 claude.md
