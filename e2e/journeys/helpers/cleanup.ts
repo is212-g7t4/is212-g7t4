@@ -1,7 +1,7 @@
 import { Client } from 'pg'
 
-// Journey fixtures are named with this prefix; cleanup never touches other events.
-export const FIXTURE_PREFIX = 'J5'
+// Fixture events are named "J<n>[a|b] Event ..."; cleanup never touches other events.
+const FIXTURE_NAME = '^J[0-9]+[ab]? Event '
 
 function connect() {
   process.loadEnvFile('.env') // run from the repo root, as the npm scripts do
@@ -19,13 +19,17 @@ export async function deleteFixtureEvents() {
   const db = connect()
   await db.connect()
   try {
-    const ids = `(SELECT event_id FROM public."Event" WHERE event_name LIKE $1)`
-    const like = [`${FIXTURE_PREFIX}% Event %`]
+    const ids = `(SELECT event_id FROM public."Event" WHERE event_name ~ $1)`
+    const pattern = [FIXTURE_NAME]
     await db.query('BEGIN')
-    for (const table of ['Notification', 'EquipmentRequest', 'VenueBooking', 'EventChangeReq', 'Registration']) {
-      await db.query(`DELETE FROM public."${table}" WHERE event_id IN ${ids}`, like)
+    await db.query(
+      `DELETE FROM public."SafetyCheckFlag" WHERE safety_check_id IN (SELECT safety_check_id FROM public."SafetyCheck" WHERE event_id IN ${ids})`,
+      pattern,
+    )
+    for (const table of ['SafetyCheck', 'Notification', 'EquipmentRequest', 'VenueBooking', 'EventChangeReq', 'Registration']) {
+      await db.query(`DELETE FROM public."${table}" WHERE event_id IN ${ids}`, pattern)
     }
-    await db.query(`DELETE FROM public."Event" WHERE event_name LIKE $1`, like)
+    await db.query(`DELETE FROM public."Event" WHERE event_name ~ $1`, pattern)
     await db.query('COMMIT')
   } catch (error) {
     await db.query('ROLLBACK')
