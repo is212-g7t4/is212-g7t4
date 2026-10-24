@@ -76,7 +76,7 @@ USER = {
 
 def registration(**overrides):
     row = {
-        "registration_id": "registration-1",
+        "registration_id": "11111111-1111-4111-8111-111111111111",
         "event_id": EVENT_ID,
         "attendee_id": ATTENDEE_ID,
         "registration_date": "2026-10-08T02:00:00+00:00",
@@ -248,3 +248,115 @@ def test_health_and_cors(client):
     assert "Access-Control-Allow-Origin" not in client.options(
         "/registrations", headers={"Origin": "https://other.example"}
     ).headers
+
+
+def test_attendee_confirms_withdrawal_before_explicit_deadline(client, monkeypatch):
+    """Withdrawal AC1-AC3: own confirmed registration is timestamped and confirmed."""
+    saved = registration(status="Withdrawn", withdrawn_at="2026-10-24T02:30:00+00:00")
+    withdraw = Mock(return_value=saved)
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [registration()])
+    monkeypatch.setattr(
+        "app.routes.get_confirmed_event",
+        lambda event_id: confirmed_event(withdrawalDeadline="2099-11-01T09:00:00+08:00"),
+    )
+    monkeypatch.setattr("app.routes.withdraw_saved_registration", withdraw)
+    response = client.patch(
+        "/registrations/11111111-1111-4111-8111-111111111111/withdraw",
+        json={"attendeeId": ATTENDEE_ID},
+    )
+    assert response.status_code == 200
+    assert response.json["message"] == "Registration withdrawn for Community Workshop."
+    assert response.json["registration"]["withdrawn_at"] == "2026-10-24T02:30:00+00:00"
+    withdraw.assert_called_once_with("11111111-1111-4111-8111-111111111111", ATTENDEE_ID)
+
+
+def test_explicit_withdrawal_deadline_takes_precedence(client, monkeypatch):
+    """Withdrawal AC4: an elapsed organiser cutoff blocks withdrawal before event start."""
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [registration()])
+    monkeypatch.setattr(
+        "app.routes.get_confirmed_event",
+        lambda event_id: confirmed_event(withdrawalDeadline="2020-01-01T09:00:00+08:00"),
+    )
+    withdraw = Mock()
+    monkeypatch.setattr("app.routes.withdraw_saved_registration", withdraw)
+    response = client.patch(
+        "/registrations/11111111-1111-4111-8111-111111111111/withdraw",
+        json={"attendeeId": ATTENDEE_ID},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "WITHDRAWAL_DEADLINE_PASSED"
+    assert "contact the event organisers" in response.json["message"]
+    withdraw.assert_not_called()
+
+
+def test_event_start_is_fallback_withdrawal_deadline(client, monkeypatch):
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [registration()])
+    monkeypatch.setattr(
+        "app.routes.get_confirmed_event",
+        lambda event_id: confirmed_event(preferredStartDate="2020-01-01T09:00:00+08:00"),
+    )
+    monkeypatch.setattr("app.routes.withdraw_saved_registration", Mock())
+    response = client.patch(
+        "/registrations/11111111-1111-4111-8111-111111111111/withdraw",
+        json={"attendeeId": ATTENDEE_ID},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "WITHDRAWAL_DEADLINE_PASSED"
+
+
+def test_withdrawal_validates_attendee_and_owned_registration(client, monkeypatch):
+    path = "/registrations/11111111-1111-4111-8111-111111111111/withdraw"
+    assert client.patch(path).status_code == 400
+    assert client.patch(path, json={"attendeeId": "bad"}).status_code == 400
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [])
+    response = client.patch(path, json={"attendeeId": ATTENDEE_ID})
+    assert response.status_code == 404
+    assert response.json["code"] == "REGISTRATION_NOT_FOUND"
+
+
+def test_already_withdrawn_registration_is_not_written_again(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.routes.get_attendee_registrations",
+        lambda attendee_id: [registration(status="Withdrawn")],
+    )
+    response = client.patch(
+        "/registrations/11111111-1111-4111-8111-111111111111/withdraw",
+        json={"attendeeId": ATTENDEE_ID},
+    )
+    assert response.status_code == 409
+    assert response.json["code"] == "REGISTRATION_ALREADY_WITHDRAWN"
+
+
+def test_withdrawal_handles_unavailable_event_or_deadline(client, monkeypatch):
+    path = "/registrations/11111111-1111-4111-8111-111111111111/withdraw"
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [registration()])
+    monkeypatch.setattr("app.routes.get_confirmed_event", lambda event_id: None)
+    response = client.patch(path, json={"attendeeId": ATTENDEE_ID})
+    assert response.status_code == 409
+    assert response.json["code"] == "WITHDRAWAL_UNAVAILABLE"
+    monkeypatch.setattr(
+        "app.routes.get_confirmed_event",
+        lambda event_id: confirmed_event(preferredStartDate="", withdrawalDeadline="bad"),
+    )
+    assert client.patch(path, json={"attendeeId": ATTENDEE_ID}).status_code == 502
+
+
+def test_withdrawal_downstream_failures_are_safe(client, monkeypatch):
+    path = "/registrations/11111111-1111-4111-8111-111111111111/withdraw"
+    monkeypatch.setattr("app.routes.get_attendee_registrations", Mock(side_effect=RuntimeError("secret")))
+    assert client.patch(path, json={"attendeeId": ATTENDEE_ID}).status_code == 502
+    monkeypatch.setattr("app.routes.get_attendee_registrations", lambda attendee_id: [registration()])
+    monkeypatch.setattr("app.routes.get_confirmed_event", Mock(side_effect=RuntimeError("secret")))
+    assert client.patch(path, json={"attendeeId": ATTENDEE_ID}).status_code == 502
+    monkeypatch.setattr("app.routes.get_confirmed_event", lambda event_id: confirmed_event())
+    monkeypatch.setattr(
+        "app.routes.withdraw_saved_registration",
+        Mock(side_effect=RegistrationConflictError("REGISTRATION_NOT_OWNED", "Not yours")),
+    )
+    response = client.patch(path, json={"attendeeId": ATTENDEE_ID})
+    assert response.status_code == 409
+    assert response.json["code"] == "REGISTRATION_NOT_OWNED"
+    monkeypatch.setattr("app.routes.withdraw_saved_registration", Mock(side_effect=RuntimeError("secret")))
+    response = client.patch(path, json={"attendeeId": ATTENDEE_ID})
+    assert response.status_code == 502
+    assert "secret" not in response.json["message"]

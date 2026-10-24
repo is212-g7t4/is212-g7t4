@@ -72,3 +72,27 @@ def test_get_user_propagates_service_failure(monkeypatch):
     monkeypatch.setattr(clients.httpx, "get", Mock(return_value=response(503, {})))
     with pytest.raises(httpx.HTTPStatusError):
         clients.get_user("user-1")
+
+
+def test_withdraw_saved_registration_returns_atomic_record(monkeypatch):
+    patch = Mock(return_value=response(200, {"registration": {"status": "Withdrawn"}}))
+    monkeypatch.setattr(clients.httpx, "patch", patch)
+    assert clients.withdraw_saved_registration("registration-1", "attendee-1") == {"status": "Withdrawn"}
+    assert patch.call_args.kwargs["json"] == {"attendeeId": "attendee-1"}
+
+
+def test_withdraw_saved_registration_maps_atomic_conflict(monkeypatch):
+    monkeypatch.setattr(
+        clients.httpx,
+        "patch",
+        Mock(return_value=response(403, {"code": "REGISTRATION_NOT_OWNED", "message": "Not yours"})),
+    )
+    with pytest.raises(clients.RegistrationConflictError) as caught:
+        clients.withdraw_saved_registration("registration-1", "attendee-1")
+    assert caught.value.code == "REGISTRATION_NOT_OWNED"
+
+
+def test_withdraw_saved_registration_propagates_service_failure(monkeypatch):
+    monkeypatch.setattr(clients.httpx, "patch", Mock(return_value=response(503, {})))
+    with pytest.raises(httpx.HTTPStatusError):
+        clients.withdraw_saved_registration("registration-1", "attendee-1")
