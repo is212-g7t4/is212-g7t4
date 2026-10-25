@@ -8,6 +8,7 @@ import os
 from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
 # Ryuk, testcontainers' reaper container, intermittently fails at startup with "Port mapping
 # ... port 8080 is not available" (seen in about a third of back-to-back runs on Docker
@@ -24,6 +25,7 @@ from app import create_app  # noqa: E402
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
+OWNED_URLS = set()
 
 
 def assert_local(url):
@@ -38,22 +40,61 @@ def assert_local(url):
 
 @pytest.fixture(scope="session")
 def database_url():
-    with PostgresContainer("postgres:17.6", driver=None) as postgres:
-        url = postgres.get_connection_url()
-        assert_local(url)
-        # Autocommit so migrations with their own BEGIN/COMMIT run exactly as written.
-        with closing(psycopg2.connect(url)) as connection:
-            connection.autocommit = True
-            with connection.cursor() as cursor:
-                for migration in sorted(MIGRATIONS.glob("*.sql")):
-                    cursor.execute(migration.read_text())
-        yield url
+    import hashlib
+    import json
+    import subprocess
+    name = 'scrum45-event-integration' + "-" + uuid4().hex
+    volumes = []
+    try:
+        with PostgresContainer("postgres:17.6", driver=None, name=name,
+                               labels={"connectsphere.test": 'scrum45-event-integration'}) as postgres:
+            url = postgres.get_connection_url()
+            assert_local(url)
+            inspected = subprocess.run(["docker", "inspect", "--format", "{{json .Mounts}}", name],
+                                       capture_output=True, text=True, timeout=30)
+            assert inspected.returncode == 0, inspected.stderr
+            volumes = [mount["Name"] for mount in json.loads(inspected.stdout) if mount["Type"] == "volume"]
+            print("RESOURCE " + name, flush=True)
+            OWNED_URLS.add(url)
+            try:
+                with closing(psycopg2.connect(url)) as connection:
+                    connection.autocommit = True
+                    with connection.cursor() as cursor:
+                        for migration in sorted(MIGRATIONS.glob("*.sql")):
+                            payload = migration.read_bytes()
+                            digest = hashlib.sha256(payload).hexdigest()
+                            cursor.execute(payload.decode("utf-8"))
+                            assert hashlib.sha256(migration.read_bytes()).hexdigest() == digest
+                            print(f"APPLY {migration.name} sha256={digest}", flush=True)
+                yield url
+            finally:
+                OWNED_URLS.remove(url)
+    finally:
+        # The context removes the container/anonymous volumes; verify only exact owned resources.
+        remaining = subprocess.run(["docker", "container", "ls", "-a", "--filter", f"name=^/{name}$",
+                                    "--format", "{{.Names}}"], capture_output=True, text=True, timeout=30)
+        failures = []
+        if remaining.returncode or remaining.stdout.strip():
+            failures.append("Owned container absence unverified: " + name)
+        for volume in volumes:
+            check = subprocess.run(["docker", "volume", "ls", "--filter", "name=" + volume,
+                                    "--format", "{{.Name}}"], capture_output=True, text=True, timeout=30)
+            if check.returncode or volume in check.stdout.splitlines():
+                failures.append("Owned volume absence unverified: " + volume)
+        assert not failures, "; ".join(failures)
+        print(f"CLEANUP {name}: exact container absent; owned volumes absent={volumes}", flush=True)
 
 
 @pytest.fixture(autouse=True)
-def empty_tables(database_url):
+def empty_tables(request):
+    # Migration infrastructure deliberately owns independent clean/upgrade databases.
+    if request.module.__name__.endswith("test_infra_migrations"):
+        yield
+        return
+    database_url = request.getfixturevalue("database_url")
     yield
     assert_local(database_url)
+    assert database_url in OWNED_URLS, "Cleanup requires this session fixture's exact database URL"
     with closing(psycopg2.connect(database_url)) as connection:
         with connection, connection.cursor() as cursor:
             cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
@@ -63,6 +104,8 @@ def empty_tables(database_url):
 
 @pytest.fixture
 def client(database_url, monkeypatch):
+    assert_local(database_url)
+    assert database_url in OWNED_URLS
     # Both channels, in case a code path reads os.environ rather than app.config (§4).
     monkeypatch.setenv("DATABASE_URL", database_url)
     return create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client()
@@ -101,4 +144,100 @@ class Database:
 @pytest.fixture
 def db(database_url):
     assert_local(database_url)
+    assert database_url in OWNED_URLS
     return Database(database_url)
+
+
+# Infrastructure-only clean/upgrade databases; independent of the story fixture.
+from contextlib import contextmanager
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import time
+from uuid import uuid4
+import psycopg2
+from psycopg2 import sql
+
+def migration_command(*args):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout.strip()
+
+class MigrationDatabase:
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.connection.autocommit = True
+        self.applied = []
+
+    def query(self, statement, params=None):
+        with self.connection.cursor() as cursor:
+            cursor.execute(statement, params)
+            return cursor.fetchall() if cursor.description else []
+
+    def apply(self, paths):
+        for path in paths:
+            payload = path.read_bytes()
+            digest = hashlib.sha256(payload).hexdigest()
+            print(f'APPLY {path.name} sha256={digest}', flush=True)
+            self.query(payload.decode('utf-8'))
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+            self.applied.append(path.name)
+
+    def snapshot(self):
+        tables = self.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+        return {table: self.query(sql.SQL('SELECT to_jsonb(t) FROM public.{} t ORDER BY to_jsonb(t)::text').format(sql.Identifier(table))) for table, in tables}
+
+@contextmanager
+def disposable_database(bootstrap=False):
+    """postgres:17.6, generated loopback binding, owned anonymous volumes removed.
+
+    Optional bootstrap models only Supabase's documented default table grants
+    and API roles/BYPASSRLS. It is NOT the complete hosted Supabase platform.
+    No bootstrap is necessary to execute this repository's migration chain.
+    """
+    name = 'scrum45-migrations-' + uuid4().hex[:16]
+    connection = None
+    created = False
+    volumes = []
+    try:
+        migration_command('docker', 'run', '-d', '--name', name, '--label', 'connectsphere.test=scrum45-migrations', '-p', '127.0.0.1::5432', '-e', 'POSTGRES_USER=isolated', '-e', 'POSTGRES_PASSWORD=synthetic-only', 'postgres:17.6')
+        created = True
+        mounts = json.loads(migration_command('docker', 'inspect', '--format', '{{json .Mounts}}', name))
+        volumes = [mount['Name'] for mount in mounts if mount['Type'] == 'volume']
+        binding = migration_command('docker', 'port', name, '5432/tcp')
+        host, port = binding.rsplit(':', 1)
+        assert host == '127.0.0.1', binding
+        print(f'RESOURCE {name} binding={binding}', flush=True)
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                connection = psycopg2.connect(host=host, port=int(port), user='isolated', password='synthetic-only', dbname='isolated', connect_timeout=2)
+                break
+            except psycopg2.OperationalError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.15)
+        db = MigrationDatabase(connection)
+        print('SERVER ' + db.query('SELECT version()')[0][0], flush=True)
+        if bootstrap:
+            print('BOOTSTRAP: disposable Supabase-like roles/default grants ONLY (not hosted-platform parity)', flush=True)
+            db.query('CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;\n                CREATE ROLE service_role NOLOGIN BYPASSRLS;\n                GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;\n                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;\n                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;')
+        yield db
+    finally:
+        if connection is not None:
+            connection.close()
+        inspected = subprocess.run(['docker', 'container', 'ls', '-a', '--filter', f'name=^/{name}$', '--format', '{{.Names}}'], capture_output=True, text=True, timeout=30)
+        assert inspected.returncode == 0, inspected.stderr
+        if created or inspected.stdout.strip():
+            migration_command('docker', 'rm', '-fv', name)
+        remaining = migration_command('docker', 'container', 'ls', '-a', '--filter', f'name=^/{name}$', '--format', '{{.Names}}')
+        assert not remaining, f'Owned container still exists: {remaining}'
+        existing_volumes = migration_command('docker', 'volume', 'ls', '--format', '{{.Name}}').splitlines()
+        assert not set(volumes).intersection(existing_volumes), f'Owned volumes remain: {volumes}'
+        print(f'CLEANUP {name}: exact container absent; owned volumes absent={volumes}', flush=True)
+
+@pytest.fixture
+def migration_database():
+    return disposable_database

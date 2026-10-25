@@ -32,6 +32,8 @@ services:
       - ./services/coordinator-assignment-service/.env
     environment:
       <<: *frontend-environment
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
     ports:
       - "5004:5000"
 
@@ -217,6 +219,20 @@ services:
       - equipment-service
     ports:
       - "5012:5000"
+
+  event-notification-dispatcher:
+    build: ./services/event-workflow-service
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
+    restart: unless-stopped
+    environment:
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
+    depends_on:
+      - event-service
+      - user-service
+      - rabbitmq
 
   event-workflow-service:
     build: ./services/event-workflow-service

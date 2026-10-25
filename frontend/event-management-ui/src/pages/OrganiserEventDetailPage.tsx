@@ -91,6 +91,12 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
         {!changeRequestSubmitted && !requestingChanges && CHANGE_REQUEST_STATUSES.includes(event.status as typeof CHANGE_REQUEST_STATUSES[number]) && organiserId &&
           <button className="button primary small" type="button" onClick={() => setRequestingChanges(true)}>Request changes</button>}
       </div></header>
+      {event.decision?.status === 'Rejected' && <section className="event-card-section">
+        <h3>Event request decision</h3>
+        <p>Rejected</p>
+        <h4>Rejection reason</h4>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{event.decision.reason}</p>
+      </section>}
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
 
       {requestingChanges && organiserId && <ChangeRequestDialog event={event} organiserId={organiserId}

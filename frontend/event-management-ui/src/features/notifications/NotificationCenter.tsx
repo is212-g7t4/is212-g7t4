@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { User } from '../../types'
-import { notificationApi, notificationDate, notificationPath } from './notifications'
+import { notificationApi, notificationDate, notificationPath, notificationPayload } from './notifications'
 import type { InboxItem, InboxPage } from './notifications'
 import './notifications.css'
 
@@ -133,7 +133,7 @@ function Session({ user, children, onNavigate }: { user?: User; children: ReactN
       setRecent(replace); storeWindow(replace(windowState.current.rows).filter(row => !unread || !row.readAt), windowState.current.cursor)
       setCount(value => Math.max(0, value + (Boolean(item.readAt) !== read ? (read ? -1 : 1) : 0)))
       setWarning(''); saved = true
-      const path = notificationPath(item.payload?.destination)
+      const path = notificationPath(notificationPayload(item).destination)
       if (open && path) onNavigate(path)
       return true
     } catch {
@@ -148,15 +148,20 @@ function Session({ user, children, onNavigate }: { user?: User; children: ReactN
 }
 
 function Content({ item }: { item: InboxItem }) {
-  const raw = item.payload?.details
+  const payload = notificationPayload(item)
+  const raw = payload.details
   const text = (value: unknown) => typeof value === 'string' ? value : ''
   const details = { eventName: text(raw?.eventName), venueName: text(raw?.venueName), startDateTime: text(raw?.startDateTime), endDateTime: text(raw?.endDateTime), reason: text(raw?.reason) }
   return <>
     {details?.eventName && <strong>{details.eventName}</strong>}
     {details?.venueName && <span>{details.venueName}</span>}
-    <p>{text(item.payload?.message) || 'Notification content unavailable.'}</p>
+    <p>{text(payload.message) || 'Notification content unavailable.'}</p>
     {details?.startDateTime && details?.endDateTime && <p>{notificationDate(details.startDateTime)} – {notificationDate(details.endDateTime)}</p>}
     {details?.reason && <p className="notification-reason">{details.reason}</p>}
+    {text(raw?.equipmentType) && <span>{text(raw?.equipmentType)}</span>}
+    {typeof raw?.quantityReserved === 'number' && Number.isSafeInteger(raw.quantityReserved) && raw.quantityReserved > 0 && <p>Quantity reserved: {raw.quantityReserved}</p>}
+    {typeof raw?.round === 'number' && Number.isSafeInteger(raw.round) && raw.round > 0 && <p>Safety review round: {raw.round}</p>}
+    {text(raw?.closureStart) && text(raw?.closureEnd) && <p>Closure period: {notificationDate(raw?.closureStart)} – {notificationDate(raw?.closureEnd)}</p>}
     <small>{notificationDate(item.createdAt)} · {item.readAt ? 'Read' : 'Unread'}</small>
   </>
 }
@@ -188,7 +193,7 @@ export function NotificationBell({ onViewAll }: { onViewAll: () => void }) {
 function Items({ items, onOpened }: { items: InboxItem[]; onOpened?: () => void }) {
   const center = useContext(Context)!
   return <ul className="notification-list">{items.map(item => {
-    const path = notificationPath(item.payload?.destination)
+    const path = notificationPath(notificationPayload(item).destination)
     return <li key={item.id} className={item.readAt ? '' : 'notification-unread'}>
       {path ? <a className="notification-content-link" href={path} aria-label="Open notification" aria-disabled={center.pending} onClick={event => {
         event.preventDefault()
