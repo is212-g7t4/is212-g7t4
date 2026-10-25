@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from uuid import UUID
 
 import httpx
 import pika
@@ -40,6 +41,26 @@ class OutboxAPI:
             raise CoordinatorNameUnavailable
         return name
 
+    def submission_recipients(self):
+        users = self.call("GET", os.environ["USER_SERVICE_URL"].rstrip("/") + "/users",
+                          params={"role": "Event Coordinator Lead"})["users"]
+        if not isinstance(users, list):
+            raise ValueError("Invalid Lead lookup")
+        # Validate the entire response before acknowledging zero recipients.
+        recipients = []
+        for user in users:
+            if user.get("role") != "Event Coordinator Lead":
+                raise ValueError("Invalid Lead role")
+            recipients.append(str(UUID(user["user_id"])))
+        return recipients
+
+    def organiser_name(self, identifier):
+        user = self.call("GET", os.environ["USER_SERVICE_URL"].rstrip("/") + f"/users/{identifier}")
+        name = user.get("username") if isinstance(user, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Missing organiser name")
+        return name
+
     def claim(self):
         return self.call(
             "POST", self.base + "/internal/notification-outbox/claim", json={}
@@ -68,12 +89,22 @@ def dispatch_once(api, publish):
     jobs = api.claim()
     for job in jobs:
         try:
+            if job.get("type") == "event.submission-fanout":
+                recipients = api.submission_recipients()
+                if not recipients:
+                    LOG.warning("Submission skipped: no Event Coordinator Lead source=%s", job["id"])
+                # No recipient means no user-visible content needs enrichment.
+                name = api.organiser_name(job["source"]["organiserId"]) if recipients else "No recipients"
+                api.operation(job, "expand", recipientIds=recipients, organiserName=name)
+                continue
             envelope = job["envelope"]
             if envelope is None:
                 source = job["source"]
                 kind = job.get("type", "event.approval" if source.get("decision") == "Approved" else "event.rejection")
                 details = source
-                if kind == "event.coordinator-assignment":
+                if kind == "event.submission":
+                    message = f"{source['organiserName']} submitted {source['eventName']}. Review required."
+                elif kind == "event.coordinator-assignment":
                     name = api.coordinator_name(source["coordinatorId"])
                     details = {**source, "coordinatorName": name}
                     message = f"{name} has been assigned to coordinate {source['eventName']}."
