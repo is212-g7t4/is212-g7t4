@@ -89,12 +89,15 @@ export function RoleWarning({ children }: { children: ReactNode }) {
 
 export function StatusBadge({
   status,
+  label,
 }: {
   status: RequestStatus | string
+  /** Shown instead of the raw status; the badge colour still follows `status`. */
+  label?: string
 }) {
   return (
     <span className={`status-badge ${status.toLowerCase().replace(/\s+/g, '-')}`}>
-      {status}
+      {label ?? status}
     </span>
   )
 }

@@ -1,7 +1,17 @@
 const TIME_ZONE = 'Asia/Singapore'
 
+// The services send naive Singapore local times (e.g. `2026-11-01T09:00:00`).
+// `new Date()` reads an offset-less date-time in the *browser's* time zone, so
+// outside Singapore (or on a UTC CI runner) 09:00 would display as 17:00.
+// Pin those to +08:00; values that already carry an offset are left alone.
+const NAIVE_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
+
+export function parseSingaporeDate(value: string): Date {
+  return new Date(NAIVE_DATE_TIME.test(value) ? `${value}+08:00` : value)
+}
+
 export function getDateTile(value: string): { month: string; day: string } {
-  const parsed = new Date(value)
+  const parsed = parseSingaporeDate(value)
   if (Number.isNaN(parsed.getTime())) return { month: '—', day: '—' }
   return {
     month: parsed.toLocaleString('en-SG', { timeZone: TIME_ZONE, month: 'short' }).toUpperCase(),
@@ -23,8 +33,8 @@ function time(value: Date): string {
 }
 
 export function formatSchedule(startValue: string, endValue: string): string {
-  const start = new Date(startValue)
-  const end = new Date(endValue)
+  const start = parseSingaporeDate(startValue)
+  const end = parseSingaporeDate(endValue)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return `${startValue.replace('T', ' ')} – ${endValue.replace('T', ' ')}`
   }

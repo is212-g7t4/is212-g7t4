@@ -37,7 +37,7 @@ def prepare(monkeypatch, status, body):
             if url.endswith("/venues/venue-1")
             else {"id": "booking-1", "venueId": "venue-1"}
             if url.endswith("/venue-bookings/booking-1")
-            else {"id": "event-1"}
+            else {"id": "event-1", "status": "Under Review"}
         )
         return httpx.Response(200, json=data, request=httpx.Request("GET", url))
 

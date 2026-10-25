@@ -12,6 +12,12 @@ VENUE_SERVICE_URL = os.environ.get("VENUE_SERVICE_URL") or "http://localhost:500
 VENUE_AVAILABILITY_SERVICE_URL = (
     os.environ.get("VENUE_AVAILABILITY_SERVICE_URL") or "http://localhost:5008"
 )
+# SCRUM-28 Part B: a composite-to-composite call. Changing a booking of a
+# Confirmed event withdraws its safety approval, and that lifecycle logic
+# (record and event, with compensation) already lives in Safety Check Service.
+SAFETY_CHECK_SERVICE_URL = (
+    os.environ.get("SAFETY_CHECK_SERVICE_URL") or "http://localhost:5012"
+)
 
 
 # SCRUM-26 AC3 gives the whole search a 3-second budget. The two downstream
@@ -46,6 +52,15 @@ def _conflict_types(response):
 
 class BookingNotFoundError(Exception):
     pass
+
+
+class SafetyApprovalError(Exception):
+    """Safety Check Service refused or failed to change the approval; carries its answer."""
+
+    def __init__(self, status, body):
+        super().__init__(status)
+        self.status = status
+        self.body = body
 
 
 class BookingStateError(Exception):
@@ -296,5 +311,43 @@ def decide_booking(
         ).startswith("Cancelled"):
             raise BookingStateError
         raise BookingConflictError(_conflict_types(response))
+    response.raise_for_status()
+    return response.json()
+
+
+def withdraw_safety_for_venue_change(
+    event_id: str, coordinator_id: str, booking_id: str, reason: str
+) -> dict:
+    """SCRUM-28 Part B: withdraw a Confirmed event's approval before its booking changes."""
+    response = httpx.post(
+        f"{SAFETY_CHECK_SERVICE_URL}/safety-checks/withdraw-for-venue-change",
+        json={
+            "eventId": event_id,
+            "coordinatorId": coordinator_id,
+            "bookingId": booking_id,
+            "reason": reason,
+        },
+    )
+    if not response.is_success:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        raise SafetyApprovalError(response.status_code, body)
+    return response.json()
+
+
+def restore_safety_after_venue_change(
+    event_id: str, coordinator_id: str, withdrawn_safety_check_id: str
+) -> dict:
+    """Undo `withdraw_safety_for_venue_change` when the booking change then failed."""
+    response = httpx.post(
+        f"{SAFETY_CHECK_SERVICE_URL}/safety-checks/restore-after-venue-change",
+        json={
+            "eventId": event_id,
+            "coordinatorId": coordinator_id,
+            "withdrawnSafetyCheckId": withdrawn_safety_check_id,
+        },
+    )
     response.raise_for_status()
     return response.json()

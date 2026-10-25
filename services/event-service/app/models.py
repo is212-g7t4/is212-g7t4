@@ -141,6 +141,21 @@ SAFETY_TRANSITIONS = {
 # high-impact change that caused it. `/safety-status` refuses these.
 RECHECK_ONLY_MOVES = {("Confirmed", "Pending Safety Check")}
 
+# SCRUM-28 Part B (Clarice, 25 Oct): editing or cancelling a venue booking of
+# a 'Confirmed' event withdraws its safety approval and sends it back to
+# 'Approved', so Venue Staff re-review the booking and the coordinator then
+# resubmits through SCRUM-149. `Approved -> Confirmed` exists only to undo
+# that when the booking change itself then fails (compensation).
+#
+# Deliberately NOT in SAFETY_TRANSITIONS: neither is a step of the safety
+# workflow, and SCRUM-150/152's rule that only 'Pending Safety Check' leads
+# into 'Confirmed' still holds there. `/safety-status` makes these moves only
+# when the body names the round concerned — `withdrawnSafetyCheckId` for the
+# withdrawal, `restoredSafetyCheckId` for the undo — and refuses them otherwise.
+VENUE_CHANGE_WITHDRAW = ("Confirmed", "Approved")
+VENUE_CHANGE_RESTORE = ("Approved", "Confirmed")
+VENUE_CHANGE_ONLY_MOVES = {VENUE_CHANGE_WITHDRAW, VENUE_CHANGE_RESTORE}
+
 # SCRUM-153's field classification, shared with SCRUM-20 (which defines the
 # same split and owns "edit event details"): its names are used here so its
 # later contradiction checks reuse them rather than re-typing the strings.
@@ -1145,8 +1160,13 @@ def update_event_safety_status(
     decided_by=None,
     remarks=None,
     areas=None,
+    venue_change=None,
 ):
     """Move an event along the safety-check workflow (SCRUM-149 AC1, SCRUM-150 AC1).
+
+    `venue_change` (SCRUM-28 Part B) is `{"move": VENUE_CHANGE_WITHDRAW, "reason": ...}`
+    or `{"move": VENUE_CHANGE_RESTORE}`; only then may one of VENUE_CHANGE_ONLY_MOVES
+    be made, and `safety_check_id` is the round whose approval is withdrawn/restored.
 
     For Safety Check Service only — it is the service that has already
     checked the caller's role (coordinator or Safety Officer) and the event's
@@ -1171,7 +1191,7 @@ def update_event_safety_status(
             # Only the submit move has a coordinator at all — the Safety
             # Officer approving is not the coordinator, and the composite
             # already checked that role via User Service.
-            if status == "Pending Safety Check" and (
+            if (status == "Pending Safety Check" or venue_change) and (
                 not event["coordinator_id"]
                 or str(event["coordinator_id"]) != coordinator_id
             ):
@@ -1181,6 +1201,12 @@ def update_event_safety_status(
                 and event["status"] == "Pending Safety Check"
             ):
                 raise SafetyCheckAlreadyPendingError
+            if venue_change:
+                return _venue_change_safety_status(
+                    cursor, event, safety_check_id, round_number, coordinator_id, venue_change
+                )
+            if (event["status"], status) in VENUE_CHANGE_ONLY_MOVES:
+                raise InvalidStatusTransitionError(event["status"])
             # SCRUM-153: 'Confirmed -> Pending Safety Check' is in
             # SAFETY_TRANSITIONS, but only `update_event_details` may make it —
             # the move is legal solely as part of the high-impact edit that
@@ -1317,6 +1343,78 @@ def _changed_fields(changes, current):
         if _normalised(field, value) != _normalised(field, current.get(field))
     ]
     return changed, [field for field in changed if field in HIGH_IMPACT_FIELDS]
+
+
+def _venue_change_safety_status(cursor, event, safety_check_id, round_number, coordinator_id, venue_change):
+    """SCRUM-28 Part B: withdraw or restore a Confirmed event's approval for a venue booking change.
+
+    Called under `update_event_safety_status`'s row lock. The withdrawal must
+    name the approval the event actually holds; the restore must undo the
+    withdrawal that is still the event's latest action, so it can't revive an
+    approval after anything else has happened to the event.
+    """
+    move = venue_change["move"]
+    if event["status"] != move[0]:
+        raise InvalidStatusTransitionError(event["status"])
+    (
+        description,
+        purpose,
+        decision,
+        decision_history,
+        action_details,
+        action_history,
+        clarification_history,
+    ) = unpack_metadata(event["description"])
+    recorded_at = datetime.now(UTC).isoformat()
+    if move == VENUE_CHANGE_WITHDRAW:
+        approval = _latest_approval_entry(action_history)
+        if not approval or approval["safetyCheckId"] != safety_check_id:
+            raise StaleSafetyCheckError
+        action = {
+            "status": "Approved",
+            "details": (
+                f"Safety approval withdrawn (round {round_number}): "
+                f"{venue_change['reason']} Venue Staff will re-review the booking; "
+                "resubmit the event for its safety check afterwards."
+            ),
+            "coordinatorId": coordinator_id,
+            "withdrawnSafetyCheckId": safety_check_id,
+            "recordedAt": recorded_at,
+        }
+    else:
+        latest = action_history[-1] if action_history else {}
+        if latest.get("status") != "Approved" or latest.get("withdrawnSafetyCheckId") != safety_check_id:
+            raise StaleSafetyCheckError
+        action = {
+            "status": "Confirmed",
+            "details": (
+                f"Safety approval restored (round {round_number}): "
+                "the venue booking change was not saved."
+            ),
+            "coordinatorId": coordinator_id,
+            # Carries the round id so `_latest_approval_entry` finds it again.
+            "safetyCheckId": safety_check_id,
+            "restoredSafetyCheckId": safety_check_id,
+            "recordedAt": recorded_at,
+        }
+    metadata = {
+        "_connectsphere": "event-submission-v1",
+        "description": description,
+        "purpose": purpose,
+        "decision": decision,
+        "decisionHistory": decision_history,
+        "actionDetails": action_details,
+        "actionHistory": [*action_history, action],
+        "clarificationHistory": clarification_history,
+    }
+    cursor.execute(
+        f"""UPDATE public."Event"
+            SET status = %s, description = %s
+            WHERE event_id = %s
+            RETURNING {ROW_COLUMNS}""",
+        [move[1], json.dumps(metadata, ensure_ascii=False), event["event_id"]],
+    )
+    return serialize(cursor.fetchone())
 
 
 def _latest_approval_entry(action_history):

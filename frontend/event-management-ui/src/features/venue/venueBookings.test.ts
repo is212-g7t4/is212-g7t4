@@ -53,3 +53,12 @@ test('SCRUM-30 retains structured conflict metadata on the request error', async
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Unavailable', code: 'VENUE_UNAVAILABLE', conflictTypes: ['APPROVED_BOOKING'] }), { status: 409 })))
   await expect(createVenueBooking(details)).rejects.toMatchObject({ message: 'Unavailable', status: 409, code: 'VENUE_UNAVAILABLE', conflictTypes: ['APPROVED_BOOKING'] })
 })
+
+test('SCRUM-28 AC2: the event-status refusal keeps its code and message', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    code: 'EVENT_NOT_ACCEPTING_VENUE_REQUESTS', message: 'Not accepting requests.', eventStatus: 'Confirmed',
+  }), { status: 409 })))
+  await expect(createVenueBooking(details)).rejects.toMatchObject({
+    status: 409, code: 'EVENT_NOT_ACCEPTING_VENUE_REQUESTS', message: 'Not accepting requests.', conflictTypes: [],
+  })
+})

@@ -276,6 +276,30 @@ stale:
   `SAFETY_TRANSITIONS`, else
   `409 {"code": "INVALID_SAFETY_TRANSITION", "currentStatus": "<status>"}`.
 
+**Venue booking change (SCRUM-28 Part B).** Editing or cancelling a venue
+booking of a `Confirmed` event withdraws its safety approval and sends it
+back to `Approved`; Venue Staff re-review the booking and the coordinator
+then resubmits (SCRUM-149). Two moves exist for this, kept in
+`VENUE_CHANGE_ONLY_MOVES` rather than `SAFETY_TRANSITIONS` so the workflow's
+rule that only `Pending Safety Check` leads into `Confirmed` still holds:
+
+- `Confirmed → Approved`: `{"status": "Approved", "safetyCheckId",
+  "roundNumber", "coordinatorId", "withdrawnSafetyCheckId", "reason"}`.
+  `withdrawnSafetyCheckId` must equal `safetyCheckId` and, under the lock,
+  the round of the event's latest approval entry (else `409
+  STALE_SAFETY_CHECK`); the caller must be the assigned coordinator (`403`).
+  Without `withdrawnSafetyCheckId`, `Approved` is refused like any other
+  pre-safety status (`400`).
+- `Approved → Confirmed`, compensation only: `{"status": "Confirmed",
+  "safetyCheckId", "roundNumber", "coordinatorId", "restoredSafetyCheckId"}`.
+  The event's latest action must be that withdrawal (else `409
+  STALE_SAFETY_CHECK`). Without the marker, `Approved → Confirmed` is
+  refused (`409 INVALID_SAFETY_TRANSITION`).
+
+Safety Check Service sends both, from its
+`/safety-checks/withdraw-for-venue-change` and
+`/safety-checks/restore-after-venue-change` endpoints.
+
 On success it returns `200` with the event and appends to `actionHistory`.
 Submit:
 

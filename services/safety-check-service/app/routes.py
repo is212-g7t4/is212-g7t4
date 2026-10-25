@@ -76,6 +76,8 @@ NOT_SAFETY_OFFICER = (
 UNREADABLE_ARRANGEMENTS = "Unable to check the event's arrangements right now."
 UNREADABLE_ROLE = "Unable to check the caller's role right now."
 UNREADABLE_QUEUE = "Unable to load the safety check queue right now."
+VENUE_CHANGE_TIMEOUT = "Updating the event's safety approval took too long. Please try again."
+VENUE_CHANGE_FAILED = "Unable to update the event's safety approval right now."
 QUEUE_WORKERS = 8
 
 
@@ -559,6 +561,172 @@ def _recheck_event_update_failure(error):
     if isinstance(error, clients.DownstreamTimeout):
         return jsonify(message="The re-check took too long. Please try again."), 504
     return jsonify(message="Unable to re-check this event's safety right now."), 502
+
+
+@bp.post("/safety-checks/withdraw-for-venue-change")
+def withdraw_for_venue_change():
+    """SCRUM-28 Part B: a venue booking of a Confirmed event is about to change.
+
+    Body: `eventId`, `coordinatorId`, `bookingId`, `reason`. Called by Venue
+    Booking Service **before** it edits or cancels the booking (Clarice,
+    25 Oct): the approval was given for the old arrangement, so it is
+    withdrawn and the event goes back to 'Approved'. Unlike SCRUM-153's
+    re-check no round is opened — Venue Staff re-review the booking first,
+    and the coordinator then resubmits through SCRUM-149.
+
+    Record first, then event, as in `recheck_safety`: the record service's row
+    lock is the race guard. If the event move fails, the withdrawal is undone.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    event_id = _uuid_or_none(data.get("eventId"))
+    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
+    booking_id = _uuid_or_none(data.get("bookingId"))
+    if not event_id or not coordinator_id or not booking_id:
+        return jsonify(message="eventId, coordinatorId and bookingId must be valid UUIDs."), 400
+    reason, failure = _required_reason(data)
+    if failure:
+        return failure
+
+    event, failure = _load_event(event_id, coordinator_id)
+    if failure:
+        return failure
+    if event.get("status") != CONFIRMED:
+        return jsonify(
+            code="EVENT_NOT_CONFIRMED",
+            message="Only a Confirmed event has a safety approval to withdraw.",
+            currentStatus=event.get("status"),
+        ), 409
+    latest_round, failure = _latest_round(event_id)
+    if failure:
+        return failure
+    if not latest_round or latest_round.get("status") != SAFETY_APPROVED:
+        return jsonify(
+            code="NO_APPROVED_SAFETY_CHECK",
+            message="This event has no approved safety check to withdraw.",
+            safetyCheck=latest_round,
+        ), 409
+
+    try:
+        withdrawn = clients.withdraw_approval_without_next_round(
+            latest_round["id"], coordinator_id, reason
+        )
+    except clients.RoundNotApprovedError as refused:
+        return jsonify(
+            code=refused.code or "ROUND_NOT_APPROVED",
+            message=(
+                refused.body.get("message")
+                or "This event's safety approval has already been withdrawn."
+            ),
+        ), 409
+    except clients.RecordNotFoundError:
+        return jsonify(
+            code="NO_APPROVED_SAFETY_CHECK",
+            message="This event has no approved safety check to withdraw.",
+        ), 409
+    except clients.DownstreamTimeout:
+        return jsonify(message=VENUE_CHANGE_TIMEOUT), 504
+    except clients.DownstreamError:
+        return jsonify(message=VENUE_CHANGE_FAILED), 502
+
+    try:
+        updated = clients.set_event_venue_change_status(
+            event_id, coordinator_id, withdrawn["id"], withdrawn["roundNumber"], True, reason
+        )
+    except Exception as error:  # noqa: BLE001 — every failure compensates alike
+        try:
+            clients.restore_approval_without_next_round(withdrawn["id"])
+        except Exception:  # noqa: BLE001 — the original error is what matters
+            logger.error(
+                "Could not restore safety approval %s after the event move failed; "
+                "event %s is left Confirmed with its approval withdrawn and must be "
+                "fixed by hand.",
+                withdrawn["id"],
+                event_id,
+            )
+        return _venue_change_event_failure(error)
+
+    return jsonify(event=updated, withdrawnSafetyCheck=withdrawn, bookingId=booking_id), 200
+
+
+@bp.post("/safety-checks/restore-after-venue-change")
+def restore_after_venue_change():
+    """SCRUM-28 Part B, compensation only: the booking change could not be saved.
+
+    Body: `eventId`, `coordinatorId`, `withdrawnSafetyCheckId` — the round
+    `withdraw-for-venue-change` returned. Venue Booking Service calls this when
+    the edit or cancel it was about to make then failed, so the event's
+    approval still describes its real arrangement.
+
+    Record first, then event, so a failure part-way never leaves the event
+    reading 'Confirmed' with no approval in force: at worst it stays
+    'Approved' with its round approved again, and the coordinator resubmits.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(message="Send a JSON object."), 400
+    event_id = _uuid_or_none(data.get("eventId"))
+    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
+    withdrawn_id = _uuid_or_none(data.get("withdrawnSafetyCheckId"))
+    if not event_id or not coordinator_id or not withdrawn_id:
+        return jsonify(
+            message="eventId, coordinatorId and withdrawnSafetyCheckId must be valid UUIDs."
+        ), 400
+
+    event, failure = _load_event(event_id, coordinator_id)
+    if failure:
+        return failure
+    if event.get("status") != READY_STATUS:
+        return jsonify(
+            code="EVENT_NOT_WITHDRAWN",
+            message="Only an event sent back to Approved by a venue change can be restored.",
+            currentStatus=event.get("status"),
+        ), 409
+
+    try:
+        restored = clients.restore_approval_without_next_round(withdrawn_id)
+    except clients.RecordNotFoundError:
+        return jsonify(message="Safety check not found."), 404
+    except clients.RoundNotApprovedError as refused:
+        return jsonify(
+            code=refused.code or "NOT_RESTORABLE",
+            message=refused.body.get("message") or "This withdrawal can no longer be undone.",
+        ), 409
+    except clients.DownstreamTimeout:
+        return jsonify(message=VENUE_CHANGE_TIMEOUT), 504
+    except clients.DownstreamError:
+        return jsonify(message=VENUE_CHANGE_FAILED), 502
+
+    try:
+        updated = clients.set_event_venue_change_status(
+            event_id, coordinator_id, withdrawn_id, restored["roundNumber"], False
+        )
+    except Exception as error:  # noqa: BLE001 — reported, nothing left to undo
+        logger.error(
+            "Restored safety approval %s but could not move event %s back to "
+            "Confirmed; it is left Approved and the coordinator must resubmit it.",
+            withdrawn_id,
+            event_id,
+        )
+        return _venue_change_event_failure(error)
+
+    return jsonify(event=updated, safetyCheck=restored), 200
+
+
+def _venue_change_event_failure(error):
+    """Map Event Service's refusal of a venue-change status move."""
+    if isinstance(error, clients.ServiceCredentialsError):
+        return jsonify(message="Event Service refused this service's credentials."), 502
+    if isinstance(error, clients.EventNotAssignedError):
+        return jsonify(code="NOT_ASSIGNED_COORDINATOR", message=NOT_ASSIGNED), 403
+    if isinstance(error, clients.EventNotFoundError):
+        return jsonify(message="Event request not found."), 404
+    if isinstance(error, clients.EventTransitionError):
+        return jsonify(error.body), 409
+    if isinstance(error, clients.DownstreamTimeout):
+        return jsonify(message=VENUE_CHANGE_TIMEOUT), 504
+    return jsonify(message=VENUE_CHANGE_FAILED), 502
 
 
 def _decide(
