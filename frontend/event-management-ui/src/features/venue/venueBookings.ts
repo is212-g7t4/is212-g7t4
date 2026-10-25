@@ -12,6 +12,10 @@ export interface VenueBooking {
   status: string
   requestedBy: string
   reviewedBy: string | null
+  /** SCRUM-28 AC2: when the request was recorded; null for legacy rows. */
+  requestedAt?: string | null
+  /** SCRUM-28 AC4: set by the staff queue when the request still needs a decision. */
+  awaitingReview?: boolean
   safetyFeedback?: { reason: string | null; requestedChanges: string[] } | null
   closureRejection?: { closureId: string; startDateTime: string; endDateTime: string; reason: string; rejectedAt: string } | null
 }
@@ -99,6 +103,10 @@ export interface VenueRequestEvent {
   eventName: string
   eventStatus: string
   coordinatorId: string | null
+  /** SCRUM-28 AC3: the event's own preferred dates; null when unset. */
+  eventStart?: string | null
+  eventEnd?: string | null
+  awaitingReviewCount?: number
   bookings: VenueBooking[]
 }
 

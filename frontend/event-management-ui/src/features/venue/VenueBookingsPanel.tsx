@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import './venueBookings.css'
 import type { FormEvent } from 'react'
 import { Field, StatusBadge } from '../../components/FormControls'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { InlineLoading } from '../../components/Loading'
 import { singaporeInput } from '../calendar/dates'
 import { fetchVenues } from './venues'
@@ -10,10 +11,19 @@ import { fetchActiveVenueHolds } from './venueHolds'
 import type { VenueHold } from './venueHolds'
 import { VenueBookingError, cancelVenueBooking, createVenueBooking, fetchVenueBookings, updateVenueBooking } from './venueBookings'
 import type { VenueBooking } from './venueBookings'
+import {
+  SAFETY_WITHDRAWAL_WARNING,
+  VENUE_REQUEST_CLOSED_NOTICE,
+  canChangeVenueBooking,
+  canSubmitVenueRequest,
+  venueChangeClosedNotice,
+} from './permissions'
 
 type Props = {
   targetBookingId?: string
   eventId: string
+  /** SCRUM-28 AC2: new requests are only accepted in some event statuses. */
+  eventStatus: string
   coordinatorId: string
   eventStart: string
   eventEnd: string
@@ -24,6 +34,8 @@ type Props = {
    * (or stop it being ready), so the page is told to re-read that.
    */
   onBookingsChanged?: () => void
+  /** The event's status changed underneath the form, so the page should re-read it. */
+  onEventChanged?: () => void
 }
 
 const conflictMessages: Record<string, string> = {
@@ -49,12 +61,14 @@ const localDateTime = (value: string) => {
 export function VenueBookingsPanel({
   targetBookingId,
   eventId,
+  eventStatus,
   coordinatorId,
   eventStart,
   eventEnd,
   eventExpectedAttendance,
   eventVenueRequirements,
   onBookingsChanged,
+  onEventChanged,
 }: Props) {
   const [bookings, setBookings] = useState<VenueBooking[]>([])
   const [venues, setVenues] = useState<Venue[]>([])
@@ -74,6 +88,8 @@ export function VenueBookingsPanel({
   const [end, setEnd] = useState(localDateTime(eventEnd))
   const [requiredCapacity, setRequiredCapacity] = useState(eventExpectedAttendance)
   const [requirements, setRequirements] = useState(eventVenueRequirements)
+  // SCRUM-28 Part B: on a Confirmed event a change waits for this confirmation.
+  const [pendingChange, setPendingChange] = useState<{ kind: 'edit' } | { kind: 'cancel'; booking: VenueBooking } | null>(null)
 
   useEffect(() => {
     let active = true
@@ -101,6 +117,10 @@ export function VenueBookingsPanel({
       target.current.focus({ preventScroll: true })
     }
   }, [loading, targetBookingId])
+  const acceptsNewRequests = canSubmitVenueRequest(eventStatus)
+  const acceptsChanges = canChangeVenueBooking(eventStatus)
+  const withdrawsApproval = eventStatus === 'Confirmed'
+  const withdrawalNote = withdrawsApproval ? " The event's safety approval was withdrawn and it is back to Approved." : ''
   const availableVenues = venues.filter((venue) => venue.status === 'Available')
   const overlapsActiveHold = (venueId: string) => {
     const bookingStart = Date.parse(singaporeInstant(start))
@@ -144,20 +164,45 @@ export function VenueBookingsPanel({
     return true
   }
 
-  const submit = async (formEvent: FormEvent) => {
+  /** The event's status moved on while the form was open (SCRUM-28 AC2 / Part B). */
+  const handleEventStatusChanged = async (cause: unknown) => {
+    if (!(cause instanceof VenueBookingError) || cause.status !== 409
+      || !['EVENT_NOT_ACCEPTING_VENUE_REQUESTS', 'EVENT_NOT_ACCEPTING_VENUE_CHANGES'].includes(cause.code ?? '')) return false
+    setSubmitError(cause.message)
+    try { setBookings(await fetchVenueBookings(eventId, coordinatorId)) }
+    catch { setLoadError('Unable to refresh bookings. Reload the page to view the latest request status.') }
+    onEventChanged?.()
+    return true
+  }
+
+  const validDraft = () => {
+    const capacity = Number(requiredCapacity)
+    if (!venueId || !start || !end || !Number.isInteger(capacity) || capacity < 1) {
+      setSubmitError('Select a venue and provide valid dates and a positive required capacity.')
+      return false
+    }
+    if (end <= start) {
+      setSubmitError('Booking end date and time must be after the start.')
+      return false
+    }
+    return true
+  }
+
+  const submit = (formEvent: FormEvent) => {
     formEvent.preventDefault()
     if (saving) return
     setSubmitError('')
     setSubmitMessage('')
+    if (!validDraft()) return
+    if (editingId && withdrawsApproval) {
+      setPendingChange({ kind: 'edit' })
+      return
+    }
+    void save()
+  }
+
+  const save = async () => {
     const capacity = Number(requiredCapacity)
-    if (!venueId || !start || !end || !Number.isInteger(capacity) || capacity < 1) {
-      setSubmitError('Select a venue and provide valid dates and a positive required capacity.')
-      return
-    }
-    if (end <= start) {
-      setSubmitError('Booking end date and time must be after the start.')
-      return
-    }
     setSaving(true)
     const submittedRevision = draftRevision.current
     try {
@@ -181,12 +226,15 @@ export function VenueBookingsPanel({
           : [...current, displayed]
       ).sort((left, right) => left.requestedStartTime.localeCompare(right.requestedStartTime)))
       setSubmitMessage(editingId
-        ? `${selectedVenue?.name || 'Venue'} booking updated and returned to pending review.`
+        ? `${selectedVenue?.name || 'Venue'} booking updated and returned to pending review.${withdrawalNote}`
         : `${selectedVenue?.name || 'Venue'} booking request submitted. Status: Pending Review.`)
       resetForm()
       onBookingsChanged?.()
+      if (editingId && withdrawsApproval) onEventChanged?.()
     } catch (cause) {
       if (await handleImmutable(cause, editingId)) return
+      // The event moved on while the form was open; this isn't a venue conflict.
+      if (await handleEventStatusChanged(cause)) return
       if (cause instanceof VenueBookingError && cause.status === 409 && cause.code === 'VENUE_UNAVAILABLE') {
         // A late rejection belongs to the submitted draft, not a newly edited time/venue.
         if (submittedRevision !== draftRevision.current) return
@@ -199,12 +247,21 @@ export function VenueBookingsPanel({
       }
     } finally {
       setSaving(false)
+      setPendingChange(null)
     }
   }
 
-  const cancel = async (booking: VenueBooking) => {
+  const cancel = (booking: VenueBooking) => {
     if (cancellingId || saving) return
+    if (withdrawsApproval) {
+      setPendingChange({ kind: 'cancel', booking })
+      return
+    }
     if (!window.confirm(`Cancel the ${booking.venueName} booking? The record will remain visible as Cancelled.`)) return
+    void performCancel(booking)
+  }
+
+  const performCancel = async (booking: VenueBooking) => {
     setSubmitError('')
     setSubmitMessage('')
     setCancellingId(booking.id)
@@ -214,13 +271,16 @@ export function VenueBookingsPanel({
         ? { ...cancelled, venueName: item.venueName }
         : item))
       if (editingId === booking.id) resetForm()
-      setSubmitMessage(`${booking.venueName} booking cancelled. Other venue bookings were not changed.`)
+      setSubmitMessage(`${booking.venueName} booking cancelled. Other venue bookings were not changed.${withdrawalNote}`)
       onBookingsChanged?.()
+      if (withdrawsApproval) onEventChanged?.()
     } catch (cause) {
       if (await handleImmutable(cause, booking.id)) return
+      if (await handleEventStatusChanged(cause)) return
       setSubmitError(cause instanceof Error ? cause.message : 'Unable to cancel this venue booking.')
     } finally {
       setCancellingId(null)
+      setPendingChange(null)
     }
   }
 
@@ -247,15 +307,21 @@ export function VenueBookingsPanel({
             </div>}
             {booking.status === 'Rejected' && <p className="muted">Rejected requests are read-only. Use Add venue booking below to request a replacement.</p>}
             {booking.status !== 'Cancelled' && booking.status !== 'Rejected' && <div className="venue-booking-actions">
-              <button className="button small" type="button" disabled={saving || cancellingId !== null} onClick={() => edit(booking)}>Edit booking</button>
-              <button className="button small reject" type="button" disabled={saving || cancellingId !== null} onClick={() => void cancel(booking)}>
+              <button className="button small" type="button" disabled={!acceptsChanges || saving || cancellingId !== null} onClick={() => edit(booking)}>Edit booking</button>
+              <button className="button small reject" type="button" disabled={!acceptsChanges || saving || cancellingId !== null} onClick={() => cancel(booking)}>
                 {cancellingId === booking.id ? 'Cancelling…' : 'Cancel booking'}
               </button>
             </div>}
           </article>)}
         </div>}
+      {bookings.length > 0 && !acceptsChanges && <p className="muted">{venueChangeClosedNotice(eventStatus)}</p>}
 
-      <form className="venue-booking-form" onSubmit={submit} onChangeCapture={() => { draftRevision.current += 1 }}>
+      {!editingId && !acceptsNewRequests ? <div className="venue-booking-form">
+        <h4>Add venue booking</h4>
+        <p className="muted">{VENUE_REQUEST_CLOSED_NOTICE}</p>
+        {submitError && <p className="field-error" role="alert">{submitError}</p>}
+        {submitMessage && <p role="status">{submitMessage}</p>}
+      </div> : <form className="venue-booking-form" onSubmit={submit} onChangeCapture={() => { draftRevision.current += 1 }}>
         <h4>{editingId ? 'Edit venue booking' : 'Add venue booking'}</h4>
         <label className="field"><span>Venue <span className="required">*</span></span>
           <select value={venueId} onChange={(change) => { setVenueId(change.target.value); setSubmitError('') }} disabled={Boolean(venueError || holdsError)} required>
@@ -281,8 +347,20 @@ export function VenueBookingsPanel({
         <button className="button primary" type="submit" disabled={saving || cancellingId !== null || Boolean(venueError || holdsError)}>
           {saving ? 'Saving…' : editingId ? 'Save venue booking' : 'Submit venue booking'}
         </button>
+        {editingId && withdrawsApproval && <p className="muted">{SAFETY_WITHDRAWAL_WARNING}</p>}
         {editingId && <button className="button" type="button" disabled={saving} onClick={resetForm}>Discard changes</button>}
-      </form>
+      </form>}
     </>}
+    {pendingChange && <ConfirmDialog
+      title={pendingChange.kind === 'edit' ? 'Save this venue booking change?' : `Cancel the ${pendingChange.booking.venueName} booking?`}
+      confirmLabel={pendingChange.kind === 'edit' ? 'Save and withdraw approval' : 'Cancel booking and withdraw approval'}
+      pendingLabel={pendingChange.kind === 'edit' ? 'Saving…' : 'Cancelling…'}
+      submitting={saving || cancellingId !== null}
+      onCancel={() => setPendingChange(null)}
+      onConfirm={() => {
+        if (pendingChange.kind === 'edit') { if (validDraft()) void save(); else setPendingChange(null) }
+        else void performCancel(pendingChange.booking)
+      }}
+    >{SAFETY_WITHDRAWAL_WARNING}</ConfirmDialog>}
   </section>
 }

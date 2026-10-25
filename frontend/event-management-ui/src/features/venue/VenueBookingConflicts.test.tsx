@@ -9,7 +9,7 @@ function setup(body: unknown, status = 409) {
     return new Response(JSON.stringify(url.includes('/venues') ? { venues: [{ id: 'v', name: 'Hall', status: 'Available', capacity: 100 }] } : { bookings: [] }))
   })
   vi.stubGlobal('fetch', fetcher)
-  render(<VenueBookingsPanel eventId="event" coordinatorId="coordinator" eventStart="2026-12-01T09:00" eventEnd="2026-12-01T10:00" eventExpectedAttendance="10" eventVenueRequirements="Stage" />)
+  render(<VenueBookingsPanel eventId="event" eventStatus="Under Review" coordinatorId="coordinator" eventStart="2026-12-01T09:00" eventEnd="2026-12-01T10:00" eventExpectedAttendance="10" eventVenueRequirements="Stage" />)
   return fetcher
 }
 async function submit() {

@@ -1,3 +1,4 @@
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from uuid import UUID
@@ -11,6 +12,7 @@ from app.clients import (
     BookingStateError,
     EventNotAssignedError,
     EventNotFoundError,
+    SafetyApprovalError,
     cancel_booking,
     create_booking,
     decide_booking,
@@ -24,13 +26,44 @@ from app.clients import (
     get_venue,
     get_venues,
     reconcile_legacy_conflicts,
+    restore_safety_after_venue_change,
     search_venues,
     update_booking,
     update_venue_profile,
+    withdraw_safety_for_venue_change,
 )
 from app.search import SearchError, shortlist, validate_search
 
 bp = Blueprint("venue_booking_service", __name__)
+logger = logging.getLogger(__name__)
+
+# Event statuses in which Venue Staff can act on a venue request (unchanged
+# behaviour of the staff review route, now named once).
+REVIEWABLE_EVENT_STATUSES = ("Under Review", "Approved", "Safety Changes Requested")
+# Event statuses in which a coordinator may submit a new venue request
+# (SCRUM-28 AC2, Clarice 25 Oct): before and during review, and while fixing
+# safety feedback. Never once the safety check has started or passed
+# (SCRUM-149/152), nor for a closed event.
+SUBMITTABLE_EVENT_STATUSES = ("Submitted", *REVIEWABLE_EVENT_STATUSES)
+# SCRUM-28 Part B (Clarice, 25 Oct): an existing booking may also be edited or
+# cancelled once the event is Confirmed, but that withdraws the event's safety
+# approval first (the arrangement it approved is changing). Never while the
+# safety check is pending, nor for a closed event.
+CHANGEABLE_EVENT_STATUSES = (*SUBMITTABLE_EVENT_STATUSES, "Confirmed")
+# Booking statuses that still need a Venue Staff decision. `Pending` is the
+# legacy seed spelling; new requests are stored as `Pending Review`.
+AWAITING_REVIEW_STATUSES = ("Pending", "Pending Review")
+
+
+def _queue_order(booking):
+    """SCRUM-28 AC4: awaiting requests first, oldest submission first, legacy rows last."""
+    requested_at = booking.get("requestedAt")
+    return (
+        not booking["awaitingReview"],
+        requested_at is None,
+        requested_at or "",
+        booking.get("requestedStartTime") or "",
+    )
 
 
 def _add_event_names(result, viewer_id, viewer_role):
@@ -86,7 +119,7 @@ def staff_booking_requests():
             booking_lists = list(pool.map(get_event_bookings, [event["id"] for event in events]))
         for event, bookings in zip(events, booking_lists):
             selected = [booking for booking in bookings if status is None or
-                (booking["status"] in ("Pending", "Pending Review") if status == "Pending" else booking["status"] == status)]
+                (booking["status"] in AWAITING_REVIEW_STATUSES if status == "Pending" else booking["status"] == status)]
             if not selected:
                 continue
             latest = None
@@ -97,8 +130,17 @@ def staff_booking_requests():
                 changes = [flag["changeRequired"] for flag in (latest or {}).get("flags", [])
                     if flag["area"] == "venue arrangement" and flag.get("bookingId") in (None, booking["id"])]
                 booking["safetyFeedback"] = {"reason": latest.get("remarks"), "requestedChanges": changes} if changes and latest["status"] == "Changes Requested" else None
+                # SCRUM-28 AC2/AC4: when it was submitted, and whether it still needs a decision.
+                booking["requestedAt"] = booking.get("requestedAt")
+                booking["awaitingReview"] = booking["status"] in AWAITING_REVIEW_STATUSES
+            selected.sort(key=_queue_order)
+            # SCRUM-28 AC3: the event's own timing, so each booking is assessed in
+            # context. Event Service sends "" for a date that isn't set.
             result.append({"eventId": event["id"], "eventName": event["eventName"], "eventStatus": event["status"],
-                "coordinatorId": event.get("coordinatorId"), "bookings": selected})
+                "coordinatorId": event.get("coordinatorId"), "eventStart": event.get("preferredStartDate") or None,
+                "eventEnd": event.get("preferredEndDate") or None,
+                "awaitingReviewCount": sum(booking["awaitingReview"] for booking in selected),
+                "bookings": selected})
     except httpx.TimeoutException:
         return jsonify(message="Loading venue requests took too long."), 504
     except Exception:
@@ -117,7 +159,7 @@ def staff_review_booking(booking_id):
     try:
         booking = get_booking(booking_id)
         event = get_event_for_internal_viewer(booking["eventId"], viewer_id, "Venue Staff")
-        if event["status"] not in ("Under Review", "Approved", "Safety Changes Requested") or booking["status"] not in ("Pending", "Pending Review"):
+        if event["status"] not in REVIEWABLE_EVENT_STATUSES or booking["status"] not in AWAITING_REVIEW_STATUSES:
             return jsonify(message="This venue request is not awaiting staff review."), 409
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
@@ -251,7 +293,7 @@ def create_booking_request():
         ), 400
 
     try:
-        get_event(event_id, coordinator_id)
+        event = get_event(event_id, coordinator_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -260,6 +302,18 @@ def create_booking_request():
         ), 403
     except Exception as e:
         return jsonify(message=f"Failed to look up the event: {e}"), 502
+
+    # SCRUM-28 AC2: only record a request Venue Staff can go on to review. Runs
+    # before the catalogue call, so a refused request costs no further calls.
+    if event.get("status") not in SUBMITTABLE_EVENT_STATUSES:
+        return jsonify(
+            message=(
+                "Venue requests can only be submitted while the event is Submitted, "
+                "Under Review, Approved or Safety Changes Requested."
+            ),
+            code="EVENT_NOT_ACCEPTING_VENUE_REQUESTS",
+            eventStatus=event.get("status"),
+        ), 409
 
     try:
         venues = get_venues()
@@ -405,7 +459,7 @@ def update_booking_request(booking_id):
         ), 400
 
     try:
-        get_event(event_id, coordinator_id)
+        event = get_event(event_id, coordinator_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -414,6 +468,9 @@ def update_booking_request(booking_id):
         ), 403
     except Exception as error:
         return jsonify(message=f"Failed to look up the event: {error}"), 502
+    closed = _changes_closed(event)
+    if closed:
+        return closed
 
     try:
         venues = get_venues()
@@ -435,6 +492,22 @@ def update_booking_request(booking_id):
             )
         ), 422
 
+    withdrawn_id, failure = _withdraw_safety_approval(
+        event, event_id, coordinator_id, booking_id,
+        f"A venue booking ({venue['name']}) was edited after safety approval.",
+    )
+    if failure:
+        return failure
+    result = _save_booking_update(
+        booking_id, event_id, venue_id, start, end, required_capacity,
+        venue_requirements.strip(), venue,
+    )
+    return _restore_if_failed(result, event_id, coordinator_id, withdrawn_id)
+
+
+def _save_booking_update(
+    booking_id, event_id, venue_id, start, end, required_capacity, venue_requirements, venue
+):
     try:
         args = (
             booking_id,
@@ -443,7 +516,7 @@ def update_booking_request(booking_id):
             start,
             end,
             required_capacity,
-            venue_requirements.strip(),
+            venue_requirements,
         )
         if "setupTimeMinutes" in venue or "turnaroundTimeMinutes" in venue:
             booking = update_booking(
@@ -483,7 +556,7 @@ def cancel_booking_request(booking_id):
     if not event_id or not coordinator_id:
         return jsonify(message="eventId and coordinatorId are required."), 400
     try:
-        get_event(event_id, coordinator_id)
+        event = get_event(event_id, coordinator_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -492,6 +565,20 @@ def cancel_booking_request(booking_id):
         ), 403
     except Exception as error:
         return jsonify(message=f"Failed to look up the event: {error}"), 502
+    closed = _changes_closed(event)
+    if closed:
+        return closed
+    withdrawn_id, failure = _withdraw_safety_approval(
+        event, event_id, coordinator_id, booking_id,
+        "A venue booking was cancelled after safety approval.",
+    )
+    if failure:
+        return failure
+    result = _save_booking_cancellation(booking_id, event_id)
+    return _restore_if_failed(result, event_id, coordinator_id, withdrawn_id)
+
+
+def _save_booking_cancellation(booking_id, event_id):
     try:
         booking = cancel_booking(booking_id, event_id)
     except BookingStateError:
@@ -507,6 +594,64 @@ def cancel_booking_request(booking_id):
     except Exception as error:
         return jsonify(message=f"Failed to cancel the booking request: {error}"), 502
     return jsonify(booking), 200
+
+
+def _changes_closed(event):
+    """SCRUM-28 Part B: refuse an edit or cancel the event's status doesn't allow."""
+    if event.get("status") in CHANGEABLE_EVENT_STATUSES:
+        return None
+    return jsonify(
+        message=(
+            "Venue bookings can only be changed while the event is Submitted, Under "
+            "Review, Approved, Safety Changes Requested or Confirmed."
+        ),
+        code="EVENT_NOT_ACCEPTING_VENUE_CHANGES",
+        eventStatus=event.get("status"),
+    ), 409
+
+
+def _withdraw_safety_approval(event, event_id, coordinator_id, booking_id, reason):
+    """For a Confirmed event, withdraw its safety approval before the booking changes.
+
+    Returns `(withdrawn_safety_check_id, failure)`. Any other status needs no
+    withdrawal and returns `(None, None)`. If Safety Check Service refuses or
+    fails, the booking is never touched and its answer is passed on.
+    """
+    if event.get("status") != "Confirmed":
+        return None, None
+    try:
+        result = withdraw_safety_for_venue_change(event_id, coordinator_id, booking_id, reason)
+    except SafetyApprovalError as error:
+        status = error.status if error.status in (403, 404, 409) else 502
+        body = error.body or {"message": "Unable to withdraw the event's safety approval."}
+        return None, (jsonify(body), status)
+    except Exception:
+        return None, (
+            jsonify(message="Unable to withdraw the event's safety approval right now."),
+            502,
+        )
+    return result["withdrawnSafetyCheck"]["id"], None
+
+
+def _restore_if_failed(result, event_id, coordinator_id, withdrawn_id):
+    """Undo the withdrawal when the booking change it was made for didn't happen.
+
+    The original booking error is what the caller gets either way. If the
+    restore also fails there is nothing left to try, so it is logged for a
+    manual repair: the event is left Approved, its booking unchanged.
+    """
+    if withdrawn_id and result[1] >= 400:
+        try:
+            restore_safety_after_venue_change(event_id, coordinator_id, withdrawn_id)
+        except Exception:
+            logger.error(
+                "Could not restore safety approval %s for event %s after its venue "
+                "booking change failed; the event is left Approved with its booking "
+                "unchanged and needs manual repair.",
+                withdrawn_id,
+                event_id,
+            )
+    return result
 
 
 @bp.patch("/booking-requests/<booking_id>/approve")

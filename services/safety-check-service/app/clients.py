@@ -432,6 +432,83 @@ def restore_safety_approval(round_id: str, opened_round_id: str) -> dict:
     return _ok(response).json()
 
 
+def withdraw_approval_without_next_round(round_id: str, withdrawn_by: str, reason: str) -> dict:
+    """SCRUM-28 Part B: withdraw round N's approval and open no round.
+
+    A venue booking of a Confirmed event changed, so the event goes back to
+    'Approved'; round N+1 is opened later by the coordinator's SCRUM-149
+    resubmission. The record service's row lock is still the race guard.
+    """
+    response = _send(
+        "POST",
+        f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{round_id}/withdraw",
+        json={"withdrawnBy": withdrawn_by, "reason": reason, "openNextRound": False},
+    )
+    if response.status_code == 404:
+        raise RecordNotFoundError
+    if response.status_code == 409:
+        body_data = _body(response)
+        raise RoundNotApprovedError(body_data.get("code"), body_data)
+    return _ok(response).json()["withdrawn"]
+
+
+def restore_approval_without_next_round(round_id: str) -> dict:
+    """Undo `withdraw_approval_without_next_round` — compensation only (SCRUM-28 Part B)."""
+    response = _send(
+        "POST",
+        f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{round_id}/restore",
+        json={"nextRoundOpened": False},
+    )
+    if response.status_code == 404:
+        raise RecordNotFoundError
+    if response.status_code == 409:
+        body_data = _body(response)
+        raise RoundNotApprovedError(body_data.get("code"), body_data)
+    return _ok(response).json()
+
+
+def set_event_venue_change_status(
+    event_id: str,
+    coordinator_id: str,
+    round_id: str,
+    round_number: int,
+    withdraw: bool,
+    reason: str = None,
+) -> dict:
+    """SCRUM-28 Part B: move the event `Confirmed -> Approved` (withdraw) or back.
+
+    Event Service makes these moves only when the body names the round, so
+    `withdrawnSafetyCheckId` / `restoredSafetyCheckId` is what unlocks them.
+    """
+    body = {
+        "status": "Approved" if withdraw else "Confirmed",
+        "safetyCheckId": round_id,
+        "roundNumber": round_number,
+        "coordinatorId": coordinator_id,
+    }
+    if withdraw:
+        body["withdrawnSafetyCheckId"] = round_id
+        body["reason"] = reason
+    else:
+        body["restoredSafetyCheckId"] = round_id
+    response = _send(
+        "PATCH",
+        f"{EVENT_SERVICE_URL}/events/{event_id}/safety-status",
+        json=body,
+        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+    )
+    if response.status_code == 404:
+        raise EventNotFoundError
+    if response.status_code == 403:
+        if _body(response).get("code") == "INTERNAL_ONLY":
+            raise ServiceCredentialsError
+        raise EventNotAssignedError
+    if response.status_code == 409:
+        body_data = _body(response)
+        raise EventTransitionError(body_data.get("code"), body_data)
+    return _ok(response).json()
+
+
 def reopen_safety_check_record(safety_check_id: str, decided_at: str) -> dict:
     """Undo the decision this service's own request just made — compensation only."""
     response = _send(

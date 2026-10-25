@@ -482,6 +482,13 @@ textarea:disabled {
   flex: none;
 }
 
+/* SCRUM-28 AC3: the event's own dates under a Venue requests card title. */
+.venue-request-event-timing {
+  margin: var(--space-1) 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
 .event-card-header-actions {
   display: flex;
   align-items: center;

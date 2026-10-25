@@ -98,7 +98,12 @@ class AvailabilityDB:
         if row is None:
             return None
         result = dict(row)
-        for key in ("requested_start_time", "requested_end_time", "hold_expires_at"):
+        for key in (
+            "requested_start_time",
+            "requested_end_time",
+            "hold_expires_at",
+            "requested_at",
+        ):
             if result.get(key) is not None:
                 result[key] = datetime.fromisoformat(result[key])
         return result
