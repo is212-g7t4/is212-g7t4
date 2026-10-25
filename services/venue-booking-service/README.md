@@ -36,6 +36,17 @@ Alternatively, after creating `.env`, run
 or just `npm run dev`/`npm run dev:backend`, which brings this up alongside
 every other service.
 
+## Tests
+
+```
+uv run pytest                                          # unit tier (tests/unit), coverage floor
+uv run pytest -m integration --no-cov tests/integration  # integration tier: real httpx client, respx stubs
+```
+
+The integration tier needs no Docker and no secrets: every downstream
+service is stubbed at the HTTP layer with `respx`. See
+`docs/testing/integration-testing.md`.
+
 ## Endpoints
 
 - `GET /venue-search` — SCRUM-26 Venue Search and Filtering. Finds the venues
@@ -101,12 +112,16 @@ every other service.
   - `404` if the event doesn't exist, or if `venueId` isn't in Venue
     Service's catalogue.
   - `403` if the event isn't assigned to `coordinatorId`.
+  - `409` with `code: "EVENT_NOT_ACCEPTING_VENUE_REQUESTS"` and `eventStatus`
+    if the event isn't `Submitted`, `Under Review`, `Approved` or
+    `Safety Changes Requested` (SCRUM-28). Checked before the venue
+    catalogue, so a refused request makes no further downstream calls.
   - `409` if the venue exists but isn't `Available`, or if it's already
     booked (Approved) for that time window.
   - `422` if the venue's capacity is below this booking's `requiredCapacity`.
     The event's total attendance is deliberately not used for this check.
-  - `201` with the persisted booking (`status: "Pending Review"`) once all
-    checks pass.
+  - `201` with the persisted booking (`status: "Pending Review"`, plus the
+    `requestedAt` submission time) once all checks pass.
 - `PUT /venues/<venueId>` — saves a Venue Staff profile edit through Venue
   Service and then automatically reconciles legacy buffer conflicts through
   Venue Availability Service. No booking is cancelled or rescheduled.
@@ -124,6 +139,19 @@ every other service.
 - `PATCH /booking-requests/<id>/cancel` — body `{eventId, coordinatorId}`;
   retains only the selected booking with `status: "Cancelled"`. The operation
   is idempotent and does not alter sibling bookings for the event.
+- **Edit and cancel are gated (SCRUM-28 Part B).** Both answer `409` with
+  `code: "EVENT_NOT_ACCEPTING_VENUE_CHANGES"` and `eventStatus` unless the
+  event is `Submitted`, `Under Review`, `Approved`, `Safety Changes
+  Requested` or `Confirmed`, checked right after the event lookup. For a
+  **`Confirmed`** event, this service first calls Safety Check Service's
+  `POST /safety-checks/withdraw-for-venue-change` (the event goes back to
+  `Approved`; for an edit, after the catalogue and capacity checks pass), then
+  changes the booking. If that booking call fails (conflict, immutable, not
+  found, 5xx), it calls `POST /safety-checks/restore-after-venue-change` and
+  returns the original error; a failed restore is logged at `ERROR` for
+  manual repair. If the withdrawal itself is refused, the booking is never
+  touched (`403`/`404`/`409` passed through, anything else `502`). Needs
+  `SAFETY_CHECK_SERVICE_URL` (default `http://localhost:5012`).
 - `PATCH /booking-requests/<id>/approve` / `PATCH /booking-requests/<id>/reject`
   — Venue Staff decision. Body must include `{"reviewedBy": "<user id>"}`.
   - `404` if the booking doesn't exist.
@@ -138,6 +166,10 @@ The frontend `/venue-requests` page provides a minimal event-grouped queue,
 status filtering, individual Approve/Reject and latest-round safety feedback.
 `GET /booking-requests[?status=Pending|Approved|Rejected]` requires DEV Venue
 Staff identity headers. Pending includes both `Pending` and `Pending Review`.
+Each event group also carries `eventStart`/`eventEnd` (the event's preferred
+dates, `null` when unset) and `awaitingReviewCount`; each booking carries
+`requestedAt` (`null` for legacy rows) and `awaitingReview`. Within an event,
+awaiting bookings come first, oldest submission first (SCRUM-28).
 The composite reads events, bookings and venue names from their owning APIs;
 `SAFETY_CHECK_RECORD_SERVICE_URL` supplies safety flags for revision events.
 

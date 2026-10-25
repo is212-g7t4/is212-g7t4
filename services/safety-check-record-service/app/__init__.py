@@ -276,11 +276,20 @@ def create_app(config=None) -> Flask:
         reason, failure = _withdrawal_reason(data)
         if failure:
             return failure
+        # SCRUM-28 Part B: a venue booking change withdraws the approval
+        # without opening a round. Defaults to SCRUM-153's behaviour.
+        open_next_round = data.get("openNextRound", True)
+        if not isinstance(open_next_round, bool):
+            return jsonify(message="openNextRound must be true or false."), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message=NO_DATABASE), 503
         try:
             withdrawn, opened = withdraw_approval(
-                app.config["DATABASE_URL"], safety_check_id, withdrawn_by, reason
+                app.config["DATABASE_URL"],
+                safety_check_id,
+                withdrawn_by,
+                reason,
+                open_next_round,
             )
         except RecordNotFoundError:
             return jsonify(message="Safety check not found."), 404
@@ -316,9 +325,21 @@ def create_app(config=None) -> Flask:
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
-        opened_safety_check_id = _uuid_or_none(data.get("openedSafetyCheckId"))
-        if not opened_safety_check_id:
-            return jsonify(message="openedSafetyCheckId must be a valid UUID."), 400
+        # SCRUM-28 Part B: `nextRoundOpened: false` undoes a withdrawal that
+        # opened no round, so there is no round id to name.
+        next_round_opened = data.get("nextRoundOpened", True)
+        if not isinstance(next_round_opened, bool):
+            return jsonify(message="nextRoundOpened must be true or false."), 400
+        if next_round_opened:
+            opened_safety_check_id = _uuid_or_none(data.get("openedSafetyCheckId"))
+            if not opened_safety_check_id:
+                return jsonify(message="openedSafetyCheckId must be a valid UUID."), 400
+        elif data.get("openedSafetyCheckId") is not None:
+            return jsonify(
+                message="openedSafetyCheckId must be omitted when nextRoundOpened is false."
+            ), 400
+        else:
+            opened_safety_check_id = None
         if not app.config["DATABASE_URL"]:
             return jsonify(message=NO_DATABASE), 503
         try:

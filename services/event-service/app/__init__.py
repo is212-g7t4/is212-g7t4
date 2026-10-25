@@ -14,6 +14,8 @@ from app.models import (
     EDITABLE_FIELDS,
     FIELDS,
     RECHECK_ONLY_MOVES,
+    VENUE_CHANGE_RESTORE,
+    VENUE_CHANGE_WITHDRAW,
     SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
     UNDER_SAFETY_REVIEW_MESSAGE,
@@ -76,6 +78,43 @@ from app.validation import validate, validate_draft
 # whatever the caller sends, like coordinatorId.
 LEAD_ROLE = "Event Coordinator Lead"
 ALL_EVENTS_ROLES = (LEAD_ROLE, "Venue Staff", "Technical Support", "Safety Officer")
+
+
+def _venue_change(data, status, safety_check_id):
+    """Validate SCRUM-28 Part B's markers on PATCH /safety-status.
+
+    Returns `(venue_change, failure)`. `withdrawnSafetyCheckId` (with a
+    `reason`) is the only way to reach 'Approved' here, and
+    `restoredSafetyCheckId` the only way back to 'Confirmed' from it; both
+    must name the round given as `safetyCheckId`.
+    """
+    withdrawn = data.get("withdrawnSafetyCheckId")
+    restored = data.get("restoredSafetyCheckId")
+    if withdrawn is None and restored is None:
+        return None, None
+    if withdrawn is not None and restored is not None:
+        return None, (jsonify(message="Send withdrawnSafetyCheckId or restoredSafetyCheckId, not both."), 400)
+    marker, value, target = (
+        ("withdrawnSafetyCheckId", withdrawn, "Approved")
+        if withdrawn is not None
+        else ("restoredSafetyCheckId", restored, "Confirmed")
+    )
+    if status != target:
+        return None, (jsonify(message=f"{marker} is only valid with status '{target}'."), 400)
+    try:
+        value = str(UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        return None, (jsonify(message=f"{marker} must be a valid UUID."), 400)
+    if value != safety_check_id:
+        return None, (jsonify(message=f"{marker} must match safetyCheckId."), 400)
+    if target == "Confirmed":
+        return {"move": VENUE_CHANGE_RESTORE}, None
+    reason = data.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return None, (jsonify(message="reason is required."), 400)
+    if len(reason) > 2000:
+        return None, (jsonify(message="reason must be 2000 characters or fewer."), 400)
+    return {"move": VENUE_CHANGE_WITHDRAW, "reason": reason.strip()}, None
 
 
 def _safety_recheck(data):
@@ -892,7 +931,12 @@ def create_app(config=None):
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
         status = data.get("status", "")
-        if status not in SAFETY_STATUSES:
+        # SCRUM-28 Part B: 'Approved' is a target only for a venue-change
+        # withdrawal, which names the round (checked below). Without that
+        # marker it is a pre-safety status, refused like the others.
+        if status not in SAFETY_STATUSES and not (
+            status == "Approved" and data.get("withdrawnSafetyCheckId") is not None
+        ):
             return jsonify(
                 message=f"Status must be one of: {', '.join(SAFETY_STATUSES)}."
             ), 400
@@ -914,16 +958,25 @@ def create_app(config=None):
         ):
             return jsonify(message="roundNumber must be a positive whole number."), 400
 
+        # SCRUM-28 Part B: a venue booking change withdraws a Confirmed
+        # event's approval (-> Approved), or undoes that (-> Confirmed). The
+        # marker must name the same round as safetyCheckId.
+        venue_change, failure = _venue_change(data, status, safety_check_id)
+        if failure:
+            return failure
+
         # Each move needs its own identity fields validated.
         coordinator_id = None
         decided_by = None
         remarks = None
         areas = None
-        if status == "Pending Safety Check":
+        if status == "Pending Safety Check" or venue_change:
             try:
                 coordinator_id = str(UUID(data.get("coordinatorId", "")))
             except (ValueError, TypeError, AttributeError):
                 return jsonify(message="A valid coordinator ID is required."), 400
+        if venue_change:
+            pass
         elif status in ("Confirmed", "Safety Changes Requested", "Cancelled"):
             try:
                 decided_by = str(UUID(data.get("decidedBy", "")))
@@ -972,6 +1025,7 @@ def create_app(config=None):
                 decided_by=decided_by,
                 remarks=remarks,
                 areas=areas,
+                venue_change=venue_change,
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404

@@ -13,7 +13,7 @@
  * - `stale cancel refreshes immutable request while retaining replacement draft`: Separate approved immutability/replacement rule — stale edit/cancel handling and retained draft; no direct closure AC.
  * - `all rejected requests are immutable and automatic rejection shows full SGT period and reason`: AC3 — rejected-request full SGT period/reason rendered; separate immutability rule and manual-null compatibility.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetchVenues } from './venues'
 import { fetchActiveVenueHolds } from './venueHolds'
@@ -53,6 +53,7 @@ const bookings = [
 
 const renderPanel = () => render(<VenueBookingsPanel
   eventId={eventId}
+  eventStatus="Under Review"
   coordinatorId={coordinatorId}
   eventStart="2026-10-20T09:00"
   eventEnd="2026-10-20T17:00"
@@ -343,4 +344,149 @@ test('declining cancellation leaves the selected booking unchanged', async () =>
 
   expect(cancelVenueBooking).not.toHaveBeenCalled()
   expect(screen.getByText('Approved')).toBeInTheDocument()
+})
+
+// SCRUM-28 AC1/AC2: a coordinator can only fill in a request Venue Staff can go on to review.
+const renderForStatus = (eventStatus: string, onEventChanged = vi.fn()) => render(<VenueBookingsPanel
+  eventId={eventId}
+  eventStatus={eventStatus}
+  coordinatorId={coordinatorId}
+  eventStart="2026-10-20T09:00"
+  eventEnd="2026-10-20T17:00"
+  eventExpectedAttendance="500"
+  eventVenueRequirements="Main programme space"
+  onEventChanged={onEventChanged}
+/>)
+
+test.each(['Clarification Requested', 'Rejected', 'Pending Safety Check', 'Confirmed'])(
+  'SCRUM-28 AC2: a %s event shows why new venue requests are closed instead of the form', async (status) => {
+    renderForStatus(status)
+    expect(await screen.findByText(
+      'New venue requests can be submitted while the event is Submitted, Under Review, Approved or Safety Changes Requested.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Submit venue booking' })).not.toBeInTheDocument()
+    expect(screen.getByText('Auditorium A', { selector: 'strong' })).toBeInTheDocument()
+  })
+
+test.each(['Submitted', 'Under Review', 'Approved', 'Safety Changes Requested'])(
+  'SCRUM-28 AC1: a %s event offers the booking form with timing, capacity and requirements', async (status) => {
+    renderForStatus(status)
+    expect(await screen.findByRole('button', { name: 'Submit venue booking' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Booking start *')).toHaveValue('2026-10-20T09:00')
+    expect(screen.getByLabelText('Booking end *')).toHaveValue('2026-10-20T17:00')
+    expect(screen.getByLabelText('Expected attendance / required capacity *')).toHaveValue(500)
+    expect(screen.getByLabelText('Venue requirements')).toHaveValue('Main programme space')
+    expect(screen.queryByText(/New venue requests can be submitted while/)).not.toBeInTheDocument()
+  })
+
+test('SCRUM-28 AC2: a status change while the form is open shows the server reason, not a venue conflict', async () => {
+  const onEventChanged = vi.fn()
+  vi.mocked(createVenueBooking).mockRejectedValue(new VenueBookingError(409, {
+    code: 'EVENT_NOT_ACCEPTING_VENUE_REQUESTS',
+    message: 'Venue requests can only be submitted while the event is Submitted, Under Review, Approved or Safety Changes Requested.',
+    eventStatus: 'Pending Safety Check',
+  }))
+  renderForStatus('Under Review', onEventChanged)
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  fireEvent.change(screen.getByLabelText(/Venue \*/), { target: { value: 'venue-b' } })
+  fireEvent.change(screen.getByLabelText('Expected attendance / required capacity *'), { target: { value: '40' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Submit venue booking' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Venue requests can only be submitted while the event is Submitted, Under Review, Approved or Safety Changes Requested.')
+  expect(screen.getByRole('alert')).not.toHaveTextContent('Choose another venue or time')
+  await waitFor(() => expect(fetchVenueBookings).toHaveBeenCalledTimes(2))
+  expect(onEventChanged).toHaveBeenCalledTimes(1)
+})
+
+test('SCRUM-28 AC2: a failed refresh after a status change is reported', async () => {
+  vi.mocked(createVenueBooking).mockRejectedValue(new VenueBookingError(409, { code: 'EVENT_NOT_ACCEPTING_VENUE_REQUESTS', message: 'Closed.' }))
+  renderForStatus('Under Review')
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  vi.mocked(fetchVenueBookings).mockRejectedValue(new Error('offline'))
+  fireEvent.change(screen.getByLabelText(/Venue \*/), { target: { value: 'venue-b' } })
+  fireEvent.change(screen.getByLabelText('Expected attendance / required capacity *'), { target: { value: '40' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Submit venue booking' }))
+  expect(await screen.findByText('Unable to refresh bookings. Reload the page to view the latest request status.')).toBeInTheDocument()
+})
+
+// SCRUM-28 Part B (Clarice, 25 Oct): changing a booking of a Confirmed event withdraws its safety approval.
+const WARNING = "Changing this booking withdraws the event's safety approval. The event goes back to Approved; Venue Staff will re-review this booking, then resubmit the event for its safety check."
+
+test('SCRUM-28 Part B: saving an edit on a Confirmed event asks first and refreshes the event afterwards', async () => {
+  const onEventChanged = vi.fn()
+  vi.mocked(updateVenueBooking).mockResolvedValue({ ...bookings[1], status: 'Pending Review' })
+  renderForStatus('Confirmed', onEventChanged)
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  expect(screen.queryByRole('button', { name: 'Submit venue booking' })).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getAllByRole('button', { name: 'Edit booking' })[1])
+  expect(screen.getByText(WARNING)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Save venue booking' }))
+
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog).toHaveTextContent(WARNING)
+  expect(updateVenueBooking).not.toHaveBeenCalled()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save and withdraw approval' }))
+
+  expect(await screen.findByText(/booking updated and returned to pending review\. The event's safety approval was withdrawn and it is back to Approved\./)).toBeInTheDocument()
+  expect(updateVenueBooking).toHaveBeenCalledTimes(1)
+  expect(onEventChanged).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+test('SCRUM-28 Part B: backing out of the dialog changes nothing', async () => {
+  renderForStatus('Confirmed')
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(cancelVenueBooking).not.toHaveBeenCalled()
+  expect(window.confirm).not.toHaveBeenCalled()
+})
+
+test('SCRUM-28 Part B: cancelling a booking of a Confirmed event withdraws the approval after confirmation', async () => {
+  const onEventChanged = vi.fn()
+  vi.mocked(cancelVenueBooking).mockResolvedValue({ ...bookings[0], status: 'Cancelled' })
+  renderForStatus('Confirmed', onEventChanged)
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel booking and withdraw approval' }))
+
+  expect(await screen.findByText(/Auditorium A booking cancelled\. Other venue bookings were not changed\. The event's safety approval was withdrawn/)).toBeInTheDocument()
+  expect(cancelVenueBooking).toHaveBeenCalledWith('booking-a', eventId, coordinatorId)
+  expect(onEventChanged).toHaveBeenCalledTimes(1)
+})
+
+test.each(['Pending Safety Check', 'Clarification Requested', 'Rejected'])(
+  'SCRUM-28 Part B: on a %s event the booking actions are disabled with the reason', async (status) => {
+    renderForStatus(status)
+    await screen.findByText('Auditorium A', { selector: 'strong' })
+    for (const button of screen.getAllByRole('button', { name: /Edit booking|Cancel booking/ })) expect(button).toBeDisabled()
+    expect(screen.getByText(`Venue bookings can't be edited or cancelled while the event is ${status}.`)).toBeInTheDocument()
+  })
+
+test('SCRUM-28 Part B: an open event changes bookings with the usual confirm and no safety dialog', async () => {
+  vi.mocked(cancelVenueBooking).mockResolvedValue({ ...bookings[0], status: 'Cancelled' })
+  renderForStatus('Approved')
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+
+  expect(await screen.findByText('Auditorium A booking cancelled. Other venue bookings were not changed.')).toBeInTheDocument()
+  expect(window.confirm).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+test('SCRUM-28 Part B: a change refused because the event moved on shows the reason and re-reads the event', async () => {
+  const onEventChanged = vi.fn()
+  vi.mocked(cancelVenueBooking).mockRejectedValue(new VenueBookingError(409, {
+    code: 'EVENT_NOT_ACCEPTING_VENUE_CHANGES', message: 'Venue bookings can only be changed while …', eventStatus: 'Pending Safety Check',
+  }))
+  renderForStatus('Approved', onEventChanged)
+  await screen.findByText('Auditorium A', { selector: 'strong' })
+  fireEvent.click(screen.getAllByRole('button', { name: 'Cancel booking' })[0])
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Venue bookings can only be changed while …')
+  expect(onEventChanged).toHaveBeenCalledTimes(1)
 })

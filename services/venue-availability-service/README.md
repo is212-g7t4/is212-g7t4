@@ -212,15 +212,21 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
 
 - `POST /venue-bookings`: body `{eventId, venueId, requestedStartTime,
   requestedEndTime, requiredCapacity, venueRequirements, requestedBy}`;
-  creates `Pending Review`; returns `409` on an approved overlap for the same
+  creates `Pending Review` and stamps `requested_at` with the database's
+  `now()` (SCRUM-28); returns `409` on an approved overlap for the same
   venue. Conflict detection keys on venue and time, not event, so overlapping
   requests for different venues in one event remain independent. The write
   accepts **naive** datetime input only and returns naive times.
+- Every booking response carries `requestedAt`: the submission time as
+  Singapore-offset ISO 8601 (`2030-03-01T10:30:00+08:00`), or `null` for rows
+  recorded before SCRUM-28.
 - `GET /events/<eventId>/venue-bookings`: returns all booking rows linked to
   one event, ordered independently by requested start time and booking ID.
 - `PATCH /venue-bookings/<id>`: updates one row, scoped by `eventId`, rechecks
   approved-booking/hold conflicts while excluding that row's old interval,
-  and resets the selected booking to `Pending Review` with no reviewer.
+  and resets the selected booking to `Pending Review` with no reviewer,
+  restamping `requested_at` so it rejoins the staff queue as a new
+  submission (SCRUM-28 Part B).
 - `PATCH /venue-bookings/<id>/cancel`: scopes by `eventId` and retains the
   selected row as `Cancelled`; repeating the request is idempotent.
 - `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy}`;
@@ -238,8 +244,12 @@ uv run pytest
 uvx ruff check --isolated --select E4,E7,E9,F,I app tests
 # Explicit opt-in: live DB SELECTs only, PostgreSQL read-only transactions;
 # prints counts/status codes, never identities or credentials. Marked
-# `integration`, so it is deselected by every default run.
-RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest -m integration --no-cov -q -s
+# `live`, so it is deselected by every default run.
+RUN_LIVE_CALENDAR_SMOKE=true uv run --env-file ../../.env pytest -m live --no-cov -q -s
+# Integration tier (tests/integration): the real app and SQL against a
+# throwaway postgres:17.6 loaded with the full migration chain. Needs Docker,
+# no secrets. See docs/testing/integration-testing.md.
+uv run pytest -m integration --no-cov tests/integration
 ```
 
 See [BACKEND_REVIEW.md](BACKEND_REVIEW.md) for flow, file map, acceptance mapping,

@@ -129,11 +129,14 @@ services:
       INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
       VENUE_CLOSURE_DEV_MODE: "${VENUE_CLOSURE_DEV_MODE:-false}"
       SAFETY_CHECK_RECORD_SERVICE_URL: http://safety-check-record-service:5000
+      # SCRUM-28 Part B: a booking change on a Confirmed event withdraws its safety approval.
+      SAFETY_CHECK_SERVICE_URL: http://safety-check-service:5000
     depends_on:
       - event-service
       - venue-service
       - venue-availability-service
       - safety-check-record-service
+      - safety-check-service
     ports:
       - "5007:5000"
 

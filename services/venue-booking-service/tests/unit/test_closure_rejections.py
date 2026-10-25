@@ -32,7 +32,7 @@ def test_immutable_atomic_response_remains_state_error(monkeypatch, action):
     monkeypatch.setattr("app.routes.get_booking", lambda *a: {"venueId": "venue"})
     monkeypatch.setattr("app.routes.get_venue", lambda *a: {"id": "venue", "setupTimeMinutes": 0, "turnaroundTimeMinutes": 0})
     monkeypatch.setattr(httpx, "patch", reply)
-    monkeypatch.setattr("app.routes.get_event", lambda *a: {})
+    monkeypatch.setattr("app.routes.get_event", lambda *a: {"status": "Under Review"})
     monkeypatch.setattr(
         "app.routes.get_venues",
         lambda: [

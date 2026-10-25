@@ -128,8 +128,16 @@ finds round N no longer `Safety Approved`.
   `Approval Withdrawn`, which is the race's loser.
 - `409 {"code": "NOT_LATEST_ROUND"}` when a later round exists: an older
   round's approval is history, not the one in force.
-- `400` for a bad UUID, a missing/blank `reason` or one over 2000 characters.
+- `400` for a bad UUID, a missing/blank `reason` or one over 2000 characters,
+  or a non-boolean `openNextRound`.
 - `503` when `DATABASE_URL` is unset or the database is unreachable.
+
+**`openNextRound: false`** (SCRUM-28 Part B) does step 1 only and returns
+`{"withdrawn": {...}, "opened": null}`. It is used when a venue booking of a
+`Confirmed` event changes: the event goes back to `Approved` rather than
+straight to a new round, because Venue Staff must re-review the booking
+first; the coordinator's later SCRUM-149 submit opens round N+1. Omitted, it
+defaults to `true`, which is SCRUM-153's behaviour above.
 
 Safety Check Service is the only caller — it is the service that checks the
 caller is the assigned coordinator, that the event is `Confirmed`, and that a
@@ -146,6 +154,12 @@ It deletes round N+1 only while that round is still `Pending` and really is
 round N+1 of the same event, then sets round N back to `Safety Approved` with
 the three withdrawal columns cleared. Idempotent: a second call, where round N
 is already approved and N+1 is gone, returns round N unchanged.
+
+**`{"nextRoundOpened": false}`** (SCRUM-28 Part B) undoes an
+`openNextRound: false` withdrawal: there is no round to delete, so
+`openedSafetyCheckId` must be omitted, and round N must still be the event's
+latest round — so this can never un-withdraw an approval whose round N+1
+exists.
 
 `409 {"code": "NOT_RESTORABLE"}` if round N isn't withdrawn, or the round named
 has since been decided or isn't the one this withdrawal opened; `404` if round N
