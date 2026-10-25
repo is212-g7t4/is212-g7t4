@@ -6,6 +6,23 @@ import { RefreshIcon } from '../components/Icon'
 import { formatSchedule } from '../features/event/dateFormat'
 import { fetchVenueRequests, reviewVenueRequest } from '../features/venue/venueBookings'
 import type { VenueRequestEvent } from '../features/venue/venueBookings'
+import { VENUE_REQUEST_REVIEWABLE_STATUSES, isAwaitingVenueReview } from '../features/venue/permissions'
+
+const FILTERS: Record<string, string> = { All: 'All requests', Pending: 'Awaiting review', Approved: 'Approved', Rejected: 'Rejected' }
+
+const submittedAt = (value: string) => {
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('en-SG', {
+    timeZone: 'Asia/Singapore', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  })
+}
+
+/** SCRUM-28 AC4: what the Action cell says when there is no decision to make. */
+const noActionText = (awaiting: boolean, eventStatus: string) => {
+  if (!awaiting) return 'Reviewed'
+  if (eventStatus === 'Submitted') return 'Opens for review when the event is Under Review'
+  return `Not open for review while the event is ${eventStatus}`
+}
 
 export function VenueRequestsPage({ role, user, resolveUserName }: {
   role: Role; user: User | null; resolveUserName?: (id: string | null) => string | null
@@ -38,7 +55,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
       setEvents((current) => current.map((event) => ({ ...event,
         bookings: event.bookings.map((booking) => booking.id === bookingId ? { ...booking, ...updated } : booking)
           .filter((booking) => filter === 'All' || (filter === 'Pending'
-            ? ['Pending', 'Pending Review'].includes(booking.status) : booking.status === filter)),
+            ? isAwaitingVenueReview(booking.status) : booking.status === filter)),
       })).filter((event) => event.bookings.length > 0))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to review this venue request.')
@@ -54,7 +71,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
       <div className="table-actions toolbar">
         <label className="field"><span>Show</span>
           <select aria-label="Filter by status" value={filter} onChange={(change) => { setLoading(true); setFilter(change.target.value) }}>
-            {['All', 'Pending', 'Approved', 'Rejected'].map((status) => <option key={status} value={status}>{status === 'All' ? 'All requests' : status}</option>)}
+            {Object.entries(FILTERS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
         <button className="button small" onClick={() => { setLoading(true); setRefresh((value) => value + 1) }}><RefreshIcon size={14} /> Refresh requests</button>
@@ -63,29 +80,41 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
     </section>
     {loading ? <InlineLoading label="Loading venue requests..." /> : events.length === 0 ? <p>No venue requests found.</p> : events.map((event) => {
       const safety = event.eventStatus === 'Safety Changes Requested'
-      const canReview = ['Under Review', 'Approved', 'Safety Changes Requested'].includes(event.eventStatus)
+      const canReview = VENUE_REQUEST_REVIEWABLE_STATUSES.includes(event.eventStatus)
+      // Counted here rather than read from awaitingReviewCount so it follows decisions made on this page.
+      const awaitingCount = event.bookings.filter((booking) => isAwaitingVenueReview(booking.status)).length
       return <article className="panel event-card" key={event.eventId}>
         <header className="event-card-header">
-          <div className="event-card-title"><h2>{event.eventName}</h2><StatusBadge status={event.eventStatus} /></div>
+          <div>
+            <div className="event-card-title"><h2>{event.eventName}</h2><StatusBadge status={event.eventStatus} /></div>
+            <p className="venue-request-event-timing">
+              Event: {event.eventStart && event.eventEnd ? formatSchedule(event.eventStart, event.eventEnd) : 'Event dates not set'}
+              {awaitingCount > 0 && <> · <strong>{awaitingCount} awaiting review</strong></>}
+            </p>
+          </div>
           <span className="equipment-request-coordinator">Coordinator: {resolveUserName?.(event.coordinatorId) ?? 'Unknown'}</span>
         </header>
         <div className="table-scroll" role="region" aria-label={`${event.eventName} venue requests`} tabIndex={0}>
           <table className={`equipment-request-table venue-request-table${safety ? ' with-safety-feedback' : ''}`}>
             <colgroup>{[220, 220, 100, 220, 180, ...(safety ? [240] : [])].map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
             <thead><tr><th>Venue</th><th>Schedule</th><th>Capacity</th><th>Requirements</th><th>Action</th>{safety && <th>Safety change reason</th>}</tr></thead>
-            <tbody>{event.bookings.map((booking) => <tr key={booking.id}>
-              <td><div className="equipment-request-item"><span>{booking.venueName}</span><StatusBadge status={booking.status} /></div></td>
-              <td>{formatSchedule(booking.requestedStartTime, booking.requestedEndTime)}</td>
+            <tbody>{event.bookings.map((booking) => {
+              const awaiting = isAwaitingVenueReview(booking.status)
+              return <tr key={booking.id}>
+              <td><div className="equipment-request-item"><span>{booking.venueName}</span><StatusBadge status={booking.status} label={awaiting ? 'Awaiting review' : undefined} /></div></td>
+              <td>{formatSchedule(booking.requestedStartTime, booking.requestedEndTime)}
+                {booking.requestedAt && <div className="muted">Submitted {submittedAt(booking.requestedAt)}</div>}</td>
               <td>{booking.requiredCapacity}</td><td>{booking.venueRequirements || 'None'}</td>
-              <td>{canReview && ['Pending', 'Pending Review'].includes(booking.status) ? <div className="table-actions">
+              <td>{canReview && awaiting ? <div className="table-actions">
                 <button className="button small approve" disabled={reviewing !== null} onClick={() => { void review(booking.id, 'Approved') }}>Approve</button>
                 <button className="button small reject" disabled={reviewing !== null} onClick={() => { void review(booking.id, 'Rejected') }}>Reject</button>
-              </div> : <span className="muted">Reviewed</span>}</td>
+              </div> : <span className="muted">{noActionText(awaiting, event.eventStatus)}</span>}</td>
               {safety && <td>{booking.safetyFeedback ? <div className="equipment-safety-feedback">
                 {booking.safetyFeedback.requestedChanges.map((change, index) => <p key={index}>{change}</p>)}
                 {booking.safetyFeedback.reason && <p className="muted">Reason: {booking.safetyFeedback.reason}</p>}
               </div> : <span className="muted">Not flagged</span>}</td>}
-            </tr>)}</tbody>
+            </tr>
+            })}</tbody>
           </table>
         </div>
       </article>

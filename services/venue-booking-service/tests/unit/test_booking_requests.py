@@ -14,6 +14,7 @@ from app.clients import (
 
 EVENT = {
     "id": "evt-1",
+    "status": "Under Review",
     "expectedAttendance": "150",
     "preferredStartDate": "2026-10-01T09:00",
     "preferredEndDate": "2026-10-01T12:00",

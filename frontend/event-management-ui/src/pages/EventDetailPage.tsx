@@ -200,12 +200,14 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
       {canUpdate && event.status !== 'Cancelled' && <VenueBookingsPanel
         targetBookingId={targetBookingId}
         eventId={event.id}
+        eventStatus={event.status}
         coordinatorId={currentCoordinator.id}
         eventStart={event.preferredStartDate}
         eventEnd={event.preferredEndDate}
         eventExpectedAttendance={event.expectedAttendance}
         eventVenueRequirements={event.venueRequirements}
         onBookingsChanged={() => setBookingsChanged((value) => value + 1)}
+        onEventChanged={() => setRefresh((value) => value + 1)}
       />}
 
       <section className="event-card-section">

@@ -5,7 +5,8 @@ Check workflow (change #6). SCRUM-149 builds the first step, **submit**;
 SCRUM-150 the second, **approve**; SCRUM-151 the other two, **request
 changes** and **reject**; SCRUM-153 adds **re-check**, which withdraws an
 approval after a high-impact change. SCRUM-163 (review) and SCRUM-164
-(resubmit) extend it further.
+(resubmit) extend it further, and SCRUM-28 Part B adds the venue-change
+withdrawal Venue Booking Service calls.
 
 Submitting and approving each need facts from more than one atomic and write
 to two, which is exactly what a composite is for (AGENTS.md;
@@ -416,6 +417,36 @@ curl -X POST localhost:5013/safety-check-records/<round N id>/restore \
 ```
 
 `restore` is idempotent, so this is safe to repeat.
+
+## `POST /safety-checks/withdraw-for-venue-change` (SCRUM-28 Part B)
+
+Called by **Venue Booking Service** (5007), before it edits or cancels a
+venue booking of a `Confirmed` event. Decided 25 Oct: the approval was given
+for the old arrangement, so it is withdrawn and the event goes back to
+**`Approved`**. Unlike a re-check, **no round is opened**: Venue Staff re-review
+the changed booking, then the coordinator resubmits with `POST
+/safety-checks`, which opens round N+1.
+
+Body `{eventId, coordinatorId, bookingId, reason}`. Steps: load the event as
+the coordinator (`403` for anyone else) → it must be `Confirmed` (`409
+EVENT_NOT_CONFIRMED`) → its latest round must be `Safety Approved` (`409
+NO_APPROVED_SAFETY_CHECK`) → withdraw that round with `openNextRound: false`
+(the record service's lock is the race guard; a lost race is `409
+ROUND_NOT_APPROVED`) → move the event `Confirmed → Approved` with
+`withdrawnSafetyCheckId`. If the event move fails, the round is restored
+(`nextRoundOpened: false`) and Event Service's error is returned. `200
+{event, withdrawnSafetyCheck, bookingId}`.
+
+## `POST /safety-checks/restore-after-venue-change` (SCRUM-28 Part B)
+
+Compensation only: Venue Booking Service calls this when the booking change
+it withdrew the approval for then failed. Body `{eventId, coordinatorId,
+withdrawnSafetyCheckId}`. The event must be `Approved` (`409
+EVENT_NOT_WITHDRAWN`). **Record first, then event**: the round is restored,
+then the event moves `Approved → Confirmed` with `restoredSafetyCheckId`. If
+that event move fails, the event stays `Approved` with its round approved
+again — safe, because nothing reads as confirmed without an approval — and it
+is logged at `ERROR`; the coordinator resubmits. `200 {event, safetyCheck}`.
 
 ## `GET /safety-checks/readiness?eventId=<uuid>&coordinatorId=<uuid>`
 

@@ -249,7 +249,7 @@ def test_booking_create_and_edit_forward_catalogue_buffers(monkeypatch):
         "capacity": 100,
         "status": "Available",
     }
-    monkeypatch.setattr(routes, "get_event", lambda *args: {})
+    monkeypatch.setattr(routes, "get_event", lambda *args: {"status": "Under Review"})
     monkeypatch.setattr(routes, "get_venues", lambda: [venue])
     create_calls, update_calls = [], []
     monkeypatch.setattr(

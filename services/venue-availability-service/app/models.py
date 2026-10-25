@@ -19,6 +19,7 @@ register_uuid()
 BASE_COLUMNS = (
     "booking_id, event_id, venue_id, requested_start_time, requested_end_time, "
     "required_capacity, venue_requirements, status, requested_by, reviewed_by, "
+    "requested_at, "
 )
 COLUMNS = BASE_COLUMNS + "rejection_closure_id, rejection_closure_start, rejection_closure_end, rejection_closure_reason, rejected_at"
 LEGACY_COLUMNS = BASE_COLUMNS + (
@@ -105,6 +106,13 @@ def serialize(row):
         "status": row["status"],
         "requestedBy": str(row["requested_by"]) if row["requested_by"] else None,
         "reviewedBy": str(row["reviewed_by"]) if row["reviewed_by"] else None,
+        # SCRUM-28 AC2: when the request was recorded. Legacy rows, and hold
+        # rows that never carry the column, serialise as None.
+        "requestedAt": (
+            _aware(row["requested_at"]).astimezone(SINGAPORE).isoformat()
+            if row.get("requested_at")
+            else None
+        ),
         "conflictReason": row.get("conflict_reason"),
         "closureRejection": (
             dict(
@@ -397,8 +405,8 @@ def create_booking(
                 f"""INSERT INTO public."VenueBooking"
                     (booking_id, event_id, venue_id, requested_start_time,
                      requested_end_time, required_capacity, venue_requirements,
-                     status, requested_by)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'Pending Review', %s)
+                     status, requested_by, requested_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'Pending Review', %s, now())
                     RETURNING {booking_columns()}""",
                 [
                     booking_id,
@@ -463,20 +471,25 @@ def update_booking(
                     SET venue_id = %s, requested_start_time = %s,
                         requested_end_time = %s, required_capacity = %s,
                         venue_requirements = %s, status = 'Pending Review',
-                        reviewed_by = NULL, conflict_reason = NULL
+                        reviewed_by = NULL, conflict_reason = NULL,
+                        -- SCRUM-28 Part B: a changed request rejoins the
+                        -- Venue Staff queue as a new submission.
+                        requested_at = now()
                     WHERE booking_id = %s AND event_id = %s
                     RETURNING {booking_columns()}""",
                 [
                     venue_id,
-                    start,
-                    end,
+                    # Naive Singapore local time, as in create_booking: without
+                    # _aware() Postgres reads it in the session time zone (UTC).
+                    _aware(start),
+                    _aware(end),
                     required_capacity,
                     venue_requirements,
                     booking_id,
                     event_id,
                 ],
             )
-            saved = cursor.fetchone()
+            saved = _localize(cursor.fetchone())
     return serialize(saved)
 
 

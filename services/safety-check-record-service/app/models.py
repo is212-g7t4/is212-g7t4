@@ -323,8 +323,14 @@ def reopen_round(database_url, safety_check_id, decided_at):
             return serialize(cursor.fetchone())
 
 
-def withdraw_approval(database_url, safety_check_id, withdrawn_by, reason):
+def withdraw_approval(database_url, safety_check_id, withdrawn_by, reason, open_next_round=True):
     """Withdraw round N's approval and open round N+1 (SCRUM-153 AC1, AC3).
+
+    With `open_next_round=False` (SCRUM-28 Part B: a venue booking of a
+    Confirmed event changed) round N is withdrawn and nothing is opened: the
+    event goes back to 'Approved', Venue Staff re-review the booking, and the
+    coordinator then resubmits through SCRUM-149, which opens round N+1.
+    Returns `(withdrawn, None)` in that case.
 
     One transaction, so the event's safety history can never show an approval
     withdrawn with no new round waiting, or a new round with the old approval
@@ -363,6 +369,8 @@ def withdraw_approval(database_url, safety_check_id, withdrawn_by, reason):
                 [APPROVAL_WITHDRAWN, withdrawn_by, clean_notes(reason), safety_check_id],
             )
             withdrawn = cursor.fetchone()
+            if not open_next_round:
+                return serialize(withdrawn), None
             # Round N's notes carry forward: the coordinator described the
             # same event, and the Safety Officer reviewing round N+1 needs
             # them as a starting point rather than a blank round.
@@ -386,6 +394,10 @@ def withdraw_approval(database_url, safety_check_id, withdrawn_by, reason):
 
 def restore_approval(database_url, safety_check_id, opened_safety_check_id):
     """Compensation only: undo the withdrawal this request itself just made.
+
+    `opened_safety_check_id=None` undoes a withdrawal that opened no round
+    (SCRUM-28 Part B). Round N must then still be the latest round, so this
+    can never un-withdraw an approval whose round N+1 exists.
 
     Safety Check Service calls this when it withdrew the approval but could
     not then save the edit and move the event, so the event would otherwise
@@ -419,6 +431,12 @@ def restore_approval(database_url, safety_check_id, opened_safety_check_id):
             if existing["status"] != APPROVAL_WITHDRAWN:
                 raise RoundNotRestorableError
 
+            if opened_safety_check_id is None:
+                latest = _latest_round(cursor, existing["event_id"], lock=True)
+                if latest["round_number"] != existing["round_number"]:
+                    raise RoundNotRestorableError
+                return _reinstate(cursor, safety_check_id)
+
             cursor.execute(
                 f"""SELECT {COLUMNS} FROM public."SafetyCheck"
                     WHERE safety_check_id = %s
@@ -440,15 +458,20 @@ def restore_approval(database_url, safety_check_id, opened_safety_check_id):
                 'DELETE FROM public."SafetyCheck" WHERE safety_check_id = %s',
                 [opened_safety_check_id],
             )
-            cursor.execute(
-                f"""UPDATE public."SafetyCheck"
-                    SET status = %s, withdrawn_at = NULL, withdrawn_by = NULL,
-                        withdrawal_reason = NULL
-                    WHERE safety_check_id = %s
-                    RETURNING {COLUMNS}""",
-                [SAFETY_APPROVED, safety_check_id],
-            )
-            return serialize(cursor.fetchone())
+            return _reinstate(cursor, safety_check_id)
+
+
+def _reinstate(cursor, safety_check_id):
+    """Put round N back to 'Safety Approved' with the three withdrawal columns cleared."""
+    cursor.execute(
+        f"""UPDATE public."SafetyCheck"
+            SET status = %s, withdrawn_at = NULL, withdrawn_by = NULL,
+                withdrawal_reason = NULL
+            WHERE safety_check_id = %s
+            RETURNING {COLUMNS}""",
+        [SAFETY_APPROVED, safety_check_id],
+    )
+    return serialize(cursor.fetchone())
 
 
 def clean_notes(value):

@@ -68,3 +68,61 @@ test('other roles cannot load or review venue requests', () => {
   expect(screen.getByText('Venue requests are visible only to Venue Staff.')).toBeInTheDocument()
   expect(fetchVenueRequests).not.toHaveBeenCalled()
 })
+// SCRUM-28 AC3: staff see the event's own dates with its requests.
+test('SCRUM-28 AC3: each event card shows the event dates and when the request was submitted', async () => {
+  vi.mocked(fetchVenueRequests).mockResolvedValue([{ ...event, eventStart: '2026-11-01T09:00:00', eventEnd: '2026-11-01T17:00:00',
+    bookings: [{ ...booking, requestedAt: '2026-10-01T02:30:00+00:00' }] }])
+  show()
+  expect(await screen.findByText(/Event: Sun, 1 Nov · 9:00 am – 5:00 pm/)).toBeInTheDocument()
+  expect(screen.getByText('Submitted 1 Oct 2026, 10:30 am')).toBeInTheDocument()
+})
+
+test('SCRUM-28 AC3: an event without dates says so, and a legacy request has no submitted line', async () => {
+  vi.mocked(fetchVenueRequests).mockResolvedValue([{ ...event, eventStart: null, eventEnd: null, bookings: [{ ...booking, requestedAt: null }] }])
+  show()
+  expect(await screen.findByText(/Event dates not set/)).toBeInTheDocument()
+  expect(screen.queryByText(/^Submitted /)).not.toBeInTheDocument()
+})
+
+// SCRUM-28 AC4: requests needing a decision are identifiable as awaiting review.
+test('SCRUM-28 AC4: both pending spellings read "Awaiting review" and are counted', async () => {
+  vi.mocked(fetchVenueRequests).mockResolvedValue([{ ...event, eventStatus: 'Under Review', bookings: [
+    { ...booking, id: 'new', status: 'Pending Review' },
+    { ...booking, id: 'legacy', status: 'Pending', venueName: 'Studio' },
+    { ...booking, id: 'done', status: 'Approved', venueName: 'Annex' },
+  ] }])
+  show()
+  expect(await screen.findByText('2 awaiting review')).toBeInTheDocument()
+  expect(screen.getAllByText('Awaiting review', { selector: '.status-badge' })).toHaveLength(2)
+  expect(screen.getByText('Approved', { selector: '.status-badge' })).toBeInTheDocument()
+  expect(screen.queryByText('Pending Review', { selector: '.status-badge' })).not.toBeInTheDocument()
+})
+
+test('SCRUM-28 AC4: the count follows a decision made on the page', async () => {
+  vi.mocked(fetchVenueRequests).mockResolvedValue([{ ...event, eventStatus: 'Under Review', bookings: [booking, { ...booking, id: 'b2' }] }])
+  vi.mocked(reviewVenueRequest).mockResolvedValue({ ...booking, status: 'Approved' })
+  show()
+  expect(await screen.findByText('2 awaiting review')).toBeInTheDocument()
+  fireEvent.click(screen.getAllByRole('button', { name: 'Approve' })[0])
+  expect(await screen.findByText('1 awaiting review')).toBeInTheDocument()
+})
+
+test('SCRUM-28 AC4: the "Awaiting review" filter still asks the API for Pending', async () => {
+  show()
+  await screen.findByText('Grand Hall')
+  expect(screen.getByRole('option', { name: 'Awaiting review' })).toHaveValue('Pending')
+  fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'Pending' } })
+  await waitFor(() => expect(fetchVenueRequests).toHaveBeenLastCalledWith(user, 'Pending'))
+})
+
+test.each([
+  ['Submitted', 'Opens for review when the event is Under Review'],
+  ['Pending Safety Check', 'Not open for review while the event is Pending Safety Check'],
+])('SCRUM-28 AC4: an awaiting request on a %s event explains why it has no actions', async (eventStatus, text) => {
+  vi.mocked(fetchVenueRequests).mockResolvedValue([{ ...event, eventStatus, bookings: [booking] }])
+  show()
+  const row = (await screen.findByText('Grand Hall')).closest('tr')!
+  expect(within(row).queryByRole('button')).not.toBeInTheDocument()
+  expect(within(row).getByText(text)).toBeInTheDocument()
+  expect(within(row).getByText('Awaiting review', { selector: '.status-badge' })).toBeInTheDocument()
+})
