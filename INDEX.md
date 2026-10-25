@@ -6,13 +6,11 @@ it owns. For *why* the architecture looks like this, see
 [docs/microservices-diagram-notes.md](docs/microservices-diagram-notes.md) —
 this file is a directory, not a design rationale.
 
-> **Status:** two template services and the frontend's dependencies are
-> scaffolded (see below); User, Event, Coordinator Assignment, Registration,
-> Venue, Venue Booking, and Venue Availability are built (see their rows
-> below — User remains deliberately minimal and read-only
-> of their eventually-planned scope); the remaining real services in this
-> file are still **planned** — copy the matching template to create each
-> one. Update the status column as each service is actually created.
+> **Status:** two template services are scaffolded. The React frontend has
+> implemented workflows, including the notification bell/inbox; Notification
+> Service and its RabbitMQ consumer are built. See the rows below for each
+> service's implemented scope and remaining planned work. User Service remains
+> deliberately minimal and read-only.
 >
 > **Architecture note:** Booking Conflict Service (previously listed as a
 > separate atomic) has been merged into Venue Availability Service — see
@@ -23,7 +21,7 @@ this file is a directory, not a design rationale.
 ```
 is212-g7t4/
 ├── frontend/
-│   └── event-management-ui/            # React SPA — Vite scaffold, deps installed, no real UI yet
+│   └── event-management-ui/            # React SPA — event/venue/safety flows and notification bell/inbox
 ├── services/
 │   ├── _template-atomic-service/       # copy this to start any atomic service
 │   ├── _template-composite-service/    # copy this to start any composite service
@@ -41,7 +39,7 @@ is212-g7t4/
 │   ├── equipment-request-service/      # atomic (built, request records + review)
 │   ├── registration-service/           # atomic (built, read-only)
 │   ├── safety-check-record-service/    # atomic (built) — owns the SafetyCheck review rounds
-│   ├── notification-service/           # atomic (planned)
+│   ├── notification-service/           # atomic (built; inbox API + consumer), port 5015
 │   ├── forum-service/                  # atomic, MongoDB (planned)
 │   └── email-sms-wrapper-service/      # wrapper (planned)
 ├── docs/
@@ -67,7 +65,7 @@ and `.env.example`. Copy one, rename it, then fill in the real logic.
 
 | Path | Description | Status |
 |---|---|---|
-| `frontend/event-management-ui/` | React + TypeScript SPA (Vite default template). Dependencies installed via `npm install`; no app code written yet. Calls composite/atomic services directly — no API gateway. | deps installed |
+| `frontend/event-management-ui/` | React + TypeScript SPA (Vite). Implemented event/venue/safety flows plus notification bell/inbox, read controls and validated event/venue-request destinations in `frontend/event-management-ui/src/features/notifications/`. Calls composite/atomic services directly — no API gateway. | built (implemented flows) |
 
 ## Composite services
 
@@ -78,7 +76,7 @@ composites are allowed to call other services.
 |---|---|---|---|---|
 | Event Workflow Service | `services/event-workflow-service/` | Event, User, Venue Availability, Venue, Equipment Request, Equipment | SCRUM-20, port 5014: `PATCH /events/:id/details` lets the assigned coordinator, or the Event Coordinator Lead when no coordinator is assigned (role looked up in User Service), edit an event. Event Service classifies the edit with a `dryRun`; a high-impact one is checked against venue bookings (new dates overlap none of the live bookings), equipment stock in the new window and venue capacity (attendance increase), and a contradiction is refused with `409 CHANGE_CONTRADICTS_ARRANGEMENTS` and the reasons. Otherwise Event Service saves it. The change/cancellation cascade, Forum and Broker are not built — **provisional**, see open question below. | built (edit validation) |
 | Coordinator Assignment Service | `services/coordinator-assignment-service/` | User, Event, Forum, Broker | Assigns/reassigns the Event Coordinator on an event; only the Event Coordinator Lead (role `Event Coordinator Lead`) may do so. No Forum call yet. | built |
-| Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Venue Availability, Safety Check Record, Safety Check, Forum, Broker | Submits independently evaluated venue requests (`POST /booking-requests`) with booking-level time, capacity and requirements; rejects submissions unless the event is Submitted, Under Review, Approved or Safety Changes Requested (SCRUM-28); lists every request for an event (`GET /events/<id>/booking-requests`); gives Venue Staff a queue (`GET /booking-requests`) with each event's dates and which requests are awaiting review, plus approval/rejection; and provides venue search (`GET /venue-search`, SCRUM-26). Validates event + venue, then persists/conflict-checks via Venue Availability Service. Editing or cancelling a booking is refused while the safety check is pending or the event is closed; on a Confirmed event it first asks Safety Check Service to withdraw the safety approval (event back to Approved) and restores it if the booking change fails (SCRUM-28 Part B). No Forum call/notification yet. | built |
+| Venue Booking Service | `services/venue-booking-service/` | Event, Venue, Venue Availability, Safety Check Record, Safety Check, Forum, Broker | Submits independently evaluated venue requests (`POST /booking-requests`) with booking-level time, capacity and requirements; rejects submissions unless the event is Submitted, Under Review, Approved or Safety Changes Requested (SCRUM-28); lists every request for an event (`GET /events/<id>/booking-requests`); gives Venue Staff a queue (`GET /booking-requests`) with each event's dates and which requests are awaiting review, plus approval/rejection; and provides venue search (`GET /venue-search`, SCRUM-26). Validates event + venue, then persists/conflict-checks via Venue Availability Service. Editing or cancelling a booking is refused while the safety check is pending or the event is closed; on a Confirmed event it first asks Safety Check Service to withdraw the safety approval (event back to Approved) and restores it if the booking change fails (SCRUM-28 Part B). No Forum call; `services/venue-booking-service/app/dispatcher.py` publishes venue-closure rejection notifications through RabbitMQ, with React bell/inbox links to the rejected request. | built |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment Availability, Forum, Broker | Two sub-flows: request submission, and technical-support approval/rejection. | planned |
 | Attendee Registration Service | `services/attendee-registration-service/` | Event, Registration, User | Registers an attendee after checking that the event is confirmed, open, and has capacity. Lists registrations with the attendee's name, email and organisation from User Service (`GET /events/<id>/registrations` for coordinators). No Forum call. | built (registration) |
 | Equipment Reservation Service | `services/equipment-reservation-service/` | Event, Equipment, Equipment Request | Availability checking and review validation (SCRUM-33), port 5010: `GET /equipment-reservations` groups requests by event with each Pending line's two-stage availability (physical status, then total less quantity held by Approved lines of other non-rejected events overlapping the window); `PATCH /equipment-reservations/requests/:id` and `.../events/:id` approve/reject, blocking Approve while any line is insufficient. Request submission not built yet; no Forum call/notification. | built (review) |
@@ -102,14 +100,14 @@ call another service, Forum, or the broker.
 | Equipment Request | `services/equipment-request-service/` | Supabase Postgres | Equipment request records (`public."EquipmentRequest"`) and their Pending/Approved/Rejected status. `GET /equipment-requests[?status=&eventId=&eventIds=]`, `GET /equipment-requests/:id`, `PATCH /equipment-requests/:id` and `PATCH /events/:id/equipment-requests` (Technical Support, SCRUM-33). Does no availability checking — that is Equipment Reservation Service | built (records + review) |
 | Registration | `services/registration-service/` | Supabase Postgres | Attendee registration records. Read-only (`GET /registrations?eventId=`) — no registration/withdrawal endpoints yet; called directly by the frontend (a "simple read," no composite needed) | built (read-only) |
 | Safety Check Record | `services/safety-check-record-service/` | Supabase Postgres | Operational Safety Check records (`public."SafetyCheck"`), port 5013 — one row per **review round**, so earlier decisions stay visible as history. `POST /safety-check-records` opens round N+1 and refuses a new round while one is `Pending` (`UNIQUE (event_id, round_number)` behind it); `GET /safety-check-records?eventId=[&status=]` lists rounds newest first with each round's flags; `PATCH /safety-check-records/:id/decision` decides the open round under `FOR UPDATE` (SCRUM-150's race guard) as `Safety Approved`, `Changes Requested` (1-3 `SafetyCheckFlag` rows, area-level only) or `Safety Rejected` (SCRUM-151); `DELETE /safety-check-records/:id` and `POST /safety-check-records/:id/reopen` undo a create/decide for Safety Check Service's rollback only, the latter also clearing the round's flags. SCRUM-153 adds `POST /safety-check-records/:id/withdraw`, which in one transaction turns round N from `Safety Approved` into `Approval Withdrawn` (keeping its decision fields, plus `withdrawn_at`/`withdrawn_by`/`withdrawal_reason`) and opens round N+1 as `Pending` with round N's notes — its `FOR UPDATE` is the re-check's race guard; `POST /safety-check-records/:id/restore` undoes that, for Safety Check Service's rollback only. | built (records, decide, withdraw) |
-| Notification | `services/notification-service/` | Supabase Postgres | Notification records; consumes the broker queue, calls the Email/SMS Wrapper | planned |
+| Notification | `services/notification-service/` | Supabase Postgres | Inbox list/unread count/read-state API on host port 5015; `services/notification-service/app/consumer.py` consumes durable `notifications.v1` messages into PostgreSQL. Malformed-message diagnostics/replay in `services/notification-service/app/diagnostics.py`; bell/inbox UI lives in `frontend/event-management-ui/src/features/notifications/`. Email/SMS delivery is not implemented. | built (in-app notifications) |
 | Forum / Communication | `services/forum-service/` | **MongoDB (Atlas)** | All communication tied to a request — clarifications, approval/rejection reasons, comments — keyed by `entityType` + `entityId` | planned |
 
 ## Infrastructure
 
 | Component | Path / source | Description | Status |
 |---|---|---|---|
-| Message Broker | RabbitMQ image, `docker-compose.yml` | The only async path — composites publish, Notification Service consumes | planned |
+| Message Broker | RabbitMQ image, `docker-compose.yml` | Durable `notifications.v1` queue; loopback AMQP 5672 / management 15672; persistent `notification-rabbitmq-data` volume. Composite dispatchers publish; the consumer in `services/notification-service/` stores inbox records. | configured in Compose |
 | Email/SMS Wrapper | `services/email-sms-wrapper-service/` | Wraps the external email/SMS provider; called only by Notification Service | planned |
 
 ## Running a template (or any scaffolded service) locally

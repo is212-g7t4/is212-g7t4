@@ -399,6 +399,7 @@ def submit_event(database_url, data):
                 [event_id, *values, data.get("organiserId") or None],
             )
             saved = cursor.fetchone()
+            record_submission(cursor, saved)
     return serialize(saved)
 
 
@@ -1873,6 +1874,21 @@ def _record_notification(cursor, event, notification_type, label, **facts):
     )
 
 
+def record_submission(cursor, event):
+    """Persist submission facts atomically; the composite resolves names/recipients later."""
+    if not event.get("organiser_id"):
+        logging.getLogger(__name__).warning("Submission notification missing organiser event=%s", event["event_id"])
+        return
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  organiserId=str(event["organiser_id"]),
+                  startDateTime=_aware(event["preferred_start_date"]).astimezone(SINGAPORE).isoformat(),
+                  endDateTime=_aware(event["preferred_end_date"]).astimezone(SINGAPORE).isoformat())
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), "event.submission-fanout", Json(source)),
+    )
+
+
 def record_approval(cursor, event):
     """Save approval facts in the decision transaction without outward calls."""
     _record_notification(cursor, event, "event.approval", "Approval", decision="Approved")
@@ -1978,6 +1994,8 @@ def _write_draft(database_url, event_id, organiser_id, details, status):
                 [*_draft_values(details), status, event_id],
             )
             updated = cursor.fetchone()
+            if status == "Submitted":
+                record_submission(cursor, updated)
     return serialize(updated)
 
 

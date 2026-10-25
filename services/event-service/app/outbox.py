@@ -1,7 +1,8 @@
 """Owning-service outbox. A lease token fences every mutation; freeze is once-only."""
 
 import hmac
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
+from datetime import datetime, UTC
 from contextlib import contextmanager
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
@@ -58,6 +59,29 @@ def mutate(dsn, identifier, token, action, data):
         row = cursor.fetchone()
         if row is None or not row["lease_valid"]:
             return None
+        if action == "expand":
+            # One fenced transaction freezes the lookup result and all recipients.
+            # A lost HTTP response cannot create duplicate children on lease recovery.
+            if row["type"] != "event.submission-fanout":
+                raise ValueError("Only submission intents can expand")
+            recipients = data.get("recipientIds")
+            name = data.get("organiserName")
+            if not isinstance(recipients, list) or not isinstance(name, str) or not name.strip():
+                raise ValueError("Invalid submission recipients/name")
+            recipients = sorted({str(UUID(value)) for value in recipients})
+            captured = datetime.now(UTC).isoformat()
+            for recipient in recipients:
+                source = {**row["source"], "recipientId": recipient,
+                          "organiserName": name, "organiserNameCapturedAt": captured}
+                cursor.execute(
+                    'INSERT INTO public."EventNotificationOutbox" (source_id,type,source,created_at) VALUES (%s,%s,%s,%s)',
+                    (str(uuid5(UUID(identifier), recipient)), "event.submission", Json(source), row["created_at"]),
+                )
+            cursor.execute(
+                'UPDATE public."EventNotificationOutbox" SET published_at=now(),lease_token=NULL,lease_until=NULL,last_error=NULL WHERE source_id=%s',
+                (identifier,),
+            )
+            return {"id": identifier, "status": "expanded", "recipients": len(recipients)}
         if action == "freeze":
             if row["envelope"] is None:
                 envelope = data.get("envelope")
@@ -113,7 +137,10 @@ def validate_envelope(value, row):
     if destination != dict(kind="event-details", eventId=source["eventId"]):
         raise ValueError("Invalid destination")
     details = value.get("details")
-    if row["type"] == "event.coordinator-assignment":
+    if row["type"] == "event.submission":
+        expected_details = source
+        message = f"{source['organiserName']} submitted {source['eventName']}. Review required."
+    elif row["type"] == "event.coordinator-assignment":
         name = details.get("coordinatorName") if isinstance(details, dict) else None
         if not isinstance(name, str) or not name.strip():
             raise ValueError("Missing coordinator name")
@@ -178,7 +205,7 @@ def operate(identifier=None, action=None):
                 released = cursor.fetchone()
             return ((jsonify(id=str(identifier), status="released"), 200) if released
                     else (jsonify(message="Held work not found."), 409))
-        if action not in {"freeze", "published", "retry", "hold"}:
+        if action not in {"freeze", "published", "retry", "hold", "expand"}:
             return jsonify(message="Unknown operation."), 404
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
