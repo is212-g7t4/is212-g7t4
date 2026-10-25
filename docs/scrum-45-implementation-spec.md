@@ -1,6 +1,6 @@
 # SCRUM-45 — Event Organiser Status and Update Notifications
 
-Status (October 21, 2026): implemented across tickets 01–04; combined ticket 05 verification is recorded in `scrum-45-final-verification.md`. Independent standards/specification review and ticket closure remain parent-owned and pending. Tracker publication is not asserted here.
+Status (October 21, 2026): implemented across tickets 01–04; combined ticket 05 verification is recorded in [verification summary](scrum-45-verification-summary.md). Independent standards/specification review and ticket closure remain parent-owned and pending. Tracker publication is not asserted here.
 
 Historical baseline: this specification was originally written during design/first-RED preparation, before production implementation. The original plan below remains a requirements/chronology record, not a current claim that implementation is absent.
 

@@ -32,6 +32,8 @@ services:
       - ./services/coordinator-assignment-service/.env
     environment:
       <<: *frontend-environment
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      USER_SERVICE_URL: "http://user-service:5000"
     ports:
       - "5004:5000"
 

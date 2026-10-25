@@ -13,12 +13,16 @@ OPTIONAL = (
     "accessibilityNeeds",
     "equipmentRequirements",
     "registrationNeeds",
+    "withdrawalDeadline",
 )
 ATTENDANCE_ERROR = (
     "Expected Attendance must be a positive whole number (maximum 2147483647)."
 )
 DATE_ERROR = "Preferred dates must be valid local dates and times."
 PERIOD_ERROR = "Preferred End Date & Time must be after the start."
+WITHDRAWAL_DEADLINE_ERROR = (
+    "Withdrawal Deadline must be a valid local date and time no later than the event start."
+)
 
 
 def _blank(data, key):
@@ -62,6 +66,17 @@ def _period_errors(start, end):
     return [PERIOD_ERROR] if end <= start else []
 
 
+def _withdrawal_deadline_errors(deadline, start):
+    if _blank({"deadline": deadline}, "deadline"):
+        return []
+    try:
+        deadline_value = _local_datetime(deadline)
+        start_value = _local_datetime(start)
+    except (ValueError, TypeError):
+        return [WITHDRAWAL_DEADLINE_ERROR]
+    return [WITHDRAWAL_DEADLINE_ERROR] if deadline_value > start_value else []
+
+
 def validate(data):
     missing = [label for key, label in REQUIRED.items() if _blank(data, key)]
     errors = _type_errors(data)
@@ -69,6 +84,9 @@ def validate(data):
         return missing, errors
     errors = _attendance_errors(data["expectedAttendance"])
     errors += _period_errors(data["preferredStartDate"], data["preferredEndDate"])
+    errors += _withdrawal_deadline_errors(
+        data.get("withdrawalDeadline", ""), data["preferredStartDate"]
+    )
     return missing, errors
 
 
@@ -93,4 +111,14 @@ def validate_draft(data):
             _local_datetime(data["preferredEndDate" if start_blank else "preferredStartDate"])
         except ValueError:
             errors.append(DATE_ERROR)
+    if not _blank(data, "withdrawalDeadline"):
+        if start_blank:
+            try:
+                _local_datetime(data["withdrawalDeadline"])
+            except (ValueError, TypeError):
+                errors.append(WITHDRAWAL_DEADLINE_ERROR)
+        else:
+            errors += _withdrawal_deadline_errors(
+                data["withdrawalDeadline"], data["preferredStartDate"]
+            )
     return missing, errors

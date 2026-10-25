@@ -5,9 +5,9 @@ a "simple read" (per `AGENTS.md`: the UI may call an owning atomic directly
 without a composite in between), the same way it already calls
 `event-service` and `user-service`.
 
-The internal `POST /registrations` endpoint is called by Attendee Registration
-Service after event validation. It serializes registrations per event and
-enforces duplicate-email and capacity rules before inserting a confirmed row.
+The internal write endpoints are called by Attendee Registration Service after business validation. 
+Registration Service serializes writes per event, enforces
+attendee uniqueness and capacity, and owns the status and audit timestamp.
 
 ## 1. Start the service
 
@@ -36,4 +36,7 @@ Alternatively, after creating `services/registration-service/.env`, run
 - `GET /registrations?attendeeId=<uuid>` — every registration belonging to
   one attendee, newest first.
 - `POST /registrations` — internal atomic write used by Attendee Registration
-  Service. Requires event and attendee IDs, capacity, full name and email.
+  Service. Requires event and attendee IDs plus event capacity.
+- `PATCH /registrations/<registrationId>/withdraw` — internal atomic write;
+  verifies the attendee owns the row, changes `Confirmed` to `Withdrawn`, and
+  records `withdrawn_at` in the same transaction.

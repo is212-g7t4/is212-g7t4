@@ -10,6 +10,9 @@ import { StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
 import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
 import { ClarificationHistory } from '../features/event/ClarificationHistory'
+import { ChangeRequestDialog } from '../features/event/ChangeRequestDialog'
+
+const CHANGE_REQUEST_STATUSES = ['Submitted', 'Under Review', 'Approved'] as const
 
 export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName, backLabel, onBack }: { eventId: string; organiserId?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }) {
   const [event, setEvent] = useState<SubmittedEvent | null>(null)
@@ -23,6 +26,8 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
   const [responding, setResponding] = useState(false)
   const [responseError, setResponseError] = useState('')
   const [responseMessage, setResponseMessage] = useState('')
+  const [requestingChanges, setRequestingChanges] = useState(false)
+  const [changeRequestSubmitted, setChangeRequestSubmitted] = useState(false)
 
   useEffect(() => {
     if (!organiserId) return
@@ -81,7 +86,11 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
       <button className="button small" onClick={() => { setLoading(true); setError(''); setRegistrationsLoading(true); setRefresh((value) => value + 1) }}><RefreshIcon size={13} /> Refresh</button>
     </section>
     {loading ? <DetailPanelSkeleton /> : error ? <p className="field-error" role="alert">{error}</p> : event && <article className="panel event-card">
-      <header className="event-card-header"><h2>{event.eventName}</h2><StatusBadge status={event.status} /></header>
+      <header className="event-card-header"><h2>{event.eventName}</h2><div className="event-card-header-actions">
+        <StatusBadge status={event.status} />
+        {!changeRequestSubmitted && !requestingChanges && CHANGE_REQUEST_STATUSES.includes(event.status as typeof CHANGE_REQUEST_STATUSES[number]) && organiserId &&
+          <button className="button primary small" type="button" onClick={() => setRequestingChanges(true)}>Request changes</button>}
+      </div></header>
       {event.decision?.status === 'Rejected' && <section className="event-card-section">
         <h3>Event request decision</h3>
         <p>Rejected</p>
@@ -89,6 +98,10 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
         <p style={{ whiteSpace: 'pre-wrap' }}>{event.decision.reason}</p>
       </section>}
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
+
+      {requestingChanges && organiserId && <ChangeRequestDialog event={event} organiserId={organiserId}
+        onCancel={() => setRequestingChanges(false)} onSubmitted={() => { setRequestingChanges(false); setChangeRequestSubmitted(true) }} />}
+      {changeRequestSubmitted && <p className="event-card-section" role="status">Your change request was submitted and is pending review.</p>}
 
       {event.status === 'Clarification Requested' && <section className="event-card-section">
         <h3>Response required</h3>

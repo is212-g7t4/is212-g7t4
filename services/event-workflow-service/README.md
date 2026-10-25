@@ -66,29 +66,30 @@ source-ID deduplication preserves read state. A publisher confirmation is not
 an inbox receipt. Diagnose worker logs and Event-owned pending rows/last_error.
 No atomic calls other services or RabbitMQ.
 
-### Real isolated acceptance run
+### SCRUM-45 service tests
 
-With Docker Desktop running and `postgres:17` / `rabbitmq:4-management`
-available, first `uv sync --locked` in Event, Notification, User and Event Workflow,
-then from Event Workflow:
+From this service directory, with dotenv disabled and no shared database credentials:
 
 ```sh
-uv run --with psycopg2-binary python -m pytest -m integration --no-cov
+env -i HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" PYTHON_DOTENV_DISABLED=1 FLASK_SKIP_DOTENV=1 \
+  uv run python -m pytest
+env -i HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" PYTHON_DOTENV_DISABLED=1 FLASK_SKIP_DOTENV=1 \
+  uv run python -m pytest tests/integration/test_scrum45_notifications.py -m integration --no-cov
 ```
 
-The tests own disposable UUID-named containers, separate Event/Notification/User
-databases, real HTTP/consumer/worker processes, synthetic identities and finally
-cleanup. The User lookup is the real User Service, not an HTTP mock server.
-They disable dotenv and never use a remote database. They check both approval
-and rejection paths, distinct approval/initial-assignment updates, clean and
-existing rejection-only schema upgrades, broker outage/recovery, duplicate delivery/read-state preservation,
-recipient isolation and real mutation rollback. Use `python -m pytest` so uv's
-overlay driver is available; the bare pytest executable uses its venv shebang.
-Browser checks remain separate mocked Playwright journeys, not persistence
-proof (`event-approval-notifications.spec.ts`, `event-rejection-notifications.spec.ts`,
-`event-assignment-notifications.spec.ts`, `event-reassignment-notifications.spec.ts`
-and existing `notifications.spec.ts`).
-
+The story unit module is `tests/unit/test_scrum45_notifications.py` in Event,
+Event Workflow and Notification; the integration module has the same name in
+each service. Event/Notification use their own disposable PostgreSQL 17.6 with
+full migrations (Docker required); Workflow uses strict HTTP stubs and a recording
+publisher, without a database or broker. Event's separate
+`tests/integration/test_infra_migrations.py` preserves full-chain install/upgrade
+checks. See the [team integration guide](../../docs/testing/integration-testing.md).
+These service tests do not prove cross-service delivery or browser navigation.
+SCRUM-45 E2E tests are handed off. Ordinary `scripts/scrum45_support/` helpers
+support the retained `scripts/scrum45_manual_sandbox.py` launcher and its lifecycle
+safety tests; they are not an acceptance suite or service integration fixtures.
+Existing teammate E2E is unchanged.
+See `docs/scrum-45-manual-testing.md` for the separate shared-development gates.
 
 ### Initial assignment preparation and name repair (AC4 / DR6)
 
@@ -109,9 +110,6 @@ same historical change eligible again. This does not alter assignment or
 substitute the current coordinator. Held work is never deleted or automatically
 published with an ID-only placeholder.
 
-`test_initial_assignment_delivery.py` additionally verifies real User lookup,
-missing/blank-name hold/release, unrelated rejection delivery, transient User
-503 recovery, assignment transaction rollback, broker recovery with a renamed
-user after freeze and duplicate consumption. The browser regression
-`event-assignment-notifications.spec.ts` separately checks the existing bell,
-inbox name rendering and event-only link using mocked APIs. No new UI is added.
+`tests/integration/test_scrum45_notifications.py` checks saved-ID lookup,
+missing-name hold, transient lookup retry and independent job progress with strict
+Event/User HTTP stubs; owner transaction/storage is tested in the owning services.

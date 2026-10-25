@@ -1,29 +1,37 @@
-"""SCRUM-45: As an Event Organiser, I want to receive an in-app notification
-when the Lead Coordinator approves or rejects my event request, so that I know
-the outcome and who is responsible for coordinating my event.
-DR3 verification infrastructure: isolated fixtures must report cleanup honestly.
+"""Infra: SCRUM-45 retained manual-sandbox lifecycle safety tests.
+
+Supporting DR3 (retry/recovery) requires verification resources to be cleaned up
+honestly; these are not additional acceptance criteria or delivery tests.
+Real: cleanup/wait helpers; the final test starts only its own local process group.
+Doubled: process signalling, clock-adjacent waits and Docker calls in other cases.
+Not proven: notification delivery, real Docker removal, shared-stack safety or any
+service's business rules. The process regression checks exact owned-group absence.
 """
 from unittest.mock import Mock, patch
 import subprocess
 
-from e2e.scrum45.system import cleanup_owned_resources, wait_group_gone
+from scripts.scrum45_support.system import cleanup_owned_resources, wait_group_gone
 
 
 def test_group_absence_wait_retries_transient_permission_without_claiming_success():
-    """DR3: macOS can report EPERM during group reaping; only ESRCH proves gone."""
-    with patch("e2e.scrum45.system.os.killpg", side_effect=[PermissionError(), ProcessLookupError()]):
+    """Boundary: simulate permission denied followed by process-group absence; the wait succeeds
+    only after absence is observed, avoiding a false cleanup claim during macOS reaping.
+    """
+    with patch("scripts.scrum45_support.system.os.killpg", side_effect=[PermissionError(), ProcessLookupError()]):
         assert wait_group_gone(905, seconds=1)
 
 
 def test_group_absence_wait_never_treats_persistent_permission_as_absence():
-    """DR3: a genuinely inaccessible group must time out, not pass cleanup."""
-    with patch("e2e.scrum45.system.os.killpg", side_effect=PermissionError()):
+    """Failure: simulate persistent permission denied with an expired wait budget; the wait returns
+    false rather than treating an inaccessible group as removed.
+    """
+    with patch("scripts.scrum45_support.system.os.killpg", side_effect=PermissionError()):
         assert not wait_group_gone(905, seconds=0)
 
 
 def test_cleanup_attempts_all_resources_despite_process_log_and_container_failures():
-    """DR3 isolation: inject boundary failures and observe all process/log/container
-    attempts, exact container readback and returned diagnostics, not silent cleanup.
+    """Failure: inject process-wait, log-close and container-removal errors; cleanup attempts every
+    resource and returns all three diagnostics, so one failure cannot hide later leaks.
     """
     processes = [Mock(pid=901), Mock(pid=902)]
     processes[1].wait.side_effect = RuntimeError("wait failed")
@@ -35,7 +43,7 @@ def test_cleanup_attempts_all_resources_despite_process_log_and_container_failur
         if args[:3] == ["docker", "rm", "-fv"] and args[-1] == "owned-two":
             return subprocess.CompletedProcess(args, 1, "", "removal refused")
         return subprocess.CompletedProcess(args, 0, "", "")
-    with patch("e2e.scrum45.system.wait_group_gone", return_value=True), patch("e2e.scrum45.system.os.killpg") as kill, patch("e2e.scrum45.system.subprocess.run", side_effect=docker):
+    with patch("scripts.scrum45_support.system.wait_group_gone", return_value=True), patch("scripts.scrum45_support.system.os.killpg") as kill, patch("scripts.scrum45_support.system.subprocess.run", side_effect=docker):
         failures = cleanup_owned_resources(processes, logs, ["owned-one", "owned-two"])
     assert [call.args[0] for call in kill.call_args_list] == [902, 901]
     assert all(log.close.call_count == 1 for log in logs)
@@ -48,25 +56,25 @@ def test_cleanup_attempts_all_resources_despite_process_log_and_container_failur
 
 
 def test_cleanup_reports_remaining_container_even_after_successful_removal_response():
-    """DR3 isolation: successful docker rm is not proof; exact readback that still
-    finds the owned container must be reported rather than claiming removal.
+    """Conflict: return success from removal but still list the exact owned container; cleanup
+    reports unverified absence, so command success cannot masquerade as resource removal.
     """
     results = [subprocess.CompletedProcess([], 0, "owned", ""),
                subprocess.CompletedProcess([], 0, "owned\n", "")]
-    with patch("e2e.scrum45.system.subprocess.run", side_effect=results):
+    with patch("scripts.scrum45_support.system.subprocess.run", side_effect=results):
         failures = cleanup_owned_resources([], [], ["owned"])
     assert len(failures) == 1
     assert "absence unverified owned" in failures[0]
 
 
 def test_cleanup_kills_timed_out_process_group_and_continues_after_missing_group():
-    """DR3 isolation: timeout escalates only owned process group; already absent
-    group is harmless and container cleanup still executes and verifies absence.
+    """Failure: simulate an absent group and a timed-out owned process; cleanup escalates only the
+    owned group and still verifies container absence, preserving bounded and complete teardown.
     """
     processes = [Mock(pid=903), Mock(pid=904)]
     processes[0].wait.side_effect = [subprocess.TimeoutExpired("owned", 10), 0]
-    with patch("e2e.scrum45.system.wait_group_gone", side_effect=[True, False, True]), patch("e2e.scrum45.system.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
-        "e2e.scrum45.system.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
+    with patch("scripts.scrum45_support.system.wait_group_gone", side_effect=[True, False, True]), patch("scripts.scrum45_support.system.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
+        "scripts.scrum45_support.system.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
     ) as docker:
         assert cleanup_owned_resources(processes, [], ["owned"]) == []
     assert [call.args[0] for call in kill.call_args_list] == [904, 903, 903]
@@ -74,9 +82,9 @@ def test_cleanup_kills_timed_out_process_group_and_continues_after_missing_group
 
 
 def test_cleanup_removes_term_ignoring_child_after_group_leader_exits(tmp_path):
-    """DR3: create only our own session; parent exits on TERM while its ready
-    child ignores TERM. Require ESRCH for the whole group, not leader exit.
-    A bounded emergency kill in finally keeps a RED run from leaking the child.
+    """Failure: start an owned group whose parent exits on TERM while its ready child ignores TERM;
+    cleanup must remove the entire group, not merely reap the leader. A bounded emergency kill
+    prevents leakage if the assertion fails.
     """
     import os
     import signal
@@ -89,7 +97,11 @@ import os, signal, sys, time
 from pathlib import Path
 if os.fork() == 0:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    Path(sys.argv[1]).write_text(str(os.getpid()))
+    # Publish readiness atomically: existence must imply a complete child PID.
+    ready_file = Path(sys.argv[1])
+    pending = ready_file.with_suffix('.pending')
+    pending.write_text(str(os.getpid()))
+    pending.replace(ready_file)
     time.sleep(60)
 else:
     time.sleep(60)

@@ -53,6 +53,16 @@ class NotificationComposeConfiguration(unittest.TestCase):
         self.assertIn('INTERNAL_SERVICE_TOKEN', p.stderr)
         return {}
 
+    def test_coordinator_upstreams_do_not_use_container_localhost_defaults(self):
+        """Docker service URLs override stale env_file values without changing the database."""
+        p = self.root / 'services/coordinator-assignment-service/.env'
+        p.write_text(p.read_text() + 'EVENT_SERVICE_URL=http://localhost:5003\n'
+                     'USER_SERVICE_URL=http://localhost:5001\n')
+        env = self.render()['coordinator-assignment-service']['environment']
+        self.assertEqual(env['EVENT_SERVICE_URL'], 'http://event-service:5000')
+        self.assertEqual(env['USER_SERVICE_URL'], 'http://user-service:5000')
+        self.assertEqual(env['DATABASE_URL'], 'postgresql://fixture@db.invalid/service-specific')
+
     def test_root_configuration_needs_no_notification_env(self):
         services = self.render()
         for name in ('notification-service','notification-consumer'):
