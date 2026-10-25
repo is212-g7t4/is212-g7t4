@@ -1,11 +1,12 @@
 import json
+import logging
 from contextlib import closing
 from datetime import UTC, datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 
 # Safe both ways: validation.py imports nothing from here.
 from app import validation
@@ -634,6 +635,8 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
     Venue bookings, equipment requests and safety checks all authorise against
     the event's current coordinator_id, so changing it here hands every linked
     record to the new coordinator and takes it away from the previous one.
+    Each successful change records the same assignment notification contract,
+    with its own identity and saved recipient/event/coordinator facts.
     """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -668,6 +671,10 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 [coordinator_id, assigned_by, event_id],
             )
             assigned = cursor.fetchone()
+            _record_notification(
+                cursor, assigned, "event.coordinator-assignment", "Assignment",
+                coordinatorId=coordinator_id,
+            )
     return serialize(assigned)
 
 
@@ -1096,6 +1103,10 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 [status, json.dumps(metadata, ensure_ascii=False), event_id],
             )
             updated = cursor.fetchone()
+            if status == "Rejected" and event["status"] != status:
+                record_rejection(cursor, event, action_details)
+            if status == "Approved" and event["status"] != status:
+                record_approval(cursor, event)
     return serialize(updated)
 
 
@@ -1740,11 +1751,40 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                 ],
             )
             decided = cursor.fetchone()
+            if status == "Rejected":
+                record_rejection(cursor, event, reason_text)
+            if status == "Approved":
+                record_approval(cursor, event)
     return serialize(decided)
 
 
 def approve_event(database_url, event_id, coordinator_id):
     return decide_event(database_url, event_id, coordinator_id, "Approved")
+
+
+def _record_notification(cursor, event, notification_type, label, **facts):
+    """Save frozen source facts using the mutation's existing transaction cursor."""
+    if not event.get("organiser_id"):
+        logging.getLogger(__name__).warning("%s notification missing organiser event=%s", label, event["event_id"])
+        return
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  recipientId=str(event["organiser_id"]), **facts)
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), notification_type, Json(source)),
+    )
+
+
+def record_approval(cursor, event):
+    """Save approval facts in the decision transaction without outward calls."""
+    _record_notification(cursor, event, "event.approval", "Approval", decision="Approved")
+
+
+def record_rejection(cursor, event, reason):
+    """Save notification intent on the mutation's transaction, never call outward."""
+    _record_notification(
+        cursor, event, "event.rejection", "Rejection", decision="Rejected", reason=reason,
+    )
 
 
 def reject_event(database_url, event_id, coordinator_id, reason):
