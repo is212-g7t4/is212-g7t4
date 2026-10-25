@@ -59,10 +59,9 @@ def test_migrations_full_chain_preserves_schema_types_and_existing_data(installa
         else:
             cutoff = FIRST_SCRUM45 if installation == 'pre-scrum45' else APPROVAL
             if installation == 'latest-main-pre-scrum45':
-                scrum45_names = {FIRST_SCRUM45, APPROVAL, '20261021020000_event_notification_assignments.sql'}
                 installed = [path for path in paths if path.name in PINNED_MAIN_MIGRATIONS]
                 assert {path.name for path in installed} == set(PINNED_MAIN_MIGRATIONS)
-                pending = [path for path in paths if path.name in scrum45_names]
+                pending = [path for path in paths if path.name not in PINNED_MAIN_MIGRATIONS]
             else:
                 installed = [path for path in paths if path.name < cutoff]
                 pending = [path for path in paths if path.name >= cutoff]
@@ -144,4 +143,6 @@ def test_forward_migrations_preserve_rejection_and_all_three_types(migration_dat
         db.apply([paths[name] for name in forwards])
         assert_snapshot_preserved(db, before)
         assert_schema_and_types(db)
+        # Later additive features are still applied in full-chain regression runs.
+        db.apply([path for name, path in sorted(paths.items()) if name not in db.applied])
         assert set(db.applied) == set(paths)

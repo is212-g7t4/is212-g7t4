@@ -663,7 +663,8 @@ def test_submit_persists_organiser_id(setup):
     response = client.post("/events", json={**VALID, "organiserId": ORGANISER_ID})
     assert response.status_code == 201
     assert response.json["organiserId"] == ORGANISER_ID
-    assert cursor.execute.call_args.args[1][-1] == ORGANISER_ID
+    event_insert = next(call for call in cursor.execute.call_args_list if 'INSERT INTO public."Event"' in call.args[0])
+    assert event_insert.args[1][-1] == ORGANISER_ID
 
 
 def test_submit_rejects_invalid_organiser_id(setup):

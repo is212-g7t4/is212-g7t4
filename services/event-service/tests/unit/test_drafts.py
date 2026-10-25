@@ -337,7 +337,9 @@ def test_ac5_submitting_a_complete_draft_moves_it_to_submitted(setup):
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         draft_row(),
-        draft_row(status="Submitted", submission_date=datetime(2026, 10, 21, 2, tzinfo=UTC)),
+        draft_row(status="Submitted", submission_date=datetime(2026, 10, 21, 2, tzinfo=UTC),
+                  preferred_start_date=datetime(2030, 6, 2, 9, 15, tzinfo=UTC),
+                  preferred_end_date=datetime(2030, 6, 2, 12, 45, tzinfo=UTC)),
     ]
 
     response = client.post(
@@ -347,7 +349,7 @@ def test_ac5_submitting_a_complete_draft_moves_it_to_submitted(setup):
     assert response.status_code == 200
     assert response.json["status"] == "Submitted"
     assert response.json["submittedAt"] == "2026-10-21T02:00:00+00:00"
-    query, params = cursor.execute.call_args.args
+    query, params = next(call.args for call in cursor.execute.call_args_list if 'UPDATE public."Event"' in call.args[0])
     assert "submission_date = now()" in query
     assert params[-2:] == ["Submitted", DRAFT_ID]
 
