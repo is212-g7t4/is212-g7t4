@@ -215,7 +215,9 @@ def test_reject_booking_does_not_recheck_conflicts(setup):
     ]
 
     response = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/reject", json={"reviewedBy": USER_ID}
+        f"/venue-bookings/{BOOKING_ID}/reject",
+        # SCRUM-29 AC4: a reject now carries a reason.
+        json={"reviewedBy": USER_ID, "rejectionReason": "Venue unsuitable"},
     )
 
     assert response.status_code == 200
@@ -230,7 +232,9 @@ def test_cancelled_booking_cannot_be_approved_or_rejected(setup):
         f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}
     )
     reject = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/reject", json={"reviewedBy": USER_ID}
+        f"/venue-bookings/{BOOKING_ID}/reject",
+        # SCRUM-29 AC4: a reject now carries a reason.
+        json={"reviewedBy": USER_ID, "rejectionReason": "Venue unsuitable"},
     )
 
     assert approve.status_code == 409
