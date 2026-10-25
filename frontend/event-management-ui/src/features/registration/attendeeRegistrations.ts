@@ -8,6 +8,7 @@ interface ApiRegistration {
   event_id: string
   attendee_id: string
   registration_date: string | null
+  withdrawn_at: string | null
   status: string
   attendee_name: string
   attendee_email: string
@@ -23,6 +24,7 @@ export interface AttendeeRegistration {
   id: string
   attendeeId: string
   registrationDate: string | null
+  withdrawnAt: string | null
   status: string
   attendeeName: string
   attendeeEmail: string
@@ -52,6 +54,7 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
     id: registration.registration_id,
     attendeeId: registration.attendee_id,
     registrationDate: registration.registration_date,
+    withdrawnAt: registration.withdrawn_at || null,
     status: registration.status,
     attendeeName: registration.attendee_name,
     attendeeEmail: registration.attendee_email,
@@ -59,4 +62,20 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
     event,
     venue: venues.get(venueIdByEvent.get(event.id) ?? '') ?? null,
   }))
+}
+
+export async function withdrawRegistration(registrationId: string, attendeeId: string) {
+  const serviceUrl = import.meta.env.VITE_ATTENDEE_REGISTRATION_SERVICE_URL || 'http://localhost:5009'
+  const response = await fetch(`${serviceUrl}/registrations/${encodeURIComponent(registrationId)}/withdraw`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attendeeId }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.message || 'Unable to withdraw this registration.')
+  return {
+    message: body.message as string,
+    status: body.registration.status as string,
+    withdrawnAt: (body.registration.withdrawn_at || null) as string | null,
+  }
 }

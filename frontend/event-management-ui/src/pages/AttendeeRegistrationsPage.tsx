@@ -4,7 +4,7 @@ import { ArrowLeftIcon, ArrowRightIcon, RefreshIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 import type { AttendeeRegistration } from '../features/registration/attendeeRegistrations'
-import { loadAttendeeRegistrations } from '../features/registration/attendeeRegistrations'
+import { loadAttendeeRegistrations, withdrawRegistration } from '../features/registration/attendeeRegistrations'
 import type { Role } from '../types'
 
 function formatRegistrationDate(value: string | null) {
@@ -39,7 +39,11 @@ export function AttendeeRegistrationsPage({ role, attendeeId }: { role: Role; at
 
   if (role !== 'Attendee') return <RoleWarning>Registration status is visible only to Attendees.</RoleWarning>
   if (!attendeeId) return <p className="field-error" role="alert">Select an attendee to view registrations.</p>
-  if (selected) return <RegistrationDetail registration={selected} onBack={() => setSelected(null)} />
+  if (selected) return <RegistrationDetail
+    registration={selected}
+    onBack={() => setSelected(null)}
+    onWithdrawn={(updated) => setRegistrations((items) => items.map((item) => item.id === updated.id ? updated : item))}
+  />
 
   return <div className="page-stack">
     <section className="intro">
@@ -70,33 +74,75 @@ export function AttendeeRegistrationsPage({ role, attendeeId }: { role: Role; at
   </div>
 }
 
-function RegistrationDetail({ registration, onBack }: { registration: AttendeeRegistration; onBack: () => void }) {
+function RegistrationDetail({ registration, onBack, onWithdrawn }: {
+  registration: AttendeeRegistration
+  onBack: () => void
+  onWithdrawn: (registration: AttendeeRegistration) => void
+}) {
+  const [current, setCurrent] = useState(registration)
+  const [confirming, setConfirming] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
+  const [message, setMessage] = useState('')
+  const [withdrawalError, setWithdrawalError] = useState('')
+
+  const withdraw = async () => {
+    if (withdrawing) return
+    setWithdrawing(true)
+    setWithdrawalError('')
+    try {
+      const result = await withdrawRegistration(current.id, current.attendeeId)
+      const updated = { ...current, status: result.status, withdrawnAt: result.withdrawnAt }
+      setCurrent(updated)
+      onWithdrawn(updated)
+      setConfirming(false)
+      setMessage(result.message)
+    } catch (cause) {
+      setWithdrawalError(cause instanceof Error ? cause.message : 'Unable to withdraw this registration.')
+    } finally {
+      setWithdrawing(false)
+    }
+  }
+
   return <div className="page-stack">
     <section className="intro"><button className="button small" onClick={onBack}><ArrowLeftIcon size={13} /> Back to registrations</button></section>
     <article className="panel event-card">
-      <header className="event-card-header"><h2>{registration.event.eventName}</h2><StatusBadge status={registration.status} /></header>
+      <header className="event-card-header"><h2>{current.event.eventName}</h2><StatusBadge status={current.status} /></header>
+
+      {message && <p className="notice success" role="status">{message}</p>}
 
       <section className="event-card-section">
         <h3>Registration details</h3>
         <dl className="event-details">
-          <div className="event-detail"><dt>Status</dt><dd>{registration.status}</dd></div>
-          <div className="event-detail"><dt>Registration date</dt><dd>{formatRegistrationDate(registration.registrationDate)}</dd></div>
-          <div className="event-detail"><dt>Name</dt><dd>{registration.attendeeName}</dd></div>
-          <div className="event-detail"><dt>Email</dt><dd>{registration.attendeeEmail}</dd></div>
-          <div className="event-detail full"><dt>Organisation</dt><dd>{registration.attendeeOrganization || '—'}</dd></div>
+          <div className="event-detail"><dt>Status</dt><dd>{current.status}</dd></div>
+          <div className="event-detail"><dt>Registration date</dt><dd>{formatRegistrationDate(current.registrationDate)}</dd></div>
+          {current.withdrawnAt && <div className="event-detail"><dt>Withdrawn at</dt><dd>{formatRegistrationDate(current.withdrawnAt)}</dd></div>}
+          <div className="event-detail"><dt>Name</dt><dd>{current.attendeeName}</dd></div>
+          <div className="event-detail"><dt>Email</dt><dd>{current.attendeeEmail}</dd></div>
+          <div className="event-detail full"><dt>Organisation</dt><dd>{current.attendeeOrganization || '—'}</dd></div>
         </dl>
+        {current.status === 'Confirmed' && !confirming && <button className="button primary" type="button" onClick={() => { setConfirming(true); setWithdrawalError('') }}>Withdraw registration</button>}
+        {confirming && <div className="panel" role="dialog" aria-label="Confirm withdrawal">
+          <h4>Withdraw registration?</h4>
+          <p>Your place will be released for another attendee.</p>
+          {withdrawalError && <p className="field-error" role="alert">{withdrawalError}</p>}
+          <div className="button-row">
+            <button className="button primary" type="button" disabled={withdrawing} onClick={withdraw}>{withdrawing ? 'Withdrawing…' : 'Confirm withdrawal'}</button>
+            <button className="button" type="button" disabled={withdrawing} onClick={() => { setConfirming(false); setWithdrawalError('') }}>Keep registration</button>
+          </div>
+        </div>}
       </section>
 
       <section className="event-card-section">
         <h3>Event details</h3>
         <dl className="event-details">
-          <div className="event-detail full"><dt>Date and time</dt><dd>{formatSchedule(registration.event.preferredStartDate, registration.event.preferredEndDate)}</dd></div>
-          {registration.venue && <>
-            <div className="event-detail"><dt>Venue</dt><dd>{registration.venue.name}</dd></div>
-            <div className="event-detail"><dt>Location</dt><dd>{registration.venue.location}</dd></div>
+          <div className="event-detail full"><dt>Date and time</dt><dd>{formatSchedule(current.event.preferredStartDate, current.event.preferredEndDate)}</dd></div>
+          <div className="event-detail full"><dt>Withdrawal deadline</dt><dd>{formatRegistrationDate(current.event.withdrawalDeadline || current.event.preferredStartDate)}</dd></div>
+          {current.venue && <>
+            <div className="event-detail"><dt>Venue</dt><dd>{current.venue.name}</dd></div>
+            <div className="event-detail"><dt>Location</dt><dd>{current.venue.location}</dd></div>
           </>}
-          <div className="event-detail full"><dt>Description</dt><dd>{registration.event.description}</dd></div>
-          {registration.event.purpose && <div className="event-detail full"><dt>Purpose</dt><dd>{registration.event.purpose}</dd></div>}
+          <div className="event-detail full"><dt>Description</dt><dd>{current.event.description}</dd></div>
+          {current.event.purpose && <div className="event-detail full"><dt>Purpose</dt><dd>{current.event.purpose}</dd></div>}
         </dl>
       </section>
     </article>

@@ -101,6 +101,18 @@ def _details_call(event_id, coordinator_id, changes, actor_role, dry_run):
     return _ok(response).json()
 
 
+def _event_workflow_call(method, path, **kwargs):
+    response = _send(
+        method,
+        f"{EVENT_SERVICE_URL}{path}",
+        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        **kwargs,
+    )
+    if response.status_code in (400, 403, 404, 409):
+        raise EventRejectedError(response.status_code, _body(response))
+    return _ok(response).json()
+
+
 def preview_event_details(event_id, coordinator_id, changes, actor_role=None) -> dict:
     """Event Service's verdict on an edit with nothing written.
 
@@ -114,6 +126,34 @@ def preview_event_details(event_id, coordinator_id, changes, actor_role=None) ->
 def save_event_details(event_id, coordinator_id, changes, actor_role=None) -> dict:
     """Save the edit; Event Service re-checks everything under its own row lock."""
     return _details_call(event_id, coordinator_id, changes, actor_role, dry_run=False)
+
+
+def list_pending_change_requests(coordinator_id: str) -> list:
+    return _event_workflow_call(
+        "GET", "/change-requests", params={"coordinatorId": coordinator_id}
+    )["changeRequests"]
+
+
+def get_change_request(change_request_id: str, coordinator_id: str) -> dict:
+    return _event_workflow_call(
+        "GET",
+        f"/change-requests/{change_request_id}",
+        params={"coordinatorId": coordinator_id},
+    )
+
+
+def decide_change_request(
+    change_request_id: str,
+    coordinator_id: str,
+    decision: str,
+    reason: str | None = None,
+) -> dict:
+    body = {"coordinatorId": coordinator_id, "decision": decision}
+    if reason is not None:
+        body["reason"] = reason
+    return _event_workflow_call(
+        "PATCH", f"/change-requests/{change_request_id}/decision", json=body
+    )
 
 
 def list_overlapping_events(start, end, statuses, exclude_event_id) -> list:

@@ -22,11 +22,26 @@ FIELDS = {
     "accessibilityNeeds": "accessibility_needs",
     "equipmentRequirements": "equipment_requirements",
     "registrationNeeds": "registration_needs",
+    "withdrawalDeadline": "withdrawal_deadline",
 }
 COLUMNS = ", ".join(FIELDS.values())
 ROW_COLUMNS = (
     f"event_id, {COLUMNS}, status, submission_date, coordinator_id, organiser_id,"
     " assigned_by, assigned_at, previous_coordinator_id"
+)
+EVENT_ROW_COLUMN_NAMES = (
+    "event_id",
+    *FIELDS.values(),
+    "status",
+    "submission_date",
+    "coordinator_id",
+    "organiser_id",
+    "assigned_by",
+    "assigned_at",
+    "previous_coordinator_id",
+)
+QUALIFIED_EVENT_ROW_COLUMNS = ", ".join(
+    f'event."{column}"' for column in EVENT_ROW_COLUMN_NAMES
 )
 
 SINGAPORE = ZoneInfo("Asia/Singapore")
@@ -172,6 +187,11 @@ EDITABLE_STATUSES = (
     "Pending Safety Check",
 )
 
+# The organiser-facing proposal workflow is deliberately narrower than a
+# coordinator edit. A proposal records intent only; it never mutates the Event
+# row or changes its lifecycle status.
+CHANGE_REQUEST_STATUSES = ("Submitted", "Under Review", "Approved")
+
 UNDER_SAFETY_REVIEW_MESSAGE = (
     "This event is waiting for its Operational Safety Check. Change date/time, "
     "attendance, venue, equipment or accessibility details after the Safety "
@@ -306,7 +326,7 @@ def serialize(row):
         action_history,
         clarification_history,
     ) = unpack_metadata(row["description"])
-    for key in ("preferredStartDate", "preferredEndDate"):
+    for key in ("preferredStartDate", "preferredEndDate", "withdrawalDeadline"):
         result[key] = _local(result[key]).isoformat() if result[key] else ""
     result["expectedAttendance"] = str(row["expected_attendance"] or "")
     result.update(
@@ -348,6 +368,9 @@ def submit_event(database_url, data):
         "expectedAttendance": int(data["expectedAttendance"]),
         "preferredStartDate": _aware(data["preferredStartDate"]),
         "preferredEndDate": _aware(data["preferredEndDate"]),
+        "withdrawalDeadline": _aware(data["withdrawalDeadline"])
+        if data.get("withdrawalDeadline")
+        else None,
     }
     values = [stored[key] for key in FIELDS]
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -465,6 +488,37 @@ class EventNotAssignedError(Exception):
 
 class EventNotOwnedError(Exception):
     pass
+
+
+class ChangeRequestNotAllowedError(Exception):
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class ChangeRequestAlreadyPendingError(Exception):
+    pass
+
+
+class ChangeRequestNotFoundError(Exception):
+    pass
+
+
+class ChangeRequestAlreadyDecidedError(Exception):
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class NoProposedChangesError(Exception):
+    pass
+
+
+class InvalidProposedChangesError(Exception):
+    def __init__(self, missing, errors):
+        super().__init__(*errors)
+        self.missing = missing
+        self.errors = errors
 
 
 class EventNotSubmittedError(Exception):
@@ -706,6 +760,249 @@ def get_organiser_event(database_url, event_id, organiser_id):
     if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
         raise EventNotOwnedError
     return serialize(event)
+
+
+def create_change_request(database_url, event_id, organiser_id, changes, reason):
+    """Record one organiser proposal without changing the event itself."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event:
+                raise EventNotFoundError
+            if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
+                raise EventNotOwnedError
+            if event["status"] not in CHANGE_REQUEST_STATUSES:
+                raise ChangeRequestNotAllowedError(event["status"])
+
+            current = serialize(event)
+            changed_fields, _ = _changed_fields(changes, current)
+            if not changed_fields:
+                raise NoProposedChangesError
+            proposed = {field: changes[field].strip() for field in changed_fields}
+            missing, errors = validation.validate({**current, **proposed})
+            if missing or errors:
+                raise InvalidProposedChangesError(missing, errors)
+
+            cursor.execute(
+                """INSERT INTO public."EventChangeReq"
+                    (event_id, requested_changes, status, request_date,
+                     requested_by, reason)
+                    VALUES (%s, %s, 'Pending Review', now(), %s, %s)
+                    ON CONFLICT (event_id) WHERE status = 'Pending Review'
+                    DO NOTHING
+                    RETURNING change_id, event_id, requested_changes, status,
+                              request_date, requested_by, reason""",
+                [event_id, json.dumps(proposed, ensure_ascii=False), organiser_id, reason],
+            )
+            saved = cursor.fetchone()
+            if not saved:
+                raise ChangeRequestAlreadyPendingError
+    return {
+        "id": str(saved["change_id"]),
+        "eventId": str(saved["event_id"]),
+        "proposedChanges": saved["requested_changes"],
+        "status": saved["status"],
+        "requestedAt": saved["request_date"].astimezone(UTC).isoformat(),
+        "requestedBy": str(saved["requested_by"]),
+        "reason": saved["reason"],
+    }
+
+
+def _serialize_change_request(row):
+    """One request together with the event values the coordinator compares."""
+    return {
+        "id": str(row["change_id"]),
+        "eventId": str(row["event_id"]),
+        "proposedChanges": row["requested_changes"],
+        "status": row["change_request_status"],
+        "requestedAt": row["request_date"].astimezone(UTC).isoformat(),
+        "requestedBy": str(row["requested_by"]),
+        "reason": row["reason"],
+        "reviewedBy": str(row["reviewed_by"]) if row.get("reviewed_by") else None,
+        "reviewedAt": row["review_date"].astimezone(UTC).isoformat()
+        if row.get("review_date")
+        else None,
+        "rejectionReason": row.get("rejection_reason"),
+        "event": serialize(row),
+    }
+
+
+CHANGE_REQUEST_COLUMNS = """
+    request.change_id, request.requested_changes,
+    request.status AS change_request_status, request.request_date,
+    request.requested_by, request.reason, request.rejection_reason,
+    request.review_date, request.reviewed_by
+"""
+
+
+def list_pending_change_requests(database_url, coordinator_id):
+    """Pending proposals for events assigned to this coordinator (SCRUM-43 AC1)."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {CHANGE_REQUEST_COLUMNS}, {QUALIFIED_EVENT_ROW_COLUMNS}
+                    FROM public."EventChangeReq" AS request
+                    JOIN public."Event" AS event ON event.event_id = request.event_id
+                    WHERE request.status = 'Pending Review'
+                      AND event.coordinator_id = %s
+                    ORDER BY request.request_date ASC, request.change_id ASC""",
+                [coordinator_id],
+            )
+            return [_serialize_change_request(row) for row in cursor.fetchall()]
+
+
+def get_change_request(database_url, change_request_id, coordinator_id):
+    """Load a pending request only when its event belongs to the coordinator."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {CHANGE_REQUEST_COLUMNS}, {QUALIFIED_EVENT_ROW_COLUMNS}
+                    FROM public."EventChangeReq" AS request
+                    JOIN public."Event" AS event ON event.event_id = request.event_id
+                    WHERE request.change_id = %s""",
+                [change_request_id],
+            )
+            row = cursor.fetchone()
+    if not row:
+        raise ChangeRequestNotFoundError
+    if not row["coordinator_id"] or str(row["coordinator_id"]) != coordinator_id:
+        raise EventNotAssignedError
+    return _serialize_change_request(row)
+
+
+def decide_change_request(
+    database_url,
+    change_request_id,
+    coordinator_id,
+    decision,
+    rejection_reason=None,
+):
+    """Approve/reject one request under locks on both request and event.
+
+    Approval applies the stored proposal and records the decision in the same
+    database transaction, so neither half can succeed alone. The composite has
+    already checked downstream arrangements; this atomic still validates the
+    stored fields, assignment, request status and event status under its lock.
+    """
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {CHANGE_REQUEST_COLUMNS}, {QUALIFIED_EVENT_ROW_COLUMNS}
+                    FROM public."EventChangeReq" AS request
+                    JOIN public."Event" AS event ON event.event_id = request.event_id
+                    WHERE request.change_id = %s
+                    FOR UPDATE OF request, event""",
+                [change_request_id],
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ChangeRequestNotFoundError
+            if not row["coordinator_id"] or str(row["coordinator_id"]) != coordinator_id:
+                raise EventNotAssignedError
+            if row["change_request_status"] != "Pending Review":
+                raise ChangeRequestAlreadyDecidedError(row["change_request_status"])
+
+            updated_event = serialize(row)
+            if decision == "Approved":
+                if row["status"] not in CHANGE_REQUEST_STATUSES:
+                    raise ChangeRequestNotAllowedError(row["status"])
+                proposed = row["requested_changes"]
+                if (
+                    not isinstance(proposed, dict)
+                    or not proposed
+                    or set(proposed) - set(EDITABLE_FIELDS)
+                    or any(not isinstance(value, str) for value in proposed.values())
+                ):
+                    raise InvalidProposedChangesError([], ["The stored proposal is invalid."])
+                merged = {**updated_event, **proposed}
+                missing, errors = validation.validate(merged)
+                if missing or errors:
+                    raise InvalidProposedChangesError(missing, errors)
+                changed, _high = _changed_fields(proposed, updated_event)
+                if changed:
+                    (
+                        description,
+                        purpose,
+                        event_decision,
+                        decision_history,
+                        action_details,
+                        action_history,
+                        clarification_history,
+                    ) = unpack_metadata(row["description"])
+                    recorded_at = datetime.now(UTC).isoformat()
+                    metadata = {
+                        "_connectsphere": "event-submission-v1",
+                        "description": merged["description"],
+                        "purpose": merged["purpose"],
+                        "decision": event_decision,
+                        "decisionHistory": decision_history,
+                        "actionDetails": action_details,
+                        "actionHistory": [
+                            *action_history,
+                            {
+                                "status": row["status"],
+                                "details": (
+                                    "Change request approved: "
+                                    f"{', '.join(field_labels(changed))}."
+                                ),
+                                "changedFields": changed,
+                                "coordinatorId": coordinator_id,
+                                "changeRequestId": change_request_id,
+                                "recordedAt": recorded_at,
+                            },
+                        ],
+                        "clarificationHistory": clarification_history,
+                    }
+                    assignments = ", ".join(
+                        f"{column} = %s" for column in DETAIL_COLUMNS.values()
+                    )
+                    values = []
+                    for field in DETAIL_COLUMNS:
+                        value = merged[field]
+                        if field == "expectedAttendance":
+                            values.append(int(str(value).strip()))
+                        elif field in ("preferredStartDate", "preferredEndDate"):
+                            values.append(_aware(value))
+                        else:
+                            values.append(value)
+                    cursor.execute(
+                        f"""UPDATE public."Event"
+                            SET {assignments}, description = %s
+                            WHERE event_id = %s
+                            RETURNING {ROW_COLUMNS}""",
+                        [
+                            *values,
+                            json.dumps(metadata, ensure_ascii=False),
+                            str(row["event_id"]),
+                        ],
+                    )
+                    updated_event = serialize(cursor.fetchone())
+
+            cursor.execute(
+                """UPDATE public."EventChangeReq"
+                   SET status = %s, reviewed_by = %s, review_date = now(),
+                       rejection_reason = %s
+                   WHERE change_id = %s
+                   RETURNING status, review_date, reviewed_by, rejection_reason""",
+                [decision, coordinator_id, rejection_reason, change_request_id],
+            )
+            decided = cursor.fetchone()
+    return {
+        "id": change_request_id,
+        "eventId": str(row["event_id"]),
+        "status": decided["status"],
+        "reviewedBy": str(decided["reviewed_by"]),
+        "reviewedAt": decided["review_date"].astimezone(UTC).isoformat(),
+        "rejectionReason": decided["rejection_reason"],
+        "event": updated_event,
+    }
 
 
 def get_event(database_url, event_id, coordinator_id, view_all=False):
@@ -1515,7 +1812,7 @@ def _draft_values(details):
     )
     if stored["expectedAttendance"]:
         stored["expectedAttendance"] = int(stored["expectedAttendance"])
-    for key in ("preferredStartDate", "preferredEndDate"):
+    for key in ("preferredStartDate", "preferredEndDate", "withdrawalDeadline"):
         if stored[key]:
             stored[key] = _aware(stored[key])
     return [stored[key] for key in FIELDS]

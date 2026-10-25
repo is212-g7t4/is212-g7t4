@@ -1,6 +1,6 @@
 # SCRUM-45 — Event Organiser Status and Update Notifications
 
-Status (October 21, 2026): agreed design implemented across tickets 01–04; see `scrum-45-final-verification.md` for combined verification. Independent review and ticket closure remain pending.
+Status (October 21, 2026): agreed design implemented across tickets 01–04; see [verification summary](scrum-45-verification-summary.md) for combined verification. Independent review and ticket closure remain pending.
 
 Historical note: this document began as an interview with implementation not yet authorised. The confirmation and verification sections below preserve that original design-stage chronology, not the current delivery status.
 

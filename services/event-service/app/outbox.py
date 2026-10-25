@@ -137,6 +137,12 @@ def authenticate():
     supplied = request.headers.get("X-Internal-Token", "")
     if not expected or not hmac.compare_digest(expected.encode(), supplied.encode()):
         return jsonify(message="Internal token required."), 401
+    if request.endpoint == "notification_outbox.operate" and (request.view_args or {}).get("action") == "freeze":
+        # HTTPX duplicates the accepted reason in message/details (2 * 64 KiB).
+        # 4 KiB covers the twice-escaped varchar(255) name (at most 3060
+        # bytes), UUIDs, timestamp, lease token and JSON keys. Only authenticated
+        # freeze gets this bounded allowance; the public 64 KiB cap is unchanged.
+        request.max_content_length = 2 * 65536 + 4096
 
 
 @bp.get("/internal/notification-outbox/held")

@@ -653,6 +653,26 @@ test('SCRUM-153 AC2: a plain edit entry lists its fields without the withdrawal 
   expect(screen.queryByText('Safety approval withdrawn')).not.toBeInTheDocument()
 })
 
+test.each(['Submitted', 'Under Review', 'Approved'] as const)(
+  'change request story: an organiser can request changes while an event is %s',
+  async (status) => {
+    vi.mocked(eventApi).mockResolvedValue({ ...event, status, organiserId: coordinatorId })
+    render(<EventDetailPage eventId={event.id} role="Event Organiser" currentCoordinatorId={coordinatorId} backLabel="my events" onBack={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'Community Workshop' })
+    expect(screen.getByRole('button', { name: 'Request changes' })).toBeInTheDocument()
+  },
+)
+
+test.each(['Clarification Requested', 'Rejected', 'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled'] as const)(
+  'change request story: an organiser cannot request changes while an event is %s',
+  async (status) => {
+    vi.mocked(eventApi).mockResolvedValue({ ...event, status, organiserId: coordinatorId })
+    render(<EventDetailPage eventId={event.id} role="Event Organiser" currentCoordinatorId={coordinatorId} backLabel="my events" onBack={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'Community Workshop' })
+    expect(screen.queryByRole('button', { name: 'Request changes' })).not.toBeInTheDocument()
+  },
+)
+
 /** SCRUM-173 review P2: public event-detail DOM; existing panel/write guards stay intact. */
 test.each([
   { label: 'cancelled assigned event', status: 'Cancelled' as const, role: 'Event Coordinator' as const, viewer: coordinatorId, assigned: coordinatorId },

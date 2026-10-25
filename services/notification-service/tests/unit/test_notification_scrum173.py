@@ -1,29 +1,22 @@
-"""# SCRUM-173 — Receive Venue Disruption Notifications
+"""SCRUM-173: venue disruptions tell the assigned coordinator to rearrange bookings.
 
-As an Event Coordinator, I want to receive an in-app notification when a venue booking for an event assigned to me is affected, so that I know that alternative arrangements are required.
-AC1: Given a rejection is ready for notification, then the notification is addressed to the coordinator assigned to that event when the notification is created.
-AC2: The notification contains the event name, affected venue, closure start/end, rejection reason, and a link to the venue rejection.
-AC3: Given a temporary system failure occurs during notification dispatch, the system must ensure the notification is eventually delivered to the assigned coordinator without generating multiple duplicate alerts.
+Story: As an Event Coordinator, I want an in-app notification when a venue booking
+for my assigned event is affected, so I know alternative arrangements are needed.
+AC1: notify the coordinator assigned when the notification is prepared.
+AC2: include event, venue, closure interval, reason and rejection destination.
+AC3: recover from temporary dispatch failure without duplicate alerts.
+AC = acceptance criterion; DR = design rule (supporting behaviour, not an extra AC).
 
-## Layer and scope
-# SCRUM-173 AC3 — consumer process/startup and commit/ack seam.
-Hermetic broker and database adapters, including outage backoff and CLI diagnostics.
-Real restart/ack redelivery is in the disposable harness, not inferred here.
+Real: consumer validation, storage adapters, Flask routes and command-loop logic.
+Mocked: database/broker I/O, time delays and selected route storage calls.
+Identity: DEV headers exercise caller scoping, not JWT login or production auth.
+Not proven: durable database writes, broker restart/redelivery, producer recipient
+selection, deployed authentication or browser navigation; isolated suites cover
+those boundaries separately. Quarantine means the mocked SQL write was requested.
 
-
-## AC groups
-AC1: current coordinator at preparation; recipient frozen across retries.
-AC2: complete frozen content and structured rejection destination.
-AC3: eventual delivery without duplicate inbox alerts.
-Security, diagnostics, process adapters, fixtures and legacy compatibility are
-explicit supporting/cross-ticket checks, not separate direct AC scenarios.
-FIRST: unit I/O/clocks are mocked; real integration owns setup/finally teardown.
-Historical tests are retrospective evidence, not a blanket test-first claim.
-
-
-Consolidated story unit tests. Each class preserves an original module scope;
-class-local fixtures never leak into another acceptance/supporting group.
-"""
+Classes group recovery, inbox access and validation. Security, diagnostics and
+legacy compatibility support the story; they are not additional acceptance criteria.
+Historical checks are regression evidence, not a claim of test-first chronology."""
 
 # test_consumer_recovery.py — original fixture and scenario group
 import json
@@ -80,9 +73,8 @@ class TestConsumerRecovery:
     """SCRUM-173 AC3 — consumer process/startup and commit/ack seam. Hermetic broker and database adapters, including outage backoff and CLI diagnostics. Real restart/ack redelivery is in the disposable harness, not inferred here."""
 
     def test_delivered_only_after_database_commit(self):
-        """## AC3
-        Valid delivery commits and closes storage before acknowledging the broker.
-        """
+        """AC3: processing exits the mocked transaction, closes it and requests ACK.
+        Checks expected calls, not a real commit or their relative call order."""
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
         channel = Mock()
@@ -295,9 +287,8 @@ class TestDelivery:
 
 
     def test_excessively_nested_malformed_json_is_durably_quarantined(self):
-        """## AC3 supporting poison recovery
-        Excessive JSON nesting is caught and retained rather than crashing the consumer.
-        """
+        """AC3 supporting poison recovery: excessive JSON nesting requests quarantine
+        and ACK instead of crashing. Mocked SQL is not durable storage evidence."""
         channel = Mock()
         method = Mock(delivery_tag=4)
         depth = 100000

@@ -18,6 +18,48 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 
 ## Event service
 
+The diagram below is the Event Service portion of the relational model. It
+shows the two user references recorded for a change request without implying a
+new service-to-service call; the foreign keys are stored in the shared
+Supabase Postgres schema.
+
+```mermaid
+erDiagram
+    USER ||--o{ EVENT : organises
+    USER ||--o{ EVENT_CHANGE_REQUEST : requests
+    USER o|--o{ EVENT_CHANGE_REQUEST : reviews
+    EVENT ||--o{ EVENT_CHANGE_REQUEST : has
+
+    USER {
+        UUID user_id PK
+    }
+
+    EVENT {
+        UUID event_id PK
+        VARCHAR event_name
+        VARCHAR status
+        UUID organiser_id FK
+    }
+
+    EVENT_CHANGE_REQUEST {
+        UUID change_id PK
+        UUID event_id FK
+        JSONB requested_changes
+        VARCHAR status
+        TIMESTAMPTZ request_date
+        UUID requested_by FK
+        TEXT reason
+        TEXT rejection_reason
+        TIMESTAMPTZ review_date
+        UUID reviewed_by FK
+    }
+```
+
+`EVENT_CHANGE_REQUEST` represents the database table
+`public."EventChangeReq"`. An event can retain multiple historical change
+requests, while a partial unique index permits at most one request with the
+status `Pending Review` for that event.
+
 ### Event
 
 | Column | Type / constraint | Change | What it is for and how it is used |
@@ -37,6 +79,7 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 | accessibility_needs | TEXT | | Accessibility requirements, read by the coordinator and the Safety Officer. |
 | equipment_requirements | TEXT | | Equipment the organiser asks for, used by the coordinator to raise equipment requests. |
 | registration_needs | TEXT | | Free-text notes on how attendee registration should work. |
+| withdrawal_deadline | TIMESTAMPTZ, nullable | new | Optional organiser-set cutoff for attendee withdrawals; the event start is used when empty. |
 | registration_enabled | BOOLEAN NOT NULL DEFAULT FALSE | new | Switch that tells the system whether attendees may register for this event. |
 | rejection_reason | TEXT | new | The coordinator's reason when the request is rejected, shown to the organiser. |
 | assigned_by | UUID (FK User) | | The Lead who made the latest assignment, shown on the event detail page. |
@@ -52,9 +95,14 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 | requested_changes | JSONB | | The fields and new values requested, applied to the event if approved. |
 | status | VARCHAR(50) | | Whether the request is pending, approved or rejected. |
 | request_date | TIMESTAMPTZ | changed | When the organiser submitted the change request, used to order the coordinator's queue. |
+| requested_by | UUID (FK User) | new | The Event Organiser who submitted the request. |
+| reason | TEXT | new | The organiser's required justification for the proposed changes. |
 | rejection_reason | TEXT | | The coordinator's reason for refusing the change, shown to the organiser. |
 | review_date | TIMESTAMPTZ | changed | When the coordinator decided on the request. |
 | reviewed_by | UUID (FK User) | | The coordinator who decided, kept for accountability. |
+
+A partial unique index on `event_id` where `status = 'Pending Review'` permits
+history while ensuring an event has at most one request awaiting review.
 
 ---
 
@@ -191,6 +239,7 @@ The time window for availability comes from the event's `preferred_start_date` a
 | attendee_id | UUID (FK User) | | The attendee's account, used to look up their name, email and organisation. |
 | registration_date | TIMESTAMPTZ | changed | When the attendee registered, shown on the coordinator's registration list. |
 | status | VARCHAR(50) | | Confirmed or Withdrawn; confirmed rows are counted against expected attendance. |
+| withdrawn_at | TIMESTAMPTZ | new | When the attendee withdrew, retained for auditability and cleared if they register again. |
 | UNIQUE (event_id, attendee_id) | table rule | new | Stops the same attendee registering twice; re-registering after withdrawal reuses the row. |
 
 Removed: `attendee_name`, `attendee_email`, `attendee_organization` (these come from `User`).
