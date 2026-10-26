@@ -62,6 +62,10 @@ def test_ac2_edit_saves_current_venue_fields_and_status(setup):
         "status": "Under Maintenance",
         "setupTimeMinutes": 60,
         "turnaroundTimeMinutes": 20,
+        "emergencyAccessDetails": None,
+        "knownRestrictions": None,
+        "safetyInfoUpdatedBy": None,
+        "safetyInfoUpdatedAt": None,
     }
     update_query, update_params = cursor.execute.call_args_list[-1].args
     assert 'UPDATE public."Venue"' in update_query
