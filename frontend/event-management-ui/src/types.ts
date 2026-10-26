@@ -44,6 +44,7 @@ export type RequestStatus =
   | 'Submitted'
   | 'Under Review'
   | 'Clarification Requested'
+  | 'Amendment Requested'
   | 'Approved'
   | 'Confirmed'
   | 'Rejected'

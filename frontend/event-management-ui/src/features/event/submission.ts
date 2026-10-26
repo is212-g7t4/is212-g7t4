@@ -15,6 +15,23 @@ export interface SubmittedEvent extends EventData {
   actionDetails: string
   actionHistory: EventAction[]
   clarificationHistory?: EventClarification[]
+  amendmentHistory?: EventAmendment[]
+}
+
+/** One SCRUM-16 amendment round. Mirrors the entries Event Service appends to
+ * the event's `amendmentHistory`; the resubmission fields stay null while the
+ * round is open. */
+export interface EventAmendment {
+  id: string
+  fields: string[]
+  reason: string
+  requestedBy: string
+  requestedAt: string
+  resubmittedBy: string | null
+  resubmittedAt: string | null
+  /** For each field that actually changed, its value before and after. */
+  changes: Record<string, { from: string; to: string }> | null
+  note: string | null
 }
 
 export interface EventClarification {
@@ -65,7 +82,8 @@ export interface EventProgressUpdate {
 // services/event-service/app/models.py. An organiser's 'Draft' is deliberately
 // not here: drafts never reach a coordinator, as DRAFT_STATUS there.
 export type EventStatus =
-  | 'Submitted' | 'Under Review' | 'Clarification Requested' | 'Approved' | 'Rejected'
+  | 'Submitted' | 'Under Review' | 'Clarification Requested' | 'Amendment Requested'
+  | 'Approved' | 'Rejected'
   | 'Pending Safety Check' | 'Confirmed' | 'Safety Changes Requested' | 'Cancelled'
 
 export interface Coordinator {
@@ -137,7 +155,9 @@ export async function eventApi(
   path: string,
   data?: (EventData & { organiserId?: string }) | EventProgressUpdate
     | { coordinatorId: string; reason?: string; message?: string }
-    | { organiserId: string; response: string },
+    | { organiserId: string; response: string }
+    | { coordinatorId: string; fields: string[]; reason: string }
+    | { organiserId: string; changes: Record<string, string>; note?: string },
   method?: 'POST' | 'PATCH' | 'DELETE',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}
