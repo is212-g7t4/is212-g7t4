@@ -57,3 +57,15 @@ export const venueChangeClosedNotice = (eventStatus: string) =>
   `Venue bookings can't be edited or cancelled while the event is ${eventStatus}.`
 
 export const SAFETY_WITHDRAWAL_WARNING = "Changing this booking withdraws the event's safety approval. The event goes back to Approved; Venue Staff will re-review this booking, then resubmit the event for its safety check."
+
+/** Why Venue Availability refused a booking or approval, keyed by its conflict
+ *  type. Shared by the coordinator's booking form and the staff review dialog. */
+export const VENUE_CONFLICT_MESSAGES: Record<string, string> = {
+  APPROVED_BOOKING: 'An approved booking overlaps this time.',
+  TENTATIVE_HOLD: 'An active tentative hold overlaps this time.',
+  VENUE_CLOSURE: 'The venue is closed during this time.',
+}
+
+export const describeVenueConflicts = (types: readonly string[]) => types
+  .map((type) => Object.hasOwn(VENUE_CONFLICT_MESSAGES, type) ? VENUE_CONFLICT_MESSAGES[type] : '')
+  .filter(Boolean).join(' ')

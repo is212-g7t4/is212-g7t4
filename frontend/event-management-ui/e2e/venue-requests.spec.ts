@@ -18,8 +18,19 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         eventId: 'e1', eventName: 'Community Fair', eventStatus: 'Safety Changes Requested', coordinatorId: users.coordinator.user_id,
         bookings: [booking(), { ...booking(), id: 'b2', venueName: 'Unaffected Room', status: 'Approved', safetyFeedback: null }],
       }] }))
+      // SCRUM-29: Review opens the request with its event and venue details first.
+      await mock(page, 'venueBooking', '/booking-requests/b1', (route) => json(route, {
+        booking: { ...booking(), awaitingReview: true, occupiedFrom: '2026-11-07T09:30:00', occupiedTo: '2026-11-07T16:45:00' },
+        event: { id: 'e1', eventName: 'Community Fair', status: 'Safety Changes Requested', coordinatorId: users.coordinator.user_id,
+          preferredStartDate: '2026-11-07T09:00:00', preferredEndDate: '2026-11-07T17:00:00', expectedAttendance: '100',
+          venueRequirements: 'Stage', accessibilityNeeds: null },
+        venue: { id: 'v1', name: 'Grand Hall', capacity: 200, status: 'Available', setupTimeMinutes: 30, turnaroundTimeMinutes: 45 },
+        canDecide: true, decisionBlockedReason: null,
+      }))
       await mock(page, 'venueBooking', '/booking-requests/b1/review', (route) => {
-        expect(route.request().postDataJSON()).toEqual({ status: decision, reviewedBy: users.venueStaff.user_id })
+        expect(route.request().postDataJSON()).toEqual(decision === 'Rejected'
+          ? { status: decision, reviewedBy: users.venueStaff.user_id, rejectionReason: 'Exit still blocked.' }
+          : { status: decision, reviewedBy: users.venueStaff.user_id })
         status = decision
         return json(route, booking())
       })
@@ -27,16 +38,23 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       if (viewport.width >= 768) await expect(page.getByRole('navigation').getByRole('button', { name: 'Venue requests', exact: true })).toBeVisible()
       await expect(page.getByRole('heading', { name: 'Venue requests', exact: true }).last()).toBeVisible()
       const row = page.getByRole('row').filter({ hasText: 'Grand Hall' })
-      await expect(row.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
-      await expect(row.getByRole('button', { name: 'Reject', exact: true })).toBeVisible()
+      await expect(row.getByRole('button', { name: 'Review', exact: true })).toBeVisible()
       const unaffected = page.getByRole('row').filter({ hasText: 'Unaffected Room' })
-      await expect(unaffected.getByRole('button')).toHaveCount(0)
+      await expect(unaffected.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0)
       const scroll = page.getByRole('region', { name: 'Community Fair venue requests' })
       expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
       await scroll.evaluate((element) => { element.scrollLeft = element.scrollWidth })
       await expect(row.getByText('Move the stage away from the exit.')).toBeVisible()
       await page.screenshot({ path: testInfo.outputPath(`venue-requests-${viewport.width}-${decision}.png`), fullPage: true })
-      await row.getByRole('button', { name: decision === 'Approved' ? 'Approve' : 'Reject', exact: true }).click()
+      await row.getByRole('button', { name: 'Review', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: 'Grand Hall for Community Fair' })
+      if (decision === 'Approved') {
+        await dialog.getByRole('button', { name: 'Approve', exact: true }).click()
+      } else {
+        await dialog.getByRole('button', { name: 'Reject', exact: true }).click()
+        await page.getByLabel(/Reason for rejection/).fill('Exit still blocked.')
+        await page.getByRole('button', { name: 'Confirm rejection' }).click()
+      }
       await expect(row.locator('.status-badge')).toHaveText(decision)
       await expect(unaffected.locator('.status-badge')).toHaveText('Approved')
     })

@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request
 
 from app.calendar import parse_boundary
 from app.models import (
+    BookingAlreadyDecidedError,
     BookingConflictError,
     BookingNotFoundError,
     BookingStateError,
@@ -36,6 +37,9 @@ from app.models import (
 # as the calendar's 42-day bound — an unbounded range is an unbounded read.
 MAX_WINDOW = timedelta(days=42)
 
+# SCRUM-29 AC4: matches the frontend RejectionDialog's maxLength.
+MAX_REJECTION_REASON = 500
+
 load_dotenv()
 
 
@@ -54,6 +58,14 @@ def _parse_datetime(value):
         return parsed
     except (ValueError, TypeError):
         return None
+
+
+def _parse_rejection_reason(value):
+    """Return the stripped reason, or None when it is missing or invalid."""
+    if not isinstance(value, str):
+        return None
+    reason = value.strip()
+    return reason if 0 < len(reason) <= MAX_REJECTION_REASON else None
 
 
 def _parse_buffer_minutes(value, default=0):
@@ -544,6 +556,16 @@ def create_app(config=None):
             return jsonify(
                 message="Venue buffer times must be non-negative whole minutes."
             ), 400
+        # SCRUM-29 AC4: a rejection must explain itself to the coordinator.
+        # A reason sent with an approval is ignored, not stored.
+        rejection_reason = None
+        if status == "Rejected":
+            rejection_reason = _parse_rejection_reason(data.get("rejectionReason"))
+            if rejection_reason is None:
+                return jsonify(
+                    message="A reason is required to reject a venue request.",
+                    code="REJECTION_REASON_REQUIRED",
+                ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
@@ -556,9 +578,15 @@ def create_app(config=None):
                 status,
                 setup_time,
                 turnaround_time,
+                rejection_reason,
             )
         except BookingNotFoundError:
             return jsonify(message="Venue booking not found."), 404
+        except BookingAlreadyDecidedError:
+            return jsonify(
+                message="This venue request has already been decided.",
+                code="BOOKING_ALREADY_DECIDED",
+            ), 409
         except BookingStateError:
             return (
                 jsonify(

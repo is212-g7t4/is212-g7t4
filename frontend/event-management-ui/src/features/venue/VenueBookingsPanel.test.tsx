@@ -490,3 +490,37 @@ test('SCRUM-28 Part B: a change refused because the event moved on shows the rea
   expect(await screen.findByRole('alert')).toHaveTextContent('Venue bookings can only be changed while …')
   expect(onEventChanged).toHaveBeenCalledTimes(1)
 })
+
+// SCRUM-29 AC2/AC3/AC6: the coordinator sees the Venue Staff decision and, for a rejection, why.
+test('SCRUM-29 AC2: an approved booking shows when Venue Staff approved it', async () => {
+  vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[0], reviewedAt: '2026-10-02T01:00:00+00:00' }, bookings[1]])
+  renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+  expect(screen.getByText('Approved by Venue Staff on 2 Oct 2026, 09:00 SGT')).toBeInTheDocument()
+  expect(screen.getAllByText(/Approved by Venue Staff/)).toHaveLength(1)
+})
+
+test('SCRUM-29 AC6: a staff rejection shows its reason and date so the coordinator can plan a replacement', async () => {
+  vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[1], status: 'Rejected', closureRejection: null,
+    reviewedAt: '2026-10-03T01:00:00+00:00', rejectionReason: 'Hall is too small\nfor the stage.' }])
+  renderPanel(); await screen.findByText('Breakout Room B', { selector: 'strong' })
+  const box = screen.getByText('Rejected by Venue Staff').closest('.closure-rejection')!
+  expect(within(box as HTMLElement).getByText(/Hall is too small/)).toHaveTextContent('Hall is too small for the stage.')
+  expect(within(box as HTMLElement).getByText('3 Oct 2026, 09:00 SGT')).toBeInTheDocument()
+  expect(screen.getByText('Rejected requests are read-only. Use Add venue booking below to request a replacement.')).toBeInTheDocument()
+})
+
+test('SCRUM-29 AC3: a legacy rejection without a reason or date still says who rejected it', async () => {
+  vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[1], status: 'Rejected', closureRejection: null, rejectionReason: 'Too small', reviewedAt: null },
+    { ...bookings[0], id: 'legacy', status: 'Rejected', closureRejection: null, rejectionReason: null }])
+  renderPanel(); await screen.findByText('Breakout Room B', { selector: 'strong' })
+  expect(screen.getAllByText('Rejected by Venue Staff')).toHaveLength(2)
+  expect(document.querySelectorAll('.closure-rejection')).toHaveLength(1)
+})
+
+test('SCRUM-29 regression: a closure rejection keeps its own box, not the staff one', async () => {
+  vi.mocked(fetchVenueBookings).mockResolvedValue([{ ...bookings[0], status: 'Rejected', rejectionReason: null,
+    closureRejection: { closureId: 'c', startDateTime: '2099-01-01T02:00:00Z', endDateTime: '2099-01-02T04:00:00Z', reason: 'Roof repair', rejectedAt: '2098-12-01T02:00:00Z' } }])
+  renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+  expect(screen.getByText('Rejected due to temporary venue closure')).toBeInTheDocument()
+  expect(screen.queryByText('Rejected by Venue Staff')).not.toBeInTheDocument()
+})

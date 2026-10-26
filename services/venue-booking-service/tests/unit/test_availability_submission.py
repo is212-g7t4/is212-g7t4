@@ -5,6 +5,10 @@ import pytest
 
 from app import clients, create_app
 
+# SCRUM-29 D7: the legacy approve/reject routes now require Venue Staff.
+STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
+STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+
 PAYLOAD = dict(
     eventId="event-1",
     venueId="venue-1",
@@ -35,7 +39,12 @@ def prepare(monkeypatch, status, body):
             if url.endswith("/venues")
             else {"venue": {"id": "venue-1", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}}
             if url.endswith("/venues/venue-1")
-            else {"id": "booking-1", "venueId": "venue-1"}
+            else {
+                "id": "booking-1",
+                "eventId": "event-1",
+                "venueId": "venue-1",
+                "status": "Pending Review",
+            }
             if url.endswith("/venue-bookings/booking-1")
             else {"id": "event-1", "status": "Under Review"}
         )
@@ -81,7 +90,9 @@ def test_edit_and_approval_preserve_typed_conflicts(monkeypatch, action):
     )
     path = "/booking-requests/booking-1" + ("/approve" if action == "approve" else "")
     response = client.patch(
-        path, json={"reviewedBy": "staff-1"} if action == "approve" else PAYLOAD
+        path,
+        json={"reviewedBy": STAFF_ID} if action == "approve" else PAYLOAD,
+        headers=STAFF_HEADERS if action == "approve" else {},
     )
     assert response.status_code == 409
     assert response.json["code"] == "VENUE_UNAVAILABLE"
@@ -207,8 +218,15 @@ def test_review_client_success_not_found_and_failure(
         lambda url, **kwargs: httpx.Response(
             200,
             json=(
-                {"id": "booking-1", "venueId": "venue-1"}
+                {
+                    "id": "booking-1",
+                    "eventId": "event-1",
+                    "venueId": "venue-1",
+                    "status": "Pending Review",
+                }
                 if "/venue-bookings/" in url
+                else {"id": "event-1", "status": "Under Review"}
+                if "/events/" in url
                 else {"venue": {"id": "venue-1", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}}
             ),
             request=httpx.Request("GET", url),
@@ -222,7 +240,9 @@ def test_review_client_success_not_found_and_failure(
         ),
     )
     response = client.patch(
-        f"/booking-requests/booking-1/{action}", json={"reviewedBy": "staff-1"}
+        f"/booking-requests/booking-1/{action}",
+        headers=STAFF_HEADERS,
+        json={"reviewedBy": STAFF_ID, "rejectionReason": "Venue unsuitable"},
     )
     assert response.status_code == expected
 

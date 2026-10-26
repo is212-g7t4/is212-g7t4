@@ -530,7 +530,7 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 | equipment-reservation | composite | n/a | Equipment Request, Event, Equipment, Safety Check Record (`app/clients.py`, **read per call**) | `X-Dev-*` headers | none (not tier-ready, see Transition) |
 | event-workflow | composite | n/a | Event, User, Venue Availability, Venue, Equipment Request, Equipment (`app/clients.py`, frozen at import, plus `INTERNAL_SERVICE_TOKEN`) | role via User Service | none |
 | safety-check | composite | n/a | Event, Venue Availability, Equipment Request, Safety Check Record, User, Venue, Equipment (`app/clients.py`, frozen at import; uses a `ThreadPoolExecutor`) | body/query IDs; role via User Service | none |
-| venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | `X-Dev-*` for Venue Staff review | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
+| venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | `X-Dev-*` for Venue Staff review (`GET /booking-requests/<id>`, `/review`, and since SCRUM-29 the legacy `/approve` and `/reject`) | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
 
 ### 12.2 Known gaps
 

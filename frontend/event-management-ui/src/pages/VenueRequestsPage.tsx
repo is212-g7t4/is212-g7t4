@@ -4,8 +4,9 @@ import { RoleWarning, StatusBadge } from '../components/FormControls'
 import { InlineLoading } from '../components/Loading'
 import { RefreshIcon } from '../components/Icon'
 import { formatSchedule } from '../features/event/dateFormat'
-import { fetchVenueRequests, reviewVenueRequest } from '../features/venue/venueBookings'
-import type { VenueRequestEvent } from '../features/venue/venueBookings'
+import { fetchVenueRequests } from '../features/venue/venueBookings'
+import type { VenueBooking, VenueRequestEvent } from '../features/venue/venueBookings'
+import { VenueRequestReviewDialog } from '../features/venue/VenueRequestReviewDialog'
 import { VENUE_REQUEST_REVIEWABLE_STATUSES, isAwaitingVenueReview } from '../features/venue/permissions'
 
 const FILTERS: Record<string, string> = { All: 'All requests', Pending: 'Awaiting review', Approved: 'Approved', Rejected: 'Rejected' }
@@ -24,6 +25,12 @@ const noActionText = (awaiting: boolean, eventStatus: string) => {
   return `Not open for review while the event is ${eventStatus}`
 }
 
+/** SCRUM-29 AC5: a decided row shows its outcome instead of a bare "Reviewed". */
+const outcomeText = (booking: VenueBooking) => {
+  if (!booking.reviewedAt || !['Approved', 'Rejected'].includes(booking.status)) return 'Reviewed'
+  return `${booking.status} on ${submittedAt(booking.reviewedAt)}`
+}
+
 export function VenueRequestsPage({ role, user, resolveUserName }: {
   role: Role; user: User | null; resolveUserName?: (id: string | null) => string | null
 }) {
@@ -33,6 +40,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reviewing, setReviewing] = useState<string | null>(null)
+  const [message, setMessage] = useState('')
   const allowed = role === 'Venue Staff' && user !== null
 
   useEffect(() => {
@@ -46,22 +54,25 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
     return () => { active = false }
   }, [allowed, user, filter, refresh])
 
-  const review = async (bookingId: string, status: 'Approved' | 'Rejected') => {
-    if (!allowed || !user || reviewing) return
-    setReviewing(bookingId)
+  /** SCRUM-29 AC5: update the decided row in place; the active filter drops it if it no longer matches. */
+  const decided = (updated: VenueBooking, status: string) => {
+    setReviewing(null)
     setError('')
-    try {
-      const updated = await reviewVenueRequest(bookingId, status, user)
-      setEvents((current) => current.map((event) => ({ ...event,
-        bookings: event.bookings.map((booking) => booking.id === bookingId ? { ...booking, ...updated } : booking)
-          .filter((booking) => filter === 'All' || (filter === 'Pending'
-            ? isAwaitingVenueReview(booking.status) : booking.status === filter)),
-      })).filter((event) => event.bookings.length > 0))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to review this venue request.')
-    } finally {
-      setReviewing(null)
-    }
+    setMessage(status)
+    setEvents((current) => current.map((event) => ({ ...event,
+      bookings: event.bookings.map((booking) => booking.id === updated.id ? { ...booking, ...updated, venueName: booking.venueName } : booking)
+        .filter((booking) => filter === 'All' || (filter === 'Pending'
+          ? isAwaitingVenueReview(booking.status) : booking.status === filter)),
+    })).filter((event) => event.bookings.length > 0))
+  }
+
+  // Shown as status, not error: the reload clears errors when it succeeds.
+  const stale = (reason: string) => {
+    setReviewing(null)
+    setError('')
+    setMessage(`${reason} The list has been refreshed.`)
+    setLoading(true)
+    setRefresh((value) => value + 1)
   }
 
   if (!allowed) return <RoleWarning>Venue requests are visible only to Venue Staff.</RoleWarning>
@@ -77,6 +88,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
         <button className="button small" onClick={() => { setLoading(true); setRefresh((value) => value + 1) }}><RefreshIcon size={14} /> Refresh requests</button>
       </div>
       {error && <p className="field-error" role="alert">{error}</p>}
+      {message && <p role="status">{message}</p>}
     </section>
     {loading ? <InlineLoading label="Loading venue requests..." /> : events.length === 0 ? <p>No venue requests found.</p> : events.map((event) => {
       const safety = event.eventStatus === 'Safety Changes Requested'
@@ -105,10 +117,14 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
               <td>{formatSchedule(booking.requestedStartTime, booking.requestedEndTime)}
                 {booking.requestedAt && <div className="muted">Submitted {submittedAt(booking.requestedAt)}</div>}</td>
               <td>{booking.requiredCapacity}</td><td>{booking.venueRequirements || 'None'}</td>
-              <td>{canReview && awaiting ? <div className="table-actions">
-                <button className="button small approve" disabled={reviewing !== null} onClick={() => { void review(booking.id, 'Approved') }}>Approve</button>
-                <button className="button small reject" disabled={reviewing !== null} onClick={() => { void review(booking.id, 'Rejected') }}>Reject</button>
-              </div> : <span className="muted">{noActionText(awaiting, event.eventStatus)}</span>}</td>
+              <td>{canReview && awaiting
+                ? <button className="button small primary" onClick={() => { setMessage(''); setReviewing(booking.id) }}>Review</button>
+                : <div className="venue-request-outcome">
+                  <span className="muted">{awaiting ? noActionText(awaiting, event.eventStatus) : outcomeText(booking)}</span>
+                  {booking.status === 'Rejected' && booking.rejectionReason
+                    && <span className="venue-request-reason" title={booking.rejectionReason}>{booking.rejectionReason}</span>}
+                  <button className="button small" onClick={() => { setMessage(''); setReviewing(booking.id) }}>View</button>
+                </div>}</td>
               {safety && <td>{booking.safetyFeedback ? <div className="equipment-safety-feedback">
                 {booking.safetyFeedback.requestedChanges.map((change, index) => <p key={index}>{change}</p>)}
                 {booking.safetyFeedback.reason && <p className="muted">Reason: {booking.safetyFeedback.reason}</p>}
@@ -119,5 +135,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
         </div>
       </article>
     })}
+    {reviewing && user && <VenueRequestReviewDialog bookingId={reviewing} user={user}
+      onClose={() => setReviewing(null)} onDecided={decided} onStale={stale} />}
   </div>
 }

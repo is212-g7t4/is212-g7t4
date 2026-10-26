@@ -16,6 +16,7 @@ import {
   VENUE_REQUEST_CLOSED_NOTICE,
   canChangeVenueBooking,
   canSubmitVenueRequest,
+  describeVenueConflicts,
   venueChangeClosedNotice,
 } from './permissions'
 
@@ -36,12 +37,6 @@ type Props = {
   onBookingsChanged?: () => void
   /** The event's status changed underneath the form, so the page should re-read it. */
   onEventChanged?: () => void
-}
-
-const conflictMessages: Record<string, string> = {
-  APPROVED_BOOKING: 'An approved booking overlaps this time.',
-  TENTATIVE_HOLD: 'An active tentative hold overlaps this time.',
-  VENUE_CLOSURE: 'The venue is closed during this time.',
 }
 
 const singaporeInstant = (value: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}$/.test(value)
@@ -238,9 +233,7 @@ export function VenueBookingsPanel({
       if (cause instanceof VenueBookingError && cause.status === 409 && cause.code === 'VENUE_UNAVAILABLE') {
         // A late rejection belongs to the submitted draft, not a newly edited time/venue.
         if (submittedRevision !== draftRevision.current) return
-        const reasons = cause.conflictTypes
-          .map((type) => Object.hasOwn(conflictMessages, type) ? conflictMessages[type] : '')
-          .filter(Boolean).join(' ')
+        const reasons = describeVenueConflicts(cause.conflictTypes)
         setSubmitError(`Request not submitted. ${reasons || 'The venue is unavailable for this time.'} Choose another venue or time.`)
       } else {
         setSubmitError(cause instanceof Error ? cause.message : 'Unable to save this venue booking.')
@@ -305,6 +298,15 @@ export function VenueBookingsPanel({
               <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{booking.closureRejection.reason}</p>
               <p>{closureDate(booking.closureRejection.startDateTime)} – {closureDate(booking.closureRejection.endDateTime)}</p>
             </div>}
+            {/* SCRUM-29 AC2/AC3/AC6: the Venue Staff decision, and why a request was rejected. */}
+            {booking.status === 'Approved' && booking.reviewedAt && <p className="muted">Approved by Venue Staff on {closureDate(booking.reviewedAt)}</p>}
+            {booking.status === 'Rejected' && !booking.closureRejection && (booking.rejectionReason
+              ? <div className="closure-rejection">
+                <strong>Rejected by Venue Staff</strong>
+                <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{booking.rejectionReason}</p>
+                {booking.reviewedAt && <p>{closureDate(booking.reviewedAt)}</p>}
+              </div>
+              : <p className="muted">Rejected by Venue Staff</p>)}
             {booking.status === 'Rejected' && <p className="muted">Rejected requests are read-only. Use Add venue booking below to request a replacement.</p>}
             {booking.status !== 'Cancelled' && booking.status !== 'Rejected' && <div className="venue-booking-actions">
               <button className="button small" type="button" disabled={!acceptsChanges || saving || cancellingId !== null} onClick={() => edit(booking)}>Edit booking</button>

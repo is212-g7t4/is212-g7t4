@@ -14,6 +14,8 @@ import pytest
 import httpx
 from app import create_app
 
+STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
+
 
 @pytest.mark.parametrize("action", ["update", "cancel", "approve", "reject"])
 def test_immutable_atomic_response_remains_state_error(monkeypatch, action):
@@ -29,7 +31,14 @@ def test_immutable_atomic_response_remains_state_error(monkeypatch, action):
 
     # Main reads booking/venue buffer settings before approval; keep those
     # independent reads local so this case reaches the immutable-write response.
-    monkeypatch.setattr("app.routes.get_booking", lambda *a: {"venueId": "venue"})
+    monkeypatch.setattr(
+        "app.routes.get_booking",
+        lambda *a: {"eventId": "event", "venueId": "venue", "status": "Pending Review"},
+    )
+    # SCRUM-29 D7: approve/reject run the staff review gates first.
+    monkeypatch.setattr(
+        "app.routes.get_event_for_internal_viewer", lambda *a: {"status": "Under Review"}
+    )
     monkeypatch.setattr("app.routes.get_venue", lambda *a: {"id": "venue", "setupTimeMinutes": 0, "turnaroundTimeMinutes": 0})
     monkeypatch.setattr(httpx, "patch", reply)
     monkeypatch.setattr("app.routes.get_event", lambda *a: {"status": "Under Review"})
@@ -43,11 +52,13 @@ def test_immutable_atomic_response_remains_state_error(monkeypatch, action):
     suffix = "" if action == "update" else "/" + action
     result = client.patch(
         "/booking-requests/booking" + suffix,
+        headers={"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"},
         json=dict(
             eventId="event",
             venueId="venue",
             coordinatorId="user",
-            reviewedBy="staff",
+            reviewedBy=STAFF_ID,
+            rejectionReason="Venue unsuitable",
             requestedStartTime="2099-01-01T10:00",
             requestedEndTime="2099-01-01T11:00",
             requiredCapacity=20,

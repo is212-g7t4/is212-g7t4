@@ -44,7 +44,8 @@ def event(status="Under Review", event_id=EVENT_ID, name="Spring Fair", start="2
 
 
 def venue(capacity=150, status="Available", setup=30, turnaround=45, venue_id=VENUE_ID, name="Grand Ballroom"):
-    """services/venue-service/app/models.py::serialize (GET /venues)."""
+    """services/venue-service/app/models.py::serialize (GET /venues, and GET /venues/<id>
+    wrapped as {"venue": ...})."""
     return {
         "id": venue_id,
         "name": name,
@@ -60,20 +61,24 @@ def venue(capacity=150, status="Available", setup=30, turnaround=45, venue_id=VE
 
 
 def booking(status="Pending Review", booking_id=BOOKING_ID, event_id=EVENT_ID,
-            requested_at="2030-02-01T10:00:00+08:00", start="2030-03-01T13:00:00"):
-    """services/venue-availability-service/app/models.py::serialize."""
+            requested_at="2030-02-01T10:00:00+08:00", start="2030-03-01T13:00:00",
+            end="2030-03-01T15:00:00", reviewed_by=None, reviewed_at=None, rejection_reason=None):
+    """services/venue-availability-service/app/models.py::serialize (SCRUM-29 adds
+    reviewedAt and rejectionReason)."""
     return {
         "id": booking_id,
         "eventId": event_id,
         "venueId": VENUE_ID,
         "requestedStartTime": start,
-        "requestedEndTime": "2030-03-01T15:00:00",
+        "requestedEndTime": end,
         "requiredCapacity": 120,
         "venueRequirements": "Stage and two microphones",
         "status": status,
         "requestedBy": COORDINATOR_ID,
-        "reviewedBy": None,
+        "reviewedBy": reviewed_by,
         "requestedAt": requested_at,
+        "reviewedAt": reviewed_at,
+        "rejectionReason": rejection_reason,
         "conflictReason": None,
         "closureRejection": None,
     }

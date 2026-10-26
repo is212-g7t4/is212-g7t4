@@ -67,9 +67,9 @@ says otherwise.
 | 2 | Choose venue V, set 10:00–12:00 on a free date, capacity within V's capacity, requirements "Stage", and submit | "V booking request submitted. Status: Pending Review."; the booking appears in the list with a Pending Review badge | AC2 | | |
 | 3 | In Supabase, read the new `VenueBooking` row | `status = 'Pending Review'`, `event_id` = Event A, `requested_at` set to the submission time | AC2, AC5 | | |
 | 4 | Switch to **Venue Staff**, open **Venue requests** | Event A's card shows its name, status, coordinator and "Event: <event dates>"; the booking row shows V, 10:00–12:00, the capacity, "Stage" and "Submitted <time>" | AC3, AC5 | | |
-| 5 | Same page | The booking's badge reads **Awaiting review**, the card says "1 awaiting review", and Approve / Reject are offered | AC4 | | |
+| 5 | Same page | The booking's badge reads **Awaiting review**, the card says "1 awaiting review", and a **Review** button is offered (SCRUM-29 moved Approve / Reject into its dialog) | AC4 | | |
 | 6 | Set **Show** to **Awaiting review** | Only awaiting requests are listed; the Network tab shows `?status=Pending` | AC4 | | |
-| 7 | As Venue Staff, approve the step-2 booking | Badge changes to Approved; the awaiting count disappears for Event A | AC4 | | |
+| 7 | As Venue Staff, click **Review** on the step-2 booking and **Approve** it | Badge changes to Approved; the awaiting count disappears for Event A | AC4 | | |
 | 8 | As the coordinator, open Event B and request V on the same date **13:15–15:00** | Accepted: "… submitted. Status: Pending Review." (12:00 end + 45 min turnaround + 30 min setup) | AC6 | | |
 | 9 | Request V for Event B on the same date **13:14–15:00** | Refused: "Request not submitted. An approved booking overlaps this time. …"; no new row in Supabase | AC6 | | |
 | 10 | On a new date, submit V 10:00–12:00 for Event A and leave it **Pending Review**; then request V for Event B at 10:30–11:30 that date | Accepted: a request that has only been *requested* (not approved) by another event never blocks | AC6 | | |

@@ -103,7 +103,7 @@ def test_staff_can_review_reopened_safety_booking(decide, booking, event, status
     decide.return_value = {**BOOKING, "status": status}
     with patch("app.routes.get_venue", return_value=VENUES[1]):
         response = create_app().test_client().patch("/booking-requests/booking-1/review", headers=STAFF_HEADERS,
-            json={"reviewedBy": STAFF_ID, "status": status})
+            json={"reviewedBy": STAFF_ID, "status": status, "rejectionReason": "Venue unsuitable"})
     assert response.status_code == 200
     assert response.json["status"] == status
 
@@ -355,28 +355,31 @@ def test_lists_multiple_bookings_for_same_event_separately(
     ]
 
 
+# SCRUM-29 D7: the legacy approve/reject routes now run the /review checks,
+# so these earlier-story tests send Venue Staff headers and stub the event.
+@patch("app.routes.get_event_for_internal_viewer", return_value=EVENT)
 @patch("app.routes.get_venue")
 @patch("app.routes.get_booking")
 @patch("app.routes.decide_booking")
-def test_approve_booking_request(mock_decide_booking, mock_get_booking, mock_get_venue):
+def test_approve_booking_request(mock_decide_booking, mock_get_booking, mock_get_venue, _event):
     mock_decide_booking.return_value = {**BOOKING, "status": "Approved"}
     mock_get_booking.return_value = {**BOOKING, "venueId": "ven-2"}
     mock_get_venue.return_value = {"id": "ven-2", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
 
     client = create_app().test_client()
     response = client.patch(
-        "/booking-requests/booking-1/approve", json={"reviewedBy": "staff-1"}
+        "/booking-requests/booking-1/approve", headers=STAFF_HEADERS, json={"reviewedBy": STAFF_ID}
     )
 
     assert response.status_code == 200
     assert response.json["status"] == "Approved"
-    mock_decide_booking.assert_called_once_with("booking-1", "staff-1", "Approved", 30, 45)
+    mock_decide_booking.assert_called_once_with("booking-1", STAFF_ID, "Approved", 30, 45)
 
 
 @patch("app.routes.decide_booking")
 def test_reject_booking_request_requires_reviewer(mock_decide_booking):
     client = create_app().test_client()
-    response = client.patch("/booking-requests/booking-1/reject", json={})
+    response = client.patch("/booking-requests/booking-1/reject", headers=STAFF_HEADERS, json={})
     assert response.status_code == 400
     mock_decide_booking.assert_not_called()
 
@@ -388,18 +391,20 @@ def test_approve_booking_request_missing_returns_404(mock_decide_booking, mock_g
 
     client = create_app().test_client()
     response = client.patch(
-        "/booking-requests/missing/approve", json={"reviewedBy": "staff-1"}
+        "/booking-requests/missing/approve", headers=STAFF_HEADERS, json={"reviewedBy": STAFF_ID}
     )
     assert response.status_code == 404
 
 
-@patch("app.routes.get_booking")
+@patch("app.routes.get_event_for_internal_viewer", return_value=EVENT)
+@patch("app.routes.get_venue", return_value=VENUES[1])
+@patch("app.routes.get_booking", return_value=BOOKING)
 @patch("app.routes.decide_booking")
-def test_cancelled_booking_cannot_be_reviewed(mock_decide_booking, mock_get_booking):
-    mock_get_booking.side_effect = BookingStateError
+def test_cancelled_booking_cannot_be_reviewed(mock_decide_booking, *_):
+    mock_decide_booking.side_effect = BookingStateError
 
     response = create_app().test_client().patch(
-        "/booking-requests/booking-1/approve", json={"reviewedBy": "staff-1"}
+        "/booking-requests/booking-1/approve", headers=STAFF_HEADERS, json={"reviewedBy": STAFF_ID}
     )
 
     assert response.status_code == 409

@@ -1,17 +1,19 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 import httpx
 from flask import Blueprint, jsonify, request
 
 from app.clients import (
+    BookingAlreadyDecidedError,
     BookingConflictError,
     BookingNotFoundError,
     BookingStateError,
     EventNotAssignedError,
     EventNotFoundError,
+    RejectionReasonRequiredError,
     SafetyApprovalError,
     cancel_booking,
     create_booking,
@@ -53,6 +55,30 @@ CHANGEABLE_EVENT_STATUSES = (*SUBMITTABLE_EVENT_STATUSES, "Confirmed")
 # Booking statuses that still need a Venue Staff decision. `Pending` is the
 # legacy seed spelling; new requests are stored as `Pending Review`.
 AWAITING_REVIEW_STATUSES = ("Pending", "Pending Review")
+# SCRUM-29 AC4: the longest rejection reason, matching the frontend's
+# RejectionDialog and Venue Availability Service.
+MAX_REJECTION_REASON = 500
+# SCRUM-29 AC1: the event fields Venue Staff need to assess a request. Only
+# these are forwarded, never the event's history or metadata.
+REVIEW_EVENT_FIELDS = (
+    "id",
+    "eventName",
+    "status",
+    "coordinatorId",
+    "preferredStartDate",
+    "preferredEndDate",
+    "expectedAttendance",
+    "venueRequirements",
+    "accessibilityNeeds",
+)
+REVIEW_VENUE_FIELDS = (
+    "id",
+    "name",
+    "capacity",
+    "status",
+    "setupTimeMinutes",
+    "turnaroundTimeMinutes",
+)
 
 
 def _queue_order(booking):
@@ -148,24 +174,138 @@ def staff_booking_requests():
     return jsonify(events=result)
 
 
+def _rejection_reason(value):
+    """Return the stripped reason, or None when it is missing or invalid."""
+    if not isinstance(value, str):
+        return None
+    reason = value.strip()
+    return reason if 0 < len(reason) <= MAX_REJECTION_REASON else None
+
+
+def _decision_blocked_reason(event_status, booking_status):
+    """SCRUM-29 AC1/AC5: why Venue Staff can't decide, in the page's own wording."""
+    if booking_status not in AWAITING_REVIEW_STATUSES:
+        return "Already decided"
+    if event_status == "Submitted":
+        return "Opens for review when the event is Under Review"
+    if event_status not in REVIEWABLE_EVENT_STATUSES:
+        return f"Not open for review while the event is {event_status}"
+    return None
+
+
+def _occupied(value, minutes):
+    """Shift a naive local booking time by a venue buffer, keeping its format."""
+    try:
+        return (datetime.fromisoformat(value) + timedelta(minutes=int(minutes or 0))).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+@bp.get("/booking-requests/<booking_id>")
+def staff_booking_request(booking_id):
+    """SCRUM-29 AC1: open one venue request with what Venue Staff need to assess it.
+
+    Combines the booking (Venue Availability), the event's timing and
+    requirements (Event Service) and the venue's capacity and buffers (Venue
+    Service), so the occupied window shows what an approval would block.
+    """
+    viewer_id, failure = _venue_staff()
+    if failure:
+        return failure
+    try:
+        booking = get_booking(booking_id)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            event_call = pool.submit(
+                get_event_for_internal_viewer, booking["eventId"], viewer_id, "Venue Staff"
+            )
+            venue_call = pool.submit(get_venue, booking["venueId"])
+            event = event_call.result()
+            venue = venue_call.result()
+    except BookingNotFoundError:
+        return jsonify(message="Venue booking not found."), 404
+    except httpx.TimeoutException:
+        return jsonify(message="Loading the venue request took too long."), 504
+    except Exception:
+        return jsonify(message="Unable to load the venue request right now."), 502
+
+    # Event Service sends "" for unset dates and requirements.
+    event_view = {field: event.get(field) or None for field in REVIEW_EVENT_FIELDS}
+    venue_view = {field: venue.get(field) for field in REVIEW_VENUE_FIELDS}
+    blocked = _decision_blocked_reason(event.get("status"), booking.get("status"))
+    return jsonify(
+        booking={
+            **booking,
+            "venueName": venue.get("name") or "Unknown venue",
+            "awaitingReview": booking.get("status") in AWAITING_REVIEW_STATUSES,
+            "occupiedFrom": _occupied(
+                booking.get("requestedStartTime"), -int(venue.get("setupTimeMinutes") or 0)
+            ),
+            "occupiedTo": _occupied(
+                booking.get("requestedEndTime"), venue.get("turnaroundTimeMinutes")
+            ),
+        },
+        event=event_view,
+        venue=venue_view,
+        canDecide=blocked is None,
+        decisionBlockedReason=blocked,
+    )
+
+
 @bp.patch("/booking-requests/<booking_id>/review")
 def staff_review_booking(booking_id):
+    return _review_decision(booking_id)
+
+
+def _review_decision(booking_id, status=None):
+    """SCRUM-29 AC2-AC5: the one path by which Venue Staff record a decision.
+
+    `/review` reads the decision from the body; the legacy `/approve` and
+    `/reject` routes pass it in, but run every same check.
+    """
     viewer_id, failure = _venue_staff()
     if failure:
         return failure
     data = request.get_json(silent=True)
-    if not isinstance(data, dict) or data.get("status") not in ("Approved", "Rejected") or data.get("reviewedBy") != viewer_id:
+    decision = status or (data.get("status") if isinstance(data, dict) else None)
+    if not isinstance(data, dict) or decision not in ("Approved", "Rejected") or data.get("reviewedBy") != viewer_id:
         return jsonify(message="A valid decision and matching reviewedBy are required."), 400
+    rejection_reason = None
+    if decision == "Rejected":
+        # Checked before any downstream call so a bad request costs nothing.
+        rejection_reason = _rejection_reason(data.get("rejectionReason"))
+        if rejection_reason is None:
+            return _rejection_reason_required()
     try:
         booking = get_booking(booking_id)
         event = get_event_for_internal_viewer(booking["eventId"], viewer_id, "Venue Staff")
-        if event["status"] not in REVIEWABLE_EVENT_STATUSES or booking["status"] not in AWAITING_REVIEW_STATUSES:
-            return jsonify(message="This venue request is not awaiting staff review."), 409
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
     except Exception:
         return jsonify(message="Unable to check the venue request."), 502
-    return _decide(booking_id, data["status"])
+    # .get: a malformed downstream answer is refused, never a 500.
+    if event.get("status") not in REVIEWABLE_EVENT_STATUSES:
+        return jsonify(
+            message="This venue request is not awaiting staff review.",
+            code="EVENT_NOT_REVIEWABLE",
+            eventStatus=event.get("status"),
+        ), 409
+    if booking.get("status") not in AWAITING_REVIEW_STATUSES:
+        return _already_decided()
+    return _decide(booking_id, booking, viewer_id, decision, rejection_reason)
+
+
+def _rejection_reason_required():
+    return jsonify(
+        message="A reason is required to reject a venue request.",
+        code="REJECTION_REASON_REQUIRED",
+    ), 400
+
+
+def _already_decided():
+    return jsonify(
+        message="This venue request is not awaiting staff review.",
+        code="BOOKING_ALREADY_DECIDED",
+    ), 409
 
 
 @bp.get("/venue-search")
@@ -654,26 +794,23 @@ def _restore_if_failed(result, event_id, coordinator_id, withdrawn_id):
     return result
 
 
+# SCRUM-29 D7 (Clarice, 25 Oct): the legacy decision URLs stay, but run the
+# same Venue Staff, event-status, awaiting and reason checks as /review.
 @bp.patch("/booking-requests/<booking_id>/approve")
 def approve_booking_request(booking_id):
-    return _decide(booking_id, "Approved")
+    return _review_decision(booking_id, "Approved")
 
 
 @bp.patch("/booking-requests/<booking_id>/reject")
 def reject_booking_request(booking_id):
-    return _decide(booking_id, "Rejected")
+    return _review_decision(booking_id, "Rejected")
 
 
-def _decide(booking_id, status):
-    data = request.get_json(silent=True)
-    reviewed_by = data.get("reviewedBy") if isinstance(data, dict) else None
-    if not reviewed_by:
-        return jsonify(message="reviewedBy is required."), 400
+def _decide(booking_id, booking, reviewed_by, status, rejection_reason=None):
     try:
         if status == "Approved":
-            current = get_booking(booking_id)
-            venue = get_venue(current["venueId"])
-            booking = decide_booking(
+            venue = get_venue(booking["venueId"])
+            decided = decide_booking(
                 booking_id,
                 reviewed_by,
                 status,
@@ -681,11 +818,18 @@ def _decide(booking_id, status):
                 int(venue.get("turnaroundTimeMinutes", 0)),
             )
         else:
-            # Rejection cannot create a scheduling conflict and retains the
-            # existing one-call workflow.
-            booking = decide_booking(booking_id, reviewed_by, status)
+            # Rejection cannot create a scheduling conflict, so it needs no
+            # venue buffers.
+            decided = decide_booking(
+                booking_id, reviewed_by, status, rejection_reason=rejection_reason
+            )
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
+    except RejectionReasonRequiredError:
+        return _rejection_reason_required()
+    except BookingAlreadyDecidedError:
+        # Another staff member decided between our check and the write.
+        return _already_decided()
     except BookingStateError:
         return (
             jsonify(
@@ -702,7 +846,7 @@ def _decide(booking_id, status):
         ), 409
     except Exception as e:
         return jsonify(message=f"Failed to update the booking request: {e}"), 502
-    return jsonify(booking), 200
+    return jsonify(decided), 200
 
 
 @bp.put("/venues/<uuid:venue_id>")

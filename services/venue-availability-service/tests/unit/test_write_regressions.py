@@ -70,7 +70,8 @@ def test_decision_database_unconfigured(setup):
     client.application.config["DATABASE_URL"] = None
     assert (
         client.patch(
-            f"/venue-bookings/{BOOKING_ID}/reject", json={"reviewedBy": USER_ID}
+            f"/venue-bookings/{BOOKING_ID}/reject",
+            json={"reviewedBy": USER_ID, "rejectionReason": "Venue unsuitable"},
         ).status_code
         == 503
     )

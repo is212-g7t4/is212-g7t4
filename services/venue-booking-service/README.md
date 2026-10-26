@@ -153,17 +153,17 @@ service is stubbed at the HTTP layer with `respx`. See
   touched (`403`/`404`/`409` passed through, anything else `502`). Needs
   `SAFETY_CHECK_SERVICE_URL` (default `http://localhost:5012`).
 - `PATCH /booking-requests/<id>/approve` / `PATCH /booking-requests/<id>/reject`
-  — Venue Staff decision. Body must include `{"reviewedBy": "<user id>"}`.
-  - `404` if the booking doesn't exist.
-  - `409` on approve if another booking was approved for an overlapping time
-    since this one was requested (re-checked at decision time), or if the
-    booking was cancelled.
-  - `200` with the updated booking otherwise.
+  — legacy decision URLs, kept as thin wrappers around `/review` below
+  (SCRUM-29): same Venue Staff headers, `reviewedBy`, reason, event-status and
+  awaiting-review checks, with the decision taken from the URL.
 
 ## Venue Staff Request Review
 
-The frontend `/venue-requests` page provides a minimal event-grouped queue,
-status filtering, individual Approve/Reject and latest-round safety feedback.
+The frontend `/venue-requests` page provides an event-grouped queue, status
+filtering and latest-round safety feedback. Each awaiting request has a
+**Review** button opening a dialog with the request's details and
+Approve/Reject (a reason is required to reject); decided rows show "Approved
+on …" / "Rejected on …" and open the same dialog read-only (SCRUM-29).
 `GET /booking-requests[?status=Pending|Approved|Rejected]` requires DEV Venue
 Staff identity headers. Pending includes both `Pending` and `Pending Review`.
 Each event group also carries `eventStart`/`eventEnd` (the event's preferred
@@ -173,10 +173,38 @@ awaiting bookings come first, oldest submission first (SCRUM-28).
 The composite reads events, bookings and venue names from their owning APIs;
 `SAFETY_CHECK_RECORD_SERVICE_URL` supplies safety flags for revision events.
 
-`PATCH /booking-requests/<id>/review` requires the same headers and body
-`{status: "Approved" | "Rejected", reviewedBy: "<active staff UUID>"}`.
-Only pending bookings for Under Review, Approved or Safety Changes Requested
-events can be reviewed. Existing conflict checks still run on approval.
+`GET /booking-requests/<id>` (SCRUM-29 AC1) requires the same headers and
+opens one request: `booking` (the Venue Availability record plus `venueName`,
+`awaitingReview` and the buffered `occupiedFrom`/`occupiedTo` window), `event`
+(`id`, `eventName`, `status`, `coordinatorId`, `preferredStartDate`,
+`preferredEndDate`, `expectedAttendance`, `venueRequirements`,
+`accessibilityNeeds`; unset values are `null`), `venue` (`id`, `name`,
+`capacity`, `status`, `setupTimeMinutes`, `turnaroundTimeMinutes`),
+`canDecide` and `decisionBlockedReason`. `401`/`403` for identity/role, `404`
+for an unknown booking, `502` on a downstream failure, `504` on a timeout.
 
- No Forum Service call for logging the approval/rejection reason, and no
-async notification — both flagged as planned but not built (see `INDEX.md`).
+`PATCH /booking-requests/<id>/review` requires the same headers and body
+`{status: "Approved" | "Rejected", reviewedBy: "<active staff UUID>",
+rejectionReason?}`. Existing conflict checks still run on approval. Results:
+
+- `200` with the decided booking, including `reviewedBy`, `reviewedAt` and
+  `rejectionReason` (SCRUM-29).
+- `400` for a bad status or a `reviewedBy` that isn't the caller;
+  `400 REJECTION_REASON_REQUIRED` for a reject whose reason is missing, blank
+  or over 500 characters (checked before any downstream call).
+- `404` if the booking doesn't exist.
+- `409 EVENT_NOT_REVIEWABLE` (+ `eventStatus`) unless the event is Under
+  Review, Approved or Safety Changes Requested.
+- `409 BOOKING_ALREADY_DECIDED` unless the booking is `Pending`/`Pending
+  Review` (also when another staff member decides first).
+- `409 BOOKING_IMMUTABLE` for a Cancelled/Rejected booking at Venue
+  Availability; `409 VENUE_UNAVAILABLE` + `conflictTypes` when approval would
+  overlap (with buffers) an approved booking, an active hold or a closure.
+- `502` on a downstream failure.
+
+The staff queue and `GET /events/<id>/booking-requests` pass `reviewedAt` and
+`rejectionReason` through, so the coordinator sees why a booking was rejected.
+
+The rejection reason is stored on the booking in Venue Availability
+(SCRUM-29), not in Forum Service. No async decision notification yet —
+SCRUM-47 owns that (see `INDEX.md`).

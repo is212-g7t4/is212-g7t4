@@ -67,6 +67,14 @@ class BookingStateError(Exception):
     pass
 
 
+class BookingAlreadyDecidedError(Exception):
+    """SCRUM-29 AC5: Venue Availability found the booking already decided."""
+
+
+class RejectionReasonRequiredError(Exception):
+    """SCRUM-29 AC4: Venue Availability refused a reject with no usable reason."""
+
+
 def get_event(event_id: str, coordinator_id: str) -> dict:
     """Fetch an event from Event Service, scoped to the requesting coordinator."""
     response = httpx.get(
@@ -292,20 +300,32 @@ def decide_booking(
     status: str,
     setup_time_minutes: int = 0,
     turnaround_time_minutes: int = 0,
+    rejection_reason: str | None = None,
 ) -> dict:
     """Approve or reject a booking via Venue Availability Service."""
     action = "approve" if status == "Approved" else "reject"
+    body = {
+        "reviewedBy": reviewed_by,
+        "setupTimeMinutes": setup_time_minutes,
+        "turnaroundTimeMinutes": turnaround_time_minutes,
+    }
+    # SCRUM-29 AC4: only a rejection carries a reason.
+    if status == "Rejected":
+        body["rejectionReason"] = rejection_reason
     response = httpx.patch(
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/{action}",
-        json={
-            "reviewedBy": reviewed_by,
-            "setupTimeMinutes": setup_time_minutes,
-            "turnaroundTimeMinutes": turnaround_time_minutes,
-        },
+        json=body,
     )
     if response.status_code == 404:
         raise BookingNotFoundError
+    if (
+        response.status_code == 400
+        and response.json().get("code") == "REJECTION_REASON_REQUIRED"
+    ):
+        raise RejectionReasonRequiredError
     if response.status_code == 409:
+        if response.json().get("code") == "BOOKING_ALREADY_DECIDED":
+            raise BookingAlreadyDecidedError
         if response.json().get("code") == "BOOKING_IMMUTABLE" or response.json().get(
             "message", ""
         ).startswith("Cancelled"):

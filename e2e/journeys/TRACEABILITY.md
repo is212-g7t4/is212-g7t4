@@ -4,7 +4,7 @@ Real-stack Playwright journeys. Manual and opt-in (never in CI): start the stack
 
 | Journey | Spec | Jira task | User stories exercised | Fixture-only dependencies | Status |
 |---|---|---|---|---|---|
-| J5a Prevent conflicting venue reservations | `J5a-venue-conflict/` | SCRUM-259 | SCRUM-28, 29, 30, 154, 155, 156, 145, 146, 147 | | Placeholder (`test.fixme`); blocked on SCRUM-29 |
+| J5a Prevent conflicting venue reservations | `J5a-venue-conflict/` | SCRUM-259 | SCRUM-28, 29, 30, 154, 155, 156, 145, 146, 147 | | Placeholder (`test.fixme`); unblocked by SCRUM-28/29, to be implemented under SCRUM-259 |
 | J5b Prevent equipment over-allocation | `J5b-equipment-over-allocation/` | SCRUM-259 | SCRUM-32, 33, 34, 35 | SCRUM-31, 11, 159, 19 | Implemented |
 
 Other journeys (J1 to J4, J6 to J8; SCRUM-255 to 258, 260 to 262) get a row here when their spec is added.
