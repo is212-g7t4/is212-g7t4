@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { VenueDetailPage } from './VenueDetailPage'
 import { fetchVenue } from '../features/venue/venues'
@@ -136,4 +136,68 @@ test('Venue Staff sees legacy buffer conflicts without any automatic cancellatio
   expect(screen.getByText('Venue occupancy overlaps by 45 minutes, from 2026-10-10 12:00 to 2026-10-10 12:45 SGT.')).toBeInTheDocument()
   expect(screen.getByText('Sustainable Operations Workshop')).toHaveAttribute('title', 'Event ID: event-1')
   expect(screen.getByText('Asia-Pacific Product Leadership Summit')).toHaveAttribute('title', 'Event ID: event-2')
+})
+
+// SCRUM-167 Record Venue Safety Information ------------------------------------
+
+const staffUsers = [{ id: 'staff-1', username: 'Priya Venue' }]
+
+function safetyBlock() {
+  return within(screen.getByRole('region', { name: 'Safety information' }))
+}
+
+test('SCRUM-167 AC1: recorded safety information is shown with its line breaks', async () => {
+  vi.mocked(fetchVenue).mockResolvedValue({
+    ...venue,
+    emergencyAccessDetails: 'North exit\nAssembly at the lawn',
+    knownRestrictions: 'No open flames',
+  })
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  await screen.findByRole('region', { name: 'Safety information' })
+  const emergency = safetyBlock().getByText(/North exit/)
+  // The newline reaches the DOM; venueDetail.css renders it with white-space: pre-line.
+  expect(emergency.textContent).toBe('North exit\nAssembly at the lawn')
+  expect(safetyBlock().getByText('No open flames')).toBeInTheDocument()
+})
+
+test.each([
+  ['null', null],
+  ['blank', '  '],
+  ['absent', undefined],
+])('SCRUM-167 AC2: %s safety information reads "Not provided"', async (_label, value) => {
+  vi.mocked(fetchVenue).mockResolvedValue({ ...venue, emergencyAccessDetails: value, knownRestrictions: value })
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  await screen.findByRole('region', { name: 'Safety information' })
+  expect(safetyBlock().getAllByText('Not provided')).toHaveLength(2)
+  expect(safetyBlock().queryByText(/Last updated/)).not.toBeInTheDocument()
+})
+
+test('SCRUM-167 AC3: the last editor and time are shown when stamped', async () => {
+  vi.mocked(fetchVenue).mockResolvedValue({
+    ...venue, emergencyAccessDetails: 'North exit', knownRestrictions: null,
+    safetyInfoUpdatedBy: 'staff-1', safetyInfoUpdatedAt: '2030-01-15T10:30:00+08:00',
+  })
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" users={staffUsers} onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  expect(await screen.findByText(/Last updated .*15 Jan 2030.* by Priya Venue/)).toBeInTheDocument()
+})
+
+test('SCRUM-167 AC3: an editor missing from the user list is named generically', async () => {
+  vi.mocked(fetchVenue).mockResolvedValue({
+    ...venue, safetyInfoUpdatedBy: 'someone-else', safetyInfoUpdatedAt: '2030-01-15T10:30:00+08:00',
+  })
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" users={staffUsers} onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  expect(await screen.findByText(/Last updated .* by a Venue Staff member/)).toBeInTheDocument()
+})
+
+test('SCRUM-167 AC4: an Event Coordinator sees the safety information but cannot edit the venue', async () => {
+  vi.mocked(fetchVenue).mockResolvedValue({ ...venue, emergencyAccessDetails: 'North exit', knownRestrictions: 'No open flames' })
+  render(<VenueDetailPage venueId={venue.id} role="Event Coordinator" onBack={vi.fn()} onEdit={vi.fn()} />)
+
+  await screen.findByRole('region', { name: 'Safety information' })
+  expect(safetyBlock().getByText('North exit')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Edit Venue/ })).not.toBeInTheDocument()
 })

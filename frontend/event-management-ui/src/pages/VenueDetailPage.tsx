@@ -66,19 +66,39 @@ function ConflictSchedule({ booking }: { booking: LegacyConflict['firstBooking']
   </section>
 }
 
+// SCRUM-167: the service sends an offset timestamp, so this shows it in local time.
+function formatUpdatedAt(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function SafetyInformation({ venue, users }: { venue: Venue; users: Pick<User, 'id' | 'username'>[] }) {
+  const editor = users.find((candidate) => candidate.id === venue.safetyInfoUpdatedBy)
+  return <section className="venue-safety-info" aria-labelledby="venue-safety-info-title">
+    <h3 id="venue-safety-info-title">Safety information</h3>
+    <dl>
+      <div className="event-detail"><dt>Emergency access details</dt><dd>{venue.emergencyAccessDetails?.trim() || 'Not provided'}</dd></div>
+      <div className="event-detail"><dt>Known restrictions</dt><dd>{venue.knownRestrictions?.trim() || 'Not provided'}</dd></div>
+    </dl>
+    {venue.safetyInfoUpdatedAt && <p className="muted">
+      Last updated {formatUpdatedAt(venue.safetyInfoUpdatedAt)} by {editor?.username || 'a Venue Staff member'}
+    </p>}
+  </section>
+}
+
 function Chips({ values }: { values: string[] }) {
   if (values.length === 0) return <>Not specified</>
   return <span className="chip-list">{values.map((value) => <span key={value} className="chip">{value}</span>)}</span>
 }
 
-type VenueDetailPageProps = { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; coordinators?: Pick<User, 'id' | 'username'>[]; onBack: () => void; onEdit: () => void }
+type VenueDetailPageProps = { venueId: string; role: Role; user?: Pick<User, 'id' | 'role'>; coordinators?: Pick<User, 'id' | 'username'>[]; users?: Pick<User, 'id' | 'username'>[]; onBack: () => void; onEdit: () => void }
 
 export function VenueDetailPage(props: VenueDetailPageProps) {
   // Route changes reset cached detail and drafts; refreshes keep the same mounted panel.
   return <VenueDetailContent key={props.venueId} {...props} />
 }
 
-function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, onEdit }: VenueDetailPageProps) {
+function VenueDetailContent({ venueId, role, user, coordinators = [], users = [], onBack, onEdit }: VenueDetailPageProps) {
   const [venue, setVenue] = useState<Venue | null>(null)
   const [hold, setHold] = useState<VenueHold | null>(null)
   const [error, setError] = useState('')
@@ -173,6 +193,7 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], onBack, on
         <div className="event-detail"><dt>Supported layouts</dt><dd><Chips values={venue.supportedLayouts} /></dd></div>
         {hold && <div className="event-detail"><dt>Hold expires</dt><dd>{formatExpiry(hold.expiresAt)}</dd></div>}
       </dl>
+      <SafetyInformation venue={venue} users={users} />
       {role === 'Venue Staff' && <section className="legacy-conflicts" aria-labelledby="legacy-conflicts-title">
         <h3 id="legacy-conflicts-title">Scheduling conflicts</h3>
         {conflictError ? <p className="field-error" role="alert">{conflictError}</p> : legacyConflicts.length === 0 ?

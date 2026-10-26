@@ -1,13 +1,18 @@
 from contextlib import closing
+from zoneinfo import ZoneInfo
 
 import psycopg2
+import psycopg2.errors
 from psycopg2.extras import Json, RealDictCursor
 
 COLUMNS = (
     "venue_id, venue_name, location, max_capacity, facilities, accessibility, "
     "supported_layouts, operational_status, setup_time_minutes, "
-    "turnaround_time_minutes"
+    "turnaround_time_minutes, emergency_access_details, known_restrictions, "
+    "safety_info_updated_by, safety_info_updated_at"
 )
+
+SINGAPORE = ZoneInfo("Asia/Singapore")
 
 # SCRUM-26: accessibility is free text in the catalogue, so a checkbox key is
 # matched against the phrases the live rows actually use. A key matches when
@@ -47,7 +52,20 @@ def serialize(row):
         "status": row["operational_status"] or "Unknown",
         "setupTimeMinutes": row.get("setup_time_minutes", 0),
         "turnaroundTimeMinutes": row.get("turnaround_time_minutes", 0),
+        # SCRUM-167: `row.get` so rows built without these columns still serialise.
+        "emergencyAccessDetails": row.get("emergency_access_details"),
+        "knownRestrictions": row.get("known_restrictions"),
+        "safetyInfoUpdatedBy": _text_or_none(row.get("safety_info_updated_by")),
+        "safetyInfoUpdatedAt": _singapore_time(row.get("safety_info_updated_at")),
     }
+
+
+def _text_or_none(value):
+    return None if value is None else str(value)
+
+
+def _singapore_time(value):
+    return None if value is None else value.astimezone(SINGAPORE).isoformat()
 
 
 def matches(venue, criteria):
@@ -102,6 +120,10 @@ class VenueNotFoundError(Exception):
 
 class DuplicateVenueNameError(Exception):
     pass
+
+
+class UnknownEditorError(Exception):
+    """SCRUM-167: the editor id is not a `User` row (the FK refused it)."""
 
 
 def create_venue(database_url, details):
@@ -185,3 +207,45 @@ def get_venue(database_url, venue_id):
     if not venue:
         raise VenueNotFoundError
     return serialize(venue)
+
+
+def update_safety_info(database_url, venue_id, editor_id, emergency, restrictions):
+    """SCRUM-167: replace a venue's safety information and stamp the editor.
+
+    One statement, so there is no read-modify-write race (last write wins).
+    The `IS DISTINCT FROM` guard means a save that changes neither value
+    touches nothing, so the existing editor and timestamp are kept.
+    """
+    params = {
+        "venue_id": venue_id,
+        "editor": editor_id,
+        "emergency": emergency,
+        "restrictions": restrictions,
+    }
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            try:
+                cursor.execute(
+                    f"""UPDATE public."Venue"
+                        SET emergency_access_details = %(emergency)s,
+                            known_restrictions = %(restrictions)s,
+                            safety_info_updated_by = %(editor)s,
+                            safety_info_updated_at = now()
+                        WHERE venue_id = %(venue_id)s
+                          AND (emergency_access_details IS DISTINCT FROM %(emergency)s
+                               OR known_restrictions IS DISTINCT FROM %(restrictions)s)
+                        RETURNING {COLUMNS}""",
+                    params,
+                )
+            except psycopg2.errors.ForeignKeyViolation:
+                raise UnknownEditorError from None
+            saved = cursor.fetchone()
+            if not saved:
+                cursor.execute(
+                    f"""SELECT {COLUMNS} FROM public."Venue" WHERE venue_id = %s""",
+                    [venue_id],
+                )
+                saved = cursor.fetchone()
+    if not saved:
+        raise VenueNotFoundError
+    return serialize(saved)

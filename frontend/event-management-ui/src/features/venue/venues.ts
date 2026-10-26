@@ -9,6 +9,11 @@ export interface Venue {
   status: string
   setupTimeMinutes?: number
   turnaroundTimeMinutes?: number
+  // SCRUM-167: null when nothing has been recorded. Optional so mocks may omit them.
+  emergencyAccessDetails?: string | null
+  knownRestrictions?: string | null
+  safetyInfoUpdatedBy?: string | null
+  safetyInfoUpdatedAt?: string | null
 }
 
 const venueServiceUrl = () => import.meta.env.VITE_VENUE_SERVICE_URL || 'http://localhost:5006'

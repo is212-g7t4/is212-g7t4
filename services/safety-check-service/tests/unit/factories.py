@@ -97,3 +97,24 @@ def record(round_number=1, status="Pending", **overrides):
         "flags": [],
         **overrides,
     }
+
+
+def venue(venue_id="88888888-8888-4888-8888-888888888888", **overrides):
+    """A venue as `venue-service` serialises it (app/models.py::serialize)."""
+    return {
+        "id": venue_id,
+        "name": "Main Hall",
+        "location": "Level 1",
+        "capacity": 200,
+        "facilities": ["projector"],
+        "accessibility": "Step-free entry",
+        "supportedLayouts": ["Theatre"],
+        "status": "Available",
+        "setupTimeMinutes": 0,
+        "turnaroundTimeMinutes": 0,
+        "emergencyAccessDetails": None,
+        "knownRestrictions": None,
+        "safetyInfoUpdatedBy": None,
+        "safetyInfoUpdatedAt": None,
+        **overrides,
+    }

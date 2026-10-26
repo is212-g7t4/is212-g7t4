@@ -77,3 +77,32 @@ def validate(data):
         errors.append("Capacity must be a positive whole number (maximum 2147483647).")
 
     return missing, errors
+
+
+# SCRUM-167: venue safety information, two free-text fields replaced together.
+SAFETY_LABELS = {
+    "emergencyAccessDetails": "Emergency Access Details",
+    "knownRestrictions": "Known Restrictions",
+}
+SAFETY_MAX_LENGTH = 2000
+
+
+def validate_safety_info(data):
+    """Return ({key: text or None}, errors). Blank text is stored as NULL."""
+    if not isinstance(data, dict):
+        return {}, ["Send a JSON object."]
+    values, errors = {}, []
+    for key, label in SAFETY_LABELS.items():
+        if key not in data:
+            errors.append(f"{label} is required (send null to clear it).")
+            continue
+        value = data[key]
+        if value is not None and not isinstance(value, str):
+            errors.append(f"{label} must be text.")
+            continue
+        text = (value or "").strip()
+        if len(text) > SAFETY_MAX_LENGTH:
+            errors.append(f"{label} must be at most {SAFETY_MAX_LENGTH} characters.")
+            continue
+        values[key] = text or None
+    return values, errors

@@ -151,9 +151,9 @@ def review_safety_check(event_id):
                 and attendance_number > capacity
             ),
             "layout": ", ".join(venue.get("supportedLayouts") or []) or None,
-            "emergencyAccess": venue.get("emergencyAccess"),
+            "emergencyAccess": venue.get("emergencyAccessDetails"),
             "accessibility": venue.get("accessibility"),
-            "restrictions": venue.get("restrictions"),
+            "restrictions": venue.get("knownRestrictions"),
             "venueRequirements": booking.get("venueRequirements"),
             "status": booking.get("status"),
         })

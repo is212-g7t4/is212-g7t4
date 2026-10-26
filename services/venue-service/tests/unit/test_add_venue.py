@@ -47,6 +47,10 @@ def test_ac3_valid_submission_is_saved_and_visible_in_catalogue(setup):
         "status": "Available",
         "setupTimeMinutes": 30,
         "turnaroundTimeMinutes": 45,
+        "emergencyAccessDetails": None,
+        "knownRestrictions": None,
+        "safetyInfoUpdatedBy": None,
+        "safetyInfoUpdatedAt": None,
     }
 
 

@@ -33,9 +33,11 @@ catalogue names, the open round's placement/crowd notes, and every earlier
 safety round. The route verifies the caller's role and that the event is
 `Pending Safety Check`; downstream read failures fail closed. The response
 groups per-booking capacity comparisons under `venues`, requested inventory
-under `equipment`, and earlier decisions under `history`. Emergency access
-and venue restrictions are returned as null where the current venue model
-does not record them, so the UI displays **Not provided**.
+under `equipment`, and earlier decisions under `history`. Each venue entry's
+`emergencyAccess` and `restrictions` come from Venue Service's
+`emergencyAccessDetails` and `knownRestrictions` (SCRUM-167, recorded by Venue
+Staff); they are null when nothing is recorded, so the UI displays
+**Not provided**.
 
 No notification in this story: Notification Service and RabbitMQ aren't built,
 and the "decision" notification is SCRUM-168.

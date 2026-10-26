@@ -518,7 +518,7 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 |---|---|---|---|---|---|
 | user | atomic | `create_app(config)["DATABASE_URL"]` | none | `?role=` filter only; no check | none |
 | event | atomic | `create_app(config)` | none | body/query `coordinatorId`, `?viewerRole=`; `X-Internal-Token` checked against `app.config["INTERNAL_SERVICE_TOKEN"]` | none |
-| venue | atomic | `create_app(config)` | none | no identity check on routes | none |
+| venue | atomic | `create_app(config)` | none | `X-Dev-*` headers on `PUT /venues/<id>/safety-info` only (Venue Staff, since SCRUM-167); no identity check on the other routes | none |
 | venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | `X-Dev-*` gated by `CALENDAR_DEV_MODE` / `VENUE_CLOSURE_DEV_MODE`; body `requestedBy`; `X-Internal-Service-Token` (config); outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
 | equipment | atomic | `create_app(config)` | none | `X-Dev-User-Id` / `X-Dev-Role` | none |
 | equipment-request | atomic | `create_app(config)` | none | `X-Dev-*` headers | none (not tier-ready, see Transition) |
@@ -594,6 +594,8 @@ able to fail (§6 step 5) before being listed here. Copy the fixture *patterns*
 | DB-backed atomic | `services/event-service/tests/integration/` | `conftest.py` (session container, migration loading, localhost guard, both-channel `DATABASE_URL`, per-test truncate, `db` helper for arrange/assert), `factories.py` (inserting builders incl. FK parents) |
 | DB-backed atomic | `services/registration-service/tests/integration/` | Auditable status transitions, direct persisted-state assertions, and proving that withdrawn rows no longer consume confirmed capacity |
 | Composite | `services/attendee-registration-service/tests/integration/` | `respx` HTTP-boundary stubs, exact downstream request assertions, deadline short-circuiting, and downstream failure handling |
+| DB-backed atomic | `services/venue-service/tests/integration/` | Header-role gate on an atomic and FK-backed editor stamp: refused roles leave persisted values unchanged, a real `User` FK rejects an unknown editor, and a no-change save doesn't restamp |
+| Composite | `services/safety-check-service/tests/integration/` | First suite for this composite: `ThreadPoolExecutor` fan-out under `respx` (the stubs are hit from worker threads) |
 
 **Adding to this table:** once a new suite passes and every test has been
 proven able to fail, add one row here: its kind, its path, and what it is the

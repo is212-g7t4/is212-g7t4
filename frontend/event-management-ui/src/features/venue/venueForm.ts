@@ -1,3 +1,4 @@
+import type { User } from '../../types'
 import type { Venue } from './venues'
 
 export interface VenueFormData {
@@ -10,7 +11,12 @@ export interface VenueFormData {
   status: string
   setupTimeMinutes: string
   turnaroundTimeMinutes: string
+  // SCRUM-167: saved by updateVenueSafetyInfo, never sent in the profile payload.
+  emergencyAccessDetails: string
+  knownRestrictions: string
 }
+
+export const SAFETY_INFO_MAX_LENGTH = 2000
 
 export const VENUE_STATUSES = ['Available', 'Under Maintenance', 'Booked'] as const
 
@@ -24,6 +30,8 @@ export const emptyVenueForm: VenueFormData = {
   status: 'Available',
   setupTimeMinutes: '0',
   turnaroundTimeMinutes: '0',
+  emergencyAccessDetails: '',
+  knownRestrictions: '',
 }
 
 function splitList(value: string): string[] {
@@ -57,6 +65,15 @@ export function validateVenueForm(form: VenueFormData) {
   ] as const) {
     if (!/^\d+$/.test(value.trim()) || Number(value) > 2147483647) {
       errors.push(`${label} must be a non-negative whole number of minutes (maximum 2147483647).`)
+    }
+  }
+
+  for (const [value, label] of [
+    [form.emergencyAccessDetails, 'Emergency Access Details'],
+    [form.knownRestrictions, 'Known Restrictions'],
+  ] as const) {
+    if (value.trim().length > SAFETY_INFO_MAX_LENGTH) {
+      errors.push(`${label} must be at most ${SAFETY_INFO_MAX_LENGTH} characters.`)
     }
   }
 
@@ -106,5 +123,28 @@ async function saveVenue(path: string, method: 'POST' | 'PUT', form: VenueFormDa
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new VenueSubmissionError(body.message || 'Unable to save the venue.', body.missingFields, body.errors)
+  return body.venue as Venue
+}
+
+export type VenueSafetyInfo = Pick<VenueFormData, 'emergencyAccessDetails' | 'knownRestrictions'>
+
+/** SCRUM-167: Venue Staff replace both safety fields together. Goes straight to
+ *  Venue Service (it affects no booking, so Venue Booking has no part in it);
+ *  blank text is sent as null so the venue reads "Not provided". */
+export async function updateVenueSafetyInfo(
+  venueId: string,
+  safety: VenueSafetyInfo,
+  user: Pick<User, 'id' | 'role'>,
+): Promise<Venue> {
+  const response = await fetch(`${venueServiceUrl()}/venues/${encodeURIComponent(venueId)}/safety-info`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+    body: JSON.stringify({
+      emergencyAccessDetails: safety.emergencyAccessDetails.trim() || null,
+      knownRestrictions: safety.knownRestrictions.trim() || null,
+    }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new VenueSubmissionError(body.message || 'Unable to save the safety information.', [], body.errors)
   return body.venue as Venue
 }

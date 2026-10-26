@@ -86,6 +86,8 @@ test('SCRUM-170 venue change aborts stale reads and never shows old closure data
  vi.mocked(listClosures).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
  const { rerender } = render(<VenueDetailPage {...props} />)
  await screen.findByRole('button', { name: 'Record temporary closure' })
+ // The list request starts in an effect after the button renders; wait for it, not for the button.
+ await waitFor(() => expect(listClosures).toHaveBeenCalled())
  const signal = vi.mocked(listClosures).mock.calls[0][3]
  vi.mocked(fetchVenue).mockResolvedValue({ id: 'v2', name: 'Other Hall', status: 'On Hold', location: '', capacity: 1, accessibility: '', facilities: [], supportedLayouts: [] })
  rerender(<VenueDetailPage {...props} venueId="v2" />)

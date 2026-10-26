@@ -1,4 +1,5 @@
 import os
+from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
@@ -9,14 +10,16 @@ load_dotenv()
 from app.models import (
     ACCESSIBILITY_KEYWORDS,
     DuplicateVenueNameError,
+    UnknownEditorError,
     VenueNotFoundError,
     create_venue,
     get_venue,
     list_venues,
     matches,
+    update_safety_info,
     update_venue,
 )
-from app.validation import validate
+from app.validation import validate, validate_safety_info
 
 
 class InvalidCriteriaError(Exception):
@@ -61,6 +64,13 @@ def read_criteria(args):
     }
 
 
+def _uuid_or_none(value):
+    try:
+        return str(UUID(value or ""))
+    except ValueError:
+        return None
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
@@ -83,7 +93,9 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
+            )
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
@@ -202,6 +214,45 @@ def create_app(config=None):
                 missingFields=[],
                 errors=["A venue with this name already exists."],
             ), 409
+        except VenueNotFoundError:
+            return jsonify(message="Venue not found."), 404
+        return jsonify(venue=venue), 200
+
+    @app.route("/venues/<uuid:venue_id>/safety-info", methods=["PUT"])
+    def edit_safety_info(venue_id):
+        """SCRUM-167: Venue Staff record emergency access and known restrictions."""
+        # DEV-only role check, same headers as Equipment Service and Venue
+        # Availability. Spoofable; replace with Supabase JWT verification when
+        # real auth lands.
+        editor_id = _uuid_or_none(request.headers.get("X-Dev-User-Id"))
+        if not editor_id:
+            return jsonify(message="A valid DEV user UUID is required."), 401
+        role = request.headers.get("X-Dev-Role")
+        if not role:
+            return jsonify(message="A DEV role header is required."), 401
+        if role != "Venue Staff":
+            return jsonify(
+                code="VENUE_STAFF_ONLY",
+                message="Only Venue Staff can edit venue safety information.",
+            ), 403
+        values, errors = validate_safety_info(request.get_json(silent=True))
+        if errors:
+            return jsonify(message="Please correct the safety information.", errors=errors), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Venue Service."), 503
+        try:
+            venue = update_safety_info(
+                app.config["DATABASE_URL"],
+                str(venue_id),
+                editor_id,
+                values["emergencyAccessDetails"],
+                values["knownRestrictions"],
+            )
+        except UnknownEditorError:
+            return jsonify(
+                code="UNKNOWN_EDITOR",
+                message="Your user account could not be found.",
+            ), 403
         except VenueNotFoundError:
             return jsonify(message="Venue not found."), 404
         return jsonify(venue=venue), 200
