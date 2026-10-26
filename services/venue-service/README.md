@@ -1,7 +1,8 @@
 # Venue Service (atomic)
 
 The venue catalogue. It owns lookups and Venue Staff profile creation/editing
-against `public."Venue"`, including each venue's setup and turnaround minutes.
+against `public."Venue"`, including each venue's setup and turnaround minutes
+and its safety information (SCRUM-167).
 It contains no booking logic (Venue Availability Service owns that). The
 frontend calls it directly because Venue Service owns this catalogue concern,
 and `venue-booking-service` calls it when validating a booking request.
@@ -77,12 +78,52 @@ same either way:
     "facilities": ["av_system", "stage", "wifi"],
     "accessibility": "Wheelchair accessible, elevator access",
     "supportedLayouts": ["theatre", "banquet", "classroom"],
-    "status": "Available"
+    "status": "Available",
+    "setupTimeMinutes": 30,
+    "turnaroundTimeMinutes": 45,
+    "emergencyAccessDetails": "Exits on north and south walls; assembly point at the front lawn",
+    "knownRestrictions": "Noise curfew 10pm; no open flames",
+    "safetyInfoUpdatedBy": "5b1f0c2e-7d3a-4c1e-9f6b-2a8d4e0c1b37",
+    "safetyInfoUpdatedAt": "2030-01-15T10:30:00+08:00"
   }
 }
 ```
 
-`GET /venues` returns the same objects under a `venues` array.
+`GET /venues` returns the same objects under a `venues` array. The four
+safety fields are `null` until Venue Staff record something; Safety Check
+Service reads them from the catalogue list for the Safety Officer's review.
+
+- `PUT /venues/<venueId>/safety-info` — SCRUM-167 Record Venue Safety
+  Information. Venue Staff only. Replaces both texts and stamps the editor and
+  the database's `now()`.
+
+  Headers: `X-Dev-User-Id: <uuid>`, `X-Dev-Role: Venue Staff`. This is the same
+  DEV-only, spoofable identity as Equipment Service and Venue Availability;
+  replace it with Supabase JWT verification when real auth lands.
+
+  Body (both keys required; send `null` to clear one):
+
+  ```json
+  { "emergencyAccessDetails": "string or null", "knownRestrictions": "string or null" }
+  ```
+
+  Text is trimmed; blank text is stored as `NULL` (so the UI shows "Not
+  provided"); at most 2000 characters each.
+
+  | Status | When |
+  | --- | --- |
+  | `200 { venue }` | saved. If neither value changed, nothing is written and the existing stamp is kept |
+  | `400 { message, errors }` | not a JSON object, a key missing, a value not text, or over 2000 characters |
+  | `401 { message }` | `X-Dev-User-Id` missing or not a UUID, or `X-Dev-Role` missing |
+  | `403 { code: "VENUE_STAFF_ONLY" }` | any role other than Venue Staff |
+  | `403 { code: "UNKNOWN_EDITOR" }` | the editor id is not a `User` row (the `safety_info_updated_by` foreign key refuses it) |
+  | `404` | no such venue |
+  | `503` | `DATABASE_URL` unset or the database unreachable |
+
+  Two staff saving at once: last write wins, and the stamp names the last
+  writer. The update is a single statement, so there is no read-modify-write
+  race. `POST /venues` and `PUT /venues/<id>` (the profile routes, which have
+  no role check) ignore these keys, so they can't be used to bypass this one.
 
 ## Data notes
 
@@ -106,11 +147,20 @@ uv run pytest
 All pytest and coverage settings, including the coverage floor, live in
 `pyproject.toml`, so this needs no flags.
 
+Integration tests (real Flask app against a throwaway `postgres:17.6` loaded
+with the full migration chain; Docker must be running):
+
+```
+uv run pytest -m integration --no-cov
+```
+
 `tests/unit/test_venue_details.py` covers AC1 and the failure cases with
 `psycopg2.connect` mocked; `tests/unit/test_venue_search_filters.py` covers the
 SCRUM-26 filter parameters above; `tests/unit/test_seed_data.py` checks that
 `scripts/seed_venues.py` writes rows in the shape above. Shared payloads and row
 builders live in `tests/unit/factories.py`.
+`tests/unit/test_venue_safety_information.py` and
+`tests/integration/test_venue_safety_information.py` cover SCRUM-167.
 
 ## Seeding
 

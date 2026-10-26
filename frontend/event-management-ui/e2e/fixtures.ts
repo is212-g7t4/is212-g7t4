@@ -30,9 +30,15 @@ export const users = {
 }
 export const allUsers = Object.values(users)
 
+// SCRUM-167: Grand Hall has no safety information recorded; Meeting Room has some.
+const noSafetyInfo = { emergencyAccessDetails: null, knownRestrictions: null, safetyInfoUpdatedBy: null, safetyInfoUpdatedAt: null }
 export const venues = [
-  { id: '00000000-0000-0000-0000-000000000001', name: 'Grand Hall', location: 'Level 1', capacity: 200, facilities: ['Projector', 'Stage'], accessibility: 'Step-free access', supportedLayouts: ['Theatre'], status: 'Available' },
-  { id: '00000000-0000-0000-0000-000000000002', name: 'Meeting Room', location: 'Level 2', capacity: 12, facilities: ['Whiteboard'], accessibility: 'Lift access', supportedLayouts: ['Boardroom'], status: 'Available' },
+  { id: '00000000-0000-0000-0000-000000000001', name: 'Grand Hall', location: 'Level 1', capacity: 200, facilities: ['Projector', 'Stage'], accessibility: 'Step-free access', supportedLayouts: ['Theatre'], status: 'Available', ...noSafetyInfo },
+  {
+    id: '00000000-0000-0000-0000-000000000002', name: 'Meeting Room', location: 'Level 2', capacity: 12, facilities: ['Whiteboard'], accessibility: 'Lift access', supportedLayouts: ['Boardroom'], status: 'Available',
+    emergencyAccessDetails: 'Single exit to corridor B', knownRestrictions: 'No open flames',
+    safetyInfoUpdatedBy: '00000000-0000-0000-0000-0000000000aa', safetyInfoUpdatedAt: '2026-10-20T10:30:00+08:00',
+  },
 ]
 
 export function makeEvent(overrides: Record<string, unknown> = {}) {
@@ -157,3 +163,8 @@ export function mockSafetyQueue(page: Page, events: () => Record<string, unknown
 
 export const asUser = (page: Page, userId: string) =>
   page.addInitScript((id) => localStorage.setItem('activeUserId', id), userId)
+
+// SCRUM-167: Venue Staff save a venue's safety information on Venue Service.
+export function mockVenueSafetyInfo(page: Page, venueId: string, handler: (route: Route) => unknown) {
+  return mock(page, 'venue', `/venues/${venueId}/safety-info`, handler)
+}
