@@ -33,6 +33,8 @@ def test_all_rejected_requests_are_immutable(setup, action):
         requiredCapacity=80,
         venueRequirements="Projector",
         reviewedBy=USER_ID,
+        # SCRUM-29 AC4: a reject now needs a reason to reach the state check.
+        rejectionReason="Venue unsuitable",
     )
     suffix = "" if action == "edit" else "/" + action
     response = client.patch(f"/venue-bookings/{BOOKING_ID}{suffix}", json=payload)

@@ -89,5 +89,6 @@ test('AC3/AC4/AC5: Venue Staff see the request under its event, with the event d
   await expect(row.locator('.status-badge')).toHaveText('Awaiting review')
   await expect(row.getByText('Stage and dance floor')).toBeVisible()
   await expect(row.getByText('Submitted 2 Nov 2026, 10:00 am')).toBeVisible()
-  await expect(row.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+  // SCRUM-29: the decision is made in a review dialog opened from this button.
+  await expect(row.getByRole('button', { name: 'Review', exact: true })).toBeVisible()
 })
