@@ -33,12 +33,12 @@ this up alongside every other service.
 - `GET /coordinators` — everyone an event can be assigned to: the Event
   Coordinator Lead (so the Lead can take an event on themselves) and every
   Event Coordinator, fetched from `user-service`.
-- `GET /queue?actingUserId=<user id>` — the Lead's queue: submitted events
-  with no coordinator assigned yet, oldest submission first (from
-  `event-service`'s `GET /events/unassigned`). Only the Event Coordinator Lead
-  may view it — `403` for everyone else, `400` without `actingUserId`. An
-  event leaves the queue once assigned, because assignment moves it to
-  `Under Review`.
+- `GET /queue?actingUserId=<user id>` — the Lead's assignment worklist:
+  unassigned `Submitted` requests and assigned `Under Review` requests, oldest
+  submission first (from `event-service`'s `GET /events/submitted`). Only the
+  Event Coordinator Lead may view it — `403` for everyone else, `400` without
+  `actingUserId`. Assigned requests remain visible so the Lead can reassign
+  them without leaving the worklist.
 - `GET /workload?actingUserId=<user id>` — the Lead's read-only workload
   view: every coordinator from `GET /coordinators` (the Lead included, and
   those with nothing assigned) with their active events under `events`, plus

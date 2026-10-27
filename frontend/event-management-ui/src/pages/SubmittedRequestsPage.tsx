@@ -187,7 +187,7 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
                 <button className="button secondary" disabled={decisionId === event.id} onClick={() => { setAmending(event); setAmendmentError('') }}>Request amendment</button>
               </div>}
             </div>
-          : isLead(role) && <p className="muted">Not assigned yet. Assign it from Unassigned requests.</p>}
+          : isLead(role) && <p className="muted">Not assigned yet. Assign it from Coordinator assignments.</p>}
       </article>)}
     {rejecting && <RejectionDialog eventName={rejecting.eventName} reason={reason} submitting={decisionId === rejecting.id} onReasonChange={setReason} onCancel={() => { setRejecting(null); setReason('') }} onConfirm={reject} />}
     {clarifying && <ClarificationDialog eventName={clarifying.eventName} message={clarificationMessage} submitting={decisionId === clarifying.id} error={clarificationError} onMessageChange={setClarificationMessage} onCancel={() => { setClarifying(null); setClarificationMessage(''); setClarificationError('') }} onConfirm={requestClarification} />}

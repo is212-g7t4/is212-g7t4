@@ -10,7 +10,7 @@ export const routeTitles: Record<Route, string> = {
   manage: 'Event information',
   review: 'Request review',
   changeRequests: 'Change requests',
-  queue: 'Unassigned requests',
+  queue: 'Coordinator assignments',
   workload: 'Coordinator workload',
   detail: 'Event record',
   myEvents: 'My events',
