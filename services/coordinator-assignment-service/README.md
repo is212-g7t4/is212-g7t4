@@ -70,3 +70,21 @@ No Forum Service call yet for logging the assignment/reassignment reason —
 flagged as an open architecture question in `AGENTS.md`/`docs/microservices-catalog.md`
 (whether this composite needs one at all, since most assignments won't have
 a reason worth logging).
+
+## Tests
+
+Run the hermetic unit tier (the default):
+
+```bash
+uv run pytest
+```
+
+Run the opt-in SCRUM-159 composite integration tier:
+
+```bash
+uv run pytest -m integration --no-cov
+```
+
+The integration tests run the real Flask routes and `httpx` client code while
+`respx` controls User Service and Event Service at their HTTP boundaries. They
+require no live services, database, or secrets.
