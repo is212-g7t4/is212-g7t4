@@ -12,6 +12,8 @@ import { RejectionDialog } from '../components/RejectionDialog'
 import { ArrowRightIcon, RefreshIcon } from '../components/Icon'
 import { EventCardSkeletonList, Spinner } from '../components/Loading'
 import { ClarificationDialog } from '../features/event/ClarificationDialog'
+import { AmendmentRequestDialog } from '../features/event/AmendmentRequestDialog'
+import type { EditableField } from '../features/event/eventDetails'
 
 export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoordinatorName, resolveUserName, onViewDetails }: { role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
@@ -24,6 +26,8 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
   const [clarifying, setClarifying] = useState<SubmittedEvent | null>(null)
   const [clarificationMessage, setClarificationMessage] = useState('')
   const [clarificationError, setClarificationError] = useState('')
+  const [amending, setAmending] = useState<SubmittedEvent | null>(null)
+  const [amendmentError, setAmendmentError] = useState('')
   const [coordinators, setCoordinators] = useState<Coordinator[]>([])
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
 
@@ -124,6 +128,31 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
     }
   }
 
+  const requestAmendment = async (fields: EditableField[], reason: string) => {
+    if (!amending || fields.length === 0 || !reason) return
+    const event = amending
+    setDecisionId(event.id)
+    setAmendmentError('')
+    try {
+      await eventApi(
+        `/events/${event.id}/amendment-request`,
+        { coordinatorId: currentCoordinator.id, fields, reason },
+        'PATCH',
+      )
+      // Like clarification, the request leaves this list until the organiser resubmits.
+      setEvents((current) => current.filter((item) => item.id !== event.id))
+      setAmending(null)
+      setPopup({
+        title: 'Amendment Requested',
+        messages: [`${event.eventName} was sent back to its organiser to amend the flagged fields.`],
+      })
+    } catch (cause) {
+      setAmendmentError(cause instanceof Error ? cause.message : 'Unable to request an amendment.')
+    } finally {
+      setDecisionId(null)
+    }
+  }
+
   if (!isCoordinator(role)) return <RoleWarning>Submitted event requests are visible to Event Coordinators.</RoleWarning>
 
   return <div className="page-stack">
@@ -155,12 +184,14 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
                 <button className="button approve" disabled={decisionId === event.id} onClick={() => approve(event)}>{decisionId === event.id && <Spinner size={12} />}{decisionId === event.id ? 'Processing…' : 'Approve Request'}</button>
                 <button className="button reject" disabled={decisionId === event.id} onClick={() => { setRejecting(event); setReason('') }}>Reject Request</button>
                 <button className="button secondary" disabled={decisionId === event.id} onClick={() => { setClarifying(event); setClarificationMessage(''); setClarificationError('') }}>Request clarification</button>
+                <button className="button secondary" disabled={decisionId === event.id} onClick={() => { setAmending(event); setAmendmentError('') }}>Request amendment</button>
               </div>}
             </div>
           : isLead(role) && <p className="muted">Not assigned yet. Assign it from Unassigned requests.</p>}
       </article>)}
     {rejecting && <RejectionDialog eventName={rejecting.eventName} reason={reason} submitting={decisionId === rejecting.id} onReasonChange={setReason} onCancel={() => { setRejecting(null); setReason('') }} onConfirm={reject} />}
     {clarifying && <ClarificationDialog eventName={clarifying.eventName} message={clarificationMessage} submitting={decisionId === clarifying.id} error={clarificationError} onMessageChange={setClarificationMessage} onCancel={() => { setClarifying(null); setClarificationMessage(''); setClarificationError('') }} onConfirm={requestClarification} />}
+    {amending && <AmendmentRequestDialog eventName={amending.eventName} submitting={decisionId === amending.id} error={amendmentError} onCancel={() => { setAmending(null); setAmendmentError('') }} onConfirm={requestAmendment} />}
   </div>
 }
 

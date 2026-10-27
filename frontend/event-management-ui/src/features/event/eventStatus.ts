@@ -9,6 +9,8 @@ export const ALLOWED_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
   Submitted: ['Submitted', 'Under Review'],
   'Under Review': ['Under Review', 'Approved', 'Rejected'],
   'Clarification Requested': [],
+  // SCRUM-16: only the organiser's amendment response leaves this state.
+  'Amendment Requested': [],
   // A coordinator can't confirm an event; the safety workflow does that, so
   // 'Approved' offers only itself. The next step is submit-for-safety-check.
   Approved: ['Approved'],
@@ -32,6 +34,7 @@ const SAFETY_BLOCK_MESSAGES: Record<Exclude<EventStatus, typeof PREPARATION_STAT
   Submitted: 'This event must be approved and pass its Operational Safety Check before it can progress to Confirmed.',
   'Under Review': 'This event must be approved and pass its Operational Safety Check before it can progress to Confirmed.',
   'Clarification Requested': "This event is waiting for the Event Organiser's clarification response.",
+  'Amendment Requested': "This event is waiting for the Event Organiser's amendment.",
   Approved: 'Submit this event for safety check for it to progress to Confirmed.',
   Rejected: "This event was rejected, so it can't progress to Confirmed.",
   'Pending Safety Check': "This event is waiting for the Safety Officer's decision.",
@@ -62,10 +65,19 @@ export function showsSafetyHint(status: EventStatus) {
 // Mirrors CLOSED_STATUSES in services/event-service/app/models.py: these
 // events keep their coordinator. Event Service enforces it; the UI just
 // doesn't offer a reassignment that would 409.
-const CLOSED_STATUSES: EventStatus[] = ['Rejected', 'Cancelled', 'Clarification Requested']
+const CLOSED_STATUSES: EventStatus[] = [
+  'Rejected', 'Cancelled', 'Clarification Requested', 'Amendment Requested',
+]
 
 export function canReassign(event: SubmittedEvent) {
   return Boolean(event.coordinatorId) && !CLOSED_STATUSES.includes(event.status)
+}
+
+/** The organiser holds the request (clarification or amendment), so the
+ * coordinator's progress and detail edits are locked. Event Service refuses
+ * both too: neither status has a progress transition or is editable. */
+export function isAwaitingOrganiser(status: EventStatus) {
+  return status === 'Clarification Requested' || status === 'Amendment Requested'
 }
 
 // Same wording as Event Service's no-change refusal.

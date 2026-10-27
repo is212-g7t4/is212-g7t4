@@ -47,6 +47,36 @@ export const FIELD_LABELS: Record<EditableField, string> = {
   registrationNeeds: 'Registration needs',
 }
 
+/** The editable fields in form order, with their form label and input type.
+ * Shared by the organiser's change-request form (SCRUM-42) and the
+ * amendment request and response (SCRUM-16), so the three can't drift. */
+export const FIELD_INPUTS: { field: EditableField; label: string; type: 'text' | 'textarea' | 'number' | 'datetime' }[] = [
+  { field: 'eventName', label: 'Event Name', type: 'text' },
+  { field: 'preferredStartDate', label: 'Preferred Start Date & Time', type: 'datetime' },
+  { field: 'preferredEndDate', label: 'Preferred End Date & Time', type: 'datetime' },
+  { field: 'expectedAttendance', label: 'Expected Attendance', type: 'number' },
+  { field: 'venueRequirements', label: 'Venue Requirements', type: 'textarea' },
+  { field: 'accessibilityNeeds', label: 'Accessibility Needs', type: 'textarea' },
+  { field: 'equipmentRequirements', label: 'Equipment Requirements', type: 'textarea' },
+  { field: 'description', label: 'Description', type: 'textarea' },
+  { field: 'purpose', label: 'Purpose', type: 'textarea' },
+  { field: 'registrationNeeds', label: 'Registration Requirements', type: 'textarea' },
+]
+
+/** One checkbox per FIELD_LABELS label, in form order: "Date/time" is a single
+ * option carrying both date fields, because Event Service flags them as a pair
+ * (SCRUM-16). */
+export const AMENDMENT_OPTIONS: { label: string; fields: EditableField[] }[] = FIELD_INPUTS.reduce(
+  (options, { field }) => {
+    const label = FIELD_LABELS[field]
+    const existing = options.find((option) => option.label === label)
+    if (existing) existing.fields.push(field)
+    else options.push({ label, fields: [field] })
+    return options
+  },
+  [] as { label: string; fields: EditableField[] }[],
+)
+
 export function isHighImpact(field: string): boolean {
   return (HIGH_IMPACT_FIELDS as readonly string[]).includes(field)
 }
