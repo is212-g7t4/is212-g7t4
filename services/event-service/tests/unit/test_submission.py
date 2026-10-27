@@ -277,7 +277,7 @@ def test_assign_coordinator_updates_event(setup):
     lock_query, lock_parameters = cursor.execute.call_args_list[0].args
     assert "FOR UPDATE" in lock_query
     assert lock_parameters == ["00000000-0000-0000-0000-000000000001"]
-    query, parameters = cursor.execute.call_args.args
+    query, parameters = cursor.execute.call_args_list[1].args
     assert "previous_coordinator_id = coordinator_id" in query
     assert "coordinator_id = %s" in query
     assert "assigned_by = %s" in query
@@ -312,7 +312,9 @@ def test_reassign_replaces_the_coordinator_and_records_the_previous_one(setup, s
     assert response.json["assignedBy"] == LEAD_ID
     assert response.json["assignedAt"] == "2026-10-16T13:05:00+00:00"
     assert response.json["status"] == status
-    assert cursor.execute.call_count == 2
+    writes = [call for call in cursor.execute.call_args_list if 'UPDATE public."Event"' in call.args[0]]
+    assert len(writes) == 1
+    assert writes[0].args[1] == [OTHER_COORDINATOR_ID, LEAD_ID, "00000000-0000-0000-0000-000000000001"]
 
 
 @pytest.mark.parametrize("status", ["Rejected", "Cancelled", "Clarification Requested"])

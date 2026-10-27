@@ -7,6 +7,8 @@ import subprocess
 import sys
 import time
 from uuid import UUID
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 import pika
@@ -17,6 +19,10 @@ LOG = logging.getLogger(__name__)
 
 class CoordinatorNameUnavailable(Exception):
     """Saved coordinator cannot be named; retain intent for operator repair."""
+
+
+class OrganiserNameUnavailable(Exception):
+    """Coordinator delivery remains held until its organiser can be named."""
 
 
 class OutboxAPI:
@@ -85,6 +91,17 @@ class OutboxAPI:
     def retry(self, job, error):
         return self.operation(job, "retry", error=error)
 
+def coordinator_message(source, name, removed=False):
+    """Freeze a complete, UI-independent proposed-period description in Singapore time."""
+    def stamp(value):
+        return datetime.fromisoformat(value).astimezone(ZoneInfo("Asia/Singapore")).strftime("%d %b %Y, %H:%M SGT")
+
+    period = (stamp(source["startDateTime"]) + " – " + stamp(source["endDateTime"])
+              if source.get("startDateTime") and source.get("endDateTime") else "Not provided")
+    action = "You are no longer assigned to" if removed else "You have been assigned to"
+    return f"{action} {source['eventName']}. Event Organiser: {name}. Proposed: {period}."
+
+
 def dispatch_once(api, publish):
     jobs = api.claim()
     for job in jobs:
@@ -108,6 +125,19 @@ def dispatch_once(api, publish):
                     name = api.coordinator_name(source["coordinatorId"])
                     details = {**source, "coordinatorName": name}
                     message = f"{name} has been assigned to coordinate {source['eventName']}."
+                elif kind in ("event.coordinator-assigned", "event.coordinator-removed"):
+                    if not source.get("organiserId"):
+                        raise OrganiserNameUnavailable
+                    try:
+                        name = api.organiser_name(source["organiserId"])
+                    except httpx.HTTPStatusError as error:
+                        if error.response.status_code == 404:
+                            raise OrganiserNameUnavailable from error
+                        raise
+                    except ValueError as error:
+                        raise OrganiserNameUnavailable from error
+                    details = {**source, "organiserName": name}
+                    message = coordinator_message(source, name, kind == "event.coordinator-removed")
                 elif kind == "event.approval":
                     message = f"{source['eventName']} was approved"
                 else:
@@ -116,12 +146,20 @@ def dispatch_once(api, publish):
                     version=1, id=job["id"], type=kind,
                     recipientId=source["recipientId"], createdAt=job["createdAt"],
                     message=message,
-                    destination=dict(kind="event-details", eventId=source["eventId"]),
+                    destination=(None if kind == "event.coordinator-removed" else
+                                 dict(kind="event-details", eventId=source["eventId"])),
                     details=details,
                 )
                 envelope = api.freeze(job, envelope)
             publish(envelope)
             api.published(job)
+        except OrganiserNameUnavailable:
+            diagnosis = f"OrganiserNameUnavailable organiserId={job['source'].get('organiserId')}"
+            LOG.warning("Dispatch hold source=%s error=%s", job["id"], diagnosis)
+            try:
+                api.hold(job, diagnosis)
+            except Exception:
+                LOG.warning("Hold update failed; lease will recover source=%s", job["id"])
         except CoordinatorNameUnavailable:
             diagnosis = f"CoordinatorNameUnavailable coordinatorId={job['source']['coordinatorId']}"
             LOG.warning("Dispatch hold source=%s error=%s", job["id"], diagnosis)

@@ -198,7 +198,7 @@ function Items({ items, onOpened }: { items: InboxItem[]; onOpened?: () => void 
       {path ? <a className="notification-content-link" href={path} aria-label="Open notification" aria-disabled={center.pending} onClick={event => {
         event.preventDefault()
         void center.mark(item, true, true).then(opened => { if (opened) onOpened?.() })
-      }}><Content item={item} /><span className="notification-destination">{item.type === 'venue.closure-rejection' ? 'View rejection →' : 'View details →'}</span></a> : <><Content item={item} /><span>Destination unavailable.</span></>}
+      }}><Content item={item} /><span className="notification-destination">{item.type === 'venue.closure-rejection' ? 'View rejection →' : 'View details →'}</span></a> : <><Content item={item} />{!(item.type === 'event.coordinator-removed' && item.payload?.destination === null) && <span>Destination unavailable.</span>}</>}
       <div className="notification-actions">
         <button className="button small" disabled={center.pending} onClick={() => void center.mark(item, !item.readAt)}>{item.readAt ? 'Mark unread' : 'Mark read'}</button>
       </div>
