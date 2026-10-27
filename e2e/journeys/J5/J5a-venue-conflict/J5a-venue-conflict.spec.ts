@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { openAs, users } from '../helpers/stack'
-import { seedJ5a } from '../helpers/j5a'
-import { deleteFixtureEvents } from '../helpers/cleanup'
+import { deleteFixtureEvents } from '../../../helpers/cleanup'
+import { openAs, users } from '../../../helpers/stack'
+import { seedJ5a } from './helpers/seed'
 
 /**
  * J5a — Prevent conflicting venue reservations (High; brief demo, detailed cases at integration level)

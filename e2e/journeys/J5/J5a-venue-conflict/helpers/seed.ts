@@ -1,6 +1,6 @@
 import type { APIRequestContext } from '@playwright/test'
 import { expect } from '@playwright/test'
-import { createUnderReviewEvent, randomWindow } from './stack'
+import { createUnderReviewEvent, randomWindow } from '../../../../helpers/stack'
 
 export const SETUP_MINUTES = 60
 export const TURNAROUND_MINUTES = 60

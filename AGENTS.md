@@ -252,21 +252,28 @@ manual and opt-in, never in CI: start the stack (`npm run dev`), then
 mocked suite in `frontend/event-management-ui/e2e/` and from the Python
 harnesses in the repo-root `e2e/*.py`; don't merge or delete either.
 
-When adding a journey, follow J5b (`J5b-equipment-over-allocation/`):
+When adding a journey, use one `J<n>/` folder per Jira journey. Put alternate
+paths in child folders or files within that journey folder, following the J5
+structure (`J5/J5a-venue-conflict/` and `J5/J5b-equipment-over-allocation/`):
 
-- **One folder and one spec per journey**, named `J<n>[a|b]-<name>/J<n>[a|b]-<name>.spec.ts`.
-  Each test is a specific scenario, split into `test.step`s that match the
-  journey flow in the Jira task.
+- **One journey root folder per Jira journey.** Keep the main spec and its
+  path-specific specs/files under `J<n>/`, using child folders for distinct
+  paths when useful. Each spec should cover a specific path and split its
+  scenario into `test.step`s that match the journey flow in the Jira task.
 - **Header comment** on every spec: the journey's Jira task, the user stories it
   exercises, and the stories its fixture setup relies on, using real SCRUM keys
   (never invent one; ask). Add a row to `e2e/journeys/TRACEABILITY.md` too.
-- **Set up data through the service APIs** in `helpers/` (see `helpers/stack.ts`),
-  not by clicking through the UI. Log in per role with `openAs()`; the UI reads
-  `activeUserId` from localStorage.
+- **Helper ownership:** helpers shared across all E2E suites belong in
+  `e2e/helpers/` (see `e2e/helpers/stack.ts` and `e2e/helpers/cleanup.ts`).
+  Helpers and fixture scripts used only by one journey/path belong inside its
+  folder under `e2e/journeys/J<n>/`. Set up data through service APIs, not UI
+  clicks. Log in per role with `openAs()`; the UI reads `activeUserId` from
+  localStorage.
 - **Clean up after yourself.** The tests write to the shared Supabase database.
-  Fixture event names must be `J<n>[a|b] Event ...` (the pattern in `helpers/cleanup.ts`), which runs
-  before and after the journey. Use far-future random dates (`randomWindow()`) so
-  runs never collide with real events or stock.
+  Fixture event names must be `J<n>[a|b] Event ...` (the pattern in
+  `e2e/helpers/cleanup.ts`), which runs before and after the journey. Use
+  far-future random dates (`randomWindow()`) so runs never collide with real
+  events or stock.
 - **Placeholders:** a journey blocked on an unbuilt story is a spec with
   `test.fixme`, its flow written as comments, and the blocking tickets named.
 - **Codegen** (`npm run codegen`, with `npm run journey:fixtures` to seed J5b
