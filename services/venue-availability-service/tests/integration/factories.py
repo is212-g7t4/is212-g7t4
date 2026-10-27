@@ -52,14 +52,37 @@ def make_event(db, coordinator_id=COORDINATOR_ID, name="Spring Fair", status="Un
     return event_id
 
 
-def make_booking(db, event_id, venue_id, start, end, status="Approved", requested_by=COORDINATOR_ID):
+def make_booking(
+    db,
+    event_id,
+    venue_id,
+    start,
+    end,
+    status="Approved",
+    requested_by=COORDINATOR_ID,
+    reviewed_by=None,
+    reviewed_at=None,
+    rejection_reason=None,
+):
     booking_id = str(uuid4())
     db.execute(
         """INSERT INTO public."VenueBooking"
            (booking_id, event_id, venue_id, requested_start_time, requested_end_time,
-            required_capacity, venue_requirements, status, requested_by)
-           VALUES (%s, %s, %s, %s, %s, 50, '', %s, %s)""",
-        [booking_id, event_id, venue_id, start, end, status, requested_by],
+            required_capacity, venue_requirements, status, requested_by,
+            reviewed_by, reviewed_at, rejection_reason)
+           VALUES (%s, %s, %s, %s, %s, 50, '', %s, %s, %s, %s, %s)""",
+        [
+            booking_id,
+            event_id,
+            venue_id,
+            start,
+            end,
+            status,
+            requested_by,
+            reviewed_by,
+            reviewed_at,
+            rejection_reason,
+        ],
     )
     return booking_id
 

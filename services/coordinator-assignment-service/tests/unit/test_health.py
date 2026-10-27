@@ -181,25 +181,32 @@ def test_lead_can_assign_an_event_to_themselves(mock_get_user, mock_get_coordina
 ORGANISER = {"user_id": "user-organiser", "username": "Priya Nair", "role": "Event Organiser"}
 
 
-@patch("app.routes.get_unassigned_events")
+@patch("app.routes.get_assignment_events")
 @patch("app.routes.get_user")
-def test_lead_sees_the_unassigned_queue(mock_get_user, mock_get_unassigned):
-    """The Lead gets the submitted events that still need a coordinator."""
+def test_lead_sees_assigned_and_unassigned_submitted_requests(mock_get_user, mock_get_assignments):
+    """AC1/AC3: the Lead gets one worklist for assignment and reassignment."""
     mock_get_user.return_value = LEAD
-    mock_get_unassigned.return_value = [{"id": "EVT-001", "coordinatorId": None}]
+    mock_get_assignments.return_value = [
+        {"id": "EVT-001", "coordinatorId": None, "status": "Submitted"},
+        {"id": "EVT-002", "coordinatorId": "user-coordinator", "status": "Under Review"},
+    ]
 
     client = create_app().test_client()
     response = client.get("/queue?actingUserId=user-lead")
 
     assert response.status_code == 200
-    assert response.json == {"events": [{"id": "EVT-001", "coordinatorId": None}]}
+    assert response.json == {"events": [
+        {"id": "EVT-001", "coordinatorId": None, "status": "Submitted"},
+        {"id": "EVT-002", "coordinatorId": "user-coordinator", "status": "Under Review"},
+    ]}
     mock_get_user.assert_called_once_with("user-lead")
+    mock_get_assignments.assert_called_once_with("user-lead")
 
 
 @pytest.mark.parametrize("acting_user", [COORDINATOR, ORGANISER, None])
-@patch("app.routes.get_unassigned_events")
+@patch("app.routes.get_assignment_events")
 @patch("app.routes.get_user")
-def test_only_the_lead_can_see_the_queue(mock_get_user, mock_get_unassigned, acting_user):
+def test_only_the_lead_can_see_the_queue(mock_get_user, mock_get_assignments, acting_user):
     """Event Coordinators, other roles and unknown users get 403 and no events."""
     mock_get_user.return_value = acting_user
 
@@ -207,7 +214,7 @@ def test_only_the_lead_can_see_the_queue(mock_get_user, mock_get_unassigned, act
     response = client.get("/queue?actingUserId=someone")
 
     assert response.status_code == 403
-    mock_get_unassigned.assert_not_called()
+    mock_get_assignments.assert_not_called()
 
 
 def test_queue_requires_acting_user_id():
@@ -224,14 +231,14 @@ def test_queue_handles_acting_user_lookup_error(mock_get_user):
     assert "Failed to validate acting user" in response.json["error"]
 
 
-@patch("app.routes.get_unassigned_events")
+@patch("app.routes.get_assignment_events")
 @patch("app.routes.get_user")
-def test_queue_handles_event_service_error(mock_get_user, mock_get_unassigned):
+def test_queue_handles_event_service_error(mock_get_user, mock_get_assignments):
     mock_get_user.return_value = LEAD
-    mock_get_unassigned.side_effect = Exception("Event Service down")
+    mock_get_assignments.side_effect = Exception("Event Service down")
     response = create_app().test_client().get("/queue?actingUserId=user-lead")
     assert response.status_code == 500
-    assert "Failed to fetch unassigned events" in response.json["error"]
+    assert "Failed to fetch assignment events" in response.json["error"]
 
 
 @patch("app.routes.get_active_events")

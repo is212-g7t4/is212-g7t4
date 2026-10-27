@@ -11,6 +11,8 @@ import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
 import { DetailPanelSkeleton, TableSkeleton } from '../components/Loading'
 import { ClarificationHistory } from '../features/event/ClarificationHistory'
 import { ChangeRequestDialog } from '../features/event/ChangeRequestDialog'
+import { AmendmentResponseForm } from '../features/event/AmendmentResponseForm'
+import { AmendmentHistory } from '../features/event/AmendmentHistory'
 
 const CHANGE_REQUEST_STATUSES = ['Submitted', 'Under Review', 'Approved'] as const
 
@@ -115,8 +117,19 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
           <button className="button primary" type="submit" disabled={!response.trim() || responding}>{responding ? 'Submitting…' : 'Submit response'}</button>
         </form>
       </section>}
+      {event.status === 'Amendment Requested' && organiserId && <AmendmentResponseForm
+        key={event.amendmentHistory?.at(-1)?.id}
+        event={event}
+        organiserId={organiserId}
+        resolveUserName={resolveUserName}
+        onResubmitted={(updated) => {
+          setEvent(updated)
+          setResponseMessage('Your amended request was resubmitted. It is back with the same Event Coordinator.')
+        }}
+      />}
       {responseMessage && <p className="event-card-section" role="status">{responseMessage}</p>}
       <ClarificationHistory clarifications={event.clarificationHistory || []} resolveUserName={resolveUserName} />
+      <AmendmentHistory amendments={event.amendmentHistory || []} resolveUserName={resolveUserName} />
 
       <div className="event-card-section">
         <h3>Registrations</h3>

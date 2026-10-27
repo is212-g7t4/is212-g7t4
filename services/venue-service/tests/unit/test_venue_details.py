@@ -68,6 +68,10 @@ def test_ac1_returns_all_venue_characteristics(setup):
         "status": "Available",
         "setupTimeMinutes": 30,
         "turnaroundTimeMinutes": 45,
+        "emergencyAccessDetails": None,
+        "knownRestrictions": None,
+        "safetyInfoUpdatedBy": None,
+        "safetyInfoUpdatedAt": None,
     }
 
 

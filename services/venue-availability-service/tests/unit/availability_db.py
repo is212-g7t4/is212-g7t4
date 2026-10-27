@@ -103,6 +103,7 @@ class AvailabilityDB:
             "requested_end_time",
             "hold_expires_at",
             "requested_at",
+            "reviewed_at",
         ):
             if result.get(key) is not None:
                 result[key] = datetime.fromisoformat(result[key])

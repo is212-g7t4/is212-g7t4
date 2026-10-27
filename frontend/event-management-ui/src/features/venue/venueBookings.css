@@ -12,3 +12,12 @@
 .venue-bookings-section .venue-booking-actions { flex-wrap: wrap; }
 .venue-bookings-section .venue-booking-form select,
 .venue-bookings-section .venue-booking-form input { min-width: 0; max-width: 100%; }
+
+/* SCRUM-29: the Venue Staff review dialog and decided-row outcome. */
+.venue-review-dialog { width: min(640px, calc(100vw - 32px)); }
+.venue-review-dialog .event-details { padding: 0 0 var(--space-4); }
+.venue-review-dialog .venue-review-heading { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); font-size: 14px; }
+.venue-review-dialog .closure-rejection { padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--color-background); }
+.venue-review-dialog .closure-rejection p { margin: var(--space-2) 0 0; }
+.venue-request-outcome { display: grid; gap: var(--space-1); justify-items: start; }
+.venue-request-reason { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }

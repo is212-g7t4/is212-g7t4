@@ -59,9 +59,10 @@ verify the Supabase JWT (see AGENTS.md). The retired `isManager=true` flag is
 ignored.
 
 `GET /events/unassigned` returns `Submitted` events with no `coordinator_id`,
-oldest submission first. It backs the Lead's unassigned queue, which
-`coordinator-assignment-service` serves at `GET /queue` after checking that the
-caller is the Lead. The frontend never calls this endpoint directly.
+oldest submission first. It remains available for consumers needing only
+unassigned requests. The Lead's assignment worklist instead uses
+`GET /events/submitted` with the Lead role so assigned `Under Review` requests
+remain visible for reassignment. The frontend calls neither endpoint directly.
 
 `GET /events/active` returns every event that isn't `Confirmed`, `Rejected` or
 `Cancelled`, assigned or not, ordered by start date. It backs the Lead's
@@ -91,6 +92,32 @@ It records the question, requesting coordinator and UTC timestamp, then the
 response, responding organiser and UTC timestamp. Only one round can be open
 at a time; earlier answered rounds remain visible to both parties. This is a
 temporary Event-owned implementation until the planned Forum Service exists.
+
+## Event amendment (SCRUM-16)
+
+An assigned coordinator can call `PATCH /events/<id>/amendment-request` with
+`{coordinatorId, fields, reason}` while the event is `Submitted` or `Under
+Review`. `fields` names the details the organiser must change, from the same
+ten fields change requests and detail edits use (the withdrawal deadline is not
+one of them); flagging either date flags both. `reason` is required, at most
+1000 characters. The row is locked, the assignment is checked again, and the
+event moves to `Amendment Requested`. No event field changes.
+
+The owning organiser resubmits through `PATCH /events/<id>/amendment-response`
+with `{organiserId, changes, note?}`. Only the flagged fields may appear in
+`changes`: any other key is refused whole with `400 AMENDMENT_FIELD_LOCKED`
+and `lockedFields`, even if its value is unchanged, so every other field stays
+as submitted. At least one flagged value must actually differ
+(`400 NO_AMENDMENT_CHANGES`), and the merged event must pass submission
+validation. Only the changed fields are written, and the event returns to
+`Submitted` with `coordinator_id` and `submission_date` untouched, so it goes
+back to the same coordinator and keeps its place in the queue. Reassignment is
+blocked while the amendment is open.
+
+Every round is append-only in the event metadata's `amendmentHistory`: the
+flagged fields, reason, requesting coordinator and UTC timestamp, then the
+resubmitting organiser, UTC `resubmittedAt`, optional note, and a from/to
+record of each changed field. No notification is sent.
 
 ## Event Organiser change requests
 
@@ -127,7 +154,8 @@ until the event has passed its Operational Safety Check.
 ```
 Submitted → Under Review → Approved ──(SCRUM-149)──► Pending Safety Check
               │
-              └──► Clarification Requested ──(organiser response)──► Submitted
+              ├──► Clarification Requested ──(organiser response)──► Submitted
+              └──► Amendment Requested ──(organiser resubmits)──► Submitted
                          ↘ Rejected                    │       ▲
                                     (SCRUM-150) ◄──────┼───────┼──► (SCRUM-151)
                                          │             │       │        │
@@ -153,6 +181,7 @@ What this endpoint accepts, by the event's current status:
 | Submitted | Submitted, Under Review |
 | Under Review | Under Review, Approved, Rejected |
 | Clarification Requested | None — only the dedicated response endpoint returns it to Submitted |
+| Amendment Requested | None — only the amendment response endpoint returns it to Submitted |
 | Approved | Approved |
 | Rejected | Rejected |
 | Pending Safety Check | Pending Safety Check |
@@ -160,10 +189,11 @@ What this endpoint accepts, by the event's current status:
 | Safety Changes Requested | Safety Changes Requested |
 | Cancelled | Cancelled |
 
-Every status except `Clarification Requested` lists itself. A "self"
-transition is a save that keeps the status and updates the action details.
-Progress and detail edits are locked during clarification; only the organiser's
-dedicated response endpoint can return the request to `Submitted`. Only the
+Every status except `Clarification Requested` and `Amendment Requested` lists
+itself. A "self" transition is a save that keeps the status and updates the
+action details. Progress and detail edits are locked during clarification and
+amendment; only the organiser's dedicated response endpoint can return the
+request to `Submitted`. Only the
 pre-safety transitions actually move an event through the review lifecycle.
 
 SCRUM-152 AC1's guarantee that `Confirmed` can't be reached "through ... the

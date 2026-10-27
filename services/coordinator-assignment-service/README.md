@@ -33,12 +33,12 @@ this up alongside every other service.
 - `GET /coordinators` — everyone an event can be assigned to: the Event
   Coordinator Lead (so the Lead can take an event on themselves) and every
   Event Coordinator, fetched from `user-service`.
-- `GET /queue?actingUserId=<user id>` — the Lead's queue: submitted events
-  with no coordinator assigned yet, oldest submission first (from
-  `event-service`'s `GET /events/unassigned`). Only the Event Coordinator Lead
-  may view it — `403` for everyone else, `400` without `actingUserId`. An
-  event leaves the queue once assigned, because assignment moves it to
-  `Under Review`.
+- `GET /queue?actingUserId=<user id>` — the Lead's assignment worklist:
+  unassigned `Submitted` requests and assigned `Under Review` requests, oldest
+  submission first (from `event-service`'s `GET /events/submitted`). Only the
+  Event Coordinator Lead may view it — `403` for everyone else, `400` without
+  `actingUserId`. Assigned requests remain visible so the Lead can reassign
+  them without leaving the worklist.
 - `GET /workload?actingUserId=<user id>` — the Lead's read-only workload
   view: every coordinator from `GET /coordinators` (the Lead included, and
   those with nothing assigned) with their active events under `events`, plus
@@ -70,3 +70,21 @@ No Forum Service call yet for logging the assignment/reassignment reason —
 flagged as an open architecture question in `AGENTS.md`/`docs/microservices-catalog.md`
 (whether this composite needs one at all, since most assignments won't have
 a reason worth logging).
+
+## Tests
+
+Run the hermetic unit tier (the default):
+
+```bash
+uv run pytest
+```
+
+Run the opt-in SCRUM-112 composite integration tier:
+
+```bash
+uv run pytest -m integration --no-cov
+```
+
+The integration tests run the real Flask routes and `httpx` client code while
+`respx` controls User Service and Event Service at their HTTP boundaries. They
+require no live services, database, or secrets.

@@ -19,7 +19,7 @@ register_uuid()
 BASE_COLUMNS = (
     "booking_id, event_id, venue_id, requested_start_time, requested_end_time, "
     "required_capacity, venue_requirements, status, requested_by, reviewed_by, "
-    "requested_at, "
+    "requested_at, reviewed_at, rejection_reason, "
 )
 COLUMNS = BASE_COLUMNS + "rejection_closure_id, rejection_closure_start, rejection_closure_end, rejection_closure_reason, rejected_at"
 LEGACY_COLUMNS = BASE_COLUMNS + (
@@ -86,6 +86,10 @@ class BookingStateError(Exception):
     pass
 
 
+class BookingAlreadyDecidedError(Exception):
+    """SCRUM-29 AC5: only an undecided booking can be approved or rejected."""
+
+
 class HoldConflictError(Exception):
     pass
 
@@ -113,6 +117,14 @@ def serialize(row):
             if row.get("requested_at")
             else None
         ),
+        # SCRUM-29 AC2/AC6: when Venue Staff decided, and why they rejected.
+        # Undecided, legacy and hold rows serialise both as None.
+        "reviewedAt": (
+            _aware(row["reviewed_at"]).astimezone(SINGAPORE).isoformat()
+            if row.get("reviewed_at")
+            else None
+        ),
+        "rejectionReason": row.get("rejection_reason"),
         "conflictReason": row.get("conflict_reason"),
         "closureRejection": (
             dict(
@@ -472,6 +484,8 @@ def update_booking(
                         requested_end_time = %s, required_capacity = %s,
                         venue_requirements = %s, status = 'Pending Review',
                         reviewed_by = NULL, conflict_reason = NULL,
+                        -- SCRUM-29 AC5: the old decision no longer applies.
+                        reviewed_at = NULL, rejection_reason = NULL,
                         -- SCRUM-28 Part B: a changed request rejoins the
                         -- Venue Staff queue as a new submission.
                         requested_at = now()
@@ -534,7 +548,8 @@ def reset_safety_bookings(database_url, event_id, booking_ids):
             if len(cursor.fetchall()) != len(booking_ids):
                 raise BookingNotFoundError
             cursor.execute(
-                f'''UPDATE public."VenueBooking" SET status = 'Pending Review', reviewed_by = NULL
+                f'''UPDATE public."VenueBooking" SET status = 'Pending Review', reviewed_by = NULL,
+                    reviewed_at = NULL, rejection_reason = NULL
                     WHERE event_id = %s AND booking_id = ANY(%s::uuid[])
                     AND status IN ('Approved', 'Pending', 'Pending Review')
                     RETURNING {booking_columns()}''',
@@ -667,6 +682,7 @@ def decide_booking(
     status,
     setup_time_minutes=0,
     turnaround_time_minutes=0,
+    rejection_reason=None,
 ):
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -682,6 +698,10 @@ def decide_booking(
                 raise BookingNotFoundError
             if booking["status"] in {"Cancelled", "Rejected"}:
                 raise BookingStateError
+            # SCRUM-29 AC5: decisions are final; an approved (or held/expired)
+            # row is never decided again.
+            if booking["status"] not in {"Pending", "Pending Review"}:
+                raise BookingAlreadyDecidedError
             if status == "Approved":
                 # Re-check — another booking may have been approved since this one was requested.
                 cursor.execute(
@@ -701,10 +721,16 @@ def decide_booking(
                     raise BookingConflictError(conflicts)
             cursor.execute(
                 f"""UPDATE public."VenueBooking"
-                    SET status = %s, reviewed_by = %s, conflict_reason = NULL
+                    SET status = %s, reviewed_by = %s, reviewed_at = now(),
+                        rejection_reason = %s, conflict_reason = NULL
                     WHERE booking_id = %s
                     RETURNING {booking_columns()}""",
-                [status, reviewed_by, booking_id],
+                [
+                    status,
+                    reviewed_by,
+                    rejection_reason if status == "Rejected" else None,
+                    booking_id,
+                ],
             )
             decided = _localize(cursor.fetchone())
     return serialize(decided)

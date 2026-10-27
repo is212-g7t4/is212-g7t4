@@ -253,9 +253,9 @@ function App() {
       {route === 'newEquipmentRequest' && <NewEquipmentRequestPage key={activeUser?.id} role={role} user={activeUser ?? null} onBack={() => navigate('equipmentRequests')} onCreated={(message) => { navigate('equipmentRequests'); setNotice({ message, tone: 'success' }) }} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}
-      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} coordinators={users.filter((u) => u.role === 'Event Coordinator' || u.role === 'Event Coordinator Lead')} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
+      {route === 'venueDetail' && venueId && <VenueDetailPage key={venueId} venueId={venueId} role={role} user={activeUser} coordinators={users.filter((u) => u.role === 'Event Coordinator' || u.role === 'Event Coordinator Lead')} users={users} onBack={() => navigate('venues')} onEdit={() => navigateToVenueEdit(venueId)} />}
       {route === 'addVenue' && <AddVenuePage role={role} onSaved={navigateToVenue} />}
-      {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
+      {route === 'editVenue' && venueId && <EditVenuePage key={venueId} venueId={venueId} role={role} user={activeUser} onSaved={navigateToVenue} onCancel={() => navigateToVenue(venueId)} />}
       {route === 'detail' && eventId && <EventDetailPage key={`${eventId}-${activeUser?.id}-${targetBookingId}`} targetBookingId={targetBookingId ?? undefined} eventId={eventId} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} backLabel={routeTitles[detailOrigin]} onBack={() => navigate(detailOrigin)} />}
     </main>
   </div></NotificationProvider>

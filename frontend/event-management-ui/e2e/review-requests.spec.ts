@@ -54,44 +54,60 @@ test('rejection needs a reason', async ({ page }) => {
   expect(rejectBody).toEqual({ coordinatorId: users.coordinator.user_id, reason: 'Venue clash' })
 })
 
-test('lead sees the unassigned queue and an assigned event leaves it', async ({ page }) => {
+test('lead assigns and reassigns from one submitted-request worklist', async ({ page }) => {
   let queueQuery: URLSearchParams | undefined
-  let assignBody: unknown
+  const assignmentBodies: unknown[] = []
+  const unassigned = makeEvent({ coordinatorId: null, organiserId: users.organiser.user_id })
+  const assigned = makeEvent({ id: 'evt-002', eventName: 'Innovation Expo', status: 'Under Review', coordinatorId: users.coordinator.user_id, organiserId: users.organiser.user_id })
   await asUser(page, users.lead.user_id)
   await mock(page, 'assignment', '/queue', (route) => {
     queueQuery = new URL(route.request().url()).searchParams
-    return json(route, { events: [makeEvent({ coordinatorId: null, organiserId: users.organiser.user_id })] })
+    return json(route, { events: [unassigned, assigned] })
   })
   await mock(page, 'assignment', `/events/evt-001/assign-coordinator/${users.coordinator.user_id}`, (route) => {
-    assignBody = route.request().postDataJSON()
-    return json(route, { eventId: 'evt-001', assignedCoordinatorId: users.coordinator.user_id })
+    assignmentBodies.push(route.request().postDataJSON())
+    return json(route, { ...unassigned, status: 'Under Review', coordinatorId: users.coordinator.user_id })
+  })
+  await mock(page, 'assignment', `/events/evt-002/assign-coordinator/${users.lead.user_id}`, (route) => {
+    assignmentBodies.push(route.request().postDataJSON())
+    return json(route, { ...assigned, coordinatorId: users.lead.user_id, previousCoordinatorId: users.coordinator.user_id })
   })
   await page.goto('/requests/queue')
 
-  const row = page.getByRole('row', { name: /Tech Conference/ })
-  await expect(row).toContainText(users.organiser.username)
-  await expect(row).toContainText('100')
+  const unassignedRow = page.getByRole('row', { name: /Tech Conference/ })
+  const assignedRow = page.getByRole('row', { name: /Innovation Expo/ })
+  await expect(unassignedRow).toContainText(users.organiser.username)
+  await expect(unassignedRow).toContainText('Unassigned')
+  await expect(assignedRow).toContainText('Assigned')
+  await expect(assignedRow).toContainText(users.coordinator.username)
   expect(queueQuery?.get('actingUserId')).toBe(users.lead.user_id)
 
-  await row.getByLabel('Coordinator').selectOption(users.coordinator.user_id)
-  await row.getByRole('button', { name: 'Assign' }).click()
-
+  await unassignedRow.getByLabel('Coordinator').selectOption(users.coordinator.user_id)
+  await unassignedRow.getByRole('button', { name: 'Assign' }).click()
   await expect(page.getByRole('status')).toContainText(`Tech Conference was assigned to ${users.coordinator.username}`)
-  await expect(page.getByText('No requests are waiting for a coordinator.')).toBeVisible()
-  expect(assignBody).toEqual({ actingUserId: users.lead.user_id })
+  await expect(unassignedRow).toContainText('Assigned')
+
+  await assignedRow.getByLabel('New coordinator').selectOption(users.lead.user_id)
+  await assignedRow.getByRole('button', { name: 'Reassign' }).click()
+  await expect(page.getByRole('status')).toContainText(`Innovation Expo was reassigned to ${users.lead.username}`)
+  await expect(assignedRow).toContainText(users.lead.username)
+  expect(assignmentBodies).toEqual([
+    { actingUserId: users.lead.user_id },
+    { actingUserId: users.lead.user_id },
+  ])
 })
 
-test('coordinator cannot see the unassigned queue', async ({ page }) => {
+test('coordinator cannot see coordinator assignments', async ({ page }) => {
   await asUser(page, users.coordinator.user_id)
   await page.goto('/requests/queue')
-  await expect(page.getByText('The unassigned request queue is visible only to the Event Coordinator Lead.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Unassigned requests' })).toHaveCount(0)
+  await expect(page.getByText('Coordinator assignments are visible only to the Event Coordinator Lead.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Coordinator assignments' })).toHaveCount(0)
 })
 
-test('organiser cannot see the unassigned queue', async ({ page }) => {
+test('organiser cannot see coordinator assignments', async ({ page }) => {
   await asUser(page, users.organiser.user_id)
   await page.goto('/requests/queue')
-  await expect(page.getByText('The unassigned request queue is visible only to the Event Coordinator Lead.')).toBeVisible()
+  await expect(page.getByText('Coordinator assignments are visible only to the Event Coordinator Lead.')).toBeVisible()
 })
 
 test('organiser cannot see the review queue', async ({ page }) => {
@@ -112,7 +128,7 @@ test('lead moves between the Events tabs', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Events', exact: true }).click()
   await expect(page).toHaveURL(/\/requests\/queue$/)
-  await expect(page.getByRole('tab', { name: 'Unassigned requests' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tab', { name: 'Coordinator assignments' })).toHaveAttribute('aria-selected', 'true')
 
   await page.getByRole('tab', { name: 'Request review' }).click()
   await expect(page).toHaveURL(/\/requests\/review$/)

@@ -35,3 +35,16 @@ def saved_row(**overrides):
     }
     row.update(overrides)
     return row
+
+
+# SCRUM-167 Record Venue Safety Information.
+STAFF_ID = "5b1f0c2e-7d3a-4c1e-9f6b-2a8d4e0c1b37"
+
+SAFETY_PAYLOAD = {
+    "emergencyAccessDetails": "Exits on north and south walls; assembly point at the front lawn",
+    "knownRestrictions": "Noise curfew 10pm; no open flames",
+}
+
+
+def staff_headers(role="Venue Staff", user_id=STAFF_ID):
+    return {"X-Dev-User-Id": user_id, "X-Dev-Role": role}

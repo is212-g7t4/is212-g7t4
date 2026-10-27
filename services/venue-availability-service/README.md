@@ -219,19 +219,31 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
   accepts **naive** datetime input only and returns naive times.
 - Every booking response carries `requestedAt`: the submission time as
   Singapore-offset ISO 8601 (`2030-03-01T10:30:00+08:00`), or `null` for rows
-  recorded before SCRUM-28.
+  recorded before SCRUM-28. It also carries the Venue Staff decision
+  (SCRUM-29): `reviewedAt` (same format, `null` while undecided) and
+  `rejectionReason` (`null` unless a staff member rejected it).
 - `GET /events/<eventId>/venue-bookings`: returns all booking rows linked to
   one event, ordered independently by requested start time and booking ID.
 - `PATCH /venue-bookings/<id>`: updates one row, scoped by `eventId`, rechecks
   approved-booking/hold conflicts while excluding that row's old interval,
   and resets the selected booking to `Pending Review` with no reviewer,
-  restamping `requested_at` so it rejoins the staff queue as a new
+  decision time or rejection reason, restamping `requested_at` so it rejoins the staff queue as a new
   submission (SCRUM-28 Part B).
 - `PATCH /venue-bookings/<id>/cancel`: scopes by `eventId` and retains the
   selected row as `Cancelled`; repeating the request is idempotent.
-- `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy}`;
-  approval rechecks conflicts. `Cancelled` is terminal and cannot be edited,
-  approved, or rejected.
+- `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy,
+  setupTimeMinutes?, turnaroundTimeMinutes?, rejectionReason?}`; approval
+  rechecks buffered conflicts (`409 VENUE_UNAVAILABLE` + `conflictTypes`).
+  Both stamp `reviewed_by` and `reviewed_at = now()` (SCRUM-29).
+  - A reject needs `rejectionReason`: text of 1–500 characters after trimming,
+    stored trimmed; otherwise `400 REJECTION_REASON_REQUIRED`. A reason sent
+    with an approval is ignored.
+  - Decisions are final: only `Pending`/`Pending Review` rows can be decided.
+    `Cancelled`/`Rejected` return `409 BOOKING_IMMUTABLE`; any other status
+    (e.g. `Approved`) returns `409 BOOKING_ALREADY_DECIDED`. To change an
+    approved booking, edit it, which sends it back to `Pending Review`.
+- `POST /events/<eventId>/venue-bookings/safety-reset` also clears
+  `reviewed_at` and `rejection_reason` on the bookings it resets.
 - `GET /health` remains available without DEV headers.
 
 ## Tests and review

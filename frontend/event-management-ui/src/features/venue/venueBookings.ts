@@ -16,6 +16,10 @@ export interface VenueBooking {
   requestedAt?: string | null
   /** SCRUM-28 AC4: set by the staff queue when the request still needs a decision. */
   awaitingReview?: boolean
+  /** SCRUM-29 AC2/AC3: when Venue Staff decided; null while undecided and for legacy rows. */
+  reviewedAt?: string | null
+  /** SCRUM-29 AC4/AC6: why Venue Staff rejected it; null unless rejected with a reason. */
+  rejectionReason?: string | null
   safetyFeedback?: { reason: string | null; requestedChanges: string[] } | null
   closureRejection?: { closureId: string; startDateTime: string; endDateTime: string; reason: string; rejectedAt: string } | null
 }
@@ -117,10 +121,48 @@ export async function fetchVenueRequests(user: Pick<User, 'id' | 'role'>, status
   return body.events as VenueRequestEvent[]
 }
 
-export async function reviewVenueRequest(bookingId: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>): Promise<VenueBooking> {
+export async function reviewVenueRequest(
+  bookingId: string,
+  status: 'Approved' | 'Rejected',
+  user: Pick<User, 'id' | 'role'>,
+  rejectionReason?: string,
+): Promise<VenueBooking> {
   return request(`/booking-requests/${encodeURIComponent(bookingId)}/review`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
-    body: JSON.stringify({ status, reviewedBy: user.id }),
+    // SCRUM-29 AC4: only a rejection carries a reason.
+    body: JSON.stringify(status === 'Rejected' ? { status, reviewedBy: user.id, rejectionReason } : { status, reviewedBy: user.id }),
+  })
+}
+
+/** SCRUM-29 AC1: one request with the event's and venue's details, as Venue Staff open it. */
+export interface VenueRequestDetail {
+  booking: VenueBooking & { occupiedFrom: string | null; occupiedTo: string | null }
+  event: {
+    id: string
+    eventName: string | null
+    status: string | null
+    coordinatorId: string | null
+    preferredStartDate: string | null
+    preferredEndDate: string | null
+    expectedAttendance: string | null
+    venueRequirements: string | null
+    accessibilityNeeds: string | null
+  }
+  venue: {
+    id: string
+    name: string
+    capacity: number | null
+    status: string
+    setupTimeMinutes: number
+    turnaroundTimeMinutes: number
+  }
+  canDecide: boolean
+  decisionBlockedReason: string | null
+}
+
+export async function fetchVenueRequestDetail(bookingId: string, user: Pick<User, 'id' | 'role'>): Promise<VenueRequestDetail> {
+  return request(`/booking-requests/${encodeURIComponent(bookingId)}`, {
+    headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
   })
 }

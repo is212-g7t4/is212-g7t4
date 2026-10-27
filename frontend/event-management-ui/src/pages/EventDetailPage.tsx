@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
 import type { EventStatus, SubmittedEvent } from '../features/event/submission'
-import { ALLOWED_TRANSITIONS, canReassign, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
+import { ALLOWED_TRANSITIONS, canReassign, isAwaitingOrganiser, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
 import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorPanel'
 import { EventEditDialog } from '../features/event/EventEditDialog'
@@ -24,6 +24,7 @@ import { SafetyFeedbackPanel } from '../features/safety/SafetyFeedbackPanel'
 import { submittedForSafetyCheckAt } from '../features/safety/safetyCheck'
 import { isCoordinator, isLead } from '../roles'
 import { ClarificationHistory } from '../features/event/ClarificationHistory'
+import { AmendmentHistory } from '../features/event/AmendmentHistory'
 
 type EventDetailProps = { targetBookingId?: string; eventId: string; role: Role; currentCoordinatorId?: string; currentCoordinatorName?: string; resolveUserName?: (userId: string | null | undefined) => string | null; backLabel: string; onBack: () => void }
 
@@ -96,7 +97,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
     draftStatus !== event?.status || actionDetails !== (event?.actionDetails || '')
   )
   const canUpdate = Boolean(isCoordinator(role) && event && event.coordinatorId === currentCoordinator.id)
-  const canUpdateProgress = canUpdate && event?.status !== 'Clarification Requested'
+  const canUpdateProgress = canUpdate && event !== null && !isAwaitingOrganiser(event.status)
   const availableStatuses = event ? ALLOWED_TRANSITIONS[event.status] : []
   // SCRUM-152 AC1: 'Confirmed' is never offered to a coordinator — only the
   // safety workflow sets it — so instead of a dead option the field explains
@@ -109,7 +110,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
   // the same on its side.
   const canEditDetails = (canUpdate || (isLead(role) && !event?.coordinatorId)) && event !== null
     && event.status !== 'Rejected' && event.status !== 'Cancelled'
-    && event.status !== 'Clarification Requested'
+    && !isAwaitingOrganiser(event.status)
 
   const saveProgress = async (formEvent: FormEvent) => {
     formEvent.preventDefault()
@@ -154,6 +155,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
       </div></header>
       <EventOverview event={event} coordinatorName={resolveUserName?.(event.coordinatorId)} assignedByName={resolveUserName?.(event.assignedBy)} previousCoordinatorName={resolveUserName?.(event.previousCoordinatorId)} />
       <ClarificationHistory clarifications={event.clarificationHistory || []} resolveUserName={resolveUserName} />
+      <AmendmentHistory amendments={event.amendmentHistory || []} resolveUserName={resolveUserName} />
       {canUpdate && event.status === 'Safety Changes Requested' && <SafetyFeedbackPanel
         key={`${event.id}-${currentCoordinator.id}-${refresh}`}
         eventId={event.id}
@@ -241,6 +243,8 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
           </button>
         </form> : event.status === 'Clarification Requested' && canUpdate
           ? <p className="muted">Progress and event details are locked while the Event Organiser prepares a clarification response.</p>
+          : event.status === 'Amendment Requested' && canUpdate
+          ? <p className="muted">Progress and event details are locked while the Event Organiser amends the flagged fields.</p>
           : <p className="muted">Only the assigned Event Coordinator can update this event.</p>}
 
         {/* SCRUM-149: the next step the safety hint above points at. Only the

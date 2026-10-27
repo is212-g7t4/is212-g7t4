@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { createVenueBooking, fetchVenueBookings, updateVenueBooking, cancelVenueBooking, fetchVenueRequests, reviewVenueRequest } from './venueBookings'
+import { createVenueBooking, fetchVenueBookings, updateVenueBooking, cancelVenueBooking, fetchVenueRequestDetail, fetchVenueRequests, reviewVenueRequest } from './venueBookings'
 
 const details = { eventId: 'event', venueId: 'venue', coordinatorId: 'coordinator', requestedStartTime: '2026-12-01T09:00', requestedEndTime: '2026-12-01T10:00', requiredCapacity: 10, venueRequirements: '' }
 
@@ -61,4 +61,30 @@ test('SCRUM-28 AC2: the event-status refusal keeps its code and message', async 
   await expect(createVenueBooking(details)).rejects.toMatchObject({
     status: 409, code: 'EVENT_NOT_ACCEPTING_VENUE_REQUESTS', message: 'Not accepting requests.', conflictTypes: [],
   })
+})
+
+test('SCRUM-29 AC4: reviewVenueRequest sends a reason only with a rejection', async () => {
+  const user = { id: 'staff', role: 'Venue Staff' as const }
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: 'booking', status: 'Rejected' })))
+  vi.stubGlobal('fetch', fetcher)
+  await reviewVenueRequest('booking', 'Rejected', user, 'Too small')
+  expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests/booking/review'),
+    expect.objectContaining({ body: JSON.stringify({ status: 'Rejected', reviewedBy: 'staff', rejectionReason: 'Too small' }) }))
+  await reviewVenueRequest('booking', 'Approved', user, 'ignored')
+  expect(fetcher).toHaveBeenLastCalledWith(expect.anything(),
+    expect.objectContaining({ body: JSON.stringify({ status: 'Approved', reviewedBy: 'staff' }) }))
+})
+
+test('SCRUM-29 AC1: fetchVenueRequestDetail asks the composite with the staff identity', async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ booking: { id: 'b' }, canDecide: true })))
+  vi.stubGlobal('fetch', fetcher)
+  expect(await fetchVenueRequestDetail('b/1', { id: 'staff', role: 'Venue Staff' })).toMatchObject({ canDecide: true })
+  expect(fetcher).toHaveBeenLastCalledWith(expect.stringMatching(/\/booking-requests\/b%2F1$/),
+    expect.objectContaining({ headers: { 'X-Dev-User-Id': 'staff', 'X-Dev-Role': 'Venue Staff' } }))
+  expect(fetcher.mock.calls[0][1].method).toBeUndefined()
+})
+
+test('SCRUM-29 AC5: the already-decided refusal keeps its code', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'BOOKING_ALREADY_DECIDED', message: 'Decided.' }), { status: 409 })))
+  await expect(reviewVenueRequest('b', 'Approved', { id: 'staff', role: 'Venue Staff' })).rejects.toMatchObject({ status: 409, code: 'BOOKING_ALREADY_DECIDED' })
 })

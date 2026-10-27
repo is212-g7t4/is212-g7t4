@@ -15,6 +15,7 @@ RESERVING_EVENT_STATUSES = (
     "Confirmed",
     "Under Review",
     "Clarification Requested",
+    "Amendment Requested",  # SCRUM-16: approved stock stays held while the organiser amends
     "Pending Safety Check",
     "Safety Changes Requested",
 )

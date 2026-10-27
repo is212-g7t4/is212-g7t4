@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { SubmissionPopup } from '../components/SubmissionPopup'
-import { createVenue, emptyVenueForm, updateVenue, VENUE_STATUSES, validateVenueForm, VenueSubmissionError } from '../features/venue/venueForm'
-import type { VenueFormData } from '../features/venue/venueForm'
-import type { Role } from '../types'
+import { createVenue, emptyVenueForm, updateVenue, updateVenueSafetyInfo, VENUE_STATUSES, validateVenueForm, VenueSubmissionError } from '../features/venue/venueForm'
+import type { VenueFormData, VenueSafetyInfo } from '../features/venue/venueForm'
+import type { Role, User } from '../types'
 import { canManageVenues, VENUE_ACCESS_NOTICE } from '../features/venue/permissions'
 import { Field, FormSection, RoleWarning } from '../components/FormControls'
 import { Spinner } from '../components/Loading'
@@ -15,22 +15,28 @@ type VenueFormPageProps = {
   onSaved: (venueId: string) => void
   venueId?: string
   onCancel?: () => void
+  user?: Pick<User, 'id' | 'role'>
 }
+
+const emptySafety: VenueSafetyInfo = { emergencyAccessDetails: '', knownRestrictions: '' }
 
 export function AddVenuePage({ role, onSaved }: VenueFormPageProps) {
   return <VenueFormPage role={role} onSaved={onSaved} />
 }
 
-export function EditVenuePage({ role, venueId, onSaved, onCancel }: VenueFormPageProps & { venueId: string }) {
-  return <VenueFormPage role={role} venueId={venueId} onSaved={onSaved} onCancel={onCancel} />
+export function EditVenuePage({ role, venueId, onSaved, onCancel, user }: VenueFormPageProps & { venueId: string }) {
+  return <VenueFormPage role={role} venueId={venueId} onSaved={onSaved} onCancel={onCancel} user={user} />
 }
 
-function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps) {
+function VenueFormPage({ role, onSaved, venueId, onCancel, user }: VenueFormPageProps) {
   const [pending, setPending] = useState(false)
   const [popup, setPopup] = useState<{ title: string; messages: string[] } | null>(null)
   const [form, setForm] = useState<VenueFormData>(emptyVenueForm)
   const [loading, setLoading] = useState(Boolean(venueId))
   const [loadError, setLoadError] = useState('')
+  // SCRUM-167: what was loaded, so the safety save only runs when it changed.
+  const [savedSafety, setSavedSafety] = useState<VenueSafetyInfo>(emptySafety)
+  const canEditSafety = user?.role === 'Venue Staff'
 
   useEffect(() => {
     if (!venueId || !canManageVenues(role)) return
@@ -47,6 +53,12 @@ function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps)
         status: venue.status,
         setupTimeMinutes: String(venue.setupTimeMinutes ?? 0),
         turnaroundTimeMinutes: String(venue.turnaroundTimeMinutes ?? 0),
+        emergencyAccessDetails: venue.emergencyAccessDetails ?? '',
+        knownRestrictions: venue.knownRestrictions ?? '',
+      })
+      setSavedSafety({
+        emergencyAccessDetails: venue.emergencyAccessDetails ?? '',
+        knownRestrictions: venue.knownRestrictions ?? '',
       })
     }).catch((cause: Error) => {
       if (active) setLoadError(cause.message)
@@ -71,6 +83,25 @@ function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps)
     setPending(true)
     try {
       const saved = venueId ? await updateVenue(venueId, form) : await createVenue(form)
+      const safety = { emergencyAccessDetails: form.emergencyAccessDetails, knownRestrictions: form.knownRestrictions }
+      const safetyChanged = safety.emergencyAccessDetails.trim() !== savedSafety.emergencyAccessDetails.trim()
+        || safety.knownRestrictions.trim() !== savedSafety.knownRestrictions.trim()
+      if (venueId && user && canEditSafety && safetyChanged) {
+        try {
+          await updateVenueSafetyInfo(venueId, safety, user)
+          setSavedSafety(safety)
+        } catch (cause) {
+          // The profile is already saved; keep the form filled so staff can retry.
+          const reason = cause instanceof VenueSubmissionError
+            ? (cause.errors.length ? cause.errors.join(' ') : cause.message)
+            : 'Unable to reach the Venue Service.'
+          setPopup({
+            title: 'Safety Information Not Saved',
+            messages: [`Venue details were saved, but the safety information was not: ${reason}`],
+          })
+          return
+        }
+      }
       if (!venueId) setForm(emptyVenueForm)
       setPopup({
         title: venueId ? 'Venue Updated' : 'Venue Added',
@@ -127,6 +158,14 @@ function VenueFormPage({ role, onSaved, venueId, onCancel }: VenueFormPageProps)
             <Field label="Setup Time (minutes)" type="number" min="0" value={form.setupTimeMinutes} onChange={(value) => update('setupTimeMinutes', value)} placeholder="e.g. 30" required />
             <Field label="Turnaround Time (minutes)" type="number" min="0" value={form.turnaroundTimeMinutes} onChange={(value) => update('turnaroundTimeMinutes', value)} placeholder="e.g. 45" required />
           </FormSection>
+
+          {venueId && <FormSection title="Safety Information" hint="Recorded for the Safety Officer's operational safety review.">
+            <fieldset disabled={!canEditSafety} className="submission-fields">
+              <Field textarea label="Emergency Access Details" value={form.emergencyAccessDetails} onChange={(value) => update('emergencyAccessDetails', value)} placeholder="e.g. Exits on north and south walls; assembly point at the front lawn; fire engine access via Gate 2" />
+              <Field textarea label="Known Restrictions" value={form.knownRestrictions} onChange={(value) => update('knownRestrictions', value)} placeholder="e.g. Noise curfew 10pm; no open flames; floor load limit 500 kg/m²" />
+            </fieldset>
+            {!canEditSafety && <p className="muted">Only Venue Staff can edit safety information.</p>}
+          </FormSection>}
 
           <div className="form-actions">
             <button type="submit" className="button primary">
