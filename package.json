@@ -8,8 +8,8 @@
     "dev:backend": "docker compose up",
     "test:journeys": "playwright test -c e2e/journeys",
     "codegen": "playwright codegen http://localhost:5174",
-    "journey:fixtures": "tsx e2e/journeys/scripts/fixtures.ts",
-    "journey:fixtures:clean": "tsx e2e/journeys/scripts/fixtures.ts clean",
+    "journey:fixtures": "tsx e2e/journeys/J5/J5b-equipment-over-allocation/fixtures.ts",
+    "journey:fixtures:clean": "tsx e2e/journeys/J5/J5b-equipment-over-allocation/fixtures.ts clean",
     "test:backend": "for d in services/*/; do (cd \"$d\" && uv run pytest) || exit 1; done",
     "stop": "docker compose down --remove-orphans && (lsof -ti :5174 | xargs kill -9 2>/dev/null; true)"
   },

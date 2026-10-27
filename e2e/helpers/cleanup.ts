@@ -2,6 +2,7 @@ import { Client } from 'pg'
 
 // Fixture events are named "J<n>[a|b] Event ..."; cleanup never touches other events.
 const FIXTURE_NAME = '^J[0-9]+[ab]? Event '
+const FIXTURE_VENUE = '^J[0-9]+[ab]? Venue '
 
 function connect() {
   process.loadEnvFile('.env') // run from the repo root, as the npm scripts do
@@ -30,6 +31,10 @@ export async function deleteFixtureEvents() {
       await db.query(`DELETE FROM public."${table}" WHERE event_id IN ${ids}`, pattern)
     }
     await db.query(`DELETE FROM public."Event" WHERE event_name ~ $1`, pattern)
+    const venues = `(SELECT venue_id FROM public."Venue" WHERE venue_name ~ $1)`
+    await db.query(`DELETE FROM public."VenueBooking" WHERE venue_id IN ${venues}`, [FIXTURE_VENUE])
+    await db.query(`DELETE FROM public."VenueClosure" WHERE venue_id IN ${venues}`, [FIXTURE_VENUE])
+    await db.query(`DELETE FROM public."Venue" WHERE venue_name ~ $1`, [FIXTURE_VENUE])
     await db.query('COMMIT')
   } catch (error) {
     await db.query('ROLLBACK')

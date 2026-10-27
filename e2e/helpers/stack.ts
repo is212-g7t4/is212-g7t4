@@ -11,9 +11,6 @@ export const users = {
 } as const
 export type Actor = (typeof users)[keyof typeof users]
 
-export const TABLE_ID = '2ebcd2d3-636b-48e7-8784-ddef1d2d550c' // "6-foot folding table", stock 50
-export const TABLE_STOCK = 50
-
 const ports = { event: 5003, assignment: 5004, reservation: 5010 }
 const url = (service: keyof typeof ports, path: string) => `http://localhost:${ports[service]}${path}`
 const devHeaders = (actor: Actor) => ({ 'X-Dev-User-Id': actor.id, 'X-Dev-Role': actor.role })

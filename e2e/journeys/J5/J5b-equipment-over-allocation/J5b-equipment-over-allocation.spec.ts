@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { TABLE_STOCK, openAs, users } from '../helpers/stack'
-import { seedJ5b } from '../helpers/j5b'
-import { deleteFixtureEvents } from '../helpers/cleanup'
+import { deleteFixtureEvents } from '../../../helpers/cleanup'
+import { openAs, users } from '../../../helpers/stack'
+import { seedJ5b, TABLE_STOCK } from './helpers/seed'
 
 /**
  * J5b — Prevent equipment over-allocation (High; brief demo, detailed cases at integration level)
