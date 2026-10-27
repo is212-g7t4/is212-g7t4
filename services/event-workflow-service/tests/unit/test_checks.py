@@ -64,6 +64,10 @@ def test_clarification_keeps_approved_equipment_allocations_reserved():
     assert "Clarification Requested" in checks.RESERVING_EVENT_STATUSES
 
 
+def test_amendment_keeps_approved_equipment_allocations_reserved():
+    assert "Amendment Requested" in checks.RESERVING_EVENT_STATUSES
+
+
 # --- dates vs venue bookings ---------------------------------------------------
 
 

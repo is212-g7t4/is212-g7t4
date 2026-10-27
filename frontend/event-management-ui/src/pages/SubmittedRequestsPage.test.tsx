@@ -77,3 +77,59 @@ test('assigned coordinator must enter a question before requesting clarification
   expect(await screen.findByText(/question was sent/i)).toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: 'Community Workshop' })).not.toBeInTheDocument()
 })
+
+// SCRUM-16 AC1/AC2: the assigned coordinator flags fields and a reason; the
+// request leaves the list and the toast confirms it.
+test('assigned coordinator flags fields and a reason to request an amendment', async () => {
+  vi.mocked(eventApi)
+    .mockResolvedValueOnce({ events: [event] })
+    .mockResolvedValueOnce({ ...event, status: 'Amendment Requested' })
+  render(<SubmittedRequestsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Request amendment' }))
+  expect(screen.getByRole('dialog', { name: 'Request amendment' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Date/time' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Expected attendance' }))
+  fireEvent.change(screen.getByLabelText(/Reason or details/), { target: { value: '  The hall is booked that week.  ' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send amendment request' }))
+
+  await waitFor(() => expect(eventApi).toHaveBeenLastCalledWith(
+    `/events/${event.id}/amendment-request`,
+    { coordinatorId, fields: ['preferredStartDate', 'preferredEndDate', 'expectedAttendance'], reason: 'The hall is booked that week.' },
+    'PATCH',
+  ))
+  expect(await screen.findByText('Amendment Requested')).toBeInTheDocument()
+  expect(screen.getByText(/sent back to its organiser/i)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Community Workshop' })).not.toBeInTheDocument()
+})
+
+test('a refused amendment request keeps the dialog open with the API message', async () => {
+  vi.mocked(eventApi)
+    .mockResolvedValueOnce({ events: [event] })
+    .mockRejectedValueOnce(new Error('Amendment can only be requested for a submitted or under-review event request.'))
+  render(<SubmittedRequestsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Request amendment' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Venue requirements' }))
+  fireEvent.change(screen.getByLabelText(/Reason or details/), { target: { value: 'Pick a larger room.' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send amendment request' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Amendment can only be requested')
+  expect(screen.getByRole('dialog', { name: 'Request amendment' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog', { name: 'Request amendment' })).not.toBeInTheDocument()
+})
+
+test('a non-Error amendment failure shows a generic message', async () => {
+  vi.mocked(eventApi)
+    .mockResolvedValueOnce({ events: [event] })
+    .mockRejectedValueOnce('network down')
+  render(<SubmittedRequestsPage role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" onViewDetails={vi.fn()} />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Request amendment' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Purpose' }))
+  fireEvent.change(screen.getByLabelText(/Reason or details/), { target: { value: 'Be specific.' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send amendment request' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to request an amendment.')
+})

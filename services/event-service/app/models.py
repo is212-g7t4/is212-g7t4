@@ -70,6 +70,7 @@ PRE_SAFETY_STATUSES = (
     "Submitted",
     "Under Review",
     "Clarification Requested",
+    "Amendment Requested",
     "Approved",
     "Rejected",
 )
@@ -97,8 +98,8 @@ PREPARATION_STATUS = "Confirmed"
 
 # What PATCH /progress accepts, keyed by the event's current status. A "self"
 # transition is a save that keeps the status and updates the action details.
-# Clarification Requested is deliberately locked and lists no transition. The
-# frontend's src/features/event/eventStatus.ts mirrors this table.
+# Clarification Requested and Amendment Requested are deliberately locked and
+# list no transition. The frontend's src/features/event/eventStatus.ts mirrors this table.
 #
 # Safety-workflow moves do NOT belong here — they live in SAFETY_TRANSITIONS
 # below and are reachable only through PATCH /events/<id>/safety-status.
@@ -109,6 +110,10 @@ ALLOWED_TRANSITIONS = {
     # An empty set also prevents PATCH /progress from changing action metadata
     # while the organiser is answering the coordinator's question.
     "Clarification Requested": set(),
+    # SCRUM-16: likewise, only the amendment response endpoint may leave this
+    # state, so PATCH /progress can't change action details while the
+    # organiser is amending the flagged fields.
+    "Amendment Requested": set(),
     # SCRUM-152: `Approved -> Confirmed` was removed. The next step is
     # SCRUM-149's submit-for-safety-check, not this endpoint.
     "Approved": {"Approved"},
@@ -171,6 +176,12 @@ HIGH_IMPACT_FIELDS = (
     "accessibilityNeeds",
 )
 EDITABLE_FIELDS = (*LOW_IMPACT_FIELDS, *HIGH_IMPACT_FIELDS)
+# SCRUM-16: what a coordinator may flag for amendment. The same ten fields
+# SCRUM-42's proposals and SCRUM-153's edits use, so all three agree on what
+# "an event detail" is. Dates are flagged as one "Date/time" pair (see
+# amendment_fields below).
+AMENDABLE_FIELDS = EDITABLE_FIELDS
+DATE_FIELDS = ("preferredStartDate", "preferredEndDate")
 COORDINATOR_LEAD_ROLE = "Event Coordinator Lead"
 
 # Human labels for the history line and the UI (AC1's "told why"). Both date
@@ -228,6 +239,19 @@ def field_labels(fields):
     return labels
 
 
+def amendment_fields(fields):
+    """`fields` deduplicated, in EDITABLE_FIELDS order, with the dates paired.
+
+    Flagging either date flags both: they share the "Date/time" label, and an
+    end date can't be fixed without being free to move the start. The fixed
+    order means the same request always reads the same way.
+    """
+    flagged = set(fields)
+    if flagged & set(DATE_FIELDS):
+        flagged |= set(DATE_FIELDS)
+    return [field for field in AMENDABLE_FIELDS if field in flagged]
+
+
 def _sentence_list(labels):
     """"A", "A and B", "A, B and C" — for the message AC1 shows the coordinator."""
     if len(labels) <= 1:
@@ -253,6 +277,7 @@ SAFETY_BLOCK_MESSAGES = {
     "Clarification Requested": (
         "This event is waiting for the Event Organiser's clarification response."
     ),
+    "Amendment Requested": "This event is waiting for the Event Organiser's amendment.",
     "Approved": (
         "Submit this event for safety check for it to progress to Confirmed."
     ),
@@ -330,6 +355,22 @@ def unpack_metadata(value):
     return value or "", "", None, [], "", [], []
 
 
+def unpack_amendments(value):
+    """The event's SCRUM-16 amendment rounds, or [] for any event without them.
+
+    Kept apart from unpack_metadata so its 7-tuple, and every caller that
+    unpacks it, stays as it was.
+    """
+    try:
+        details = json.loads(value or "")
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(details, dict) or details.get("_connectsphere") != "event-submission-v1":
+        return []
+    history = details.get("amendmentHistory")
+    return history if isinstance(history, list) else []
+
+
 def serialize(row):
     result = {key: row[column] or "" for key, column in FIELDS.items()}
     (
@@ -364,6 +405,7 @@ def serialize(row):
         actionDetails=action_details,
         actionHistory=action_history,
         clarificationHistory=clarification_history,
+        amendmentHistory=unpack_amendments(row["description"]),
     )
     return result
 
@@ -555,6 +597,28 @@ class ClarificationNotOpenError(Exception):
     pass
 
 
+class AmendmentNotAllowedError(Exception):
+    def __init__(self, current_status):
+        super().__init__(current_status)
+        self.current_status = current_status
+
+
+class AmendmentNotOpenError(Exception):
+    pass
+
+
+class AmendmentFieldLockedError(Exception):
+    """SCRUM-16 AC3: the response tried to change a field the coordinator didn't flag."""
+
+    def __init__(self, locked_fields):
+        super().__init__(*locked_fields)
+        self.locked_fields = locked_fields
+
+
+class NoAmendmentChangesError(Exception):
+    pass
+
+
 class InvalidStatusTransitionError(Exception):
     """PATCH /progress raises this bare; the safety endpoint names the status
     it refused to move from, so the composite can report it (SCRUM-149)."""
@@ -590,7 +654,7 @@ class SafetyApprovalRequiredError(Exception):
 
 
 class EventClosedError(Exception):
-    """Reassignment is blocked for terminal events and an open clarification."""
+    """Reassignment is blocked for terminal events, an open clarification or amendment."""
 
     def __init__(self, current_status):
         super().__init__(current_status)
@@ -640,9 +704,10 @@ class NoCoordinatorChangeError(Exception):
 
 
 # Events whose coordinator can no longer be changed.
-# Clarification is temporarily non-reassignable so the organiser's response
-# returns to the same coordinator who asked the question (clarification AC4).
-CLOSED_STATUSES = ("Rejected", "Cancelled", "Clarification Requested")
+# Clarification and amendment are temporarily non-reassignable so the
+# organiser's response returns to the same coordinator who asked the question
+# (clarification AC4) and amendment (SCRUM-16 AC4).
+CLOSED_STATUSES = ("Rejected", "Cancelled", "Clarification Requested", "Amendment Requested")
 
 
 def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by):
@@ -975,6 +1040,7 @@ def decide_change_request(
                             },
                         ],
                         "clarificationHistory": clarification_history,
+                        "amendmentHistory": unpack_amendments(row["description"]),
                     }
                     assignments = ", ".join(
                         f"{column} = %s" for column in DETAIL_COLUMNS.values()
@@ -1110,6 +1176,7 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                 "actionDetails": action_details,
                 "actionHistory": action_history,
                 "clarificationHistory": clarification_history,
+                "amendmentHistory": unpack_amendments(event["description"]),
             }
             cursor.execute(
                 f"""UPDATE public."Event"
@@ -1293,6 +1360,7 @@ def update_event_safety_status(
                 "actionDetails": action_details,
                 "actionHistory": [*action_history, action],
                 "clarificationHistory": clarification_history,
+                "amendmentHistory": unpack_amendments(event["description"]),
             }
             cursor.execute(
                 f"""UPDATE public."Event"
@@ -1407,6 +1475,7 @@ def _venue_change_safety_status(cursor, event, safety_check_id, round_number, co
         "actionDetails": action_details,
         "actionHistory": [*action_history, action],
         "clarificationHistory": clarification_history,
+        "amendmentHistory": unpack_amendments(event["description"]),
     }
     cursor.execute(
         f"""UPDATE public."Event"
@@ -1594,6 +1663,7 @@ def update_event_details(
                 "actionDetails": action_details,
                 "actionHistory": [*action_history, action],
                 "clarificationHistory": clarification_history,
+                "amendmentHistory": unpack_amendments(event["description"]),
             }
             assignments = ", ".join(f"{column} = %s" for column in DETAIL_COLUMNS.values())
             values = []
@@ -1680,6 +1750,7 @@ def request_event_clarification(database_url, event_id, coordinator_id, message)
                 "actionDetails": action_details,
                 "actionHistory": [*action_history, action],
                 "clarificationHistory": [*clarification_history, clarification],
+                "amendmentHistory": unpack_amendments(event["description"]),
             }
             cursor.execute(
                 f"""UPDATE public."Event"
@@ -1755,6 +1826,7 @@ def respond_to_event_clarification(database_url, event_id, organiser_id, respons
                 "actionDetails": action_details,
                 "actionHistory": [*action_history, action],
                 "clarificationHistory": clarification_history,
+                "amendmentHistory": unpack_amendments(event["description"]),
             }
             cursor.execute(
                 f"""UPDATE public."Event"
@@ -1762,6 +1834,229 @@ def respond_to_event_clarification(database_url, event_id, organiser_id, respons
                     WHERE event_id = %s
                     RETURNING {ROW_COLUMNS}""",
                 [json.dumps(metadata, ensure_ascii=False), event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def request_event_amendment(database_url, event_id, coordinator_id, fields, reason):
+    """Open one amendment round (SCRUM-16 AC1, AC2, AC5) without changing any field.
+
+    `fields` has already been checked against AMENDABLE_FIELDS by the route;
+    it is stored deduplicated, date-paired and in EDITABLE_FIELDS order.
+    """
+    fields = amendment_fields(fields)
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event or event["status"] == DRAFT_STATUS:
+                raise EventNotFoundError
+            # Assignment before status, as for clarification: a coordinator
+            # this isn't assigned to learns nothing about the event's stage.
+            if (
+                not event["coordinator_id"]
+                or str(event["coordinator_id"]) != coordinator_id
+            ):
+                raise EventNotAssignedError
+            if event["status"] not in ("Submitted", "Under Review"):
+                raise AmendmentNotAllowedError(event["status"])
+
+            (
+                description,
+                purpose,
+                decision,
+                decision_history,
+                action_details,
+                action_history,
+                clarification_history,
+            ) = unpack_metadata(event["description"])
+            requested_at = datetime.now(UTC).isoformat()
+            amendment = {
+                "id": str(uuid4()),
+                "fields": fields,
+                "reason": reason,
+                "requestedBy": coordinator_id,
+                "requestedAt": requested_at,
+                "resubmittedBy": None,
+                "resubmittedAt": None,
+                "changes": None,
+                "note": None,
+            }
+            action = {
+                "status": "Amendment Requested",
+                "details": (
+                    "Amendment requested from the Event Organiser: "
+                    f"{_sentence_list(field_labels(fields))}."
+                ),
+                "coordinatorId": coordinator_id,
+                "recordedAt": requested_at,
+            }
+            metadata = {
+                "_connectsphere": "event-submission-v1",
+                "description": description,
+                "purpose": purpose,
+                "decision": decision,
+                "decisionHistory": decision_history,
+                "actionDetails": action_details,
+                "actionHistory": [*action_history, action],
+                "clarificationHistory": clarification_history,
+                "amendmentHistory": [*unpack_amendments(event["description"]), amendment],
+            }
+            # The coordinator, submission date and every field column are
+            # deliberately left alone: only the status and the history move.
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET status = 'Amendment Requested', description = %s
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [json.dumps(metadata, ensure_ascii=False), event_id],
+            )
+            updated = cursor.fetchone()
+    return serialize(updated)
+
+
+def _amended_value(field, value):
+    """`value` in the form `serialize` returns it, for the history's from/to record."""
+    if field == "expectedAttendance":
+        return str(int(value))
+    if field in DATE_FIELDS:
+        return _local(_aware(value)).isoformat()
+    return value
+
+
+def respond_to_event_amendment(database_url, event_id, organiser_id, changes, note):
+    """Apply the organiser's amendment to the flagged fields and resubmit (SCRUM-16 AC3, AC4).
+
+    The field lock is enforced here, under the row lock, against the fields
+    the coordinator stored: a key outside them refuses the whole request,
+    even if its value is unchanged, so every other field stays as submitted.
+    The coordinator and submission date are untouched, so the request goes
+    back to the same coordinator and keeps its place in their queue.
+    """
+    changes = {field: value.strip() for field, value in changes.items()}
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"""SELECT {ROW_COLUMNS}
+                    FROM public."Event"
+                    WHERE event_id = %s
+                    FOR UPDATE""",
+                [event_id],
+            )
+            event = cursor.fetchone()
+            if not event or event["status"] == DRAFT_STATUS:
+                raise EventNotFoundError
+            if not event["organiser_id"] or str(event["organiser_id"]) != organiser_id:
+                raise EventNotOwnedError
+            if event["status"] != "Amendment Requested":
+                raise AmendmentNotOpenError
+
+            amendment_history = unpack_amendments(event["description"])
+            open_index = next(
+                (
+                    index
+                    for index in range(len(amendment_history) - 1, -1, -1)
+                    if isinstance(amendment_history[index], dict)
+                    and amendment_history[index].get("resubmittedAt") is None
+                ),
+                None,
+            )
+            if open_index is None:
+                raise AmendmentNotOpenError
+            flagged = amendment_history[open_index].get("fields")
+            flagged = flagged if isinstance(flagged, list) else []
+            locked = sorted(set(changes) - set(flagged))
+            if locked:
+                raise AmendmentFieldLockedError(locked)
+
+            current = serialize(event)
+            merged = {**current, **changes}
+            missing, errors = validation.validate(merged)
+            if missing or errors:
+                raise InvalidProposedChangesError(missing, errors)
+            changed, _high = _changed_fields(changes, current)
+            if not changed:
+                raise NoAmendmentChangesError
+            # Field order, not the order the client sent, so the same
+            # amendment always records and writes the same way.
+            changed = [field for field in AMENDABLE_FIELDS if field in changed]
+
+            (
+                description,
+                purpose,
+                decision,
+                decision_history,
+                action_details,
+                action_history,
+                clarification_history,
+            ) = unpack_metadata(event["description"])
+            if "description" in changed:
+                description = merged["description"]
+            if "purpose" in changed:
+                purpose = merged["purpose"]
+            resubmitted_at = datetime.now(UTC).isoformat()
+            resubmitted = {
+                **amendment_history[open_index],
+                "resubmittedBy": organiser_id,
+                "resubmittedAt": resubmitted_at,
+                "changes": {
+                    field: {
+                        "from": current[field],
+                        "to": _amended_value(field, merged[field]),
+                    }
+                    for field in changed
+                },
+                "note": note,
+            }
+            amendment_history = [*amendment_history]
+            amendment_history[open_index] = resubmitted
+            action = {
+                "status": "Submitted",
+                "details": (
+                    "Event Organiser resubmitted the amended request: "
+                    f"{_sentence_list(field_labels(changed))}."
+                ),
+                "organiserId": organiser_id,
+                "changedFields": changed,
+                "recordedAt": resubmitted_at,
+            }
+            metadata = {
+                "_connectsphere": "event-submission-v1",
+                "description": description,
+                "purpose": purpose,
+                "decision": decision,
+                "decisionHistory": decision_history,
+                "actionDetails": action_details,
+                "actionHistory": [*action_history, action],
+                "clarificationHistory": clarification_history,
+                "amendmentHistory": amendment_history,
+            }
+            # Only the changed columns are written; every other field keeps
+            # its stored value byte for byte.
+            columns = [field for field in changed if field in DETAIL_COLUMNS]
+            assignments = "".join(f"{DETAIL_COLUMNS[field]} = %s, " for field in columns)
+            values = []
+            for field in columns:
+                value = merged[field]
+                if field == "expectedAttendance":
+                    values.append(int(value))
+                elif field in DATE_FIELDS:
+                    values.append(_aware(value))
+                else:
+                    values.append(value)
+            cursor.execute(
+                f"""UPDATE public."Event"
+                    SET {assignments}description = %s, status = 'Submitted'
+                    WHERE event_id = %s
+                    RETURNING {ROW_COLUMNS}""",
+                [*values, json.dumps(metadata, ensure_ascii=False), event_id],
             )
             updated = cursor.fetchone()
     return serialize(updated)
@@ -1830,7 +2125,8 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                             'decisionHistory', %s::jsonb,
                             'actionDetails', %s,
                             'actionHistory', %s::jsonb,
-                            'clarificationHistory', %s::jsonb
+                            'clarificationHistory', %s::jsonb,
+                            'amendmentHistory', %s::jsonb
                         )::text
                     WHERE event_id = %s
                     RETURNING {ROW_COLUMNS}""",
@@ -1846,6 +2142,7 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
                     action_details,
                     json.dumps(action_history),
                     json.dumps(clarification_history),
+                    json.dumps(unpack_amendments(event["description"])),
                     event_id,
                 ],
             )

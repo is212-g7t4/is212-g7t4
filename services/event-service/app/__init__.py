@@ -11,6 +11,7 @@ load_dotenv()
 
 from app.models import (
     ALL_STATUSES,
+    AMENDABLE_FIELDS,
     EDITABLE_FIELDS,
     FIELDS,
     RECHECK_ONLY_MOVES,
@@ -19,6 +20,9 @@ from app.models import (
     SAFETY_FLAG_AREAS,
     SAFETY_STATUSES,
     UNDER_SAFETY_REVIEW_MESSAGE,
+    AmendmentFieldLockedError,
+    AmendmentNotAllowedError,
+    AmendmentNotOpenError,
     ChangeRequestAlreadyPendingError,
     ChangeRequestAlreadyDecidedError,
     ChangeRequestNotFoundError,
@@ -35,6 +39,7 @@ from app.models import (
     EventUnderSafetyReviewError,
     InvalidStatusTransitionError,
     InvalidProposedChangesError,
+    NoAmendmentChangesError,
     NoProposedChangesError,
     NoCoordinatorChangeError,
     RejectionReasonError,
@@ -60,7 +65,9 @@ from app.models import (
     list_submitted,
     list_unassigned,
     reject_event,
+    request_event_amendment,
     request_event_clarification,
+    respond_to_event_amendment,
     respond_to_event_clarification,
     save_draft,
     submit_draft,
@@ -1151,6 +1158,109 @@ def create_app(config=None):
                 code="CLARIFICATION_NOT_OPEN",
                 message="This event does not have an open clarification request.",
             ), 409
+        return jsonify(updated), 200
+
+    @app.patch("/events/<uuid:event_id>/amendment-request")
+    def request_amendment(event_id):
+        """SCRUM-16 AC1/AC2/AC5: the assigned coordinator flags fields for the organiser to amend."""
+        data = request.get_json(silent=True)
+        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
+        fields = data.get("fields") if isinstance(data, dict) else None
+        reason = data.get("reason") if isinstance(data, dict) else None
+        try:
+            coordinator_id = str(UUID(coordinator_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current coordinator ID is required."), 400
+        if (
+            not isinstance(fields, list)
+            or not fields
+            or any(not isinstance(field, str) for field in fields)
+        ):
+            return jsonify(message="Flag at least one field that needs amending."), 400
+        invalid = sorted(set(fields) - set(AMENDABLE_FIELDS))
+        if invalid:
+            return jsonify(
+                message="One or more flagged fields cannot be amended.",
+                invalidFields=invalid,
+            ), 400
+        if not isinstance(reason, str) or not reason.strip():
+            return jsonify(message="A reason for the amendment is required."), 400
+        reason = reason.strip()
+        if len(reason) > 1000:
+            return jsonify(message="An amendment reason must be 1000 characters or fewer."), 400
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = request_event_amendment(
+                app.config["DATABASE_URL"], str(event_id), coordinator_id, fields, reason
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotAssignedError:
+            return jsonify(
+                message="This event request is not assigned to the current coordinator."
+            ), 403
+        except AmendmentNotAllowedError as blocked:
+            return jsonify(
+                code="AMENDMENT_NOT_ALLOWED",
+                message=(
+                    "Amendment can only be requested for a submitted or "
+                    "under-review event request."
+                ),
+                currentStatus=blocked.current_status,
+            ), 409
+        return jsonify(updated), 200
+
+    @app.patch("/events/<uuid:event_id>/amendment-response")
+    def respond_to_amendment(event_id):
+        """SCRUM-16 AC3/AC4: the organiser amends only the flagged fields and resubmits."""
+        data = request.get_json(silent=True)
+        organiser_id = data.get("organiserId", "") if isinstance(data, dict) else ""
+        changes = data.get("changes") if isinstance(data, dict) else None
+        note = data.get("note") if isinstance(data, dict) else None
+        try:
+            organiser_id = str(UUID(organiser_id))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(message="A valid current organiser ID is required."), 400
+        if not isinstance(changes, dict) or not changes:
+            return jsonify(message="Send the amended values for the flagged fields."), 400
+        if any(not isinstance(value, str) for value in changes.values()):
+            return jsonify(message="Every amended value must be text."), 400
+        if note is not None and (not isinstance(note, str) or len(note.strip()) > 1000):
+            return jsonify(message="A resubmission note must be 1000 characters or fewer."), 400
+        note = (note or "").strip() or None
+        if not app.config["DATABASE_URL"]:
+            return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
+        try:
+            updated = respond_to_event_amendment(
+                app.config["DATABASE_URL"], str(event_id), organiser_id, changes, note
+            )
+        except EventNotFoundError:
+            return jsonify(message="Event request not found."), 404
+        except EventNotOwnedError:
+            return jsonify(message="You can only amend event requests you created."), 403
+        except AmendmentNotOpenError:
+            return jsonify(
+                code="AMENDMENT_NOT_OPEN",
+                message="This event does not have an open amendment request.",
+            ), 409
+        except AmendmentFieldLockedError as locked:
+            return jsonify(
+                code="AMENDMENT_FIELD_LOCKED",
+                message="Only the fields the Event Coordinator flagged can be changed.",
+                lockedFields=locked.locked_fields,
+            ), 400
+        except NoAmendmentChangesError:
+            return jsonify(
+                code="NO_AMENDMENT_CHANGES",
+                message="Change at least one flagged field before resubmitting.",
+            ), 400
+        except InvalidProposedChangesError as error:
+            return jsonify(
+                message="Please correct the event details.",
+                missingFields=error.missing,
+                errors=error.errors,
+            ), 400
         return jsonify(updated), 200
 
     @app.patch("/events/<uuid:event_id>/reject")

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { EditableField, EventChanges } from './eventDetails'
-import { EDITABLE_FIELDS, fieldLabels, sentenceList } from './eventDetails'
+import { EDITABLE_FIELDS, FIELD_INPUTS, fieldLabels, sentenceList } from './eventDetails'
 import type { SubmittedEvent } from './submission'
 import { validateEvent } from './submission'
 
@@ -10,19 +10,6 @@ type Props = {
   onCancel: () => void
   onSubmitted: () => void
 }
-
-const FIELDS: { field: EditableField; label: string; type: 'text' | 'textarea' | 'number' | 'datetime' }[] = [
-  { field: 'eventName', label: 'Event Name', type: 'text' },
-  { field: 'preferredStartDate', label: 'Preferred Start Date & Time', type: 'datetime' },
-  { field: 'preferredEndDate', label: 'Preferred End Date & Time', type: 'datetime' },
-  { field: 'expectedAttendance', label: 'Expected Attendance', type: 'number' },
-  { field: 'venueRequirements', label: 'Venue Requirements', type: 'textarea' },
-  { field: 'accessibilityNeeds', label: 'Accessibility Needs', type: 'textarea' },
-  { field: 'equipmentRequirements', label: 'Equipment Requirements', type: 'textarea' },
-  { field: 'description', label: 'Description', type: 'textarea' },
-  { field: 'purpose', label: 'Purpose', type: 'textarea' },
-  { field: 'registrationNeeds', label: 'Registration Requirements', type: 'textarea' },
-]
 
 async function submitEventChangeRequest(eventId: string, organiserId: string, changes: EventChanges, reason: string) {
   const response = await fetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}/events/${eventId}/change-requests`, {
@@ -69,7 +56,7 @@ export function ChangeRequestDialog({ event, organiserId, onCancel, onSubmitted 
   return <section className="panel event-edit-dialog" role="dialog" aria-label="Request event changes">
     <h3>Request changes</h3>
     <p className="muted">Your event details will stay unchanged while the request is reviewed.</p>
-    {FIELDS.map(({ field, label, type }) => <label className="field" key={field}>
+    {FIELD_INPUTS.map(({ field, label, type }) => <label className="field" key={field}>
       <span>{label}</span>
       {type === 'textarea'
         ? <textarea value={draft[field]} onChange={(change) => { setDraft((current) => ({ ...current, [field]: change.target.value })); setError('') }} />

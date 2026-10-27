@@ -540,7 +540,7 @@ test.each(['Submitted', 'Under Review', 'Approved', 'Pending Safety Check', 'Con
   },
 )
 
-test.each(['Rejected', 'Cancelled', 'Clarification Requested'] as const)(
+test.each(['Rejected', 'Cancelled', 'Clarification Requested', 'Amendment Requested'] as const)(
   'SCRUM-153: a %s event has no details left to edit',
   async (status) => {
     vi.mocked(eventApi).mockResolvedValue({ ...event, status })
@@ -663,7 +663,7 @@ test.each(['Submitted', 'Under Review', 'Approved'] as const)(
   },
 )
 
-test.each(['Clarification Requested', 'Rejected', 'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled'] as const)(
+test.each(['Clarification Requested', 'Amendment Requested', 'Rejected', 'Pending Safety Check', 'Confirmed', 'Safety Changes Requested', 'Cancelled'] as const)(
   'change request story: an organiser cannot request changes while an event is %s',
   async (status) => {
     vi.mocked(eventApi).mockResolvedValue({ ...event, status, organiserId: coordinatorId })
@@ -686,4 +686,35 @@ test.each([
   expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument()
   if (viewer !== assigned) expect(screen.queryByRole('button', { name: 'Save progress' })).not.toBeInTheDocument()
   expect(vi.mocked(eventApi).mock.calls.every(call => call.length === 1)).toBe(true)
+})
+
+// SCRUM-16 AC3: while the organiser amends, the coordinator's own progress and
+// detail edits are locked, and the open round is shown.
+test('SCRUM-16: progress and edits are locked while an amendment is open', async () => {
+  vi.mocked(eventApi).mockResolvedValue({
+    ...event,
+    status: 'Amendment Requested',
+    decision: null,
+    amendmentHistory: [{
+      id: 'amendment-1',
+      fields: ['expectedAttendance'],
+      reason: 'The room holds 20.',
+      requestedBy: coordinatorId,
+      requestedAt: '2026-10-20T01:00:00+00:00',
+      resubmittedBy: null,
+      resubmittedAt: null,
+      changes: null,
+      note: null,
+    }],
+  })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} currentCoordinatorName="Alicia Tan" resolveUserName={() => 'Alicia Tan'} backLabel="my events" onBack={vi.fn()} />)
+
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByText('Progress and event details are locked while the Event Organiser amends the flagged fields.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Save progress' })).not.toBeInTheDocument()
+  expect(editButton()).not.toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Amendments' })).toBeInTheDocument()
+  expect(screen.getByText('The room holds 20.')).toBeInTheDocument()
+  expect(screen.getByText("Awaiting the Event Organiser's amendment.")).toBeInTheDocument()
 })

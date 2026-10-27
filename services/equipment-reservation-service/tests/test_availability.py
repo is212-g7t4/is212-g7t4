@@ -1,7 +1,7 @@
 """Two-stage availability rules: physical status first, then partial allocation over the window."""
 import pytest
 
-from app.availability import effective_available_stock, evaluate_request
+from app.availability import RESERVING_EVENT_STATUSES, effective_available_stock, evaluate_request
 
 MIC = {"id": "e1", "status": "Available", "totalQuantity": 10}
 
@@ -33,3 +33,8 @@ def test_over_booked_pool_is_clamped_to_zero():
 def test_request_is_insufficient_only_when_it_exceeds_the_remaining_balance(requested, insufficient):
     result = evaluate_request({"quantityRequested": requested}, MIC, 4)
     assert result == {"reservedQuantity": 4, "availableStock": 6, "isInsufficient": insufficient}
+
+
+# SCRUM-16: an event sent back for amendment keeps the stock it was already approved for.
+def test_amendment_keeps_approved_equipment_allocations_reserved():
+    assert "Amendment Requested" in RESERVING_EVENT_STATUSES
