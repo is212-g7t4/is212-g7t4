@@ -14,11 +14,17 @@ Hermetic SQL write harness: actual predicates/inserts, not PostgreSQL locking.
 
 Adapt only schema qualifiers, placeholders, FOR UPDATE and timestamp transport.
 All timestamps are normalized to UTC; now() is fixed for expiry boundaries.
+SCRUM-47 booking intents use a minimal SQL projection with the production partial
+uniqueness rules and JSON adaptation, on the SAME SQLite transaction as the booking.
+This is not PostgreSQL JSONB, foreign-key, migration or concurrency verification.
 """
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+
+from psycopg2.extras import Json
 
 from app.calendar import SINGAPORE
 from app.models import COLUMNS
@@ -28,6 +34,8 @@ NOW = datetime(2026, 10, 1, 10, tzinfo=SINGAPORE)
 
 
 def sql_value(value):
+    if isinstance(value, Json):
+        return json.dumps(value.adapted)
     if isinstance(value, datetime):
         value = value.replace(tzinfo=SINGAPORE) if value.tzinfo is None else value
         return value.astimezone(timezone.utc).isoformat()
@@ -54,6 +62,21 @@ class AvailabilityDB:
             'CREATE TABLE "VenueClosure" '
             "(venue_id TEXT, start_date_time TEXT, end_date_time TEXT)"
         )
+        self.db.executescript('''
+            CREATE TABLE "VenueNotificationOutbox" (
+                type TEXT NOT NULL, booking_id TEXT NOT NULL,
+                source TEXT NOT NULL CHECK (json_valid(source))
+            );
+            CREATE UNIQUE INDEX venue_outbox_submission_once
+                ON "VenueNotificationOutbox" (booking_id)
+                WHERE type = 'venue.booking-submission-fanout';
+            CREATE UNIQUE INDEX venue_outbox_decision_once
+                ON "VenueNotificationOutbox" (booking_id)
+                WHERE type = 'venue.booking-decision';
+            CREATE UNIQUE INDEX venue_outbox_staff_delivery_once
+                ON "VenueNotificationOutbox" (booking_id, json_extract(source, '$.recipientId'))
+                WHERE type = 'venue.booking-submission';
+        ''')
         for row in bookings:
             self.db.execute(
                 'INSERT INTO "VenueBooking" ('

@@ -143,11 +143,13 @@ export class SubmissionError extends Error {
   // Machine-readable error code where the backend sends one, e.g.
   // 'SAFETY_APPROVAL_REQUIRED', so callers needn't match on the prose.
   code?: string
-  constructor(message: string, missingFields: string[] = [], errors: string[] = [], code?: string) {
+  status?: number
+  constructor(message: string, missingFields: string[] = [], errors: string[] = [], code?: string, status?: number) {
     super(message)
     this.missingFields = missingFields
     this.errors = errors
     this.code = code
+    this.status = status
   }
 }
 
@@ -165,7 +167,7 @@ export async function eventApi(
     method: method || (data ? 'POST' : 'GET'), headers, ...(data ? { body: JSON.stringify(data) } : {}),
   })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new SubmissionError(body.message || 'Unable to complete the request.', body.missingFields, body.errors, body.code)
+  if (!response.ok) throw new SubmissionError(body.message || 'Unable to complete the request.', body.missingFields, body.errors, body.code, response.status)
   return body
 }
 

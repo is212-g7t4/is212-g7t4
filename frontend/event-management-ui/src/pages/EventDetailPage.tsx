@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Role } from '../types'
 import { eventApi } from '../features/event/submission'
-import type { EventStatus, SubmittedEvent } from '../features/event/submission'
+import type { EventStatus, SubmissionError, SubmittedEvent } from '../features/event/submission'
 import { ALLOWED_TRANSITIONS, canReassign, isAwaitingOrganiser, safetyBlockMessage, showsSafetyHint } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
 import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorPanel'
@@ -73,8 +73,11 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
         setSaveError('')
         setSaveMessage('')
       }
-    }).catch((cause: Error) => {
-      if (active) setError(cause.message)
+    }).catch((cause: SubmissionError) => {
+      // SCRUM-47: an old booking link does not restore a previous assignment.
+      if (active) setError(cause.status === 403
+        ? 'You no longer have access to this event'
+        : cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [eventId, role, refresh, currentCoordinator.id])

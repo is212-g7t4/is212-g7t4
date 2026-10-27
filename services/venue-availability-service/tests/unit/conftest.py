@@ -11,6 +11,7 @@ def setup(monkeypatch):
     monkeypatch.setattr("app.list_window_closures", lambda *args: [])
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
+    cursor.connection = connection  # Match psycopg2's cursor-to-transaction relationship.
     monkeypatch.setattr(
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
