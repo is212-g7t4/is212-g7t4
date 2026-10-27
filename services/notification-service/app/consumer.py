@@ -64,10 +64,15 @@ def validate(value):
     else:
         if (
             not isinstance(destination, dict)
-            or destination.get("kind") not in ("event-venue-request", "event-details")
+            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests")
         ):
             raise ValueError("Unknown destination")
-        for key in (("eventId",) if destination["kind"] == "event-details" else ("eventId", "bookingId")):
+        reference_keys = {
+            "venue-requests": (),
+            "event-details": ("eventId",),
+            "event-venue-request": ("eventId", "bookingId"),
+        }
+        for key in reference_keys[destination["kind"]]:
             UUID(destination[key])
     if value["type"] in ("event.coordinator-assigned", "event.coordinator-removed"):
         details = value.get("details")
@@ -111,6 +116,30 @@ def validate(value):
         for key in ("eventName", "coordinatorName"):
             if not isinstance(details.get(key), str) or not details[key].strip():
                 raise ValueError("Missing assignment display content")
+    if value["type"] in ("venue.booking-submission", "venue.booking-decision"):
+        details = value["details"]
+        if not isinstance(details, dict):
+            raise ValueError("Missing booking details")
+        for key in ("eventId", "bookingId", "venueId", "requestedBy"):
+            UUID(details[key])
+        if value["type"] == "venue.booking-submission":
+            if destination != dict(kind="venue-requests"):
+                raise ValueError("Submission requires staff review page")
+            UUID(details["recipientId"])
+            if details["recipientId"] != value["recipientId"]:
+                raise ValueError("Inconsistent booking recipient")
+        else:
+            if details["decision"] not in ("Approved", "Rejected") or value["recipientId"] != details["requestedBy"]:
+                raise ValueError("Invalid booking decision recipient/content")
+            if destination != dict(kind="event-venue-request", eventId=details["eventId"], bookingId=details["bookingId"]):
+                raise ValueError("Decision requires matching booking destination")
+        for key in ("eventName", "venueName"):
+            if not isinstance(details.get(key), str) or not details[key].strip():
+                raise ValueError("Missing booking display content")
+        start = datetime.fromisoformat(details["startDateTime"])
+        end = datetime.fromisoformat(details["endDateTime"])
+        if start.tzinfo is None or end.tzinfo is None or end <= start:
+            raise ValueError("Booking requires an ordered timezone-aware interval")
     if value["type"] == "venue.closure-rejection":
         details = value["details"]
         if not isinstance(details, dict):

@@ -2,7 +2,7 @@
 
 import hmac
 import os
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 from contextlib import contextmanager
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
@@ -27,6 +27,7 @@ def transaction(dsn):
 def serialize(row):
     return dict(
         id=str(row["source_id"]),
+        type=row["type"],
         source=row["source"],
         envelope=row["envelope"],
         leaseToken=str(row["lease_token"]),
@@ -58,6 +59,30 @@ def mutate(dsn, identifier, token, action, data):
         row = cursor.fetchone()
         if row is None or not row["lease_valid"]:
             return None
+        if action == "expand":
+            # Freeze lookup and child identities in one fenced owner transaction.
+            if row["type"] != "venue.booking-submission-fanout":
+                raise ValueError("Only submission intents can expand")
+            recipients = data.get("recipientIds")
+            if not isinstance(recipients, list) or not recipients:
+                raise ValueError("Missing Venue Staff recipients")
+            recipients = sorted({str(UUID(value)) for value in recipients})
+            for key in ("eventName", "venueName"):
+                if not isinstance(data.get(key), str) or not data[key].strip():
+                    raise ValueError("Missing display name")
+            for recipient in recipients:
+                source = {**row["source"], "recipientId": recipient,
+                          "eventName": data["eventName"], "venueName": data["venueName"]}
+                cursor.execute(
+                    'INSERT INTO public."VenueNotificationOutbox" (source_id,type,booking_id,source,created_at) VALUES (%s,%s,%s,%s,%s)',
+                    (str(uuid5(UUID(identifier), recipient)), "venue.booking-submission",
+                     row["booking_id"], Json(source), row["created_at"]),
+                )
+            cursor.execute(
+                'UPDATE public."VenueNotificationOutbox" SET published_at=now(),lease_until=NULL,lease_token=NULL,last_error=NULL WHERE source_id=%s',
+                (identifier,),
+            )
+            return {"id": identifier, "status": "expanded", "recipients": len(recipients)}
         if action == "freeze":
             if row["envelope"] is None:
                 envelope = data.get("envelope")
@@ -101,11 +126,16 @@ def validate_envelope(value, row):
     UUID(value.get("recipientId", ""))
     if value.get("createdAt") != row["created_at"].isoformat():
         raise ValueError("Invalid creation instant")
-    if destination != dict(
-        kind="event-venue-request",
-        eventId=source["eventId"],
-        bookingId=source["bookingId"],
-    ):
+    expected_destination = (
+        dict(kind="venue-requests") if row["type"] == "venue.booking-submission"
+        else dict(kind="event-venue-request", eventId=source["eventId"], bookingId=source["bookingId"])
+    )
+    if row["type"] == "venue.booking-decision":
+        if source["decision"] not in ("Approved", "Rejected") or value["recipientId"] != source["requestedBy"]:
+            raise ValueError("Invalid booking decision recipient/content")
+    if row["type"] == "venue.booking-submission" and value["recipientId"] != source["recipientId"]:
+        raise ValueError("Invalid submission recipient")
+    if destination != expected_destination:
         raise ValueError("Invalid destination")
     if not isinstance(value.get("message"), str) or not value["message"].strip():
         raise ValueError("Missing message")
@@ -138,7 +168,7 @@ def operate(identifier=None, action=None):
     try:
         if identifier is None:
             return jsonify(jobs=claim(dsn))
-        if action not in {"freeze", "published", "retry"}:
+        if action not in {"freeze", "published", "retry", "expand"}:
             return jsonify(message="Unknown operation."), 404
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
