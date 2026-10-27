@@ -756,6 +756,9 @@ def update_event_coordinator(database_url, event_id, coordinator_id, assigned_by
                 cursor, assigned, "event.coordinator-assignment", "Assignment",
                 coordinatorId=coordinator_id,
             )
+            _record_coordinator_notification(cursor, assigned, coordinator_id, "event.coordinator-assigned")
+            if current["coordinator_id"]:
+                _record_coordinator_notification(cursor, assigned, current["coordinator_id"], "event.coordinator-removed")
     return serialize(assigned)
 
 
@@ -2165,6 +2168,23 @@ def _record_notification(cursor, event, notification_type, label, **facts):
         return
     source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
                   recipientId=str(event["organiser_id"]), **facts)
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), notification_type, Json(source)),
+    )
+
+
+def _record_coordinator_notification(cursor, event, recipient, notification_type):
+    """Capture coordinator recipient and event-owned facts in the assignment transaction."""
+    def schedule(key):
+        value = event.get(key)
+        return _aware(value).astimezone(SINGAPORE).isoformat() if value else None
+
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  organiserId=str(event["organiser_id"]) if event.get("organiser_id") else None,
+                  recipientId=str(recipient),
+                  startDateTime=schedule("preferred_start_date"),
+                  endDateTime=schedule("preferred_end_date"))
     cursor.execute(
         'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
         (str(uuid4()), notification_type, Json(source)),

@@ -19,6 +19,28 @@ def make_job(kind="approval", coordinator=ALICE):
                 createdAt="2030-01-01T00:00:00+00:00", leaseToken=str(uuid4()), attempts=1)
 
 
+def make_received_job(kind="assigned", recipient=BOB, scheduled=True):
+    """Independent synthetic Event claim for coordinator-facing notifications."""
+    return dict(id=str(uuid4()), type="event.coordinator-" + kind, envelope=None,
+                createdAt="2030-01-01T00:00:00+00:00", leaseToken=str(uuid4()), attempts=1,
+                source=dict(eventId=EVENT, eventName="Community Workshop", organiserId=ORGANISER,
+                            recipientId=recipient,
+                            startDateTime="2030-03-01T01:00:00+00:00" if scheduled else None,
+                            endDateTime="2030-03-01T09:00:00+00:00" if scheduled else None))
+
+
+def received_envelope(job):
+    """Expected published contract, independent of dispatcher formatting code."""
+    removed = job["type"] == "event.coordinator-removed"
+    action = "You are no longer assigned to" if removed else "You have been assigned to"
+    period = ("01 Mar 2030, 09:00 SGT – 01 Mar 2030, 17:00 SGT"
+              if job["source"]["startDateTime"] else "Not provided")
+    return dict(version=1, id=job["id"], type=job["type"], recipientId=job["source"]["recipientId"],
+                createdAt=job["createdAt"], details={**job["source"], "organiserName": "Synthetic Organiser"},
+                message=action + " Community Workshop. Event Organiser: Synthetic Organiser. Proposed: " + period + ".",
+                destination=None if removed else dict(kind="event-details", eventId=EVENT))
+
+
 def expected_envelope(job, name="Synthetic Alice"):
     source = job["source"]
     if job["type"] == "event.coordinator-assignment":

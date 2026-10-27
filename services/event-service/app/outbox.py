@@ -3,6 +3,7 @@
 import hmac
 from uuid import UUID, uuid4, uuid5
 from datetime import datetime, UTC
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
@@ -119,6 +120,17 @@ def mutate(dsn, identifier, token, action, data):
         return {"id": identifier, "status": action}
 
 
+def coordinator_message(source, name, removed=False):
+    """Freeze a complete, UI-independent proposed-period description in Singapore time."""
+    def stamp(value):
+        return datetime.fromisoformat(value).astimezone(ZoneInfo("Asia/Singapore")).strftime("%d %b %Y, %H:%M SGT")
+
+    period = (stamp(source["startDateTime"]) + " – " + stamp(source["endDateTime"])
+              if source.get("startDateTime") and source.get("endDateTime") else "Not provided")
+    action = "You are no longer assigned to" if removed else "You have been assigned to"
+    return f"{action} {source['eventName']}. Event Organiser: {name}. Proposed: {period}."
+
+
 def validate_envelope(value, row):
     if (
         not isinstance(value, dict)
@@ -134,7 +146,9 @@ def validate_envelope(value, row):
         raise ValueError("Invalid recipient")
     if value.get("createdAt") != row["created_at"].isoformat():
         raise ValueError("Invalid creation instant")
-    if destination != dict(kind="event-details", eventId=source["eventId"]):
+    expected_destination = (None if row["type"] == "event.coordinator-removed"
+                            else dict(kind="event-details", eventId=source["eventId"]))
+    if "destination" not in value or destination != expected_destination:
         raise ValueError("Invalid destination")
     details = value.get("details")
     if row["type"] == "event.submission":
@@ -146,6 +160,12 @@ def validate_envelope(value, row):
             raise ValueError("Missing coordinator name")
         expected_details = {**source, "coordinatorName": name}
         message = f"{name} has been assigned to coordinate {source['eventName']}."
+    elif row["type"] in ("event.coordinator-assigned", "event.coordinator-removed"):
+        name = details.get("organiserName") if isinstance(details, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Missing organiser name")
+        expected_details = {**source, "organiserName": name}
+        message = coordinator_message(source, name, row["type"] == "event.coordinator-removed")
     elif row["type"] == "event.approval":
         expected_details = source
         message = f"{source['eventName']} was approved"

@@ -58,13 +58,35 @@ def validate(value):
     if not datetime.fromisoformat(value["createdAt"]).tzinfo:
         raise ValueError("Timezone required")
     destination = value["destination"]
-    if (
-        not isinstance(destination, dict)
-        or destination.get("kind") not in ("event-venue-request", "event-details")
-    ):
-        raise ValueError("Unknown destination")
-    for key in (("eventId",) if destination["kind"] == "event-details" else ("eventId", "bookingId")):
-        UUID(destination[key])
+    if value["type"] == "event.coordinator-removed":
+        if destination is not None:
+            raise ValueError("Removal must not link to the event")
+    else:
+        if (
+            not isinstance(destination, dict)
+            or destination.get("kind") not in ("event-venue-request", "event-details")
+        ):
+            raise ValueError("Unknown destination")
+        for key in (("eventId",) if destination["kind"] == "event-details" else ("eventId", "bookingId")):
+            UUID(destination[key])
+    if value["type"] in ("event.coordinator-assigned", "event.coordinator-removed"):
+        details = value.get("details")
+        if not isinstance(details, dict):
+            raise ValueError("Missing coordinator notification details")
+        for key in ("eventName", "organiserName"):
+            if not isinstance(details.get(key), str) or not details[key].strip():
+                raise ValueError("Missing coordinator display content")
+        for key in ("eventId", "organiserId", "recipientId"):
+            UUID(details[key])
+        if details["recipientId"] != value["recipientId"]:
+            raise ValueError("Inconsistent coordinator recipient")
+        if value["type"] == "event.coordinator-assigned" and destination != dict(kind="event-details", eventId=details["eventId"]):
+            raise ValueError("Coordinator assignment requires matching event details")
+        start, end = details["startDateTime"], details["endDateTime"]
+        if start is not None or end is not None:
+            start, end = datetime.fromisoformat(start), datetime.fromisoformat(end)
+            if start.tzinfo is None or end.tzinfo is None or end <= start:
+                raise ValueError("Proposed period requires an ordered timezone-aware interval")
     if value["type"] == "event.approval":
         if destination["kind"] != "event-details":
             raise ValueError("Approval requires event details")

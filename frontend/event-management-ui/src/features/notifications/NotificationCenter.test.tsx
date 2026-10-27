@@ -18,7 +18,7 @@
  * Mock only network, control time. These DOM checks are not PostgreSQL evidence.
  * Opening is not reading; explicit actions and destination links are separate.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { NotificationProvider, NotificationBell, NotificationsPage } from './NotificationCenter'
 const A = { id: '10000000-0000-0000-0000-000000000001', role: 'Event Coordinator' as const, username: 'A', email: '', organization: '' }
@@ -367,4 +367,26 @@ test('refresh during an active refresh schedules a fresh snapshot after it compl
  await screen.findByText('No notifications yet.')
  expect(screen.getByLabelText('Notifications, 0 unread')).toBeInTheDocument()
  expect(screen.queryByText('Historic event')).not.toBeInTheDocument()
+})
+
+
+/** SCRUM-166 AC4: deliberate removal is content-only, not a broken destination.
+ * Real component; HTTP inbox is doubled. Backend delivery is covered in owner integrations.
+ */
+test('coordinator removal suppresses only the deliberate null-destination warning', async () => {
+ const rows = [
+  { ...item, id: 'removed', type: 'event.coordinator-removed', payload: { message: 'You are no longer assigned to Community Workshop. Event Organiser: Synthetic Organiser. Proposed: Not provided.', destination: null } },
+  { ...item, id: 'missing', type: 'event.coordinator-removed', payload: { message: 'Malformed removal missing destination' } },
+  { ...item, id: 'invalid', type: 'event.coordinator-removed', payload: { message: 'Malformed removal destination', destination: { kind: 'url', url: 'https://evil.test' } } },
+  { ...item, id: 'legacy', type: 'coordinator_assigned', payload: { message: 'Legacy assignment', destination: null } },
+ ]
+ fetcher.mockImplementation(async (url: string) => response(url.includes('unread-count') ? { unreadCount: rows.length } : { notifications: rows, nextCursor: null }))
+ const navigate = vi.fn(); render(view(A, true, navigate))
+ await screen.findByText(rows[0].payload.message)
+ const cards = screen.getAllByRole('listitem')
+ expect(within(cards[0]).queryByText('Destination unavailable.')).not.toBeInTheDocument()
+ for (const card of cards.slice(1)) expect(within(card).getByText('Destination unavailable.')).toBeInTheDocument()
+ expect(screen.queryByRole('link')).not.toBeInTheDocument()
+ expect(within(cards[0]).getByRole('button', { name: 'Mark read' })).toBeEnabled()
+ expect(navigate).not.toHaveBeenCalled()
 })
