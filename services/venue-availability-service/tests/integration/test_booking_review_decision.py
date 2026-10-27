@@ -30,6 +30,25 @@ AC5  Given Venue Staff have recorded an approval or rejection for a pending venu
 AC6  Given a booking request has been rejected and Venue Staff have provided relevant
      information or a reason, when the Event Coordinator views the booking decision, then they
      can view that information so that they can continue planning the event.
+
+
+SCRUM-47 Venue booking notification and decision alerts (additional assertions only).
+Story: As an Event Coordinator and Venue Staff, I want to receive notifications
+about venue booking requests and decisions, so that I can coordinate venue
+arrangements efficiently.
+AC1 Given an Event Coordinator submits a venue booking request, system sends
+an in-app notification to Venue Staff with event name, requested venue,
+date/time and link to review.
+AC2 Given booking approved/rejected, sends an in-app notification to Event
+Coordinator with event name, venue, decision.
+AC means acceptance criterion; DR means supporting design rule. Original story
+AC numbering below is unchanged; SCRUM-47 has only AC1 and AC2.
+Real: Flask/mutation SQL and fixture-owned PostgreSQL with full migrations.
+Doubled: nothing; independent connections read the persisted intent.
+SCRUM-47 AC2: approval/rejection retain the original requestedBy and decision.
+SCRUM-47 AC1: submission intent is verified in test_booking_request_submission.py.
+Not proven here: all-staff fanout, display text, links or inbox delivery; the
+three Venue Booking dispatcher unit cases cover content/recipients/links, not delivery.
 """
 
 from datetime import datetime, timedelta
@@ -41,6 +60,7 @@ from tests.integration.factories import (
     OTHER_COORDINATOR_ID,
     STAFF_ID,
     at,
+    assert_booking_intent,
     make_booking,
     make_event,
     make_user,
@@ -90,8 +110,14 @@ def pending(db, start=None, end=None, status="Pending Review", venue_id=None, ev
 
 
 def test_ac2_approved_decision_is_persisted_with_reviewer_and_time(client, db):
-    """Normal: the approval, its reviewer and its time are stored and returned."""
-    booking_id, _, _ = pending(db)
+    """Normal: approval commits an alert intent for the submitter despite reassignment."""
+    booking_id, venue_id, event_id = pending(db)
+    # Reassignment changes today's coordinator, not the original request owner.
+    [event] = db.execute(
+        'UPDATE public."Event" SET coordinator_id = %s WHERE event_id = %s RETURNING coordinator_id',
+        [OTHER_COORDINATOR_ID, event_id],
+    )
+    assert str(event["coordinator_id"]) == OTHER_COORDINATOR_ID
 
     response = decide(client, booking_id, "approve")
 
@@ -107,6 +133,11 @@ def test_ac2_approved_decision_is_persisted_with_reviewer_and_time(client, db):
     assert body["reviewedAt"].endswith("+08:00")
     assert body["rejectionReason"] is None
 
+    assert_booking_intent(db, "venue.booking-decision", {
+        "bookingId": booking_id, "eventId": event_id, "venueId": venue_id,
+        "requestedBy": COORDINATOR_ID, "startDateTime": "2030-03-01T13:00:00+08:00",
+        "endDateTime": "2030-03-01T15:00:00+08:00", "decision": "Approved",
+    }, row["reviewed_at"])
 
 def test_ac2_approval_overlapping_an_approved_booking_within_buffer_is_refused(client, db):
     """Conflict: setup/turnaround padding makes a 13:14 start clash with a 12:00 finish."""
@@ -157,8 +188,14 @@ def test_ac2_two_pending_requests_for_same_slot_only_first_approval_wins(client,
 
 
 def test_ac3_rejected_decision_is_persisted_with_reason(client, db):
-    """Normal: the rejection, its stripped reason and its time are stored."""
-    booking_id, _, _ = pending(db)
+    """Normal: rejection commits an alert intent for the submitter despite reassignment."""
+    booking_id, venue_id, event_id = pending(db)
+    # Reassignment changes today's coordinator, not the original request owner.
+    [event] = db.execute(
+        'UPDATE public."Event" SET coordinator_id = %s WHERE event_id = %s RETURNING coordinator_id',
+        [OTHER_COORDINATOR_ID, event_id],
+    )
+    assert str(event["coordinator_id"]) == OTHER_COORDINATOR_ID
 
     response = decide(client, booking_id, "reject", rejectionReason=f"  {REASON}  ")
 
@@ -170,6 +207,11 @@ def test_ac3_rejected_decision_is_persisted_with_reason(client, db):
     assert_recent(db, row["reviewed_at"])
     assert response.get_json()["rejectionReason"] == REASON
 
+    assert_booking_intent(db, "venue.booking-decision", {
+        "bookingId": booking_id, "eventId": event_id, "venueId": venue_id,
+        "requestedBy": COORDINATOR_ID, "startDateTime": "2030-03-01T13:00:00+08:00",
+        "endDateTime": "2030-03-01T15:00:00+08:00", "decision": "Rejected",
+    }, row["reviewed_at"])
 
 # AC4 ----
 

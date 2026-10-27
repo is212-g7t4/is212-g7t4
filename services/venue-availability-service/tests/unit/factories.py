@@ -28,3 +28,42 @@ def booking_row(**overrides):
     }
     row.update(overrides)
     return row
+
+
+def assert_booking_intent(cursor, kind, source):
+    """SCRUM-47: one exact intent follows the mutation in its successful transaction.
+
+    The driver is doubled: this verifies SQL intent and ordering, not durable commit.
+    PostgreSQL integration reads the committed row independently.
+    """
+    writes = [call.args for call in cursor.execute.call_args_list
+              if 'INSERT INTO public."VenueNotificationOutbox"' in call.args[0]]
+    assert len(writes) == 1
+    sql, (actual_kind, booking_id, payload) = writes[0]
+    assert actual_kind == kind
+    assert str(booking_id) == source["bookingId"]
+    assert payload.adapted == source
+    assert "(type,booking_id,source) VALUES (%s,%s,%s)" in sql
+    assert cursor.execute.call_args.args == writes[0]
+    connection = cursor.connection
+    assert connection.cursor.return_value.__enter__.return_value is cursor
+    connection.__enter__.assert_called_once()
+    connection.__exit__.assert_called_once_with(None, None, None)
+    connection.commit.assert_not_called()  # No intermediate commit separates mutation and intent.
+    connection.rollback.assert_not_called()
+    calls = connection.mock_calls
+    entered = next(i for i, call in enumerate(calls) if call[0] == '__enter__')
+    mutation = next(i for i, call in enumerate(calls)
+                    if call[0].endswith('.execute') and
+                    ('INSERT INTO public."VenueBooking"' in call.args[0] or
+                     'UPDATE public."VenueBooking"' in call.args[0]))
+    intent = next(i for i, call in enumerate(calls)
+                  if call[0].endswith('.execute') and 'VenueNotificationOutbox' in call.args[0])
+    committed = next(i for i, call in enumerate(calls) if call[0] == '__exit__')
+    assert entered < mutation < intent < committed
+
+
+def assert_no_booking_intent(cursor):
+    """SCRUM-47 supporting rule: refused mutations schedule no notification."""
+    assert not any('INSERT INTO public."VenueNotificationOutbox"' in call.args[0]
+                   for call in cursor.execute.call_args_list)

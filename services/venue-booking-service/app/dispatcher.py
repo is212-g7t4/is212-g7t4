@@ -1,4 +1,4 @@
-"""Closure notification orchestration; only HTTP accesses atomic state.
+"""Venue notification orchestration; only HTTP accesses atomic state.
 Run separately with python -m app.dispatcher. Unknown publication is retried
 with the same frozen identity; broker acceptance is not inbox delivery.
 """
@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 from uuid import UUID
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import httpx
 import pika
 
@@ -34,7 +36,21 @@ class OutboxAPI:
             "POST", self.base + "/internal/notification-outbox/claim", json={}
         )["jobs"]
 
-    def context(self, source):
+    def submission_recipients(self):
+        users = self.call(
+            "GET", os.getenv("USER_SERVICE_URL", "http://user-service:5000").rstrip("/") + "/users",
+            params={"role": "Venue Staff"},
+        )["users"]
+        if not isinstance(users, list):
+            raise ValueError("Invalid Venue Staff lookup")
+        recipients = []
+        for user in users:
+            if user.get("role") != "Venue Staff":
+                raise ValueError("Invalid Venue Staff role")
+            recipients.append(str(UUID(user["user_id"])))
+        return sorted(set(recipients))
+
+    def context(self, source, require_coordinator=True):
         event = self.call(
             "GET",
             self.event + f"/internal/events/{source['eventId']}/notification-context",
@@ -42,7 +58,8 @@ class OutboxAPI:
         venue = self.call("GET", self.venue + f"/venues/{source['venueId']}")["venue"]
         if event["id"] != source["eventId"] or venue["id"] != source["venueId"]:
             raise ValueError("Mismatched enrichment identity")
-        UUID(event["coordinatorId"])
+        if require_coordinator:
+            UUID(event["coordinatorId"])
         for name in (event["eventName"], venue["name"]):
             if not isinstance(name, str) or not name.strip():
                 raise ValueError("Missing display name")
@@ -69,28 +86,27 @@ def dispatch_once(api, publish):
     jobs = api.claim()
     for job in jobs:
         try:
+            kind = job.get("type", "venue.closure-rejection")
+            if kind == "venue.booking-submission-fanout":
+                recipients = api.submission_recipients()
+                if not recipients:
+                    raise ValueError("No Venue Staff recipients")
+                event, venue = api.context(job["source"], require_coordinator=False)
+                api.operation(
+                    job, "expand", recipientIds=recipients,
+                    eventName=event["eventName"], venueName=venue["name"],
+                )
+                continue
             envelope = job["envelope"]
             if envelope is None:
-                source = job["source"]
-                event, venue = api.context(source)
-                envelope = dict(
-                    version=1,
-                    id=job["id"],
-                    type="venue.closure-rejection",
-                    recipientId=event["coordinatorId"],
-                    createdAt=job["createdAt"],
-                    message=f"{event['eventName']}: venue request for {venue['name']} rejected. Closure {source['startDateTime']} to {source['endDateTime']}. Reason: {source['reason']}",
-                    destination=dict(
-                        kind="event-venue-request",
-                        eventId=source["eventId"],
-                        bookingId=source["bookingId"],
-                    ),
-                    details={
-                        **source,
-                        "eventName": event["eventName"],
-                        "venueName": venue["name"],
-                    },
-                )
+                if kind == "venue.booking-submission":
+                    envelope = submission_envelope(job)
+                elif kind == "venue.booking-decision":
+                    envelope = decision_envelope(api, job)
+                elif kind == "venue.closure-rejection":
+                    envelope = closure_envelope(api, job)
+                else:
+                    raise ValueError("Unknown venue notification type")
                 # Use the owner's readback: a competing freeze can never replace history.
                 envelope = api.freeze(job, envelope)
             publish(envelope)
@@ -109,6 +125,47 @@ def dispatch_once(api, publish):
                     "retry update failed; lease will recover source=%s", job["id"]
                 )
     return len(jobs)
+
+
+def submission_envelope(job):
+    source = job["source"]
+
+    def stamp(value):
+        return datetime.fromisoformat(value).astimezone(ZoneInfo("Asia/Singapore")).strftime("%d %b %Y, %H:%M SGT")
+
+    return dict(
+        version=1, id=job["id"], type="venue.booking-submission",
+        recipientId=source["recipientId"], createdAt=job["createdAt"],
+        message=(f"{source['eventName']}: venue booking requested for {source['venueName']}. "
+                 f"{stamp(source['startDateTime'])} to {stamp(source['endDateTime'])}. Review required."),
+        destination=dict(kind="venue-requests"), details=source,
+    )
+
+
+def decision_envelope(api, job):
+    source = job["source"]
+    if source["decision"] not in ("Approved", "Rejected"):
+        raise ValueError("Invalid booking decision")
+    event, venue = api.context(source, require_coordinator=False)
+    return dict(
+        version=1, id=job["id"], type="venue.booking-decision",
+        recipientId=source["requestedBy"], createdAt=job["createdAt"],
+        message=f"{event['eventName']}: venue booking for {venue['name']} {source['decision'].lower()}.",
+        destination=dict(kind="event-venue-request", eventId=source["eventId"], bookingId=source["bookingId"]),
+        details={**source, "eventName": event["eventName"], "venueName": venue["name"]},
+    )
+
+
+def closure_envelope(api, job):
+    source = job["source"]
+    event, venue = api.context(source)
+    return dict(
+        version=1, id=job["id"], type="venue.closure-rejection",
+        recipientId=event["coordinatorId"], createdAt=job["createdAt"],
+        message=f"{event['eventName']}: venue request for {venue['name']} rejected. Closure {source['startDateTime']} to {source['endDateTime']}. Reason: {source['reason']}",
+        destination=dict(kind="event-venue-request", eventId=source["eventId"], bookingId=source["bookingId"]),
+        details={**source, "eventName": event["eventName"], "venueName": venue["name"]},
+    )
 
 
 def publish(envelope):

@@ -8,13 +8,34 @@ This atomic owns the stored request and the overlap rule. The event-status gate
 (AC2) and the staff queue (AC3, AC4) run in Venue Booking Service; the real-SQL
 behaviour of AC1, AC2, AC5 and AC6 is proven in
 tests/integration/test_booking_request_submission.py.
+
+
+SCRUM-47 Venue booking notification and decision alerts (additional assertions only).
+Story: As an Event Coordinator and Venue Staff, I want to receive notifications
+about venue booking requests and decisions, so that I can coordinate venue
+arrangements efficiently.
+AC1 Given an Event Coordinator submits a venue booking request, system sends
+an in-app notification to Venue Staff with event name, requested venue,
+date/time and link to review.
+AC2 Given booking approved/rejected, sends an in-app notification to Event
+Coordinator with event name, venue, decision.
+AC means acceptance criterion; DR means supporting design rule. Original story
+AC numbering below is unchanged; SCRUM-47 has only AC1 and AC2.
+Real: Flask routes, validation and model transaction/SQL construction.
+Doubled: psycopg2 connection/cursor; SQL ordering is not durable-commit proof.
+SCRUM-47 AC1: successful submission retains the exact original source snapshot.
+SCRUM-47 AC2: decision intent is verified in test_booking_review_decision.py.
+Not proven here: all-staff fanout, display text, links or inbox delivery; the
+three Venue Booking dispatcher unit cases cover content/recipients/links, not delivery.
 """
 
 from datetime import datetime, timezone
 
 from app.calendar import SINGAPORE
 from app.models import _conflict_types, serialize
-from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import (
+    BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, assert_booking_intent, booking_row,
+)
 
 PAYLOAD = {
     "eventId": EVENT_ID,
@@ -80,7 +101,7 @@ def test_ac2_legacy_row_without_requested_at_serialises_as_null():
 
 
 def test_ac5_created_row_keeps_the_submitted_event_id(setup):
-    """Normal: the request is stored against the event it was submitted for."""
+    """Normal: the request keeps its event and queues the exact SCRUM-47 submission intent."""
     client, cursor = setup
     cursor.fetchone.return_value = booking_row()
     cursor.fetchall.return_value = []
@@ -91,6 +112,11 @@ def test_ac5_created_row_keeps_the_submitted_event_id(setup):
     assert str(params[1]) == EVENT_ID
     assert params[6] == "Projector"
     assert response.json["eventId"] == EVENT_ID
+    assert_booking_intent(cursor, "venue.booking-submission-fanout", {
+        "bookingId": BOOKING_ID, "eventId": EVENT_ID, "venueId": VENUE_ID,
+        "requestedBy": USER_ID, "startDateTime": "2026-10-01T09:00:00+08:00",
+        "endDateTime": "2026-10-01T12:00:00+08:00",
+    })
 
 
 # AC6 ----
