@@ -40,6 +40,7 @@ export function notificationPath(destination: unknown): string | null {
   const uuid = (id: unknown): id is string => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
   if (value.kind === 'event-venue-request' && uuid(value.eventId) && uuid(value.bookingId)) return `/events/${value.eventId}?booking=${value.bookingId}`
   if (value.kind === 'event-details' && uuid(value.eventId)) return `/events/${value.eventId}`
+  if (value.kind === 'venue-requests') return '/venue-requests'
   return null
 }
 
