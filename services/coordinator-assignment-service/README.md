@@ -79,7 +79,7 @@ Run the hermetic unit tier (the default):
 uv run pytest
 ```
 
-Run the opt-in SCRUM-159 composite integration tier:
+Run the opt-in SCRUM-112 composite integration tier:
 
 ```bash
 uv run pytest -m integration --no-cov
