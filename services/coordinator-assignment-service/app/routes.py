@@ -3,8 +3,8 @@ from flask import Blueprint, jsonify, request
 
 from app.clients import (
     get_active_events,
+    get_assignment_events,
     get_available_coordinators,
-    get_unassigned_events,
     get_user,
     assign_event_coordinator,
 )
@@ -43,8 +43,9 @@ def get_coordinators():
 @bp.get("/queue")
 def get_queue():
     """
-    The Event Coordinator Lead's queue of submitted requests with no
-    coordinator assigned yet, oldest submission first.
+    The Event Coordinator Lead's assignment worklist. It contains unassigned
+    Submitted requests and assigned Under Review requests, oldest submission
+    first, so the Lead can assign and reassign from one list.
 
     Query parameters:
     - actingUserId: the id of the user asking. Only the Event Coordinator
@@ -68,9 +69,9 @@ def get_queue():
         ), 403
 
     try:
-        return jsonify(events=get_unassigned_events()), 200
+        return jsonify(events=get_assignment_events(acting_user_id)), 200
     except Exception as e:
-        return jsonify(error=f"Failed to fetch unassigned events: {str(e)}"), 500
+        return jsonify(error=f"Failed to fetch assignment events: {str(e)}"), 500
 
 
 @bp.get("/workload")

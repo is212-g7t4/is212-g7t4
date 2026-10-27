@@ -31,12 +31,22 @@ def test_available_coordinators_propagate_user_service_failure(monkeypatch):
         clients.get_available_coordinators()
 
 
-def test_unassigned_events_come_from_event_service(monkeypatch):
-    get = Mock(return_value=response(200, {"events": [{"id": "evt-1"}]}))
+def test_assignment_worklist_comes_from_submitted_event_requests(monkeypatch):
+    get = Mock(return_value=response(200, {"events": [
+        {"id": "evt-1", "coordinatorId": None, "status": "Submitted"},
+        {"id": "evt-2", "coordinatorId": "coord", "status": "Under Review"},
+    ]}))
     monkeypatch.setattr(clients.httpx, "get", get)
 
-    assert clients.get_unassigned_events() == [{"id": "evt-1"}]
-    assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/unassigned"
+    assert clients.get_assignment_events("lead") == [
+        {"id": "evt-1", "coordinatorId": None, "status": "Submitted"},
+        {"id": "evt-2", "coordinatorId": "coord", "status": "Under Review"},
+    ]
+    assert get.call_args.args[0] == f"{clients.EVENT_SERVICE_URL}/events/submitted"
+    assert get.call_args.kwargs["params"] == {
+        "coordinatorId": "lead",
+        "viewerRole": "Event Coordinator Lead",
+    }
 
 
 def test_active_events_come_from_event_service(monkeypatch):

@@ -9,10 +9,10 @@ test('coordinators get My events, Request review and Change requests tabs', () =
   expect(screen.getByRole('tab', { name: 'My events' })).toHaveAttribute('aria-selected', 'true')
 })
 
-test('the Lead also gets the Unassigned requests tab, first, and Coordinator workload', () => {
+test('the Lead also gets the Coordinator assignments tab, first, and Coordinator workload', () => {
   const onNavigate = vi.fn()
   render(<EventsTabs tabs={coordinatorEventTabs('Event Coordinator Lead')} route="queue" onNavigate={onNavigate} />)
-  expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Unassigned requests', 'Coordinator workload', 'My events', 'Request review', 'Change requests'])
+  expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Coordinator assignments', 'Coordinator workload', 'My events', 'Request review', 'Change requests'])
   screen.getByRole('tab', { name: 'Change requests' }).click()
   expect(onNavigate).toHaveBeenCalledWith('changeRequests')
 })
