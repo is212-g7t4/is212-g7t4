@@ -109,3 +109,22 @@ def make_closure(db, venue_id, start, end, created_by=STAFF_ID, reason="Roof rep
         [closure_id, venue_id, start, end, reason, created_by],
     )
     return closure_id
+
+
+def assert_booking_intent(db, kind, source, recorded_at):
+    """SCRUM-47: independently read the exact committed intent and mutation transaction.
+
+    This proves durable owner facts, not dispatcher enrichment or inbox delivery.
+    """
+    [row] = db.execute('''SELECT o.*, o.xmin::text AS intent_transaction,
+        b.xmin::text AS booking_transaction FROM public."VenueNotificationOutbox" o
+        JOIN public."VenueBooking" b USING (booking_id)''')
+    assert str(row["booking_id"]) == source["bookingId"]
+    assert row["type"] == kind
+    assert row["source"] == source
+    assert row["intent_transaction"] == row["booking_transaction"]
+    assert row["created_at"] == row["available_at"] == recorded_at
+    assert row["source_id"] is not None
+    assert row["attempts"] == 0
+    for key in ("closure_id", "envelope", "published_at", "lease_token", "lease_until", "last_error"):
+        assert row[key] is None

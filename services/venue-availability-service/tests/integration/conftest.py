@@ -1,18 +1,19 @@
-"""Fixtures for Venue Availability's integration tier: the real app against a throwaway Postgres.
+"""Venue Availability integration fixtures: Flask against fixture-owned PostgreSQL 17.6.
 
-See docs/testing/integration-testing.md. One postgres:17.6 container per session, loaded
-with the full migration chain unmodified; every test starts from empty tables.
+Full migration chain, unmodified and filename-ordered; clean tables between tests.
+Every database access requires the exact registered URL and live container identity,
+not merely a loopback hostname. No shared .env or shared database is supported.
 """
 
+import hashlib
 import os
+import subprocess
 from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
-# Ryuk, testcontainers' reaper container, intermittently fails at startup with "Port mapping
-# ... port 8080 is not available" (seen in about a third of back-to-back runs on Docker
-# Desktop). The `with` block below already stops the container; without Ryuk only a hard
-# kill of pytest can leave it running. Read at import, so it must be set first.
+# The context owns cleanup; disabling Ryuk avoids Docker Desktop reaper startup races.
 os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 import psycopg2  # noqa: E402
@@ -24,37 +25,91 @@ from app import create_app  # noqa: E402
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
+OWNED_DATABASES = {}
+LABEL = "scrum47-availability-integration"
 
 
 def assert_local(url):
-    """Refuse to touch anything but a local container.
+    """Require this fixture's exact URL, container ID/name/label and loopback port."""
+    parsed = urlparse(url)
+    assert parsed.hostname in LOCAL_HOSTS, "Integration database must be loopback-only"
+    assert url in OWNED_DATABASES, "Database URL is not owned by this session fixture"
+    container, identifier, name = OWNED_DATABASES[url]
+    container.reload()
+    assert container.id == identifier
+    assert container.attrs["Name"] == "/" + name
+    assert container.attrs["Config"]["Labels"]["connectsphere.test"] == LABEL
+    assert container.attrs["State"]["Running"]
+    assert container.attrs["NetworkSettings"]["Ports"]["5432/tcp"] == [
+        {"HostIp": "127.0.0.1", "HostPort": str(parsed.port)}
+    ]
 
-    load_dotenv() runs when `app` is imported and can put the live Supabase URL in the
-    environment; a TRUNCATE ... CASCADE there would wipe the team's data.
-    """
-    host = urlparse(url).hostname
-    assert host in LOCAL_HOSTS, f"Integration tests only run against a local database, not {host!r}."
+
+def assert_resources_absent(name, volumes):
+    """Read back only exact owned resources; never remove a name-matched stranger."""
+    remaining = subprocess.run(
+        ["docker", "container", "ls", "-a", "--filter", f"name=^/{name}$", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=30,
+    )
+    failures = []
+    if remaining.returncode or remaining.stdout.strip():
+        failures.append("Owned container absence unverified: " + name)
+    for volume in volumes:
+        check = subprocess.run(
+            ["docker", "volume", "ls", "--filter", "name=" + volume, "--format", "{{.Name}}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if check.returncode or volume in check.stdout.splitlines():
+            failures.append("Owned volume absence unverified: " + volume)
+    assert not failures, "; ".join(failures)
+    print(f"CLEANUP {name}: exact container absent; owned volumes absent={volumes}", flush=True)
 
 
 @pytest.fixture(scope="session")
 def database_url():
-    with PostgresContainer("postgres:17.6", driver=None) as postgres:
-        url = postgres.get_connection_url()
-        assert_local(url)
-        with closing(psycopg2.connect(url)) as connection:
-            # Some migrations carry their own BEGIN/COMMIT; autocommit runs them as written.
-            connection.autocommit = True
-            with connection.cursor() as cursor:
-                for migration in sorted(MIGRATIONS.glob("*.sql")):
-                    cursor.execute(migration.read_text(encoding="utf-8"))
-        yield url
+    name = LABEL + "-" + uuid4().hex
+    volumes = []
+    try:
+        postgres = PostgresContainer("postgres:17.6", driver=None, name=name,
+                                     labels={"connectsphere.test": LABEL})
+        # Docker SDK accepts (host IP, ephemeral port); with_bind_ports only accepts integers.
+        postgres.ports["5432"] = ("127.0.0.1", None)  # type: ignore[assignment]
+        with postgres:
+            url = postgres.get_connection_url()
+            container = postgres.get_wrapped_container()
+            container.reload()
+            volumes = [mount["Name"] for mount in container.attrs["Mounts"]
+                       if mount["Type"] == "volume"]
+            OWNED_DATABASES[url] = (container, container.id, name)
+            try:
+                assert_local(url)
+                print(f"RESOURCE {name} id={container.id}", flush=True)
+                with closing(psycopg2.connect(url, connect_timeout=10)) as connection:
+                    # Migrations carrying BEGIN/COMMIT run exactly as written.
+                    connection.autocommit = True
+                    with connection.cursor() as cursor:
+                        for migration in sorted(MIGRATIONS.glob("*.sql")):
+                            payload = migration.read_bytes()
+                            digest = hashlib.sha256(payload).hexdigest()
+                            cursor.execute(payload.decode("utf-8"))
+                            assert hashlib.sha256(migration.read_bytes()).hexdigest() == digest
+                            print(f"APPLY {migration.name} sha256={digest}", flush=True)
+                yield url
+            finally:
+                # Check ownership before the context performs destructive container cleanup.
+                try:
+                    assert_local(url)
+                finally:
+                    del OWNED_DATABASES[url]
+    finally:
+        assert_resources_absent(name, volumes)
 
 
 @pytest.fixture(autouse=True)
 def empty_tables(database_url):
     yield
     assert_local(database_url)
-    with closing(psycopg2.connect(database_url)) as connection:
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor() as cursor:
             cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
             tables = ", ".join(f'public."{name}"' for (name,) in cursor.fetchall())
@@ -64,19 +119,19 @@ def empty_tables(database_url):
 @pytest.fixture
 def client(database_url, monkeypatch):
     assert_local(database_url)
-    # Both channels, in case a code path reads os.environ rather than app.config (§4).
     monkeypatch.setenv("DATABASE_URL", database_url)
     return create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client()
 
 
 class Database:
-    """Direct reads and writes for the arrange and assert steps; never used by the app."""
+    """Independent connections for arrange/assert; never used by the app."""
 
     def __init__(self, url):
         self.url = url
 
     def execute(self, sql, params=()):
-        with closing(psycopg2.connect(self.url)) as connection:
+        assert_local(self.url)
+        with closing(psycopg2.connect(self.url, connect_timeout=10)) as connection:
             with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(sql, params)
                 return cursor.fetchall() if cursor.description else None

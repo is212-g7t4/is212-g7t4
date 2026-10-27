@@ -10,7 +10,26 @@ names and assertions specify the scenario. No group is credited with all five AC
 
 ## Existing test contract and detailed cases
 
-Venue Availability: booking creation, approval/rejection, and conflict-checking."""
+Venue Availability: booking creation, approval/rejection, and conflict-checking.
+
+SCRUM-47 Venue booking notification and decision alerts (additional assertions only).
+Story: As an Event Coordinator and Venue Staff, I want to receive notifications
+about venue booking requests and decisions, so that I can coordinate venue
+arrangements efficiently.
+AC1 Given an Event Coordinator submits a venue booking request, system sends
+an in-app notification to Venue Staff with event name, requested venue,
+date/time and link to review.
+AC2 Given booking approved/rejected, sends an in-app notification to Event
+Coordinator with event name, venue, decision.
+AC means acceptance criterion; DR means supporting design rule. Original story
+AC numbering below is unchanged; SCRUM-47 has only AC1 and AC2.
+Real: Flask routes, validation and model transaction/SQL construction.
+Doubled: psycopg2 connection/cursor; SQL ordering is not durable-commit proof.
+SCRUM-47 DR: refused submission/decision writes enqueue no notification.
+Successful intent snapshots are checked in the submission/review story modules.
+Not proven here: all-staff fanout, display text, links or inbox delivery; the
+three Venue Booking dispatcher unit cases cover content/recipients/links, not delivery.
+"""
 
 from datetime import datetime
 import pytest
@@ -22,6 +41,7 @@ from tests.unit.factories import (
     EVENT_ID,
     USER_ID,
     VENUE_ID,
+    assert_no_booking_intent,
     booking_row,
 )
 
@@ -133,6 +153,7 @@ def test_conflicts_are_scoped_to_venue_and_time_not_event(setup):
 
 
 def test_create_booking_rejects_overlap_with_approved_booking(setup):
+    """Conflict: an overlapping submission is refused without scheduling an alert."""
     client, cursor = setup
     cursor.fetchall.return_value = [{"conflict_type": "APPROVED_BOOKING"}]
 
@@ -150,6 +171,7 @@ def test_create_booking_rejects_overlap_with_approved_booking(setup):
     )
 
     assert response.status_code == 409
+    assert_no_booking_intent(cursor)
 
 
 def test_create_booking_requires_end_after_start(setup):
@@ -185,6 +207,7 @@ def test_approve_booking_succeeds_when_no_conflict(setup):
 
 
 def test_approve_booking_rejects_when_now_conflicting(setup):
+    """Conflict: a newly occupied slot refuses approval without scheduling an alert."""
     client, cursor = setup
     cursor.fetchone.side_effect = [booking_row()]
     cursor.fetchall.return_value = [{"conflict_type": "APPROVED_BOOKING"}]
@@ -194,9 +217,11 @@ def test_approve_booking_rejects_when_now_conflicting(setup):
     )
 
     assert response.status_code == 409
+    assert_no_booking_intent(cursor)
 
 
 def test_approve_booking_missing_returns_404(setup):
+    """Failure: an unknown booking schedules no approval alert."""
     client, cursor = setup
     cursor.fetchone.side_effect = [None]
 
@@ -205,6 +230,7 @@ def test_approve_booking_missing_returns_404(setup):
     )
 
     assert response.status_code == 404
+    assert_no_booking_intent(cursor)
 
 
 def test_reject_booking_does_not_recheck_conflicts(setup):
@@ -225,6 +251,7 @@ def test_reject_booking_does_not_recheck_conflicts(setup):
 
 
 def test_cancelled_booking_cannot_be_approved_or_rejected(setup):
+    """Conflict: neither decision on a cancelled booking schedules an alert."""
     client, cursor = setup
     cursor.fetchone.return_value = booking_row(status="Cancelled")
 
@@ -240,6 +267,7 @@ def test_cancelled_booking_cannot_be_approved_or_rejected(setup):
     assert approve.status_code == 409
     assert reject.status_code == 409
     assert "cannot be reviewed" in approve.json["message"]
+    assert_no_booking_intent(cursor)
 
 
 def test_get_bookings_lists_for_venue(setup):

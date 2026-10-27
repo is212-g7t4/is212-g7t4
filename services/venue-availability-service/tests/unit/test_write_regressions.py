@@ -96,4 +96,7 @@ def test_write_remains_naive_pending_without_dev_gate(setup):
         booking_row()["requested_start_time"].replace(tzinfo=SINGAPORE),
     ] * 2
     assert "VenueHold" not in sql
-    assert "'Pending Review'" in cursor.execute.call_args.args[0]
+    # SCRUM-47 adds an outbox insert after the booking, so inspect the booking SQL.
+    booking_insert = next(call.args[0] for call in cursor.execute.call_args_list
+                          if 'INSERT INTO public."VenueBooking"' in call.args[0])
+    assert "'Pending Review'" in booking_insert

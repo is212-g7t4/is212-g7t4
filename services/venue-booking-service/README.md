@@ -47,6 +47,50 @@ The integration tier needs no Docker and no secrets: every downstream
 service is stubbed at the HTTP layer with `respx`. See
 `docs/testing/integration-testing.md`.
 
+## SCRUM-47 booking notifications
+
+Venue Availability commits a durable submission intent with each new booking and
+one decision intent with the first staff decision for that booking. Its existing
+`VenueNotificationOutbox` also continues to own closure-rejection notifications;
+closure mutations do not create a second SCRUM-47 decision alert.
+
+Before rollout, apply the additive migration
+`database/supabase/migrations/20261027000001_venue_booking_notifications.sql`
+through the team's approved database process, then update Venue Availability,
+this service's `venue-notification-dispatcher` worker, Notification consumer and
+frontend together. Do not drop the outbox on rollback: it may contain pending
+work. This source change does not itself apply any migration.
+
+The existing worker (`python -m app.dispatcher`) looks up all `Venue Staff` users
+through User Service. `USER_SERVICE_URL` defaults to `http://user-service:5000`
+for the existing Compose worker; set it to `http://localhost:5001` when running
+on the host. User Service must be reachable; lookup failures or an empty staff
+list retain the intent for retry. A successful owner-side expansion atomically
+captures the staff recipient list and creates deterministic per-recipient jobs.
+
+Booking IDs, original submitter, requested period and decision are transaction-time
+snapshots. Event/venue display names are captured through their HTTP APIs when
+submission expansion or decision preparation first succeeds, not at the original
+booking transaction. Frozen envelopes are reused on retries, with the existing
+leases, broker confirmations and inbox source-ID deduplication. Submission text
+uses the booking's requested start/end in Singapore time and links to ordinary
+`/venue-requests`; decision alerts go to the original submitter and link to the
+existing event booking detail. Edits, cancellations and resubmissions add no
+new story alerts and do not change existing booking eligibility.
+
+Initial development checks (not the full coverage/release gate):
+
+```sh
+PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked pytest -q --no-cov tests/unit/test_venue_booking_notifications.py
+```
+
+These three backend cases cover submission, approval and rejection with owner,
+User, Event and Venue HTTP doubles and a recording publisher. The fourth case,
+`src/features/notifications/venueBookingNotifications.test.ts` in the frontend,
+checks the staff destination resolver. Real database, broker, service integration,
+manual acceptance and the unchanged 100% owner coverage floors remain separate
+verification gates.
+
 ## Endpoints
 
 - `GET /venue-search` — SCRUM-26 Venue Search and Filtering. Finds the venues

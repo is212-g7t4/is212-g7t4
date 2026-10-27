@@ -98,7 +98,7 @@ def deliver(dsn, envelope):
                 envelope["id"],
                 envelope["recipientId"],
                 envelope["type"],
-                (envelope["details"]["eventId"] if envelope["type"] == "event.coordinator-removed"
+                (envelope["details"]["eventId"] if envelope["type"] in ("event.coordinator-removed", "venue.booking-submission")
                  else envelope["destination"].get("eventId")),
                 Json(envelope),
                 envelope["id"],

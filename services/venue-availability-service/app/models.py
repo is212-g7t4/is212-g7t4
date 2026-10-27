@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 import psycopg2
-from psycopg2.extras import RealDictCursor, register_uuid
+from psycopg2.extras import RealDictCursor, register_uuid, Json
 
 from app.calendar import SINGAPORE
 
@@ -432,7 +432,27 @@ def create_booking(
                 ],
             )
             saved = _localize(cursor.fetchone())
+            enqueue_booking_notification(cursor, saved, "venue.booking-submission-fanout")
     return serialize(saved)
+
+
+def enqueue_booking_notification(cursor, booking, kind):
+    """Capture owner facts atomically; the composite enriches names over HTTP."""
+    source = dict(
+        bookingId=str(booking["booking_id"]), eventId=str(booking["event_id"]),
+        venueId=str(booking["venue_id"]), requestedBy=str(booking["requested_by"]),
+        startDateTime=_aware(booking["requested_start_time"]).isoformat(),
+        endDateTime=_aware(booking["requested_end_time"]).isoformat(),
+    )
+    repeat_decision = ""
+    if kind == "venue.booking-decision":
+        source["decision"] = booking["status"]
+        # Preserve existing edit/resubmission decisions without adding another alert.
+        repeat_decision = " ON CONFLICT (booking_id) WHERE type = 'venue.booking-decision' DO NOTHING"
+    cursor.execute(
+        'INSERT INTO public."VenueNotificationOutbox" (type,booking_id,source) VALUES (%s,%s,%s)' + repeat_decision,
+        (kind, booking["booking_id"], Json(source)),
+    )
 
 
 def update_booking(
@@ -733,6 +753,7 @@ def decide_booking(
                 ],
             )
             decided = _localize(cursor.fetchone())
+            enqueue_booking_notification(cursor, decided, "venue.booking-decision")
     return serialize(decided)
 
 
