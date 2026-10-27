@@ -70,14 +70,21 @@ def pending(db):
     """Read all outbox rows in a fresh transaction, including frozen and published work, in
     creation order.
     """
-    return db.execute('SELECT * FROM public."EventNotificationOutbox" ORDER BY created_at,source_id')
+    # This story owns organiser deliveries only, not SCRUM-166 coordinator fanout.
+    return db.execute('SELECT * FROM public."EventNotificationOutbox" '
+                      'WHERE type IN (%s,%s,%s) ORDER BY created_at,source_id',
+                      ['event.approval', 'event.rejection', 'event.coordinator-assignment'])
 
 
 def claim(client):
     """Claim work with the test token, require HTTP success and return the owner's leased jobs."""
-    response = client.post("/internal/notification-outbox/claim", headers=HEADERS, json={})
-    assert response.status_code == 200, response.json
-    return response.json["jobs"]
+    for _ in range(10):
+        response = client.post("/internal/notification-outbox/claim", headers=HEADERS, json={})
+        assert response.status_code == 200, response.json
+        jobs = response.json["jobs"]
+        if not jobs or jobs[0]["type"] not in ("event.coordinator-assigned", "event.coordinator-removed"):
+            return jobs
+    pytest.fail("SCRUM-45 claim exhausted its bounded coordinator-delivery skip")
 
 
 def operation(client, job, action, **body):

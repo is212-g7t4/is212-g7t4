@@ -1,10 +1,10 @@
 """Infra: full-chain clean install and upgrades: Event Service integration tests.
 
-Why: SCRUM-45 schema changes must preserve installed rows, constraints and RLS.
+Why: SCRUM-45 and SCRUM-166 schema changes must preserve installed rows, constraints and RLS.
 Real: disposable postgres:17.6 and complete unmodified migrations.
 Doubled: optional synthetic SQL API roles, not hosted Supabase.
 Not proven: service delivery, hosted-role parity or shared migration state.
-Upgrade baseline is the exact migration inventory of main aee7bb0551bb739eee1063b680aadb980e00668c."""
+Upgrade baselines are pinned below; SCRUM-166 uses main f0cd2c16ef56b5a4e15bc7d774d1b3ddb6b65f9e."""
 import pytest
 import psycopg2
 import json
@@ -18,6 +18,8 @@ APPROVAL = "20261021000100_event_approval_notifications.sql"
 PINNED_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql']
 EXPECTED_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox'}
 TYPES = ('event.rejection', 'event.approval', 'event.coordinator-assignment')
+# Actual SCRUM-166 target inventory: f0cd2c16ef56b5a4e15bc7d774d1b3ddb6b65f9e.
+SCRUM166_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261021000000_event_notification_outbox.sql', '20261021000100_event_approval_notifications.sql', '20261021020000_event_notification_assignments.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql', '20261025000000_event_submission_notifications.sql']
 
 def assert_schema_and_types(db):
     """Check the complete schema, allowed/rejected outbox writes, held timestamps, RLS and indexes
@@ -44,9 +46,9 @@ def assert_schema_and_types(db):
     assert 'WHERE (published_at IS NULL)' in indexes['event_outbox_pending']
     print('VERIFIED all tables, exact EventNotificationOutbox column types, three allowed types, invalid-type rejection, nullable/timezone-safe held_at, RLS and indexes', flush=True)
 
-@pytest.mark.parametrize('installation', ['clean', 'pre-scrum45', 'rejection-only', 'latest-main-pre-scrum45'])
+@pytest.mark.parametrize('installation', ['clean', 'pre-scrum45', 'rejection-only', 'latest-main-pre-scrum45', 'latest-main-pre-scrum166'])
 def test_migrations_full_chain_preserves_schema_types_and_existing_data(installation, migration_database):
-    """Normal: apply the complete chain from clean, pre-feature, rejection-only or pinned-main
+    """Normal: apply the complete chain from clean, pre-feature, rejection-only or either pinned-main
     state; SQL schema checks and seeded-row snapshots prove pending migrations preserve existing
     data, including backdated upgrades.
     """
@@ -58,10 +60,11 @@ def test_migrations_full_chain_preserves_schema_types_and_existing_data(installa
             db.apply(paths)
         else:
             cutoff = FIRST_SCRUM45 if installation == 'pre-scrum45' else APPROVAL
-            if installation == 'latest-main-pre-scrum45':
-                installed = [path for path in paths if path.name in PINNED_MAIN_MIGRATIONS]
-                assert {path.name for path in installed} == set(PINNED_MAIN_MIGRATIONS)
-                pending = [path for path in paths if path.name not in PINNED_MAIN_MIGRATIONS]
+            if installation in ('latest-main-pre-scrum45', 'latest-main-pre-scrum166'):
+                inventory = SCRUM166_MAIN_MIGRATIONS if installation == 'latest-main-pre-scrum166' else PINNED_MAIN_MIGRATIONS
+                installed = [path for path in paths if path.name in inventory]
+                assert {path.name for path in installed} == set(inventory)
+                pending = [path for path in paths if path.name not in inventory]
             else:
                 installed = [path for path in paths if path.name < cutoff]
                 pending = [path for path in paths if path.name >= cutoff]
@@ -76,6 +79,9 @@ def test_migrations_full_chain_preserves_schema_types_and_existing_data(installa
         assert db.applied == expected_history
         assert set(db.applied) == {path.name for path in paths}
         assert_schema_and_types(db)
+        for kind in ('event.submission-fanout', 'event.submission',
+                     'event.coordinator-assigned', 'event.coordinator-removed'):
+            db.query('INSERT INTO public."EventNotificationOutbox" (type,source) VALUES (%s,%s::jsonb)', (kind, '{}'))
         print(f'COMPLETE installation={installation} migrations={len(db.applied)}', flush=True)
 
 def test_migrations_owner_and_supabase_like_role_access(migration_database):

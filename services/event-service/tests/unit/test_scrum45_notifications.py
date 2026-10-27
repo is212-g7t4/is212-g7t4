@@ -90,7 +90,10 @@ def initial_assignment_intents(cursor):
     """Extract outbox INSERT parameters from cursor calls; these are write requests, not persisted
     rows.
     """
-    return [call.args[1] for call in cursor.execute.call_args_list if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]]
+    # SCRUM-45 observes organiser deliveries; SCRUM-166 owns coordinator deliveries.
+    return [call.args[1] for call in cursor.execute.call_args_list
+            if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]
+            and call.args[1][1] == 'event.coordinator-assignment']
 
 initial_assignment_JOB_ID = '20000000-0000-0000-0000-000000000001'
 
@@ -128,7 +131,10 @@ def reassignment_intents(cursor):
     """Extract outbox INSERT parameters so reassignment tests can inspect saved identity or absence
     of work.
     """
-    return [call.args[1] for call in cursor.execute.call_args_list if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]]
+    # SCRUM-45 observes organiser deliveries; SCRUM-166 owns coordinator deliveries.
+    return [call.args[1] for call in cursor.execute.call_args_list
+            if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]
+            and call.args[1][1] == 'event.coordinator-assignment']
 
 rejection_EVENT = '30000000-0000-0000-0000-000000000001'
 
