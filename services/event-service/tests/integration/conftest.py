@@ -217,9 +217,9 @@ class MigrationDatabase:
 def disposable_database(bootstrap=False):
     """postgres:17.6, generated loopback binding, owned anonymous volumes removed.
 
-    Optional bootstrap models only Supabase's documented default table grants
-    and API roles/BYPASSRLS. It is NOT the complete hosted Supabase platform.
-    No bootstrap is necessary to execute this repository's migration chain.
+    Synthetic NOLOGIN API roles always exist because current migrations name
+    them in REVOKE statements. Optional bootstrap adds default table/sequence
+    grants for privilege simulation only, not complete hosted Supabase parity.
     """
     name = 'scrum45-migrations-' + uuid4().hex[:16]
     connection = None
@@ -245,9 +245,12 @@ def disposable_database(bootstrap=False):
                 time.sleep(0.15)
         db = MigrationDatabase(connection)
         print('SERVER ' + db.query('SELECT version()')[0][0], flush=True)
+        # Role identities are migration prerequisites, independent of default grants.
+        db.query('CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; '
+                 'CREATE ROLE service_role NOLOGIN BYPASSRLS;')
         if bootstrap:
-            print('BOOTSTRAP: disposable Supabase-like roles/default grants ONLY (not hosted-platform parity)', flush=True)
-            db.query('CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;\n                CREATE ROLE service_role NOLOGIN BYPASSRLS;\n                GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;\n                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;\n                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;')
+            print('BOOTSTRAP: disposable Supabase-like default grants ONLY (not hosted-platform parity)', flush=True)
+            db.query('GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;\n                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;\n                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;')
         yield db
     finally:
         if connection is not None:

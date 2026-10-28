@@ -74,8 +74,8 @@ import psycopg2
 from tests.integration.factories import seed_existing_data
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database/supabase/migrations"
-# Full current chain: include SCRUM-46; the inherited Equipment outbox omission is deferred.
-EXPECTED_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox', 'RegistrationNotificationOutbox'}
+# Full combined SCRUM-49/SCRUM-46 chain (only the submission migration is delayed below).
+EXPECTED_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox', 'EquipmentNotificationOutbox', 'RegistrationNotificationOutbox'}
 TYPES = ('event.rejection', 'event.approval', 'event.coordinator-assignment')
 
 # Independent schema checks.

@@ -2,7 +2,7 @@
 
 Why: SCRUM-45 and SCRUM-166 schema changes must preserve installed rows, constraints and RLS.
 Real: disposable postgres:17.6 and complete unmodified migrations.
-Doubled: optional synthetic SQL API roles, not hosted Supabase.
+Doubled: synthetic NOLOGIN SQL API roles; optional default grants, not hosted Supabase.
 Not proven: service delivery, hosted-role parity or shared migration state.
 Upgrade baselines are pinned below; SCRUM-166 uses main f0cd2c16ef56b5a4e15bc7d774d1b3ddb6b65f9e."""
 import pytest
@@ -16,14 +16,15 @@ MIGRATIONS = Path(__file__).resolve().parents[4] / "database/supabase/migrations
 FIRST_SCRUM45 = "20261021000000_event_notification_outbox.sql"
 APPROVAL = "20261021000100_event_approval_notifications.sql"
 PINNED_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql']
-EXPECTED_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox'}
-# Only SCRUM-46's additive table is repaired here; the inherited Equipment outbox omission is deferred.
-CURRENT_EXPECTED_TABLES = EXPECTED_TABLES | {'RegistrationNotificationOutbox'}
+# Exact intermediate inventory after approval/assignment, before later additive migrations.
+HISTORICAL_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox'}
+# Current combined SCRUM-49/SCRUM-46 chain includes both additive owner outboxes.
+EXPECTED_TABLES = HISTORICAL_TABLES | {'EquipmentNotificationOutbox', 'RegistrationNotificationOutbox'}
 TYPES = ('event.rejection', 'event.approval', 'event.coordinator-assignment')
 # Actual SCRUM-166 target inventory: f0cd2c16ef56b5a4e15bc7d774d1b3ddb6b65f9e.
 SCRUM166_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261021000000_event_notification_outbox.sql', '20261021000100_event_approval_notifications.sql', '20261021020000_event_notification_assignments.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql', '20261025000000_event_submission_notifications.sql']
 
-def assert_schema_and_types(db, *, expected_tables=CURRENT_EXPECTED_TABLES):
+def assert_schema_and_types(db, expected_tables=EXPECTED_TABLES):
     """Check the complete schema, allowed/rejected outbox writes, held timestamps, RLS and indexes
     against independent SQL expectations.
     """
@@ -85,6 +86,18 @@ def test_migrations_full_chain_preserves_schema_types_and_existing_data(installa
                      'event.coordinator-assigned', 'event.coordinator-removed'):
             db.query('INSERT INTO public."EventNotificationOutbox" (type,source) VALUES (%s,%s::jsonb)', (kind, '{}'))
         print(f'COMPLETE installation={installation} migrations={len(db.applied)}', flush=True)
+
+@pytest.mark.parametrize('bootstrap', [False, True], ids=['roles-only', 'default-grants'])
+def test_migration_roles_exist_without_implicitly_enabling_default_grants(migration_database, bootstrap):
+    """Boundary: migration-required NOLOGIN roles exist in both modes; hosted-like grants are opt-in."""
+    with migration_database(bootstrap=bootstrap) as db:
+        assert db.query("SELECT rolname, rolcanlogin, rolbypassrls FROM pg_roles "
+                        "WHERE rolname IN ('anon', 'authenticated', 'service_role') ORDER BY rolname") == [
+            ('anon', False, False), ('authenticated', False, False), ('service_role', False, True)]
+        db.apply(sorted(MIGRATIONS.glob('*.sql')))
+        for role in ('anon', 'authenticated', 'service_role'):
+            assert db.query('SELECT has_table_privilege(%s,\'public."EventNotificationOutbox"\',\'SELECT,INSERT,UPDATE,DELETE\')', (role,)) == [(bootstrap,)]
+
 
 def test_migrations_owner_and_supabase_like_role_access(migration_database):
     """Boundary: apply migrations with synthetic API-role grants and exercise each SQL role;
@@ -150,8 +163,7 @@ def test_forward_migrations_preserve_rejection_and_all_three_types(migration_dat
             forwards.reverse()
         db.apply([paths[name] for name in forwards])
         assert_snapshot_preserved(db, before)
-        # Historical approval/assignment stage predates the SCRUM-46 table.
-        assert_schema_and_types(db, expected_tables=EXPECTED_TABLES)
+        assert_schema_and_types(db, expected_tables=HISTORICAL_TABLES)
         # Later additive features are still applied in full-chain regression runs.
         db.apply([path for name, path in sorted(paths.items()) if name not in db.applied])
         assert set(db.applied) == set(paths)

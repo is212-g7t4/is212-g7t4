@@ -1,5 +1,11 @@
 # SCRUM-46 — Attendee Registration and Update Notifications
 
+**Current verification status — 29 October 2026:** the approved SCRUM-49 dependency
+merge resolves the previously deferred 11 Event migration-harness failures. The
+combined tree passes **850 Event normal tests and all 188 Event integration cases**.
+See the final dependency-merge section for the exact scope and other owner results;
+earlier dated red runs remain historical evidence, not current blockers.
+
 ## Story and acceptance criteria
 
 **Story:** As an Attendee, I want to receive notifications about my registration status, so that I can confirm my place and stay updated on event changes.
@@ -152,7 +158,7 @@ Existing generic worker tests are reused for freeze-before-publish, freeze failu
 
 Remaining limits:
 
-- The older full Event migration tier is still red as described above. Only its SCRUM-46 Registration table expectation is repaired in the follow-up above; inherited SQL-role bootstrap and Equipment outbox inventory omissions remain deferred. CI policy wording is inconsistent between existing guides/configuration; no workflow was edited.
+- The historical 11 Event migration-harness failures are resolved in the approved SCRUM-49 dependency merge, verified below on the combined SCRUM-46 tree. They are no longer a current deferred limitation. CI policy wording remains inconsistent between existing guides/configuration; no workflow was edited.
 - There is no automated real-browser journey and no new production authentication. UI assertions use API doubles. The subsequent shared rollout/source checks and user-reported manual pass do not change that automated-test boundary.
 - E2E enters final safety decisions through the Event owner API, not a complete Safety Check + Venue Booking user journey. The Event unit sequence proves A->B->C accumulation and a retained prior-cycle alert through later cancellation, but no intermediate A->B->C browser journey is proven. The inherited concurrency race described above is explicitly deferred to separate business-orchestration work; it is not a new SCRUM-46 CI gate.
 - Registration's new outbox has real retry/reclaim/stale-token coverage, but elapsed-time lease expiry is only directly exercised by its unit boundary, not a new 60-second PostgreSQL expiry test.
@@ -179,11 +185,12 @@ that success does **not** establish that the normal Dockerfile build is fixed.
 Keep that portability caveat distinct from application assertions and the passing
 frontend TypeScript/Vite build.
 
-The inherited booking/safety race and **11 older Event integration failures**
-remain explicitly deferred maintenance, not newly added CI/merge gates. The latter
-are opt-in integrations, not evidence that a full Event integration run is green.
-No workflow, gate, threshold, production implementation, migration or unrelated
-business test was changed to conceal them.
+The inherited booking/safety race remains explicitly deferred business-orchestration
+work, not a newly added CI/merge gate. The **11 older Event integration failures**
+were deferred at rollout time; the approved SCRUM-49 dependency merge below resolves
+their test-harness prerequisites and inventory defects, with the complete combined
+Event tier now passing. No workflow, gate, threshold, production implementation or
+migration was changed for that maintenance.
 
 ## Pre-push strengthening and test readability follow-up
 
@@ -278,5 +285,65 @@ migrations, configuration and gates. `resource-check.json` independently found
 all **23 named test containers** and **55 logged owned volume identities** absent;
 E2E also asserted its owned process groups absent. Older fixtures without logged
 volume identities are not silently included in that independent volume claim.
-`git diff --check` passed. The work remains uncommitted and unstaged for parent
-review; no commit, push or deployment is part of this child task.
+`git diff --check` passed. The work remained uncommitted and unstaged at that
+historical handoff; no commit, push or deployment was part of that child task.
+
+## Approved SCRUM-49 dependency merge verification — 29 October 2026
+
+Verified the genuine pending merge of SCRUM-49
+`d0f79e698e13a22493f125b3bd3ad308a56dccbe` into SCRUM-46 HEAD
+`9e43147b51d2c0550d28f50fffe061dc5a4640f5`. Only the two approved conflict
+paths were resolved and staged by this pass. The auto-merged Event integration
+fixture was inspected: migration-required synthetic NOLOGIN roles always exist;
+default grants remain opt-in. Both parameter-expanded role regression cases
+(`roles-only`, `default-grants`) are retained and pass.
+
+Current exact table and RLS inventories retain **both**
+`EquipmentNotificationOutbox` and `RegistrationNotificationOutbox`. The historical
+approval/assignment inventory is unchanged and passed explicitly at its old stage.
+Exact equality assertions remain intact; no unexpected table is ignored. This is
+test maintenance, not a migration or production repair.
+
+| Complete owner tier | Normal discovery | Integration discovery |
+| --- | ---: | ---: |
+| Event | **850 passed** | **188 passed** |
+| Registration | **83 passed** | **6 passed** |
+| Event Workflow | **187 passed** | **48 passed** |
+| Notification | **219 passed** | **31 passed** |
+| Attendee Registration | **50 passed** | **4 passed** |
+| Safety Check | **523 passed** | **4 passed** |
+| Total executed in this pass | **1,912 passed** | **281 passed** |
+
+All 12 child commands exited **0**, with zero failures, errors or skips. Normal
+commands used `uv run --no-env-file --locked pytest -q`; integration commands added
+`-m integration --no-cov -s`. Each recorded JUnit outside Git. The allowlisted
+environment disabled dotenv and used an unreachable synthetic fallback DSN; only
+fixtures provisioned databases. Event's unchanged 100% floor passed (1,950
+statements / 714 branch arcs). All other existing owner floors passed unchanged.
+The Event integration increase from the prior 186 collected cases to 188 is the
+two incoming SQL-role regression parameters; all eight attendee Event integration
+cases remain included.
+
+Evidence is outside Git in the agent cache's `scratch/scrum46/dependency-merge`:
+`command-results.json`, per-command `.log` / `.xml` / `.result.json`, before/after
+source manifests, `source-stability.json`, `production-preservation.json` and
+`resource-check.json`. Source hashes were stable throughout every run and across
+the matrix. Independent cleanup readback found all **26 logged fixture container
+names and 26 logged volume identities absent**. This does not extend the volume
+claim to older fixtures that do not log volume identities.
+
+The pending index, both conflicted worktree files and all six conflict-stage
+blobs were archived before resolution. The unrelated dirty `.DS_Store` bytes were
+preserved. Production application, migration, dependency and workflow paths were
+unchanged against the pinned SCRUM-46 HEAD. No shared database, deployment or
+private environment was accessed. Documentation changes remain unstaged for
+parent review; the genuine merge remains pending, with no commit, push, branch
+switch, PR creation or main merge performed.
+
+The earlier dated 11-failure results above are preserved, but their role/bootstrap
+and table-inventory limitations are no longer current. The separately deferred
+booking/safety concurrency race, authentication/browser boundaries, legacy
+snapshot caveat, normal Docker-build portability caveat and other remaining limits
+still apply. Frontend, isolated cross-service E2E, all-service backend discovery,
+hosted CI and compatibility with every other branch were **not** rerun or proven
+by this scoped dependency-merge verification.
