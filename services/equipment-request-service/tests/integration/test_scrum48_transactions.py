@@ -1,0 +1,174 @@
+"""SCRUM48 owner-only PostgreSQL integration for equipment alerts.
+AC1 submission, AC2 approval, AC3 rejection without workflow reason.
+Supporting rules: atomic rollback/visibility, bulk granularity and no false jobs.
+Only Equipment Request production code executes; disposable PostgreSQL is the
+only external system. No composite, dispatcher, consumer, broker or browser.
+"""
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+import json
+
+import psycopg2
+import pytest
+
+from tests.integration.owner_postgres import uid, wait_for
+
+pytestmark = pytest.mark.integration
+
+
+# Case IDs read operation–failed INSERT position–status. Submission always
+# creates Pending requests; its Approved status parameter is unused, not an AC2 case.
+@pytest.mark.parametrize("operation,fail_at,status", [
+    ("submission", 1, "Approved"), ("submission", 2, "Approved"),
+    ("single", 1, "Approved"), ("bulk", 1, "Approved"), ("bulk", 2, "Approved"),
+    ("single", 1, "Rejected"), ("bulk", 1, "Rejected"), ("bulk", 2, "Rejected"),
+])
+def test_failed_first_or_later_outbox_insert_rolls_back_all_request_changes(owner, operation, fail_at, status):
+    """DR transaction atomicity; supports AC1–AC3.
+    Given an INSERT trigger failing at the selected job position, when submission
+    or review runs, then independent SQL reads match both owner-table before-snapshots.
+    Why: earlier request/decision writes and jobs must never partially commit.
+    """
+    identifiers = owner.seed_requests() if operation != "submission" else []
+    before = owner.db.snapshot()
+    owner.db.fail_outbox_insert(fail_at)
+    response = owner.submit() if operation == "submission" else owner.review(identifiers[0] if operation == "single" else None, status=status)
+    assert response.status_code >= 500, response.json
+    assert owner.db.execute("SELECT last_value FROM fault_calls")[0]["last_value"] == fail_at
+    assert owner.db.snapshot() == before
+
+
+@pytest.mark.parametrize("status", ["Approved", "Rejected"])
+def test_bulk_decides_only_pending_records_and_emits_one_alert_per_changed_record(owner, status):
+    """DR bulk granularity; supports AC2/AC3.
+    Given two submissions, quantities above one and an already-decided line, when
+    bulk review runs, then only changed Pending records produce saved envelopes
+    with the expected facts/link and no workflow reason. Why: delivery is per
+    changed request, not per physical unit, batch or previously decided record.
+    """
+    first = owner.submit(recipients=[])
+    second = owner.submit(recipients=[])
+    assert first.status_code == second.status_code == 201
+    identifiers = [row["id"] for response in (first, second) for row in response.json["requests"]]
+    assert owner.review(identifiers[0], status="Rejected").status_code == 200
+    baseline = owner.outbox()
+    baseline_request = owner.db.execute('SELECT * FROM public."EquipmentRequest" WHERE equipment_request_id=%s', [identifiers[0]])
+    response = owner.review(status=status)
+    assert response.status_code == 200
+    changed_ids = set(identifiers[1:])
+    assert {row["id"] for row in response.json["requests"]} == changed_ids
+    old_ids = {str(row["source_id"]) for row in baseline}
+    new = [row for row in owner.outbox() if str(row["source_id"]) not in old_ids]
+    assert len(new) == 3  # changed records, not quantities (5+2+2), nor one bulk alert
+    assert {row["envelope"]["destination"]["requestIds"][0] for row in new} == changed_ids
+    for row in new:
+        envelope = row["envelope"]
+        assert envelope["recipientId"] == owner.coordinator
+        assert envelope["details"]["decision"] == status
+        assert envelope["details"]["eventName"] == "Community Fair"
+        assert len(envelope["details"]["items"]) == 1
+        item = envelope["details"]["items"][0]
+        assert item["equipmentName"] == owner.context["equipmentNames"][item["equipmentId"]]
+        assert item["quantityRequested"] == (5 if item["equipmentId"] == owner.equipment[0] else 2)
+        assert envelope["destination"] == dict(kind="equipment-requests", eventId=owner.event, requestIds=[item["requestId"]])
+        assert "Private workflow reason" not in json.dumps(envelope)
+        assert not ({"reason", "rejectionReason", "rejection_reason"} & envelope["details"].keys())
+    assert owner.db.execute('SELECT * FROM public."EquipmentRequest" WHERE equipment_request_id=%s', [identifiers[0]]) == baseline_request
+    after = owner.db.snapshot()
+    assert owner.review(status=status).status_code == 409
+    assert owner.db.snapshot() == after
+
+
+# event = mismatched snapshot event; name = omitted equipment name.
+@pytest.mark.parametrize("change", ["event", "name"])
+def test_context_validation_after_update_rolls_back_decisions_and_jobs(owner, change):
+    """DR trusted context; supports AC2/AC3.
+    Given a mismatched event or missing equipment name, when review validates
+    after UPDATE, then a fresh SQL snapshot still matches the before-state.
+    Why: late validation must roll back decisions and any earlier alert inserts.
+    """
+    owner.seed_requests()
+    context = {**owner.context, "equipmentNames": dict(owner.context["equipmentNames"])}
+    if change == "event":
+        context["eventId"] = uid()
+    else:
+        context["equipmentNames"][owner.equipment[1]] = ""
+    before = owner.db.snapshot()
+    response = owner.review(context=context)
+    assert response.status_code == 400, response.json
+    assert owner.db.snapshot() == before
+
+
+# IDs pair the operation/refusal scenario with its expected HTTP status.
+# safety_reset–200 is a successful non-decision, not a notification trigger.
+@pytest.mark.parametrize("case,expected", [("missing", 404), ("repeat", 409), ("bulk_no_pending", 409), ("bulk_empty_event", 404), ("unauthorized", 403), ("invalid", 400), ("safety_reset", 200)])
+def test_failed_and_non_decision_operations_create_no_new_alerts(owner, case, expected):
+    """DR no false alerts; supports AC1–AC3.
+    Given each failed, repeated, unauthorized, invalid or safety-reset operation,
+    when its HTTP route runs, then the owner outbox baseline is unchanged.
+    Why: no successful notifying business transition means no new alert, even
+    when the non-decision safety-reset action itself returns 200.
+    """
+    identifiers = owner.seed_requests()
+    if case in ("repeat", "bulk_no_pending", "safety_reset"):
+        assert owner.review().status_code == 200
+    before = owner.db.snapshot()
+    if case == "missing":
+        response = owner.review(uid())
+    elif case == "repeat":
+        response = owner.review(identifiers[0])
+    elif case == "bulk_no_pending":
+        response = owner.review()
+    elif case == "bulk_empty_event":
+        response = owner.client.patch(f"/events/{uid()}/equipment-requests", headers=owner.identity(), json=dict(status="Approved", notificationContext=owner.context))
+    elif case == "unauthorized":
+        response = owner.review(identifiers[0], headers=owner.identity("Event Organiser"))
+    elif case == "invalid":
+        response = owner.review(identifiers[0], status="Unknown")
+    else:
+        response = owner.client.post(f"/events/{owner.event}/equipment-requests/safety-reset", headers={"X-Internal-Service-Token": "disposable-internal-token"}, json={"requestIds": identifiers})
+    assert response.status_code == expected, response.json
+    after = owner.db.snapshot()
+    for table in ("EquipmentNotificationOutbox",):
+        assert after[table] == before[table]
+    if case != "safety_reset":
+        assert after == before
+    else:
+        assert {row["status"] for row in after["EquipmentRequest"]} == {"Pending"}
+
+
+def test_requests_and_entire_fanout_become_visible_only_together_after_commit(owner):
+    """DR atomic visibility; supports AC1.
+    Given the second fanout INSERT blocked on an advisory lock, when independent
+    connections read, then neither requests nor the first job is visible. After
+    unlock and HTTP 201, both requests and both jobs appear. Why: recipients must
+    not observe partially committed business work or partially stored fanout.
+    """
+    owner.db.execute('''CREATE SEQUENCE insert_visibility_calls;
+    CREATE FUNCTION block_second_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF nextval('insert_visibility_calls')=2 THEN
+        PERFORM pg_advisory_xact_lock(480048);
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER block_second BEFORE INSERT ON public."EquipmentNotificationOutbox"
+    FOR EACH ROW EXECUTE FUNCTION block_second_insert();''')
+    before = owner.db.snapshot()
+    with closing(psycopg2.connect(owner.db.dsn)) as lock:
+        with lock.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_lock(480048)')
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(owner.submit)
+                    try:
+                        wait_for(lambda: owner.db.execute("SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory'"), seconds=5)
+                        assert owner.db.snapshot() == before
+                        assert owner.db.execute('SELECT last_value FROM insert_visibility_calls') == [{"last_value": 2}]
+                    finally:
+                        cursor.execute('SELECT pg_advisory_unlock(480048)')
+                    assert future.result(timeout=5).status_code == 201
+            finally:
+                cursor.execute('SELECT pg_advisory_unlock_all()')
+    assert len(owner.db.snapshot()["EquipmentRequest"]) == 2
+    assert len(owner.outbox()) == 2

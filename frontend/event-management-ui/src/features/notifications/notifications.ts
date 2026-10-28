@@ -41,6 +41,12 @@ export function notificationPath(destination: unknown): string | null {
   if (value.kind === 'event-venue-request' && uuid(value.eventId) && uuid(value.bookingId)) return `/events/${value.eventId}?booking=${value.bookingId}`
   if (value.kind === 'event-details' && uuid(value.eventId)) return `/events/${value.eventId}`
   if (value.kind === 'venue-requests') return '/venue-requests'
+  if (value.kind === 'equipment-requests' && uuid(value.eventId) && Array.isArray(value.requestIds)
+    && value.requestIds.length > 0 && value.requestIds.length <= 50 && value.requestIds.every(uuid)) {
+    const query = new URLSearchParams({ event: value.eventId })
+    for (const id of value.requestIds) query.append('request', id)
+    return `/equipment-requests?${query}`
+  }
   return null
 }
 

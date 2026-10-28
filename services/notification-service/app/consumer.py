@@ -64,11 +64,12 @@ def validate(value):
     else:
         if (
             not isinstance(destination, dict)
-            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests")
+            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests", "equipment-requests")
         ):
             raise ValueError("Unknown destination")
         reference_keys = {
             "venue-requests": (),
+            "equipment-requests": ("eventId",),
             "event-details": ("eventId",),
             "event-venue-request": ("eventId", "bookingId"),
         }
@@ -116,6 +117,34 @@ def validate(value):
         for key in ("eventName", "coordinatorName"):
             if not isinstance(details.get(key), str) or not details[key].strip():
                 raise ValueError("Missing assignment display content")
+    if value["type"] in ("equipment.request-submission", "equipment.request-decision"):
+        details = value["details"]
+        if value["recipientId"] != details["recipientId"]:
+            raise ValueError("Inconsistent equipment recipient")
+        if not isinstance(details["eventName"], str) or not details["eventName"].strip():
+            raise ValueError("Missing equipment event name")
+        if value["type"] == "equipment.request-decision" and details.get("decision") not in ("Approved", "Rejected"):
+            raise ValueError("Invalid equipment decision")
+        allowed = {"eventId", "eventName", "recipientId", "items"}
+        if value["type"] == "equipment.request-decision":
+            allowed.add("decision")
+        if set(details) != allowed:
+            raise ValueError("Unexpected equipment notification details")
+        items = details["items"]
+        if not isinstance(items, list) or not items:
+            raise ValueError("Missing equipment items")
+        for item in items:
+            if set(item) != {"requestId", "equipmentId", "equipmentName", "quantityRequested"}:
+                raise ValueError("Unexpected equipment item details")
+            UUID(item["requestId"])
+            UUID(item["equipmentId"])
+            if not isinstance(item["equipmentName"], str) or not item["equipmentName"].strip():
+                raise ValueError("Missing equipment name")
+            if type(item["quantityRequested"]) is not int or item["quantityRequested"] < 1:
+                raise ValueError("Invalid equipment quantity")
+        if destination != dict(kind="equipment-requests", eventId=details["eventId"],
+                               requestIds=[item["requestId"] for item in items]):
+            raise ValueError("Equipment requires matching requests destination")
     if value["type"] in ("venue.booking-submission", "venue.booking-decision"):
         details = value["details"]
         if not isinstance(details, dict):
