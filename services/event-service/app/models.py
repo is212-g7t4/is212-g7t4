@@ -1373,7 +1373,42 @@ def update_event_safety_status(
                 [status, json.dumps(metadata, ensure_ascii=False), event_id],
             )
             updated = cursor.fetchone()
+            if status == "Pending Safety Check":
+                _record_safety_review(cursor, updated, round_number)
+            else:
+                _record_safety_decision(cursor, event, round_number, status, remarks, areas)
     return serialize(updated)
+
+
+def _record_safety_decision(cursor, event, round_number, status, remarks, areas):
+    """The locked Event row supplies the coordinator at decision commit, never retry time."""
+    if not event.get("coordinator_id"):
+        logging.getLogger(__name__).warning("Safety decision missing coordinator event=%s", event["event_id"])
+        return
+    decision = {"Confirmed": "Approved", "Cancelled": "Rejected",
+                "Safety Changes Requested": "Changes Requested"}[status]
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  recipientId=str(event["coordinator_id"]), round=round_number,
+                  decision=decision, reason=remarks, areas=list(dict.fromkeys(areas or [])))
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), "safety.review-decision", Json(source)),
+    )
+
+
+def _record_safety_review(cursor, event, round_number):
+    """Capture each new pending round inside the Event mutation transaction."""
+    def schedule(key):
+        value = event.get(key)
+        return _aware(value).astimezone(SINGAPORE).isoformat() if value else None
+
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  round=round_number, startDateTime=schedule("preferred_start_date"),
+                  endDateTime=schedule("preferred_end_date"))
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
+        (str(uuid4()), "safety.review-fanout", Json(source)),
+    )
 
 
 # The editable fields that are columns of their own. `description` and
@@ -1694,6 +1729,8 @@ def update_event_details(
                 ],
             )
             updated = cursor.fetchone()
+            if recheck:
+                _record_safety_review(cursor, updated, safety_recheck["roundNumber"])
     return serialize(updated)
 
 

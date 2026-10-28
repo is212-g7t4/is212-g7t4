@@ -119,7 +119,8 @@ def test_approved_or_revised_event_moves_to_pending_safety_check(setup, source_s
 
     assert response.status_code == 200
     assert response.json["status"] == "Pending Safety Check"
-    assert cursor.execute.call_count == 2
+    # Event update and SCRUM-168 outbox insert share the same cursor/transaction.
+    assert cursor.execute.call_count == 3
     assert cursor.execute.call_args_list[1].args[1][0] == "Pending Safety Check"
 
 

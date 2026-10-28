@@ -18,7 +18,7 @@ export interface InboxItem {
     closureEnd?: string
     message?: string
     destination?: unknown
-    details?: { eventName?: string; venueName?: string; startDateTime?: string; endDateTime?: string; reason?: string; equipmentType?: string; quantityReserved?: number; round?: number; closureStart?: string; closureEnd?: string }
+    details?: { eventName?: string; venueName?: string; startDateTime?: string; endDateTime?: string; reason?: string | null; areas?: string[]; decision?: string; eventId?: string; equipmentType?: string; quantityReserved?: number; round?: number; closureStart?: string; closureEnd?: string }
   } | null
 }
 export interface InboxPage { notifications: InboxItem[]; nextCursor: string | null }
