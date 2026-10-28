@@ -18,7 +18,7 @@ export interface InboxItem {
     closureEnd?: string
     message?: string
     destination?: unknown
-    details?: { eventName?: string; venueName?: string; startDateTime?: string; endDateTime?: string; reason?: string | null; areas?: string[]; decision?: string; eventId?: string; equipmentType?: string; quantityReserved?: number; round?: number; closureStart?: string; closureEnd?: string }
+    details?: { eventName?: string; venueName?: string; startDateTime?: string; endDateTime?: string; reason?: string | null; areas?: string[]; decision?: string; eventId?: string; changeRequestId?: string; proposedChanges?: Record<string, string>; previousEventName?: string; equipmentType?: string; quantityReserved?: number; round?: number; closureStart?: string; closureEnd?: string }
   } | null
 }
 export interface InboxPage { notifications: InboxItem[]; nextCursor: string | null }
@@ -40,6 +40,9 @@ export function notificationPath(destination: unknown): string | null {
   const uuid = (id: unknown): id is string => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
   if (value.kind === 'event-venue-request' && uuid(value.eventId) && uuid(value.bookingId)) return `/events/${value.eventId}?booking=${value.bookingId}`
   if (value.kind === 'event-details' && uuid(value.eventId)) return `/events/${value.eventId}`
+  if (value.kind === 'change-request-review' && uuid(value.eventId) && uuid(value.changeRequestId)) {
+    return `/change-requests?${new URLSearchParams({ event: value.eventId, request: value.changeRequestId })}`
+  }
   if (value.kind === 'venue-requests') return '/venue-requests'
   if (value.kind === 'equipment-requests' && uuid(value.eventId) && Array.isArray(value.requestIds)
     && value.requestIds.length > 0 && value.requestIds.length <= 50 && value.requestIds.every(uuid)) {

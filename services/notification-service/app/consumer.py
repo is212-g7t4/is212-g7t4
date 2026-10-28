@@ -64,17 +64,51 @@ def validate(value):
     else:
         if (
             not isinstance(destination, dict)
-            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests", "equipment-requests")
+            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests", "equipment-requests", "change-request-review")
         ):
             raise ValueError("Unknown destination")
         reference_keys = {
             "venue-requests": (),
             "equipment-requests": ("eventId",),
+            "change-request-review": ("eventId", "changeRequestId"),
             "event-details": ("eventId",),
             "event-venue-request": ("eventId", "bookingId"),
         }
         for key in reference_keys[destination["kind"]]:
             UUID(destination[key])
+    if value["type"] in ("event.change-request-approved", "event.change-request-rejected", "event.cancelled"):
+        details = value["details"]
+        if not isinstance(details, dict) or not isinstance(details.get("eventName"), str) or not details["eventName"].strip():
+            raise ValueError("Missing event change display content")
+        UUID(details["eventId"])
+        if destination != dict(kind="event-details", eventId=details["eventId"]):
+            raise ValueError("Event change requires matching event details")
+        if "recipientId" in details and details["recipientId"] != value["recipientId"]:
+            raise ValueError("Inconsistent change recipient")
+        if value["type"] != "event.cancelled":
+            UUID(details["changeRequestId"])
+            decision = "Approved" if value["type"] == "event.change-request-approved" else "Rejected"
+            if details.get("decision") != decision:
+                raise ValueError("Invalid change request decision")
+            if decision == "Rejected" and (not isinstance(details.get("reason"), str) or not details["reason"].strip()):
+                raise ValueError("Missing change rejection reason")
+            if "previousEventName" in details and (not isinstance(details["previousEventName"], str) or not details["previousEventName"].strip()):
+                raise ValueError("Invalid previous event name")
+    if value["type"] == "event.change-request-submitted":
+        details = value["details"]
+        if not isinstance(details, dict) or not isinstance(details.get("eventName"), str) or not details["eventName"].strip():
+            raise ValueError("Missing event change display content")
+        UUID(details["eventId"])
+        UUID(details["changeRequestId"])
+        if destination != dict(kind="change-request-review", eventId=details["eventId"], changeRequestId=details["changeRequestId"]):
+            raise ValueError("Change submission requires matching review destination")
+        changes = details["proposedChanges"]
+        fields = {"eventName", "description", "purpose", "registrationNeeds", "preferredStartDate", "preferredEndDate",
+                  "expectedAttendance", "venueRequirements", "equipmentRequirements", "accessibilityNeeds"}
+        if not isinstance(changes, dict) or not changes or set(changes) - fields or any(not isinstance(item, str) for item in changes.values()):
+            raise ValueError("Missing or invalid proposed changes")
+        if "recipientId" in details and details["recipientId"] != value["recipientId"]:
+            raise ValueError("Inconsistent change recipient")
     if value["type"] in ("event.coordinator-assigned", "event.coordinator-removed"):
         details = value.get("details")
         if not isinstance(details, dict):

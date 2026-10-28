@@ -47,9 +47,15 @@ def move(client, identifier, round_id, status='Pending Safety Check', number=1, 
 
 
 def claim(client):
-    response = client.post('/internal/notification-outbox/claim', json={}, headers=OUTBOX_HEADERS)
-    assert response.status_code == 200
-    return response.json['jobs'][0]
+    # Cancellation also creates two independent SCRUM-49 jobs at this timestamp.
+    # Leave those leased and select this story's work, without assuming UUID order.
+    for _ in range(3):
+        response = client.post('/internal/notification-outbox/claim', json={}, headers=OUTBOX_HEADERS)
+        assert response.status_code == 200
+        job = response.json['jobs'][0]
+        if job['type'] != 'event.cancelled':
+            return job
+    pytest.fail("Safety work was not found within its two cancellation siblings")
 
 
 # AC1 ---- review persistence and new rounds (AC4 metadata)

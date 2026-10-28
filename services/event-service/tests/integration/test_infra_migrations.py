@@ -152,3 +152,29 @@ def test_forward_migrations_preserve_rejection_and_all_three_types(migration_dat
         # Later additive features are still applied in full-chain regression runs.
         db.apply([path for name, path in sorted(paths.items()) if name not in db.applied])
         assert set(db.applied) == set(paths)
+
+
+def test_event_change_upgrade_preserves_existing_outbox_rows_and_types(migration_database):
+    """Normal: additive SCRUM-49 upgrade retains all old delivery types and frozen/pending history."""
+    # Arrange: exact pre-feature inventory is the full chain except this one pending migration.
+    paths = sorted(MIGRATIONS.glob("*.sql"))
+    pending = [path for path in paths if path.name == "20261028000200_event_change_notifications.sql"]
+    assert len(pending) == 1
+    with migration_database(bootstrap=True) as db:
+        db.apply([path for path in paths if path not in pending])
+        kinds = ("event.rejection", "event.approval", "event.coordinator-assignment", "event.submission-fanout",
+                 "event.submission", "event.coordinator-assigned", "event.coordinator-removed",
+                 "safety.review-fanout", "safety.review-submitted", "safety.review-decision")
+        for kind in kinds:
+            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s::jsonb)', [kind, '{"pending":true}'])
+        db.query('UPDATE public."EventNotificationOutbox" SET envelope=%s::jsonb,published_at=now() WHERE type=%s',
+                 ['{"frozen":"historical"}', "event.rejection"])
+        before = db.snapshot()
+        # Act
+        db.apply(pending)
+        # Assert: all existing rows, columns, types, and non-target tables survive unchanged.
+        assert db.snapshot() == before
+        for kind in (*kinds, "event.change-request-submitted", "event.change-request-approved", "event.change-request-rejected", "event.cancelled"):
+            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s::jsonb)', [kind, '{}'])
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s::jsonb)', ["event.invalid", '{}'])

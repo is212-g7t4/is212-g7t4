@@ -194,8 +194,11 @@ def test_ac2_rejection_records_notification_with_reason(boundary, route):
     cursor.fetchone.side_effect = [rejection_row(), rejection_row('Rejected')]
     response = rejection_reject(client, route)
     assert response.status_code == 200
-    inserts = [call.args[1] for call in cursor.execute.call_args_list if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]]
-    assert len(inserts) == 1, 'Successful rejection must save durable notification intent'
+    # SCRUM-45 owns the organiser alert; SCRUM-49 separately verifies both recipients.
+    inserts = [call.args[1] for call in cursor.execute.call_args_list
+               if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]
+               and call.args[1][-1].adapted["recipientId"] == rejection_ORGANISER]
+    assert len(inserts) == 1, 'Successful rejection must save exactly one organiser intent'
     source = inserts[0][-1].adapted
     assert source == {'eventId': rejection_EVENT, 'eventName': 'Community Workshop', 'recipientId': rejection_ORGANISER, 'decision': 'Rejected', 'reason': rejection_REASON}
     assert connection.__exit__.call_args.args[0] is None
@@ -436,12 +439,17 @@ def test_ac4_dr_ownerless_legacy_reassignment_is_diagnosed_without_recipient_gue
 
 @pytest.mark.parametrize('route', ['reject', 'progress'])
 def test_ac2_dr_legacy_event_without_organiser_is_diagnosed_without_delivery(boundary, route, caplog):
-    """Boundary: DR5: reject ownerless legacy records through HTTP; observe success, diagnostic and absence of publishable outbox intent without guessing owner."""
+    """Boundary: DR5: an ownerless rejection is diagnosed without guessing an organiser; its assigned coordinator still receives confirmation."""
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [rejection_row(organiser=None), rejection_row('Rejected', organiser=None)]
     assert rejection_reject(client, route).status_code == 200
     assert 'missing organiser' in caplog.text
-    assert not any(('INSERT INTO public."EventNotificationOutbox"' in call.args[0] for call in cursor.execute.call_args_list))
+    inserts = [call.args[1] for call in cursor.execute.call_args_list
+               if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]]
+    assert len(inserts) == 1
+    assert inserts[0][1] == "event.rejection"
+    assert inserts[0][-1].adapted == dict(eventId=rejection_EVENT, eventName="Community Workshop",
+        recipientId=rejection_ACTOR, decision="Rejected", reason=rejection_REASON)
 
 @pytest.mark.parametrize('route', ['approve', 'progress'])
 def test_ac1_dr_repeated_approval_does_not_notify_again(boundary, route):

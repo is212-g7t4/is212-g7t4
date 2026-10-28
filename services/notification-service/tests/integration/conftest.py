@@ -88,6 +88,10 @@ def database_url():
                     # Migrations carrying BEGIN/COMMIT run exactly as written.
                     connection.autocommit = True
                     with connection.cursor() as cursor:
+                        # Synthetic Supabase API roles required by existing REVOKE migrations.
+                        # This does not model hosted Supabase permissions or credentials.
+                        cursor.execute("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;")
+                        print("BOOTSTRAP: synthetic Supabase API roles only", flush=True)
                         for migration in sorted(MIGRATIONS.glob("*.sql")):
                             payload = migration.read_bytes()
                             digest = hashlib.sha256(payload).hexdigest()

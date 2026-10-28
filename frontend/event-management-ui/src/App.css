@@ -2042,6 +2042,19 @@ td small {
   border-bottom-color: var(--color-primary);
 }
 
+.change-request-selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+  scroll-margin-block: var(--space-5);
+}
+
+.change-request-selection {
+  color: var(--color-primary);
+  font-weight: 600;
+  padding: var(--space-4) var(--space-5) 0;
+  margin: 0;
+}
+
 .change-request-body {
   display: grid;
   gap: var(--space-4);

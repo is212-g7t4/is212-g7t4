@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from flask import Blueprint, current_app, request, jsonify
+from app.event_changes import change_message
 
 bp = Blueprint("notification_outbox", __name__)
 
@@ -165,16 +166,25 @@ def validate_envelope(value, row):
     destination = value.get("destination")
     if value.get("id") != str(row["source_id"]) or value.get("type") != row["type"]:
         raise ValueError("Invalid source identity")
-    if value.get("recipientId") != source["recipientId"]:
+    change = row["type"] in ("event.change-request-submitted", "event.change-request-approved", "event.change-request-rejected", "event.cancelled")
+    if change:
+        UUID(value.get("recipientId"))
+    elif value.get("recipientId") != source["recipientId"]:
         raise ValueError("Invalid recipient")
     if value.get("createdAt") != row["created_at"].isoformat():
         raise ValueError("Invalid creation instant")
     expected_destination = (None if row["type"] == "event.coordinator-removed"
                             else dict(kind="event-details", eventId=source["eventId"]))
+    if row["type"] == "event.change-request-submitted":
+        expected_destination = dict(kind="change-request-review", eventId=source["eventId"],
+                                    changeRequestId=source["changeRequestId"])
     if "destination" not in value or destination != expected_destination:
         raise ValueError("Invalid destination")
     details = value.get("details")
-    if row["type"] == "safety.review-submitted":
+    if change:
+        expected_details = {**source, "recipientId": value["recipientId"]}
+        message = change_message(row["type"], source)
+    elif row["type"] == "safety.review-submitted":
         expected_details = source
         message = safety_review_message(source)
     elif row["type"] == "safety.review-decision":

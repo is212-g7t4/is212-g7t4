@@ -42,7 +42,6 @@ from app.models import (
     NoAmendmentChangesError,
     NoProposedChangesError,
     NoCoordinatorChangeError,
-    RejectionReasonError,
     SafetyApprovalRequiredError,
     SafetyCheckAlreadyPendingError,
     SafetyRecheckRequiredError,
@@ -265,7 +264,10 @@ def create_app(config=None):
             event = get_event(app.config["DATABASE_URL"], str(event_id), None, view_all=True)
         except EventNotFoundError:
             return jsonify(message="Event not found."), 404
-        return jsonify(id=event["id"], eventName=event["eventName"], coordinatorId=event["coordinatorId"])
+        context = dict(id=event["id"], eventName=event["eventName"], coordinatorId=event["coordinatorId"])
+        if request.args.get("includeOrganiser") == "true":
+            context["organiserId"] = event["organiserId"]
+        return jsonify(context)
 
     @app.post("/events")
     def submit():
@@ -1294,10 +1296,6 @@ def create_app(config=None):
             return jsonify(
                 message="Only submitted or under-review event requests can be rejected."
             ), 409
-        except RejectionReasonError:
-            return jsonify(
-                message="A reason is required when rejecting an event request."
-            ), 400
         return jsonify(rejected), 200
 
     from app.outbox import bp as outbox_bp

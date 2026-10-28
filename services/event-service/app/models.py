@@ -888,6 +888,8 @@ def create_change_request(database_url, event_id, organiser_id, changes, reason)
             saved = cursor.fetchone()
             if not saved:
                 raise ChangeRequestAlreadyPendingError
+            _record_event_change(cursor, event, "event.change-request-submitted", "coordinator",
+                                 changeRequestId=str(saved["change_id"]), proposedChanges=proposed)
     return {
         "id": str(saved["change_id"]),
         "eventId": str(saved["event_id"]),
@@ -1079,6 +1081,13 @@ def decide_change_request(
                 [decision, coordinator_id, rejection_reason, change_request_id],
             )
             decided = cursor.fetchone()
+            facts = dict(changeRequestId=change_request_id, decision=decision)
+            if decision == "Rejected":
+                facts["reason"] = rejection_reason
+            elif updated_event["eventName"] != row["event_name"]:
+                facts["previousEventName"] = row["event_name"]
+            _record_event_change(cursor, {**row, "event_name": updated_event["eventName"]},
+                                 "event.change-request-" + decision.lower(), "organiser", **facts)
     return {
         "id": change_request_id,
         "eventId": str(row["event_id"]),
@@ -1167,7 +1176,8 @@ def update_event_progress(database_url, event_id, coordinator_id, status, action
                         "reason": action_details if status == "Rejected" else None,
                     }
                     decision_history = [*decision_history, decision]
-                elif status in ("Submitted", "Under Review"):
+                else:
+                    # The transition guard leaves only Submitted -> Under Review.
                     decision = None
 
             metadata = {
@@ -1377,6 +1387,9 @@ def update_event_safety_status(
                 _record_safety_review(cursor, updated, round_number)
             else:
                 _record_safety_decision(cursor, event, round_number, status, remarks, areas)
+            if status == "Cancelled" and event["status"] != "Cancelled":
+                for recipient_role in ("coordinator", "organiser"):
+                    _record_event_change(cursor, updated, "event.cancelled", recipient_role)
     return serialize(updated)
 
 
@@ -2198,13 +2211,24 @@ def approve_event(database_url, event_id, coordinator_id):
     return decide_event(database_url, event_id, coordinator_id, "Approved")
 
 
-def _record_notification(cursor, event, notification_type, label, **facts):
-    """Save frozen source facts using the mutation's existing transaction cursor."""
-    if not event.get("organiser_id"):
+def _record_event_change(cursor, event, kind, recipient_role, **facts):
+    """Capture event facts atomically; resolve current recipients at first preparation."""
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
+                  recipientRole=recipient_role, **facts)
+    cursor.execute(
+        'INSERT INTO public."EventNotificationOutbox" (source_id,type,source) VALUES (%s,%s,%s)',
+        (str(uuid4()), kind, Json(source)),
+    )
+
+
+def _record_notification(cursor, event, notification_type, label, *, recipient_id=None, **facts):
+    """Save source facts for an explicit recipient, defaulting to the existing organiser."""
+    recipient_id = recipient_id or event.get("organiser_id")
+    if not recipient_id:
         logging.getLogger(__name__).warning("%s notification missing organiser event=%s", label, event["event_id"])
         return
     source = dict(eventId=str(event["event_id"]), eventName=event["event_name"],
-                  recipientId=str(event["organiser_id"]), **facts)
+                  recipientId=str(recipient_id), **facts)
     cursor.execute(
         'INSERT INTO public."EventNotificationOutbox" (source_id, type, source) VALUES (%s, %s, %s)',
         (str(uuid4()), notification_type, Json(source)),
@@ -2249,9 +2273,14 @@ def record_approval(cursor, event):
 
 
 def record_rejection(cursor, event, reason):
-    """Save notification intent on the mutation's transaction, never call outward."""
+    """Keep the organiser alert and confirm rejection to the assigned coordinator, even the actor."""
     _record_notification(
         cursor, event, "event.rejection", "Rejection", decision="Rejected", reason=reason,
+    )
+    # Both rejection mutation paths require an assigned coordinator under the row lock.
+    _record_notification(
+        cursor, event, "event.rejection", "Rejection", recipient_id=event["coordinator_id"],
+        decision="Rejected", reason=reason,
     )
 
 
