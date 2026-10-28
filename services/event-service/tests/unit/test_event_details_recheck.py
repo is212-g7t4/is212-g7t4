@@ -259,7 +259,8 @@ def test_a_recheck_saves_the_fields_and_moves_the_event(setup):
     assert "status = %s" in update_sql
     assert saved_status(cursor) == "Pending Safety Check"
     assert 400 in params
-    assert cursor.execute.call_count == 2
+    # SCRUM-168 also saves the new round notification in this transaction.
+    assert cursor.execute.call_count == 3
 
 
 def test_the_recheck_history_entry_says_why(setup):

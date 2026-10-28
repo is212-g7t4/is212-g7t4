@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { User } from '../../types'
+import { FLAG_AREAS } from '../safety/safetyCheck'
 import { notificationApi, notificationDate, notificationPath, notificationPayload } from './notifications'
 import type { InboxItem, InboxPage } from './notifications'
 import './notifications.css'
@@ -150,6 +151,9 @@ function Session({ user, children, onNavigate }: { user?: User; children: ReactN
 function Content({ item }: { item: InboxItem }) {
   const payload = notificationPayload(item)
   const raw = payload.details
+  const areas = item.type === 'safety.review-decision' && Array.isArray(raw?.areas)
+    ? FLAG_AREAS.filter(area => raw.areas!.includes(area.value)).map(area => area.label)
+    : []
   const text = (value: unknown) => typeof value === 'string' ? value : ''
   const details = { eventName: text(raw?.eventName), venueName: text(raw?.venueName), startDateTime: text(raw?.startDateTime), endDateTime: text(raw?.endDateTime), reason: text(raw?.reason) }
   return <>
@@ -158,6 +162,7 @@ function Content({ item }: { item: InboxItem }) {
     <p>{text(payload.message) || 'Notification content unavailable.'}</p>
     {details?.startDateTime && details?.endDateTime && <p>{notificationDate(details.startDateTime)} – {notificationDate(details.endDateTime)}</p>}
     {details?.reason && <p className="notification-reason">{details.reason}</p>}
+    {areas.length > 0 && <p>Affected areas: {areas.join(', ')}</p>}
     {text(raw?.equipmentType) && <span>{text(raw?.equipmentType)}</span>}
     {typeof raw?.quantityReserved === 'number' && Number.isSafeInteger(raw.quantityReserved) && raw.quantityReserved > 0 && <p>Quantity reserved: {raw.quantityReserved}</p>}
     {typeof raw?.round === 'number' && Number.isSafeInteger(raw.round) && raw.round > 0 && <p>Safety review round: {raw.round}</p>}

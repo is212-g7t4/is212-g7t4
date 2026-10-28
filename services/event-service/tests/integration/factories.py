@@ -75,6 +75,30 @@ def make_event(
     return event_id
 
 
+
+
+SAFETY_COORDINATOR = '10000000-0000-0000-0000-000000000002'
+SAFETY_TOKEN = "synthetic"
+
+def make_safety_coordinator(db):
+    db.query('INSERT INTO public."User"(user_id,username,email,role) VALUES (%s,%s,%s,%s)',
+             [SAFETY_COORDINATOR, "Coordinator", "coordinator@example.com", "Event Coordinator"])
+    return SAFETY_COORDINATOR
+
+
+def make_safety_event(db, status='Approved', history=None):
+    identifier = str(uuid4())
+    metadata = dict(_connectsphere='event-submission-v1', description='Workshop', purpose='Learning',
+                    actionHistory=history or [])
+    db.query('''INSERT INTO public."Event"(event_id,event_name,description,status,coordinator_id,
+                preferred_start_date,preferred_end_date,expected_attendance)
+                VALUES (%s,'Workshop',%s,%s,%s,'2030-03-01T09:00+08:00','2030-03-01T17:00+08:00',25)''',
+             [identifier, json.dumps(metadata), status, SAFETY_COORDINATOR])
+    return identifier
+
+
+
+
 def seed_existing_data(db):
     """Synthetic linked legacy rows in EVERY pre-SCRUM45 public table."""
     db.query('\n        INSERT INTO public."User"(user_id,username,email,role) VALUES\n          (\'10000000-0000-0000-0000-000000000001\',\'Synthetic organiser\',\'migration@example.com\',\'Event Organiser\');\n        INSERT INTO public."Event"(event_id,event_name,organiser_id,status) VALUES\n          (\'20000000-0000-0000-0000-000000000001\',\'Synthetic legacy event\',\'10000000-0000-0000-0000-000000000001\',\'Pending Review\');\n        INSERT INTO public."Venue"(venue_id,venue_name) VALUES\n          (\'30000000-0000-0000-0000-000000000001\',\'Synthetic venue\');\n        INSERT INTO public."VenueClosure"(closure_id,venue_id,start_date_time,end_date_time,reason,created_by,created_at) VALUES\n          (\'40000000-0000-0000-0000-000000000001\',\'30000000-0000-0000-0000-000000000001\',\'2030-01-01Z\',\'2030-01-02Z\',\'Synthetic maintenance\',\'10000000-0000-0000-0000-000000000001\',\'2026-01-01Z\');\n        INSERT INTO public."VenueBooking"(booking_id,event_id,venue_id,requested_start_time,requested_end_time,status,required_capacity,held_by,held_for,held_at) VALUES\n          (\'50000000-0000-0000-0000-000000000001\',\'20000000-0000-0000-0000-000000000001\',\'30000000-0000-0000-0000-000000000001\',\'2030-02-01Z\',\'2030-02-02Z\',\'Tentative\',10,\'10000000-0000-0000-0000-000000000001\',\'10000000-0000-0000-0000-000000000001\',\'2026-01-01Z\');\n        INSERT INTO public."Equipment"(equipment_id,equipment_type,total_quantity) VALUES\n          (\'60000000-0000-0000-0000-000000000001\',\'Synthetic chair\',10);\n        INSERT INTO public."EquipmentRequest"(equipment_request_id,event_id,equipment_id,quantity_requested) VALUES\n          (\'70000000-0000-0000-0000-000000000001\',\'20000000-0000-0000-0000-000000000001\',\'60000000-0000-0000-0000-000000000001\',2);\n        INSERT INTO public."SafetyCheck"(safety_check_id,event_id,round_number,status) VALUES\n          (\'80000000-0000-0000-0000-000000000001\',\'20000000-0000-0000-0000-000000000001\',1,\'Approved\');\n        INSERT INTO public."SafetyCheckFlag"(safety_check_id,booking_id,equip_request_id,area) VALUES\n          (\'80000000-0000-0000-0000-000000000001\',\'50000000-0000-0000-0000-000000000001\',\'70000000-0000-0000-0000-000000000001\',\'Synthetic area\');\n        INSERT INTO public."EventChangeReq"(event_id,requested_changes,status) VALUES\n          (\'20000000-0000-0000-0000-000000000001\',\'{"event_name":"Synthetic updated"}\',\'Approved\');\n        INSERT INTO public."Registration"(event_id,attendee_id,status) VALUES\n          (\'20000000-0000-0000-0000-000000000001\',\'10000000-0000-0000-0000-000000000001\',\'Registered\');\n        INSERT INTO public."Notification"(recipient_id,event_id,type,payload,dedupe_key,created_at,read_at) VALUES\n          (\'10000000-0000-0000-0000-000000000001\',\'20000000-0000-0000-0000-000000000001\',\'legacy\',\'{"message":"Synthetic read inbox"}\',\'synthetic-legacy\',\'2026-01-01Z\',\'2026-01-02Z\');\n        INSERT INTO public."NotificationFailure"(body,error) VALUES (\'synthetic\',\'Synthetic legacy failure\');\n        INSERT INTO public."VenueNotificationOutbox"(closure_id,booking_id,source,envelope,published_at,attempts) VALUES\n          (\'40000000-0000-0000-0000-000000000001\',\'50000000-0000-0000-0000-000000000001\',\'{"synthetic":true}\',\'{"frozen":true}\',\'2026-01-01Z\',2);\n    ')

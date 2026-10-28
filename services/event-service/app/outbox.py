@@ -63,20 +63,22 @@ def mutate(dsn, identifier, token, action, data):
         if action == "expand":
             # One fenced transaction freezes the lookup result and all recipients.
             # A lost HTTP response cannot create duplicate children on lease recovery.
-            if row["type"] != "event.submission-fanout":
+            safety = row["type"] == "safety.review-fanout"
+            if row["type"] != "event.submission-fanout" and not safety:
                 raise ValueError("Only submission intents can expand")
             recipients = data.get("recipientIds")
             name = data.get("organiserName")
-            if not isinstance(recipients, list) or not isinstance(name, str) or not name.strip():
+            if not isinstance(recipients, list) or (not safety and (not isinstance(name, str) or not name.strip())):
                 raise ValueError("Invalid submission recipients/name")
             recipients = sorted({str(UUID(value)) for value in recipients})
             captured = datetime.now(UTC).isoformat()
             for recipient in recipients:
-                source = {**row["source"], "recipientId": recipient,
-                          "organiserName": name, "organiserNameCapturedAt": captured}
+                source = {**row["source"], "recipientId": recipient}
+                if not safety:
+                    source.update(organiserName=name, organiserNameCapturedAt=captured)
                 cursor.execute(
                     'INSERT INTO public."EventNotificationOutbox" (source_id,type,source,created_at) VALUES (%s,%s,%s,%s)',
-                    (str(uuid5(UUID(identifier), recipient)), "event.submission", Json(source), row["created_at"]),
+                    (str(uuid5(UUID(identifier), recipient)), "safety.review-submitted" if safety else "event.submission", Json(source), row["created_at"]),
                 )
             cursor.execute(
                 'UPDATE public."EventNotificationOutbox" SET published_at=now(),lease_token=NULL,lease_until=NULL,last_error=NULL WHERE source_id=%s',
@@ -120,15 +122,36 @@ def mutate(dsn, identifier, token, action, data):
         return {"id": identifier, "status": action}
 
 
-def coordinator_message(source, name, removed=False):
-    """Freeze a complete, UI-independent proposed-period description in Singapore time."""
+def _proposed_period(source):
+    """Return the source's ISO date/time range in Singapore time, or 'Not provided'."""
     def stamp(value):
         return datetime.fromisoformat(value).astimezone(ZoneInfo("Asia/Singapore")).strftime("%d %b %Y, %H:%M SGT")
 
-    period = (stamp(source["startDateTime"]) + " – " + stamp(source["endDateTime"])
-              if source.get("startDateTime") and source.get("endDateTime") else "Not provided")
+    return (stamp(source["startDateTime"]) + " – " + stamp(source["endDateTime"])
+            if source.get("startDateTime") and source.get("endDateTime") else "Not provided")
+
+
+def coordinator_message(source, name, removed=False):
+    """Freeze a complete, UI-independent proposed-period description in Singapore time."""
+    period = _proposed_period(source)
     action = "You are no longer assigned to" if removed else "You have been assigned to"
     return f"{action} {source['eventName']}. Event Organiser: {name}. Proposed: {period}."
+
+
+def safety_review_message(source):
+    """Describe the submitted round and original proposed interval in Singapore time."""
+    period = _proposed_period(source)
+    return f"{source['eventName']} requires safety review (round {source['round']}). Proposed: {period}."
+
+
+def safety_decision_message(source):
+    """Retain full existing decision text; approval has no invented reason."""
+    message = f"{source['eventName']} safety review: {source['decision']} (round {source['round']})."
+    if source.get("reason"):
+        message += f" {source['reason']}"
+    if source.get("areas"):
+        message += f" Affected areas: {', '.join(source['areas'])}."
+    return message
 
 
 def validate_envelope(value, row):
@@ -151,7 +174,13 @@ def validate_envelope(value, row):
     if "destination" not in value or destination != expected_destination:
         raise ValueError("Invalid destination")
     details = value.get("details")
-    if row["type"] == "event.submission":
+    if row["type"] == "safety.review-submitted":
+        expected_details = source
+        message = safety_review_message(source)
+    elif row["type"] == "safety.review-decision":
+        expected_details = source
+        message = safety_decision_message(source)
+    elif row["type"] == "event.submission":
         expected_details = source
         message = f"{source['organiserName']} submitted {source['eventName']}. Review required."
     elif row["type"] == "event.coordinator-assignment":

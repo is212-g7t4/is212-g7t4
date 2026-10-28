@@ -60,6 +60,18 @@ class OutboxAPI:
             recipients.append(str(UUID(user["user_id"])))
         return recipients
 
+    def safety_recipients(self):
+        users = self.call("GET", os.environ["USER_SERVICE_URL"].rstrip("/") + "/users",
+                          params={"role": "Safety Officer"})["users"]
+        if not isinstance(users, list):
+            raise ValueError("Invalid Safety Officer lookup")
+        recipients = []
+        for user in users:
+            if user.get("role") != "Safety Officer":
+                raise ValueError("Invalid Safety Officer role")
+            recipients.append(str(UUID(user["user_id"])))
+        return recipients
+
     def organiser_name(self, identifier):
         user = self.call("GET", os.environ["USER_SERVICE_URL"].rstrip("/") + f"/users/{identifier}")
         name = user.get("username") if isinstance(user, dict) else None
@@ -91,21 +103,48 @@ class OutboxAPI:
     def retry(self, job, error):
         return self.operation(job, "retry", error=error)
 
-def coordinator_message(source, name, removed=False):
-    """Freeze a complete, UI-independent proposed-period description in Singapore time."""
+def _proposed_period(source):
+    """Return the source's ISO date/time range in Singapore time, or 'Not provided'."""
     def stamp(value):
         return datetime.fromisoformat(value).astimezone(ZoneInfo("Asia/Singapore")).strftime("%d %b %Y, %H:%M SGT")
 
-    period = (stamp(source["startDateTime"]) + " – " + stamp(source["endDateTime"])
-              if source.get("startDateTime") and source.get("endDateTime") else "Not provided")
+    return (stamp(source["startDateTime"]) + " – " + stamp(source["endDateTime"])
+            if source.get("startDateTime") and source.get("endDateTime") else "Not provided")
+
+
+def coordinator_message(source, name, removed=False):
+    """Freeze a complete, UI-independent proposed-period description in Singapore time."""
+    period = _proposed_period(source)
     action = "You are no longer assigned to" if removed else "You have been assigned to"
     return f"{action} {source['eventName']}. Event Organiser: {name}. Proposed: {period}."
+
+
+def safety_review_message(source):
+    """Describe the submitted round and original proposed interval in Singapore time."""
+    period = _proposed_period(source)
+    return f"{source['eventName']} requires safety review (round {source['round']}). Proposed: {period}."
+
+
+def safety_decision_message(source):
+    """Retain full existing decision text; approval has no invented reason."""
+    message = f"{source['eventName']} safety review: {source['decision']} (round {source['round']})."
+    if source.get("reason"):
+        message += f" {source['reason']}"
+    if source.get("areas"):
+        message += f" Affected areas: {', '.join(source['areas'])}."
+    return message
 
 
 def dispatch_once(api, publish):
     jobs = api.claim()
     for job in jobs:
         try:
+            if job.get("type") == "safety.review-fanout":
+                recipients = api.safety_recipients()
+                if not recipients:
+                    LOG.warning("Safety review skipped: no Safety Officer source=%s", job["id"])
+                api.operation(job, "expand", recipientIds=recipients)
+                continue
             if job.get("type") == "event.submission-fanout":
                 recipients = api.submission_recipients()
                 if not recipients:
@@ -119,7 +158,11 @@ def dispatch_once(api, publish):
                 source = job["source"]
                 kind = job.get("type", "event.approval" if source.get("decision") == "Approved" else "event.rejection")
                 details = source
-                if kind == "event.submission":
+                if kind == "safety.review-submitted":
+                    message = safety_review_message(source)
+                elif kind == "safety.review-decision":
+                    message = safety_decision_message(source)
+                elif kind == "event.submission":
                     message = f"{source['organiserName']} submitted {source['eventName']}. Review required."
                 elif kind == "event.coordinator-assignment":
                     name = api.coordinator_name(source["coordinatorId"])

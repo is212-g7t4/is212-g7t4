@@ -22,6 +22,9 @@ from psycopg2.extras import RealDictCursor  # noqa: E402
 from testcontainers.community.postgres import PostgresContainer  # noqa: E402
 
 from app import create_app  # noqa: E402
+from tests.integration.factories import SAFETY_TOKEN, make_safety_coordinator
+
+TOKEN = SAFETY_TOKEN
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
@@ -88,7 +91,7 @@ def database_url():
 @pytest.fixture(autouse=True)
 def empty_tables(request):
     # Migration infrastructure deliberately owns independent clean/upgrade databases.
-    if request.module.__name__.endswith("test_infra_migrations"):
+    if request.module.__name__.endswith(("test_infra_migrations", "test_safety_check_notifications")):
         yield
         return
     database_url = request.getfixturevalue("database_url")
@@ -241,3 +244,48 @@ def disposable_database(bootstrap=False):
 @pytest.fixture
 def migration_database():
     return disposable_database
+
+# SCRUM-168: explicitly requested fixture; no change to other stories' DB lifecycle.
+@pytest.fixture
+def safety_notification_owner(migration_database, monkeypatch):
+    with migration_database(bootstrap=True) as db:
+        # dotenv is disabled by the documented runner before app imports.
+        assert os.environ.get('PYTHON_DOTENV_DISABLED') == '1'
+        params = db.connection.get_dsn_parameters()
+        # Resolve only the existing fixture's uniquely bound, labelled container.
+        candidates = json.loads(migration_command('docker', 'inspect', *migration_command(
+            'docker', 'ps', '-q', '--filter', 'label=connectsphere.test=scrum45-migrations').splitlines()))
+        matches = [item for item in candidates
+                   if item['NetworkSettings']['Ports'].get('5432/tcp') ==
+                   [{'HostIp': '127.0.0.1', 'HostPort': params['port']}]]
+        assert len(matches) == 1
+        owned = matches[0]
+        assert owned['Name'].startswith('/scrum45-migrations-')
+        assert owned['Config']['Labels']['connectsphere.test'] == 'scrum45-migrations'
+        identifier = owned['Id']
+
+        def assert_owned():
+            current = json.loads(migration_command('docker', 'inspect', identifier))[0]
+            assert current['Id'] == identifier and current['Name'] == owned['Name']
+            assert current['Config']['Labels'] == owned['Config']['Labels']
+            assert current['NetworkSettings']['Ports']['5432/tcp'] == [
+                {'HostIp': '127.0.0.1', 'HostPort': params['port']}]
+            assert params['host'] == '127.0.0.1'
+            assert params['user'] == params['dbname'] == 'isolated'
+
+        assert_owned()
+        db.apply(sorted(MIGRATIONS.glob('*.sql')))
+        make_safety_coordinator(db)
+        # psycopg2's .dsn masks passwords; reconstruct only this fixture's synthetic DSN.
+        from psycopg2.extensions import make_dsn
+        params = db.connection.get_dsn_parameters()
+        dsn = make_dsn(**params, password='synthetic-only')
+        monkeypatch.setenv('DATABASE_URL', dsn)
+        assert_owned()
+        client = create_app({'TESTING': True, 'DATABASE_URL': dsn,
+                             'INTERNAL_SERVICE_TOKEN': TOKEN}).test_client()
+        assert client.application.config["DATABASE_URL"] == os.environ["DATABASE_URL"] == dsn
+        try:
+            yield client, db
+        finally:
+            assert_owned()
