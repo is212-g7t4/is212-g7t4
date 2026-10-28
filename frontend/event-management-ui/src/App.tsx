@@ -107,6 +107,7 @@ function getVenueId(): string | null {
 }
 
 function App() {
+  const [equipmentTargetSearch, setEquipmentTargetSearch] = useState(() => window.location.search)
   const [targetBookingId, setTargetBookingId] = useState(() => new URLSearchParams(window.location.search).get('booking'))
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
@@ -149,6 +150,7 @@ function App() {
       setVenueId(getVenueId())
       setDraftId(getDraftId())
       setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
+      setEquipmentTargetSearch(window.location.search)
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -178,6 +180,7 @@ function App() {
     setNotice(null)
     window.history.pushState({}, '', paths[nextRoute])
     setRoute(nextRoute)
+    setEquipmentTargetSearch('')
   }
 
   const navigateToEvent = (id: string) => {
@@ -225,6 +228,7 @@ function App() {
     window.history.pushState({}, '', path)
     setRoute(getRoute()); setEventId(getEventId())
     setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
+    setEquipmentTargetSearch(window.location.search)
   }
   return <NotificationProvider user={activeUser} onNavigate={openNotification}><div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
@@ -249,7 +253,7 @@ function App() {
       {route === 'venueRequests' && <VenueRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}
       {route === 'safetyChecks' && <SafetyChecksPage key={activeUser?.id} role={role} safetyOfficerId={activeUser?.id} onViewDetails={navigateToEvent} />}
-      {route === 'equipmentRequests' && <EquipmentRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} onCreate={() => navigate('newEquipmentRequest')} />}
+      {route === 'equipmentRequests' && <EquipmentRequestsPage key={`${activeUser?.id}-${equipmentTargetSearch}`} targetSearch={equipmentTargetSearch} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} onCreate={() => navigate('newEquipmentRequest')} />}
       {route === 'newEquipmentRequest' && <NewEquipmentRequestPage key={activeUser?.id} role={role} user={activeUser ?? null} onBack={() => navigate('equipmentRequests')} onCreated={(message) => { navigate('equipmentRequests'); setNotice({ message, tone: 'success' }) }} />}
       {route === 'venueSearch' && <VenueSearchPage role={role} onViewVenue={navigateToVenue} />}
       {route === 'venues' && <VenueCataloguePage role={role} onViewVenue={navigateToVenue} onAddVenue={() => navigate('addVenue')} />}

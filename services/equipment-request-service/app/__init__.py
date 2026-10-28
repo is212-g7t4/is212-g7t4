@@ -20,6 +20,8 @@ from app.models import (
     review_request,
 )
 
+from app import outbox
+
 STATUSES = ("Pending", "Approved", "Rejected")
 DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
@@ -79,6 +81,11 @@ def create_app(config=None):
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
     app.config.update(config or {})
+    app.register_blueprint(outbox.bp)
+
+    @app.errorhandler(outbox.NotificationValidationError)
+    def invalid_notification_context(error):
+        return jsonify(message=str(error)), 400
 
     @app.after_request
     def cors(response):
@@ -170,7 +177,8 @@ def create_app(config=None):
         if error:
             return jsonify(message=error), 400
         try:
-            created = create_requests(app.config["DATABASE_URL"], event_id, items, requester_id)
+            context = outbox.submission_context(request.get_json(), event_id, items)
+            created = create_requests(app.config["DATABASE_URL"], event_id, items, requester_id, context)
         except UnknownReferenceError:
             return jsonify(message="The event, requester or an equipment item no longer exists."), 404
         return jsonify(requests=created), 201
@@ -215,7 +223,8 @@ def create_app(config=None):
         if error:
             return jsonify(message=error), 400
         try:
-            updated = review_event_requests(app.config["DATABASE_URL"], event_id, status, reviewer_id, reason)
+            context = outbox.decision_context(payload)
+            updated = review_event_requests(app.config["DATABASE_URL"], event_id, status, reviewer_id, reason, notification_context=context)
         except RequestNotFoundError:
             return jsonify(message="No equipment requests found for this event."), 404
         except RequestAlreadyReviewedError:
@@ -238,7 +247,8 @@ def create_app(config=None):
         if error:
             return jsonify(message=error), 400
         try:
-            updated = review_request(app.config["DATABASE_URL"], request_id, status, reviewer_id, reason)
+            context = outbox.decision_context(payload)
+            updated = review_request(app.config["DATABASE_URL"], request_id, status, reviewer_id, reason, notification_context=context)
         except RequestNotFoundError:
             return jsonify(message="Equipment request not found."), 404
         except RequestAlreadyReviewedError:
