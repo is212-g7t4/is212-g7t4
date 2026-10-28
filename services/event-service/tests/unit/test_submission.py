@@ -8,7 +8,7 @@ from uuid import UUID
 import psycopg2
 import pytest
 from app import create_app
-from app.models import FIELDS, SINGAPORE, serialize, unpack_description
+from app.models import FIELDS, SINGAPORE, RejectionReasonError, reject_event, serialize, unpack_description
 
 VALID = {
     "eventName": "Community Workshop",
@@ -607,7 +607,9 @@ def test_rejection_changes_status_and_records_reason_and_audit_metadata(setup):
     assert response.json["decision"]["coordinatorId"] == COORDINATOR_ID
     assert response.json["decision"]["reason"] == "The selected venue is unavailable."
     assert response.json["decision"]["decidedAt"]
-    update_query, parameters = cursor.execute.call_args.args
+    # Notification INSERTs follow the mutation; inspect the UPDATE itself, not the last SQL call.
+    update_query, parameters = next(call.args for call in cursor.execute.call_args_list
+                                    if 'UPDATE public."Event"' in call.args[0])
     assert "SET status = %s" in update_query
     assert parameters[0] == "Rejected"
     assert parameters[6] == "The selected venue is unavailable."
@@ -748,3 +750,61 @@ def test_only_the_lead_can_view_every_submitted_request(role, setup):
     )
     assert response.status_code == 403
     cursor.execute.assert_not_called()
+
+
+# Supporting decision/configuration guards: inherited submission behavior,
+# deliberately not attributed to SCRUM-49 notification acceptance criteria.
+@pytest.mark.parametrize("route,body", [
+    ("approve", {"coordinatorId": COORDINATOR_ID}),
+    ("reject", {"coordinatorId": COORDINATOR_ID, "reason": "Unsafe exits."}),
+], ids=["approve-without-database-503", "reject-without-database-503"])
+def test_decision_without_database_configuration_never_connects(setup, route, body):
+    """Failure: approval and rejection cannot report success without Event storage."""
+    client, connection, cursor = setup
+    client.application.config["DATABASE_URL"] = None
+
+    response = client.patch(f"/events/00000000-0000-0000-0000-000000000001/{route}", json=body)
+
+    assert response.status_code == 503
+    assert response.json == {"message": "DATABASE_URL is not configured for Event Service."}
+    connection.cursor.assert_not_called()
+    cursor.execute.assert_not_called()
+
+
+def test_reject_unknown_event_does_not_write_a_decision(setup):
+    """Failure: rejecting an unknown event returns not-found without a write."""
+    client, _, cursor = setup
+    cursor.fetchone.return_value = None
+
+    response = client.patch("/events/00000000-0000-0000-0000-000000000001/reject",
+                            json={"coordinatorId": COORDINATOR_ID, "reason": "Unsafe exits."})
+
+    assert response.status_code == 404
+    assert response.json == {"message": "Event request not found."}
+    assert cursor.execute.call_count == 1
+    assert cursor.execute.call_args.args[0].lstrip().startswith("SELECT")
+
+
+def test_public_rejection_model_refuses_whitespace_reason_before_writing(setup):
+    """Failure: a non-HTTP caller cannot record a rejection with only whitespace."""
+    _, connection, cursor = setup
+    cursor.fetchone.return_value = {**saved_row(), "coordinator_id": COORDINATOR_ID}
+
+    with pytest.raises(RejectionReasonError):
+        reject_event("unused-test-url", "00000000-0000-0000-0000-000000000001", COORDINATOR_ID, " \t\n")
+
+    assert cursor.execute.call_count == 1
+    assert cursor.execute.call_args.args[0].lstrip().startswith("SELECT")
+    assert connection.__exit__.call_args.args[0] is RejectionReasonError
+    connection.close.assert_called_once()
+
+
+def test_unconfigured_frontend_origin_does_not_authorise_browser_access():
+    """Boundary: no configured frontend origin leaves a foreign browser origin disallowed."""
+    client = create_app({"TESTING": True, "DATABASE_URL": None, "FRONTEND_ORIGIN": ""}).test_client()
+
+    response = client.get("/health", headers={"Origin": "http://localhost:5174"})
+
+    assert response.status_code == 200
+    assert response.json == {"status": "ok"}
+    assert "Access-Control-Allow-Origin" not in response.headers

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pika
+from app.event_changes import change_message
 
 QUEUE = "notifications.v1"
 
@@ -78,6 +79,19 @@ class OutboxAPI:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("Missing organiser name")
         return name
+
+    def change_recipient(self, source):
+        context = self.call("GET", self.base + f"/internal/events/{source['eventId']}/notification-context",
+                            params={"includeOrganiser": "true"})
+        if source["recipientRole"] == "organiser":
+            return str(UUID(context["organiserId"]))
+        recipient = context.get("coordinatorId")
+        if not recipient:
+            leads = self.submission_recipients()
+            if len(leads) != 1:
+                raise ValueError("Exactly one Lead required for unassigned event")
+            recipient = leads[0]
+        return str(UUID(recipient))
 
     def claim(self):
         return self.call(
@@ -158,7 +172,10 @@ def dispatch_once(api, publish):
                 source = job["source"]
                 kind = job.get("type", "event.approval" if source.get("decision") == "Approved" else "event.rejection")
                 details = source
-                if kind == "safety.review-submitted":
+                if kind in ("event.change-request-submitted", "event.change-request-approved", "event.change-request-rejected", "event.cancelled"):
+                    details = {**source, "recipientId": api.change_recipient(source)}
+                    message = change_message(kind, source)
+                elif kind == "safety.review-submitted":
                     message = safety_review_message(source)
                 elif kind == "safety.review-decision":
                     message = safety_decision_message(source)
@@ -187,9 +204,12 @@ def dispatch_once(api, publish):
                     message = f"{source['eventName']} was rejected: {source['reason']}"
                 envelope = dict(
                     version=1, id=job["id"], type=kind,
-                    recipientId=source["recipientId"], createdAt=job["createdAt"],
+                    recipientId=details["recipientId"], createdAt=job["createdAt"],
                     message=message,
-                    destination=(None if kind == "event.coordinator-removed" else
+                    destination=(dict(kind="change-request-review", eventId=source["eventId"],
+                                      changeRequestId=source["changeRequestId"])
+                                 if kind == "event.change-request-submitted" else
+                                 None if kind == "event.coordinator-removed" else
                                  dict(kind="event-details", eventId=source["eventId"])),
                     details=details,
                 )

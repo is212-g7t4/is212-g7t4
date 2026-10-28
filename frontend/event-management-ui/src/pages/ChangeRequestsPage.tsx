@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Role } from '../types'
 import { isCoordinator } from '../roles'
 import { FIELD_LABELS } from '../features/event/eventDetails'
@@ -26,11 +26,20 @@ function displayValue(field: EditableField, value: string | undefined) {
   return value
 }
 
-export function ChangeRequestsPage({ role, coordinatorId, coordinatorName }: {
+export function ChangeRequestsPage({ role, coordinatorId, coordinatorName, targetSearch = '', onViewEvent }: {
+  targetSearch?: string
+  onViewEvent?: (eventId: string) => void
   role: Role
   coordinatorId?: string
   coordinatorName?: string
 }) {
+  const query = new URLSearchParams(targetSearch)
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const event = query.get('event') ?? ''
+  const request = query.get('request') ?? ''
+  const targetEventId = uuid.test(event) && uuid.test(request) ? event : ''
+  const targetRequestId = targetEventId ? request : ''
+  const selectedCard = useRef<HTMLElement | null>(null)
   const [requests, setRequests] = useState<EventChangeRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -44,16 +53,33 @@ export function ChangeRequestsPage({ role, coordinatorId, coordinatorName }: {
   useEffect(() => {
     if (!isCoordinator(role) || !coordinatorId) {
       setLoading(false)
+      if (coordinatorId && targetEventId) onViewEvent?.(targetEventId)
       return
     }
     let active = true
     setError('')
     fetchPendingChangeRequests(coordinatorId)
-      .then((items) => { if (active) setRequests(items) })
+      .then((items) => {
+        if (!active) return
+        // The caller-scoped pending list is the authority: never substitute a
+        // different request or grant the Lead review access through an alert.
+        const pending = items.filter(item => item.status === 'Pending Review')
+        if (targetEventId && !pending.some(item => item.eventId === targetEventId && item.id === targetRequestId)) {
+          onViewEvent?.(targetEventId)
+          return
+        }
+        setRequests(pending)
+      })
       .catch((cause: Error) => { if (active) setError(cause.message) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [role, coordinatorId, refresh])
+  }, [role, coordinatorId, refresh, targetEventId, targetRequestId, onViewEvent])
+
+  useEffect(() => {
+    if (loading || error) return
+    selectedCard.current?.focus()
+    selectedCard.current?.scrollIntoView?.({ block: 'center' })
+  }, [loading, error, requests, targetEventId, targetRequestId])
 
   const decide = async (request: EventChangeRequest, decision: 'Approved' | 'Rejected', rejectionReason?: string) => {
     if (!coordinatorId) return
@@ -91,7 +117,9 @@ export function ChangeRequestsPage({ role, coordinatorId, coordinatorName }: {
       requests.length === 0 ? <p>No pending change requests.</p> :
       requests.map((change) => {
         const fields = CHANGE_REQUEST_FIELD_ORDER.filter((field) => field in change.proposedChanges)
-        return <article key={change.id} className="panel event-card change-request-card">
+        const selected = change.eventId === targetEventId && change.id === targetRequestId
+        return <article key={change.id} ref={selected ? selectedCard : undefined} tabIndex={selected ? -1 : undefined} aria-current={selected ? 'true' : undefined} className={`panel event-card change-request-card${selected ? ' change-request-selected' : ''}`}>
+          {selected && <p className="change-request-selection">Selected request</p>}
           <header className="event-card-header">
             <div><h2>{change.event.eventName}</h2><p className="muted">Requested {new Date(change.requestedAt).toLocaleString('en-SG', { timeZone: 'Asia/Singapore' })} SGT</p></div>
             <StatusBadge status={change.status} />

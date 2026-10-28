@@ -66,23 +66,24 @@ def assignment(client, event_id, coordinator):
         "assignedCoordinatorId": coordinator, "assignedBy": LEAD_ID})
 
 
-def pending(db):
-    """Read all outbox rows in a fresh transaction, including frozen and published work, in
-    creation order.
-    """
-    # This story owns organiser deliveries only, not SCRUM-166 coordinator fanout.
-    return db.execute('SELECT * FROM public."EventNotificationOutbox" '
-                      'WHERE type IN (%s,%s,%s) ORDER BY created_at,source_id',
-                      ['event.approval', 'event.rejection', 'event.coordinator-assignment'])
+def pending(db, *, coordinator_rejection=False):
+    """Read outbox rows in creation order, excluding only legitimate companion alerts."""
+    rows = db.execute('SELECT * FROM public."EventNotificationOutbox" ORDER BY created_at,source_id')
+    return [row for row in rows
+            if row["type"] not in ("event.coordinator-assigned", "event.coordinator-removed")
+            and not (coordinator_rejection and row["type"] == "event.rejection"
+                     and row["source"].get("recipientId") == COORDINATOR_ID)]
 
 
-def claim(client):
+def claim(client, *, coordinator_rejection=False):
     """Claim work with the test token, require HTTP success and return the owner's leased jobs."""
     for _ in range(10):
         response = client.post("/internal/notification-outbox/claim", headers=HEADERS, json={})
         assert response.status_code == 200, response.json
         jobs = response.json["jobs"]
-        if not jobs or jobs[0]["type"] not in ("event.coordinator-assigned", "event.coordinator-removed"):
+        if not jobs or (jobs[0]["type"] not in ("event.coordinator-assigned", "event.coordinator-removed")
+                        and not (coordinator_rejection and jobs[0]["type"] == "event.rejection"
+                                 and jobs[0]["source"].get("recipientId") == COORDINATOR_ID)):
             return jobs
     pytest.fail("SCRUM-45 claim exhausted its bounded coordinator-delivery skip")
 
@@ -144,14 +145,14 @@ def test_ac2_rejection_commits_exact_reason_and_no_duplicate(client, db, entry):
     response = decision(client, event_id, "Rejected", entry)
     assert response.status_code == 200, response.json
     assert db.event(event_id)["status"] == "Rejected"
-    rows = pending(db)
+    rows = pending(db, coordinator_rejection=True)
     assert len(rows) == 1
     assert rows[0]["type"] == "event.rejection"
     assert rows[0]["source"] == dict(eventId=event_id, eventName="Spring Fair", recipientId=ORGANISER_ID,
                                      decision="Rejected", reason=REASON)
     again = decision(client, event_id, "Rejected", entry)
     assert again.status_code in (200, 409)
-    assert pending(db) == rows
+    assert pending(db, coordinator_rejection=True) == rows
 
 
 @pytest.mark.parametrize('character', ['x', '界', '😀', '"', '\\', '\n'],
@@ -174,8 +175,8 @@ def test_ac2_maximum_public_reason_freezes_without_loss(client, db, character):
     assert 65536 - cost < len(body) <= 65536
     response = client.patch(f'/events/{event_id}/reject', data=body, content_type='application/json')
     assert response.status_code == 200, response.json
-    assert pending(db)[0]['source']['reason'] == reason
-    job = claim(client)[0]
+    assert pending(db, coordinator_rejection=True)[0]['source']['reason'] == reason
+    job = claim(client, coordinator_rejection=True)[0]
     expected = envelope_for(job)
     freeze = encode(dict(leaseToken=job['leaseToken'], envelope=expected))
     assert 65536 < len(freeze) <= 135168
@@ -183,14 +184,14 @@ def test_ac2_maximum_public_reason_freezes_without_loss(client, db, character):
                          data=freeze, content_type='application/json')
     assert result.status_code == 200, result.json
     assert result.json['envelope'] == expected
-    assert pending(db)[0]['envelope'] == expected
+    assert pending(db, coordinator_rejection=True)[0]['envelope'] == expected
     # Refused requests do not overwrite the saved envelope.
-    before = pending(db)
+    before = pending(db, coordinator_rejection=True)
     assert client.post(f"/internal/notification-outbox/{job['id']}/freeze", headers=HEADERS,
                        data=b' ' * 135169, content_type='application/json').status_code == 413
     assert client.post(f"/internal/notification-outbox/{job['id']}/freeze",
                        data=freeze, content_type='application/json').status_code == 401
-    assert pending(db) == before
+    assert pending(db, coordinator_rejection=True) == before
 
 
 # AC3 — Shared decision content and linked details
@@ -202,12 +203,12 @@ def test_ac3_decision_freezes_original_facts_and_owner_can_read_details(client, 
     """
     event_id = make_event(db, status="Under Review", coordinator_id=COORDINATOR_ID)
     assert decision(client, event_id, outcome).status_code == 200
-    job = claim(client)[0]
+    job = claim(client, coordinator_rejection=outcome == "Rejected")[0]
     expected = envelope_for(job)
     frozen = operation(client, job, "freeze", envelope=expected)
     assert frozen.status_code == 200, frozen.json
     assert frozen.json["envelope"] == expected
-    assert pending(db)[0]["envelope"] == expected  # independent new DB transaction
+    assert pending(db, coordinator_rejection=outcome == "Rejected")[0]["envelope"] == expected  # independent new DB transaction
     target = client.get(f"/events/{event_id}?organiserId={ORGANISER_ID}")
     assert target.status_code == 200, target.json
     assert target.json["eventName"] == "Spring Fair"
@@ -275,7 +276,7 @@ def test_ac4_dr_intent_insert_failure_rolls_back_entire_mutation(client, db, cha
                     assignment(client, event_id, COORDINATOR_ID if change == "initial" else LEAD_ID))
         assert response.status_code >= 400
         assert db.event(event_id) == before
-        assert pending(db) == []
+        assert db.execute('SELECT * FROM public."EventNotificationOutbox"') == []
     finally:
         db.execute('DROP TRIGGER scrum45_fail_intent ON public."EventNotificationOutbox"; DROP FUNCTION scrum45_fail_intent()')
 
@@ -291,16 +292,16 @@ def test_ac3_dr_frozen_envelope_survives_retry_reclaim_and_second_freeze(client,
     response = (assignment(client, event_id, COORDINATOR_ID) if kind == "coordinator-assignment"
                 else decision(client, event_id, "Approved" if kind == "approval" else "Rejected"))
     assert response.status_code == 200
-    job = claim(client)[0]
+    job = claim(client, coordinator_rejection=kind == "rejection")[0]
     expected = envelope_for(job)
     assert operation(client, job, "freeze", envelope=expected).status_code == 200
-    assert pending(db)[0]["envelope"] == expected
+    assert pending(db, coordinator_rejection=kind == "rejection")[0]["envelope"] == expected
     # Act: release the first lease, then wait for the owner's persisted retry backoff.
     assert operation(client, job, "retry", error="synthetic publication ambiguity").status_code == 200
     deadline = time.monotonic() + 8
     jobs = []
     while time.monotonic() < deadline:
-        jobs = claim(client)
+        jobs = claim(client, coordinator_rejection=kind == "rejection")
         if jobs:
             break
         time.sleep(0.05)  # bounded condition polling of the owner's real backoff
@@ -314,11 +315,11 @@ def test_ac3_dr_frozen_envelope_survives_retry_reclaim_and_second_freeze(client,
     assert again.json["envelope"] == expected
     assert operation(client, job, "published").status_code == 409
     assert operation(client, reclaimed, "published").status_code == 200
-    row = pending(db)[0]
+    row = pending(db, coordinator_rejection=kind == "rejection")[0]
     assert row["envelope"] == expected
     assert row["published_at"] is not None
     assert row["lease_token"] is None
-    assert claim(client) == []
+    assert claim(client, coordinator_rejection=kind == "rejection") == []
 
 
 def test_ac3_dr_expired_lease_is_refused_before_and_after_reclaim(client, db):
@@ -373,7 +374,7 @@ def test_ac1_dr_wrong_actor_cannot_mutate_or_notify(client, db, outcome):
     before = db.event(event_id)
     assert decision(client, event_id, outcome, actor=LEAD_ID).status_code == 403
     assert db.event(event_id) == before
-    assert pending(db) == []
+    assert db.execute('SELECT * FROM public."EventNotificationOutbox"') == []
 
 
 def test_ac4_dr_ownerless_legacy_assignment_has_no_guessed_recipient(client, db, caplog):

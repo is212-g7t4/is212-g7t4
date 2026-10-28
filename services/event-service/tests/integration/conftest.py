@@ -60,9 +60,14 @@ def database_url():
             print("RESOURCE " + name, flush=True)
             OWNED_URLS.add(url)
             try:
+                assert_local(url)
+                assert url in OWNED_URLS, "Bootstrap requires this session fixture's exact database URL"
                 with closing(psycopg2.connect(url)) as connection:
                     connection.autocommit = True
                     with connection.cursor() as cursor:
+                        # Synthetic Supabase API roles required by the unmodified migrations.
+                        cursor.execute("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; "
+                                       "CREATE ROLE service_role NOLOGIN BYPASSRLS;")
                         for migration in sorted(MIGRATIONS.glob("*.sql")):
                             payload = migration.read_bytes()
                             digest = hashlib.sha256(payload).hexdigest()
@@ -121,6 +126,8 @@ class Database:
         self.url = url
 
     def execute(self, sql, params=()):
+        assert_local(self.url)
+        assert self.url in OWNED_URLS, "Queries require this session fixture's exact database URL"
         with closing(psycopg2.connect(self.url)) as connection:
             with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(sql, params)
@@ -244,6 +251,21 @@ def disposable_database(bootstrap=False):
 @pytest.fixture
 def migration_database():
     return disposable_database
+
+@pytest.fixture
+def event_change_notification_owner(database_url, monkeypatch):
+    """SCRUM-49 uses the session database and the standard per-test truncation."""
+    assert_local(database_url)
+    assert database_url in OWNED_URLS, "Story setup requires the session fixture's exact URL"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    client = create_app({"TESTING": True, "DATABASE_URL": database_url,
+                         "INTERNAL_SERVICE_TOKEN": TOKEN}).test_client()
+    assert client.application.config["DATABASE_URL"] == os.environ["DATABASE_URL"] == database_url
+    with closing(psycopg2.connect(database_url)) as connection:
+        db = MigrationDatabase(connection)
+        make_safety_coordinator(db)
+        yield client, db
+
 
 # SCRUM-168: explicitly requested fixture; no change to other stories' DB lifecycle.
 @pytest.fixture
