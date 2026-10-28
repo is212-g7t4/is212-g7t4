@@ -108,6 +108,7 @@ function getVenueId(): string | null {
 
 function App() {
   const [equipmentTargetSearch, setEquipmentTargetSearch] = useState(() => window.location.search)
+  const [changeRequestTargetSearch, setChangeRequestTargetSearch] = useState(() => window.location.search)
   const [targetBookingId, setTargetBookingId] = useState(() => new URLSearchParams(window.location.search).get('booking'))
   const [route, setRoute] = useState<Route>(getRoute)
   const [eventId, setEventId] = useState<string | null>(getEventId)
@@ -151,6 +152,7 @@ function App() {
       setDraftId(getDraftId())
       setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
       setEquipmentTargetSearch(window.location.search)
+      setChangeRequestTargetSearch(window.location.search)
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
@@ -181,6 +183,7 @@ function App() {
     window.history.pushState({}, '', paths[nextRoute])
     setRoute(nextRoute)
     setEquipmentTargetSearch('')
+    setChangeRequestTargetSearch('')
   }
 
   const navigateToEvent = (id: string) => {
@@ -229,6 +232,7 @@ function App() {
     setRoute(getRoute()); setEventId(getEventId())
     setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
     setEquipmentTargetSearch(window.location.search)
+    setChangeRequestTargetSearch(window.location.search)
   }
   return <NotificationProvider user={activeUser} onNavigate={openNotification}><div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
@@ -243,7 +247,7 @@ function App() {
       {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {inEventsPage && <EventsTabs tabs={eventTabs} route={route} onNavigate={navigate} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
-      {route === 'changeRequests' && <ChangeRequestsPage key={activeUser?.id} role={role} coordinatorId={activeUser?.id} coordinatorName={activeUser?.username} />}
+      {route === 'changeRequests' && <ChangeRequestsPage key={`${activeUser?.id}-${role}-${changeRequestTargetSearch}`} targetSearch={changeRequestTargetSearch} onViewEvent={navigateToEvent} role={role} coordinatorId={activeUser?.id} coordinatorName={activeUser?.username} />}
       {route === 'queue' && <UnassignedQueuePage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'workload' && <CoordinatorWorkloadPage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} onOpenDraft={navigateToDraft} />}
