@@ -17,15 +17,17 @@ FIRST_SCRUM45 = "20261021000000_event_notification_outbox.sql"
 APPROVAL = "20261021000100_event_approval_notifications.sql"
 PINNED_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql']
 EXPECTED_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox'}
+# Only SCRUM-46's additive table is repaired here; the inherited Equipment outbox omission is deferred.
+CURRENT_EXPECTED_TABLES = EXPECTED_TABLES | {'RegistrationNotificationOutbox'}
 TYPES = ('event.rejection', 'event.approval', 'event.coordinator-assignment')
 # Actual SCRUM-166 target inventory: f0cd2c16ef56b5a4e15bc7d774d1b3ddb6b65f9e.
 SCRUM166_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261021000000_event_notification_outbox.sql', '20261021000100_event_approval_notifications.sql', '20261021020000_event_notification_assignments.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql', '20261025000000_event_submission_notifications.sql']
 
-def assert_schema_and_types(db):
+def assert_schema_and_types(db, *, expected_tables=CURRENT_EXPECTED_TABLES):
     """Check the complete schema, allowed/rejected outbox writes, held timestamps, RLS and indexes
     against independent SQL expectations.
     """
-    assert set(db.snapshot()) == EXPECTED_TABLES
+    assert set(db.snapshot()) == expected_tables
     columns = dict(db.query("SELECT column_name, data_type FROM information_schema.columns\n                              WHERE table_schema='public' AND table_name='EventNotificationOutbox' "))
     assert columns == {'source_id': 'uuid', 'type': 'character varying', 'source': 'jsonb', 'envelope': 'jsonb', 'created_at': 'timestamp with time zone', 'published_at': 'timestamp with time zone', 'attempts': 'integer', 'available_at': 'timestamp with time zone', 'lease_token': 'uuid', 'lease_until': 'timestamp with time zone', 'last_error': 'text', 'held_at': 'timestamp with time zone'}
     assert db.query("SELECT is_nullable FROM information_schema.columns\n                      WHERE table_schema='public' AND table_name='EventNotificationOutbox' AND column_name='held_at' ") == [('YES',)]
@@ -39,7 +41,7 @@ def assert_schema_and_types(db):
     with pytest.raises(psycopg2.errors.NotNullViolation):
         db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (\'event.approval\',NULL)')
     row_security = dict(db.query("SELECT c.relname,c.relrowsecurity FROM pg_class c JOIN pg_namespace n\n                                   ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' "))
-    assert row_security == dict.fromkeys(EXPECTED_TABLES, True)
+    assert row_security == dict.fromkeys(expected_tables, True)
     assert db.query("SELECT count(*) FROM pg_policies WHERE schemaname='public' ") == [(0,)]
     indexes = dict(db.query("SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public'\n                              AND tablename='EventNotificationOutbox' "))
     assert 'UNIQUE INDEX' in indexes['EventNotificationOutbox_pkey']
@@ -148,7 +150,8 @@ def test_forward_migrations_preserve_rejection_and_all_three_types(migration_dat
             forwards.reverse()
         db.apply([paths[name] for name in forwards])
         assert_snapshot_preserved(db, before)
-        assert_schema_and_types(db)
+        # Historical approval/assignment stage predates the SCRUM-46 table.
+        assert_schema_and_types(db, expected_tables=EXPECTED_TABLES)
         # Later additive features are still applied in full-chain regression runs.
         db.apply([path for name, path in sorted(paths.items()) if name not in db.applied])
         assert set(db.applied) == set(paths)

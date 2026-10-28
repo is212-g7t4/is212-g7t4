@@ -95,6 +95,8 @@ def withdraw(client, headers=INTERNAL_HEADERS, **overrides):
         "coordinatorId": COORDINATOR_ID,
         "withdrawnSafetyCheckId": ROUND_ID,
         "reason": REASON,
+        # SCRUM-46 baseline input, not an extra venue-lookup simulation.
+        "venueBefore": "Grand Hall",
         **overrides,
     }
     return client.patch(f"/events/{EVENT_ID}/safety-status", json=body, headers=headers)

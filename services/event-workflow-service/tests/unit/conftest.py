@@ -69,3 +69,18 @@ def prepare_change(event_change_http):
         return api, broker, frozen
 
     return prepare
+
+
+@pytest.fixture
+def attendee_http(monkeypatch):
+    """Yield the real OutboxAPI client and a strict respx router at synthetic service URLs.
+    Every registered response must be used and every HTTP request must be registered.
+    Restore environment values after each case; neither database nor broker is started.
+    """
+    monkeypatch.setenv("EVENT_SERVICE_URL", "http://event.test")
+    monkeypatch.setenv("REGISTRATION_SERVICE_URL", "http://registration.test")
+    monkeypatch.setenv("VENUE_AVAILABILITY_SERVICE_URL", "http://availability.test")
+    monkeypatch.setenv("VENUE_SERVICE_URL", "http://venue.test")
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic")
+    with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
+        yield OutboxAPI(), router

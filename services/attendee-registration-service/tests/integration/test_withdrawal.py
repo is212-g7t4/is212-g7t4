@@ -67,7 +67,9 @@ def test_ac2_confirmed_withdrawal_returns_confirmation_and_forwards_identity(cli
     assert response.json["message"] == "Registration withdrawn for Community Workshop."
     assert response.json["registration"]["status"] == "Withdrawn"
     assert response.json["registration"]["withdrawn_at"] == "2029-12-02T02:30:00+00:00"
-    assert json.loads(withdrawal.calls[0].request.content) == {"attendeeId": ATTENDEE_ID}
+    # SCRUM-46: the real HTTP adapter must forward the action-time event name,
+    # not just identity, so a delayed withdrawal alert needs no later name lookup.
+    assert json.loads(withdrawal.calls[0].request.content) == {"attendeeId": ATTENDEE_ID, "notificationContext": {"eventName": "Community Workshop"}}
 
 
 # AC4 -------------------------------------------------------------------------

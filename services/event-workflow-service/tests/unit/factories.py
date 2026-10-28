@@ -32,3 +32,18 @@ def change_envelope(item, recipient, message):
                      if item["type"] == "event.change-request-submitted" else
                      dict(kind="event-details", eventId=EVENT)),
     )
+
+
+# SCRUM-46 synthetic action facts.
+ATTENDEE_EVENT = "11111111-1111-4111-8111-111111111111"
+ATTENDEE_USER = "22222222-2222-4222-8222-222222222222"
+ATTENDEE_REF = "33333333-3333-4333-8333-333333333333"
+ATTENDEE_JOB = "44444444-4444-4444-8444-444444444444"
+
+def attendee_job(kind):
+    """Return fresh unfrozen claimed work for the supplied Registration/Event action type.
+    Independent event, attendee, registration and action UUIDs expose swapped wire fields;
+    the returned dictionary is an API double, not a persisted owner record.
+    """
+    return dict(id=ATTENDEE_JOB,type=kind,createdAt="2030-01-01T00:00:00+00:00",envelope=None,
+                source=dict(eventId=ATTENDEE_EVENT,recipientId=ATTENDEE_USER,registrationId=ATTENDEE_REF))

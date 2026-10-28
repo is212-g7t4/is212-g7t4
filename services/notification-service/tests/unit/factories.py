@@ -73,3 +73,18 @@ def process_change_at_sql_boundary(envelope, *, quarantined=False, error=None):
         process("unused", channel, Mock(delivery_tag=7), body)
     channel.basic_ack.assert_called_once_with(delivery_tag=7)
     return observed
+
+
+def attendee_envelope(kind="registration.confirmed"):
+    """Return independent attendee wire content for parser acceptance/refusal checks.
+    The requested type shares fixed UUID identities and registration-only navigation.
+    Extra display fields allow focused mutations; generic message text is deliberately
+    not a claim that the production formatter generated this complete envelope.
+    """
+    ref="33333333-3333-4333-8333-333333333333"
+    return dict(version=1,id="44444444-4444-4444-8444-444444444444",type=kind,
+        recipientId="22222222-2222-4222-8222-222222222222",createdAt="2030-01-01T00:00:00+00:00",
+        message="Workshop notification.",destination=dict(kind="attendee-registration",registrationId=ref),
+        details=dict(eventId="11111111-1111-4111-8111-111111111111",eventName="Workshop",registrationId=ref,
+                     startDateTime="2030-03-01T01:00:00+00:00",endDateTime="2030-03-01T09:00:00+00:00",venueName="Hall A",
+                     changes={"venueName":["Hall A","Hall C"]}))
