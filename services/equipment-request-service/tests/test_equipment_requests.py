@@ -5,6 +5,7 @@ import psycopg2
 import pytest
 
 from app import create_app
+from flask.testing import FlaskClient
 
 USER_ID = "ad3d6da3-7220-4f80-9157-2ee4abc0455c"
 REQUEST_ID = "2a1bfb57-a3c0-4450-897e-cc5c73690000"
@@ -35,7 +36,21 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     connect = MagicMock(return_value=connection)
     monkeypatch.setattr("app.models.psycopg2.connect", connect)
-    app = create_app({"DATABASE_URL": "postgresql://x", "FRONTEND_ORIGIN": ORIGIN})
+    # Existing SCRUM-33 storage scenarios now enter with trusted composite context.
+    # No eligible recipient is arranged here; SCRUM-48's three doubled integration
+    # scenarios exercise real action-time capture, SQL intents, dispatcher and inbox.
+    class CompositeClient(FlaskClient):
+        def open(self, *args, **kwargs):
+            payload = kwargs.get("json")
+            if isinstance(payload, dict):
+                kwargs["json"] = {**payload, "notificationContext": {
+                    "eventId": EVENT_ID, "eventName": "Fixture event", "recipientIds": [],
+                    "coordinatorId": None, "equipmentNames": {MIC: "Microphone", TABLE: "Table"}}}
+                kwargs["headers"] = {**kwargs.get("headers", {}), "X-Internal-Token": "synthetic"}
+            return super().open(*args, **kwargs)
+    app = create_app({"DATABASE_URL": "postgresql://x", "FRONTEND_ORIGIN": ORIGIN,
+                      "INTERNAL_SERVICE_TOKEN": "synthetic"})
+    app.test_client_class = CompositeClient
     return app.test_client(), cursor, connect
 
 

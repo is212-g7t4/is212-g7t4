@@ -3,6 +3,7 @@ from contextlib import closing
 import psycopg2
 import psycopg2.errors
 from psycopg2.extras import RealDictCursor
+from app import outbox
 
 COLUMNS = (
     "equipment_request_id, event_id, equipment_id, quantity_requested, "
@@ -70,7 +71,7 @@ def list_requests(database_url, status=None, event_id=None, event_ids=None):
             return [serialize(row) for row in cursor.fetchall()]
 
 
-def create_requests(database_url, event_id, items, requester_id):
+def create_requests(database_url, event_id, items, requester_id, notification_context):
     """Insert every line as Pending in one transaction, so a bad line saves none of them."""
     created = []
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -86,6 +87,7 @@ def create_requests(database_url, event_id, items, requester_id):
                         [event_id, item["equipmentId"], item["quantityRequested"], item["technicalRequirements"] or None, requester_id],
                     )
                     created.append(serialize(cursor.fetchone()))
+                outbox.record_submission(cursor, event_id, created, notification_context)
         except psycopg2.errors.ForeignKeyViolation:
             raise UnknownReferenceError from None
     return created
@@ -113,7 +115,7 @@ def reset_safety_requests(database_url, event_id, request_ids):
             return [serialize(row) for row in cursor.fetchall()]
 
 
-def review_request(database_url, request_id, status, reviewer_id, rejection_reason=None):
+def review_request(database_url, request_id, status, reviewer_id, rejection_reason=None, *, notification_context):
     """Move a Pending request to Approved/Rejected; the Pending guard is in the UPDATE itself."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -126,7 +128,9 @@ def review_request(database_url, request_id, status, reviewer_id, rejection_reas
             )
             row = cursor.fetchone()
             if row:
-                return serialize(row)
+                updated = serialize(row)
+                outbox.record_decisions(cursor, [updated], notification_context)
+                return updated
             cursor.execute(
                 'SELECT 1 FROM public."EquipmentRequest" WHERE equipment_request_id = %s',
                 [request_id],
@@ -136,7 +140,7 @@ def review_request(database_url, request_id, status, reviewer_id, rejection_reas
             raise RequestNotFoundError
 
 
-def review_event_requests(database_url, event_id, status, reviewer_id, rejection_reason=None):
+def review_event_requests(database_url, event_id, status, reviewer_id, rejection_reason=None, *, notification_context):
     """Apply one decision to every Pending request for an event."""
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -149,7 +153,9 @@ def review_event_requests(database_url, event_id, status, reviewer_id, rejection
             )
             rows = cursor.fetchall()
             if rows:
-                return [serialize(row) for row in rows]
+                updated = [serialize(row) for row in rows]
+                outbox.record_decisions(cursor, updated, notification_context)
+                return updated
             cursor.execute(
                 'SELECT 1 FROM public."EquipmentRequest" WHERE event_id = %s LIMIT 1',
                 [event_id],

@@ -75,5 +75,83 @@ Port 5010 under docker compose.
 ```
 uv sync
 uv run flask --app app run --debug
-uv run pytest --cov=app --cov-report=term-missing
+uv run pytest
 ```
+
+
+## SCRUM-48 — equipment notifications
+
+Exactly three acceptance criteria: submission alerts each eligible Technical Support
+user once with the full submitted list; approval alerts the event's current
+coordinator once per changed request row; rejection does the same without including
+its workflow reason in message or details. The existing decision API still requires
+and stores the rejection reason. Bulk decisions emit per changed row, not per unit.
+No edit, withdrawal, reassignment or reminder notification triggers are added.
+
+Before the write, this composite resolves event name, equipment names and either
+TSS recipients (both `Technical Support` and `Technical Support Staff`) or the
+current coordinator. Equipment Request Service accepts these snapshots only with
+`X-Internal-Token` matching `INTERNAL_SERVICE_TOKEN`; direct create/review calls
+without trusted context are rejected. Existing browser callers continue using this
+composite, without sending internal tokens. Configure the same token in Event,
+Equipment Request and Equipment Reservation services. Cross-service reads remain
+outside the atomic. An unavailable context service refuses the action before saving;
+broker/consumer outages do **not** affect successful writes.
+
+The owner builds and freezes complete envelopes in `EquipmentNotificationOutbox`
+in the **same transaction** as the submitted rows/decision. This is a separate
+owner table, not the Venue service's table. It adapts SCRUM-47's lease-fenced HTTP
+outbox, bounded dispatcher subprocess, confirmed persistent RabbitMQ publication
+and Notification's existing `source_id` inbox deduplication. Retries retain saved
+IDs, recipient and content; the worker never re-reads event assignment. An event
+with no assigned coordinator has no eligible decision recipient. Submission with
+no TSS has no eligible recipient. A later assignment does not create an alert.
+
+Run `uv run python -m app.dispatcher` in a separate process, or deploy the Compose
+`equipment-notification-dispatcher`. It needs only `EQUIPMENT_REQUEST_SERVICE_URL`,
+`INTERNAL_SERVICE_TOKEN`, `RABBITMQ_URL` (no database access). Start the existing
+Notification consumer too. Never run multiple uncoordinated deployments against
+another team's shared state.
+
+### Migration / rollout (deployment-specific; do not automatically rerun)
+
+For a **new deployment where it is absent**, apply only
+`database/supabase/migrations/20261028000000_equipment_notification_outbox.sql`
+to the owning database after team approval and checking history/schema. Do not
+rerun it on an existing deployment without those checks. This cleanup did not
+inspect shared schema/runtime state. It creates the outbox and pending index, enables RLS with
+no client policies, and requires the service's privileged DB connection. It does
+not modify/backfill historical equipment requests. The existing Notification inbox
+migration and consumer remain prerequisites; there is no additional inbox migration.
+Deploy the consumer/frontend contract, then owner migration+service and composite,
+then worker. Preserve/drain pending jobs before rollback; do not drop pending work.
+No migration or test in this task writes shared Supabase.
+
+### Verification: separate single-service boundaries
+
+From this service directory, run the normal strict whole-service gate:
+
+```sh
+PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked --python 3.12 pytest
+```
+
+Exactly three AC contract scenarios execute only Reservation's routes/adapters,
+with external HTTP doubles: submission forwards full items/names/TSS context;
+approval selects the latest pre-write coordinator snapshot; rejection keeps its
+workflow reason outside notification context. Request separately tests frozen
+full-list/per-record reason-free envelopes; Notification separately tests its
+consumer contract. No production package from another owner is imported here.
+Supporting bulk, security, stock-refusal and dispatcher cases are documented in
+[tests/README.md](tests/README.md). No newly introduced SCRUM48 cross-service/E2E
+harness remains on branch;
+original sources/evidence were verified and handed off externally, not relabelled.
+The driver/dotenv development dependencies used only by that harness were removed;
+pika remains a real production dispatcher dependency.
+
+Only Equipment Request owns the optional real PostgreSQL tests (no broker or
+other service). See its [test guide](../equipment-request-service/tests/README.md).
+Do not run broad integration discovery or start shared workers to test this change.
+The [test guide](tests/README.md) describes these separate test boundaries and
+the known recipient snapshot timing limitation. Local regressions do not verify
+remote CI or runtime deployment. This composite's snapshot is
+**not assignment-at-commit proof**.

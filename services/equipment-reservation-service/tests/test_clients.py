@@ -22,6 +22,10 @@ class FakeResponse:
 @pytest.fixture
 def sent(monkeypatch):
     calls = []
+    # Keep pre-existing transport scenarios focused on their downstream write.
+    # SCRUM-48's three integration scenarios exercise the real snapshot lookup.
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic")
+    monkeypatch.setattr(clients, "notification_snapshot", lambda *args, **kwargs: {"eventId": "ev"})
 
     def fake(method, url, **kwargs):
         calls.append((method, url, kwargs))
@@ -71,19 +75,20 @@ def test_list_requests_without_filters(sent):
 # Review AC1/AC2 / Reservation AC2 (transport): target individual records and event-scoped bulk decisions.
 def test_get_and_review_calls(sent):
     calls, fake = sent
-    fake.response = FakeResponse(body={"request": {"id": "r"}, "requests": [{"id": "r"}]})
+    fake.response = FakeResponse(body={"request": {"id": "r", "eventId": "ev"}, "requests": [{"id": "r"}]})
 
-    assert clients.get_request(HEADERS, "r") == {"id": "r"}
-    assert clients.review_request(HEADERS, "r", "Approved") == {"id": "r"}
+    assert clients.get_request(HEADERS, "r") == {"id": "r", "eventId": "ev"}
+    assert clients.review_request(HEADERS, "r", "Approved") == {"id": "r", "eventId": "ev"}
     assert clients.review_event_requests(HEADERS, "ev", "Rejected", "No technician available.") == [{"id": "r"}]
 
     assert [(c[0], c[1]) for c in calls] == [
         ("GET", "http://localhost:5011/equipment-requests/r"),
+        ("GET", "http://localhost:5011/equipment-requests/r"),
         ("PATCH", "http://localhost:5011/equipment-requests/r"),
         ("PATCH", "http://localhost:5011/events/ev/equipment-requests"),
     ]
-    assert calls[1][2]["json"] == {"status": "Approved"}
-    assert calls[2][2]["json"] == {"status": "Rejected", "rejectionReason": "No technician available."}
+    assert calls[2][2]["json"] == {"status": "Approved", "notificationContext": {"eventId": "ev"}}
+    assert calls[3][2]["json"] == {"status": "Rejected", "rejectionReason": "No technician available.", "notificationContext": {"eventId": "ev"}}
 
 
 # Create request AC1/AC2 (transport): forward equipment needs, the event ID and caller identity to storage.
@@ -96,8 +101,8 @@ def test_create_event_requests_posts_items_with_identity_headers(sent):
 
     method, url, kwargs = calls[0]
     assert (method, url) == ("POST", "http://localhost:5011/events/ev/equipment-requests")
-    assert kwargs["json"] == {"items": items}
-    assert kwargs["headers"] == {"X-Dev-User-Id": "u", "X-Dev-Role": "Technical Support"}
+    assert kwargs["json"] == {"items": items, "notificationContext": {"eventId": "ev"}}
+    assert kwargs["headers"] == {"X-Dev-User-Id": "u", "X-Dev-Role": "Technical Support", "X-Internal-Token": "synthetic"}
 
 
 # Review AC1 / Reservation AC2 (supporting lookup): resolve summaries for the requested event IDs.

@@ -1,0 +1,70 @@
+"""SCRUM48 reservation-only HTTP boundary doubles; no other service code runs."""
+from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+import httpx
+import pytest
+from app import create_app
+
+EVENT, MIC, PROJECTOR, A, B, TSS1, TSS2, R1, R2 = [
+    f"10000000-0000-4000-8000-{i:012d}" for i in range(1, 10)]
+
+
+def identity(user, role):
+    return {"X-Dev-User-Id": user, "X-Dev-Role": role}
+
+
+def row(identifier=R1, equipment=MIC, quantity=5, status="Pending"):
+    return dict(id=identifier, eventId=EVENT, equipmentId=equipment,
+                quantityRequested=quantity, status=status, requestedBy=A)
+
+
+@pytest.fixture
+def boundary(monkeypatch):
+    """Fresh external HTTP responses/call log; never emulate SQL or delivery."""
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic")
+    for name, host in [("EQUIPMENT_REQUEST", "owner"), ("EVENT", "events"),
+                       ("EQUIPMENT", "equipment"), ("USER", "users")]:
+        monkeypatch.setenv(name + "_SERVICE_URL", f"http://{host}.invalid")
+    state = SimpleNamespace(event=dict(id=EVENT, eventName="Community Fair",
+        coordinatorId=A, status="Under Review", startTime="2030-12-12T10:00:00",
+        endTime="2030-12-12T18:00:00"), rows=[row()],
+        saved=[row()], write_code=200)
+    def http(method, url, **kwargs):
+        code = 200
+        if url.startswith("http://owner.invalid"):
+            if method in ("POST", "PATCH"):
+                code = 201 if method == "POST" else state.write_code
+                body = dict(requests=deepcopy(state.saved), request=deepcopy(state.saved[0]))
+                if code >= 400:
+                    body = {"message": "There are no Pending requests to review."}
+            elif url.endswith("/equipment-requests"):
+                rows = deepcopy(state.rows)
+                params = kwargs.get("params", {})
+                if params.get("status"):
+                    rows = [r for r in rows if r["status"] == params["status"]]
+                body = dict(requests=rows)
+            else:
+                body = dict(request=deepcopy(state.rows[0]))
+        elif url.endswith("/notification-context"):
+            body = deepcopy(state.event)
+        elif url.endswith(("/events", "/events/summaries")):
+            body = dict(events=[deepcopy(state.event)])
+        elif url.endswith("/events/overlapping"):
+            body = dict(events=[])
+        elif url == "http://equipment.invalid/equipment":
+            body = dict(equipment=[dict(id=MIC, description="Microphone", type="Audio", totalQuantity=20, status="Available"),
+                                   dict(id=PROJECTOR, description="Projector", type="Visual", totalQuantity=10, status="Available")])
+        elif url == "http://users.invalid/users":
+            body = dict(users=[dict(user_id=u, role="Technical Support") for u in (TSS1,TSS2)])
+        else:
+            raise AssertionError(f"Unexpected external HTTP: {method} {url}")
+        return httpx.Response(code, json=body, request=httpx.Request(method,url))
+    state.http = MagicMock(side_effect=http)
+    monkeypatch.setattr(httpx, "request", state.http)
+    state.client = create_app({"TESTING":True}).test_client()
+    return state
+
+
+def mutations(boundary):
+    return [c for c in boundary.http.call_args_list if c.args[0] in ("POST", "PATCH")]

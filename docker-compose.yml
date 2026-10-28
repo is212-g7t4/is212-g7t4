@@ -99,6 +99,8 @@ services:
       - ./services/equipment-reservation-service/.env
     environment:
       <<: *frontend-environment
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
+      USER_SERVICE_URL: http://user-service:5000
       EQUIPMENT_REQUEST_SERVICE_URL: http://equipment-request-service:5000
       EVENT_SERVICE_URL: http://event-service:5000
       EQUIPMENT_SERVICE_URL: http://equipment-service:5000
@@ -172,6 +174,19 @@ services:
       DATABASE_URL: "${NOTIFICATION_DATABASE_URL:-${DATABASE_URL}}"
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
     depends_on:
+      - rabbitmq
+
+  equipment-notification-dispatcher:
+    build: ./services/equipment-reservation-service
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
+    restart: unless-stopped
+    # HTTP only; no database credentials or deferred Event/User lookups.
+    environment:
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
+      EQUIPMENT_REQUEST_SERVICE_URL: "http://equipment-request-service:5000"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
+    depends_on:
+      - equipment-request-service
       - rabbitmq
 
   venue-notification-dispatcher:

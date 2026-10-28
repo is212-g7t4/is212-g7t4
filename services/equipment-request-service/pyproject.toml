@@ -10,3 +10,16 @@ dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+addopts = "-m 'not integration' --cov=app --cov-branch --cov-report=term-missing --cov-report=xml"
+markers = ["integration: requires explicitly owned external systems; opt-in only"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+# Strict whole-owner line+branch gate; review status is validated at the routes
+# and assigned by UPDATE RETURNING before notification recording.
+fail_under = 100

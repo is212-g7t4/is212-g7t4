@@ -14,11 +14,12 @@ type StatusFilter = EquipmentRequestStatus | 'All'
 export const EQUIPMENT_REQUESTS_ACCESS_NOTICE = 'Equipment requests are visible to Technical Support and assigned Event Coordinators.'
 const INSUFFICIENT_HINT = 'Not enough stock for this window. Reject it, or wait for stock to free up.'
 
-export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }: {
+export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate, targetSearch = '' }: {
   role: Role
   user: User | null
   resolveUserName?: (userId: string | null | undefined) => string | null
   onCreate?: () => void
+  targetSearch?: string
 }) {
   const [events, setEvents] = useState<EventReservation[]>([])
   const [filter, setFilter] = useState<StatusFilter>('All')
@@ -28,6 +29,15 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [rejection, setRejection] = useState<{ id: string; name: string; bulk: boolean } | null>(null)
   const [rejectionReason, setRejectionReason] = useState('')
+
+  const target = new URLSearchParams(targetSearch)
+  const targetEventId = target.get('event')
+  const targetRequestIds = target.getAll('request')
+  const visibleEvents = targetEventId ? events.filter((event) => event.eventId === targetEventId)
+    .map((event) => ({ ...event, requests: event.requests.filter((item) => targetRequestIds.includes(item.id)) }))
+    .filter((event) => event.requests.length > 0) : events
+  const targetMissing = targetEventId && (!visibleEvents.length
+    || targetRequestIds.some((id) => !visibleEvents.some((event) => event.requests.some((item) => item.id === id))))
 
   const allowed = (role === 'Technical Support' || isCoordinator(role)) && user !== null
   const canReview = role === 'Technical Support'
@@ -130,9 +140,10 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
       {actionError && !rejection && <p className="field-error" role="alert">{actionError}</p>}
     </section>
 
+    {!loading && !error && targetMissing && visibleEvents.length > 0 && <p role="status">Some requested equipment is unavailable or you no longer have access.</p>}
     {loading ? <EventCardSkeletonList /> : error ? <p className="field-error" role="alert">{error}</p> :
-      events.length === 0 ? <p>No equipment requests found.</p> :
-      events.map(({ eventId, eventName, eventStatus, startTime, endTime, coordinatorId, requests: items }) => {
+      visibleEvents.length === 0 ? <p>{targetEventId ? 'This equipment request is unavailable or you no longer have access.' : 'No equipment requests found.'}</p> :
+      visibleEvents.map(({ eventId, eventName, eventStatus, startTime, endTime, coordinatorId, requests: items }) => {
         // Availability and actions only matter while a decision is still open.
         const pendingItems = items.filter((request) => request.status === 'Pending')
         const reviewStage = eventStatus === 'Under Review' || eventStatus === 'Safety Changes Requested'
@@ -200,7 +211,7 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate }:
               </tbody>
             </table>
           </div>
-          {showActions && <footer className="equipment-request-bulk-actions">
+          {showActions && !targetEventId && <footer className="equipment-request-bulk-actions">
             <button className="button small approve" disabled={reviewingId !== null || anyInsufficient} title={anyInsufficient ? INSUFFICIENT_HINT : undefined} onClick={() => reviewAll(eventId, 'Approved')}>
               {reviewingId === `all:${eventId}` && <Spinner size={12} />}Approve All
             </button>

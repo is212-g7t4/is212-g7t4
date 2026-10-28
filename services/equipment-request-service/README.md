@@ -63,3 +63,33 @@ All IDs must belong to the event; otherwise nothing is updated. In one
 transaction, the selected requests become `Pending` and `reviewed_by` is
 cleared. Requests outside the selection are unchanged. Repeating the same
 reset before staff review has the same result.
+
+
+### SCRUM-48 transactional notification ownership
+
+Create and individual/bulk review also require a trusted `notificationContext`
+from Equipment Reservation Service and `X-Internal-Token` matching
+`INTERNAL_SERVICE_TOKEN`. This closes the direct-write notification bypass: the
+atomic never fetches Event/User/Equipment data or calls RabbitMQ. Browser callers
+must use the composite. Context includes event identity/name, equipment names,
+and submission recipient IDs or the decision-time coordinator ID. The owner
+uses its **returned changed rows** to build IDs/quantities and freezes one
+full-list submission envelope per TSS or one decision envelope per changed row.
+No reason is copied into a decision envelope. Pending/unchanged rows emit none.
+
+The envelopes and business changes commit together in the owner's new
+`EquipmentNotificationOutbox`. Internal token-authenticated HTTP endpoints:
+`POST /internal/notification-outbox/claim` and
+`POST /internal/notification-outbox/<id>/published|retry` (leaseToken required).
+The separate Equipment Reservation dispatcher publishes existing frozen content;
+it cannot change recipient/message during retry. Safety reset has no new trigger.
+
+For a new deployment where it is absent, the team must review/apply only
+`database/supabase/migrations/20261028000000_equipment_notification_outbox.sql`
+to this service's owning database. It creates the RLS-enabled outbox and pending
+index, no history backfill. Use a privileged service DB connection; no client RLS
+policy is granted. Do not rerun the migration on an existing deployment without
+checking its history/schema and obtaining team approval. This cleanup did not
+inspect or change shared schema/runtime state.
+See the [composite README](../equipment-reservation-service/README.md) for deployment
+order and [owner-only tests](tests/README.md) for opt-in disposable PostgreSQL commands.
