@@ -54,8 +54,7 @@ test('technical support adds equipment and the list refreshes', async ({ page })
   await expect(page.getByRole('status').filter({ hasText: 'Added Laptop' })).toBeVisible()
   await expect(page.getByRole('table')).toContainText('Presentation laptop')
   expect(created).toEqual({ equipmentType: 'Laptop', description: 'Presentation laptop', totalQuantity: 8, location: 'Tech Store', status: 'Available' })
-  expect(headers['x-dev-role']).toBe('Technical Support')
-  expect(headers['x-dev-user-id']).toBe(users.techSupport.user_id)
+  expect(headers['authorization']).toBe(`Bearer e2e-${users.techSupport.user_id}`)
 })
 
 test('technical support adds a type that is not in the list', async ({ page }) => {

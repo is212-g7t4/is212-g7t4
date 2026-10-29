@@ -6,8 +6,8 @@ Story:      As an Event Coordinator, I want to request clarification on a submit
 Real:       Flask app and routes, validation, app/models.py SQL, postgres:17.6 with the
             full migration chain.
 Doubled:    nothing (Event Service makes no outbound calls).
-Not proven: JWT authentication; identity is the coordinatorId / organiserId the caller
-            sends. Frontend behaviour and cross-service communication are also not proven.
+Not proven: Supabase sign-in itself; the caller is a token signed with a test key
+            (SCRUM-8). Frontend behaviour and cross-service communication are also not proven.
 
 AC1  Given an Event Request has status 'Submitted' and is assigned to the current Event
      Coordinator, when they request clarification, then the status changes to

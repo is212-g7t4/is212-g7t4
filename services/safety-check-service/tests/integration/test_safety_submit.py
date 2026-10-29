@@ -11,8 +11,8 @@ Doubled:    with respx: Event Service (GET /events/<id>, PATCH /events/<id>/safe
             (GET /equipment-requests, read as the coordinator), Safety Check Record
             (POST /safety-check-records).
 Not proven: that the live Equipment Request Service spells the status "Rejected" (its
-            STATUSES in app/__init__.py does today); authentication (the coordinator is
-            the coordinatorId the caller sends); the full journey on the real stack.
+            STATUSES in app/__init__.py does today); Supabase sign-in itself (the coordinator
+            is a token signed with a test key, SCRUM-8); the full journey on the real stack.
 
 AC1  Given an event assigned to the Event Coordinator has at least one approved venue
      booking, and none of its venue bookings or equipment requests is still pending, when
@@ -53,6 +53,7 @@ from tests.integration.factories import (
     event,
     safety_round,
 )
+from tests.unit.factories import signed_in
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -65,7 +66,6 @@ def stub_reads(router, bookings, requests):
     """Every read a submit or readiness call makes, with the URLs and queries app/clients.py sends."""
     router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-        params={"coordinatorId": COORDINATOR_ID},
     ).mock(return_value=Response(200, json=event("Approved")))
     router.get(
         f"{service_clients.VENUE_AVAILABILITY_SERVICE_URL}/events/{EVENT_ID}/venue-bookings"
@@ -73,7 +73,6 @@ def stub_reads(router, bookings, requests):
     router.get(
         f"{service_clients.EQUIPMENT_REQUEST_SERVICE_URL}/equipment-requests",
         params={"eventId": EVENT_ID},
-        headers={"X-Dev-User-Id": COORDINATOR_ID, "X-Dev-Role": "Event Coordinator"},
     ).mock(return_value=Response(200, json={"requests": requests}))
 
 
@@ -92,10 +91,12 @@ def sent(route):
     return json.loads(route.calls.last.request.content)
 
 
+def as_coordinator(client):
+    return signed_in(client, COORDINATOR_ID, "Event Coordinator")
+
+
 def submit(client):
-    return client.post(
-        "/safety-checks", json={"eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID}
-    )
+    return as_coordinator(client).post("/safety-checks", json={"eventId": EVENT_ID})
 
 
 # AC1 ----------------------------------------------------------------------
@@ -109,9 +110,9 @@ def test_ac1_rejected_equipment_request_does_not_block_readiness(client, stubs):
         [equipment_request("Rejected", REJECTED_REQUEST_ID)],
     )
 
-    response = client.get(
+    response = as_coordinator(client).get(
         "/safety-checks/readiness",
-        query_string={"eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID},
+        query_string={"eventId": EVENT_ID},
     )
 
     assert response.status_code == 200
@@ -139,7 +140,6 @@ def test_ac1_rejected_equipment_request_does_not_block_submission(client, stubs)
     assert created.call_count == 1
     assert sent(created) == {
         "eventId": EVENT_ID,
-        "submittedBy": COORDINATOR_ID,
         "equipmentPlacementNotes": None,
         "crowdMovementNotes": None,
     }
@@ -148,8 +148,9 @@ def test_ac1_rejected_equipment_request_does_not_block_submission(client, stubs)
         "status": "Pending Safety Check",
         "safetyCheckId": ROUND_ID,
         "roundNumber": 1,
-        "coordinatorId": COORDINATOR_ID,
     }
+    # SCRUM-8: the coordinator is identified downstream by their forwarded token.
+    assert {call.request.headers["Authorization"] for call in stubs.calls} == {client.environ_base["HTTP_AUTHORIZATION"]}
 
 
 # AC2 ----------------------------------------------------------------------

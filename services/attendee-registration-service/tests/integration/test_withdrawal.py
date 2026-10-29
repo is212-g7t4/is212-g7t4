@@ -4,7 +4,8 @@ Story:      As an Attendee, I want to withdraw my registration for an event,
             so that I can free up my place for someone else if I can no longer attend.
 Real:       Flask app, withdrawal orchestration, validation, and app/clients.py httpx calls.
 Doubled:    Event Service and Registration Service at their HTTP boundaries with respx.
-Not proven: persistence inside Registration Service or caller authentication.
+Not proven: persistence inside Registration Service, or Supabase sign-in itself (the
+            attendee is a token signed with a test key, SCRUM-8).
 
 AC1  The Attendee can access a "Withdraw" option from their registered event details page.
      Not covered here: button visibility belongs to the frontend component suite.
@@ -24,7 +25,7 @@ import respx
 from httpx import Response
 
 import app.clients as service_clients
-from tests.integration.factories import ATTENDEE_ID, EVENT_ID, REGISTRATION_ID, event, registration
+from tests.integration.factories import EVENT_ID, REGISTRATION_ID, event, registration
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -32,7 +33,6 @@ pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 def stub_registration_lookup(router):
     return router.get(
         f"{service_clients.REGISTRATION_SERVICE_URL}/registrations",
-        params={"attendeeId": ATTENDEE_ID},
     ).mock(return_value=Response(200, json={"registrations": [registration()]}))
 
 
@@ -52,7 +52,7 @@ def test_ac2_confirmed_withdrawal_returns_confirmation_and_forwards_identity(cli
         "withdrawn_at": "2029-12-02T02:30:00+00:00",
     }
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
-        stub_registration_lookup(router)
+        lookup = stub_registration_lookup(router)
         stub_event_catalogue(router, event())
         withdrawal = router.patch(
             f"{service_clients.REGISTRATION_SERVICE_URL}/registrations/{REGISTRATION_ID}/withdraw"
@@ -60,7 +60,7 @@ def test_ac2_confirmed_withdrawal_returns_confirmation_and_forwards_identity(cli
 
         response = client.patch(
             f"/registrations/{REGISTRATION_ID}/withdraw",
-            json={"attendeeId": ATTENDEE_ID},
+            json={},
         )
 
     assert response.status_code == 200
@@ -69,7 +69,11 @@ def test_ac2_confirmed_withdrawal_returns_confirmation_and_forwards_identity(cli
     assert response.json["registration"]["withdrawn_at"] == "2029-12-02T02:30:00+00:00"
     # SCRUM-46: the real HTTP adapter must forward the action-time event name,
     # not just identity, so a delayed withdrawal alert needs no later name lookup.
-    assert json.loads(withdrawal.calls[0].request.content) == {"attendeeId": ATTENDEE_ID, "notificationContext": {"eventName": "Community Workshop"}}
+    assert json.loads(withdrawal.calls[0].request.content) == {"notificationContext": {"eventName": "Community Workshop"}}
+    # SCRUM-8: the attendee is identified downstream by their forwarded token, not an ID.
+    for call in (lookup.calls[0], withdrawal.calls[0]):
+        assert call.request.headers["Authorization"] == client.environ_base["HTTP_AUTHORIZATION"]
+    assert not lookup.calls[0].request.url.params
 
 
 # AC4 -------------------------------------------------------------------------
@@ -86,7 +90,7 @@ def test_ac4_expired_organiser_deadline_refuses_withdrawal_and_contacts_organise
 
         response = client.patch(
             f"/registrations/{REGISTRATION_ID}/withdraw",
-            json={"attendeeId": ATTENDEE_ID},
+            json={},
         )
 
     assert response.status_code == 409
@@ -107,7 +111,7 @@ def test_ac4_event_start_is_the_deadline_when_organiser_did_not_set_one(client):
 
         response = client.patch(
             f"/registrations/{REGISTRATION_ID}/withdraw",
-            json={"attendeeId": ATTENDEE_ID},
+            json={},
         )
 
     assert response.status_code == 409
@@ -126,7 +130,7 @@ def test_ac2_registration_service_failure_does_not_report_success(client):
 
         response = client.patch(
             f"/registrations/{REGISTRATION_ID}/withdraw",
-            json={"attendeeId": ATTENDEE_ID},
+            json={},
         )
 
     assert response.status_code == 502

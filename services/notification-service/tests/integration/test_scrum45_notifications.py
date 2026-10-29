@@ -23,15 +23,14 @@ import psycopg2
 import pytest
 from app.consumer import process
 from tests.integration.factories import ORGANISER, OTHER, EVENT, make_parents, make_envelope
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 
 def identity(user=ORGANISER):
-    """Build demo organiser headers for recipient-scoping checks; these are not authenticated
-    credentials.
-    """
-    return {"X-Dev-User-Id": user, "X-Dev-Role": "Event Organiser"}
+    """Sign in as an organiser (a token signed with the test key, SCRUM-8) for recipient-scoping checks."""
+    return bearer(user, "Event Organiser")
 
 
 class RecordingChannel:

@@ -59,6 +59,8 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from signing import TokenIssuer
+
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (
     ROOT / "database/supabase/migrations/20261016000000_booking_closure_rejection.sql"
@@ -98,6 +100,7 @@ class Harness:
         self.processes, self.logs = [], []
         self.created = False
         self.connection = None
+        self.issuer = TokenIssuer()  # SCRUM-8: services verify tokens against this local JWKS.
         self.ports = {}
         self.report = dict(
             marker=self.name,
@@ -247,8 +250,7 @@ class Harness:
             "PYTHON_DOTENV_DISABLED": "1",
             "FLASK_SKIP_DOTENV": "1",
             "FLASK_DEBUG": "0",
-            "CALENDAR_DEV_MODE": "true",
-            "VENUE_CLOSURE_DEV_MODE": "true",
+            "SUPABASE_URL": self.issuer.url,
             "CLOSURE_CONFIRMATION_KEY": uuid4().hex + uuid4().hex,
             **{
                 s.upper().replace("-", "_") + "_SERVICE_URL": f"http://127.0.0.1:{p}"
@@ -303,9 +305,14 @@ class Harness:
 
     @property
     def headers(self):
-        return {"X-Dev-User-Id": self.ids["staff"], "X-Dev-Role": "Venue Staff"}
+        return self.issuer.bearer(self.ids["staff"], "Venue Staff")
+
+    @property
+    def coordinator_headers(self):
+        return self.issuer.bearer(self.ids["coordinator"], "Event Coordinator")
 
     def teardown(self):
+        self.issuer.close()
         if self.connection:
             try:
                 self.report["reconciled"] = self.snapshot()
@@ -442,7 +449,8 @@ def cases(h):
         h.url(
             "venue-booking",
             f'/events/{h.ids["event"]}/booking-requests?coordinatorId={h.ids["coordinator"]}',
-        )
+        ),
+        headers=h.coordinator_headers,
     )
     details = {r["id"]: r for r in detail.get("bookings", [])}
     h.check(
@@ -480,7 +488,7 @@ def cases(h):
                 status, result = http(
                     h.url(service, prefix + bid + action),
                     mutation,
-                    headers=h.headers,
+                    headers=h.headers if action in ("/approve", "/reject") else h.coordinator_headers,
                     method="PATCH",
                 )
                 # SCRUM-47: the composite's own "already decided" guard can
@@ -497,7 +505,7 @@ def cases(h):
                     response=result,
                 )
     before = h.snapshot()
-    status, result = http(h.url("venue-booking", "/booking-requests"), mutation)
+    status, result = http(h.url("venue-booking", "/booking-requests"), mutation, h.coordinator_headers)
     after = h.snapshot()
     h.check(
         "replacement_uses_existing_create_flow",
@@ -590,7 +598,7 @@ def cases(h):
         (
             "different_staff",
             body | confirmation,
-            h.headers | {"X-Dev-User-Id": h.ids["coordinator"]},
+            h.issuer.bearer(h.ids["coordinator"], "Venue Staff"),
             409,
         ),
         (
@@ -602,7 +610,7 @@ def cases(h):
         (
             "wrong_role",
             body | confirmation,
-            h.headers | {"X-Dev-Role": "Event Coordinator"},
+            h.issuer.bearer(h.ids["staff"], "Event Coordinator"),
             403,
         ),
     ]:
@@ -810,7 +818,7 @@ def cases(h):
         )
         writer = threading.Thread(
             target=lambda: booking_results.append(
-                http(h.url("venue-booking", "/booking-requests"), racing_payload)
+                http(h.url("venue-booking", "/booking-requests"), racing_payload, h.coordinator_headers)
             )
         )
         writer.start()
@@ -913,7 +921,7 @@ def cases(h):
         {"dateFrom": h.stamp(109).isoformat(), "dateTo": h.stamp(113).isoformat()}
     )
     status, window = http(
-        h.url("venue-availability", "/venue-bookings/window?") + query
+        h.url("venue-availability", "/venue-bookings/window?") + query, headers=h.headers
     )
     h.check(
         "existing_window_keeps_closure_and_excludes_rejected",

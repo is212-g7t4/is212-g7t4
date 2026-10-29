@@ -164,7 +164,7 @@ say so**. Don't work around it.
 | Flask app, routes, business logic | **Real**, built with `create_app(<test config>)` where the service accepts config | It's the thing under test. |
 | Data-access code (raw `psycopg2`) | **Real** | The SQL is part of the boundary being tested. |
 | Postgres | **Real engine, throwaway container** | SQLite can't run our Postgres SQL, and the live Supabase project needs secrets and shared state. |
-| Caller identity and role checks | **Interim (now):** the service's real `X-Dev-*` header checks, with its dev-mode flag on, via a `dev_identity(user_id, role)` helper. **Target (after the auth/RBAC work lands):** real JWT verification, fed a token minted in the test with a test key. Where a service has no `X-Dev-*` headers and takes identity from body or query IDs (see the *Identity today* column in §12.1), send those IDs exactly as a real caller would; no helper is needed. Never patch the check itself. | Role checks are acceptance criteria too, and patching them hides bugs. No service verifies a JWT yet (§12.2). |
+| Caller identity and role checks | **Real** token verification (SCRUM-8), fed a token minted in the test with a test key: `bearer(user_id, role)` / `signed_in(client, ...)` from `tests/unit/factories.py`, with the autouse `trusted_test_signing_key` fixture in `tests/conftest.py` swapping only the JWKS key lookup for the test key. Composites: assert the caller's `Authorization` header reaches each stub. Never patch the check itself. | Role checks are acceptance criteria too, and patching them hides bugs. Only Supabase's own sign-in is out of reach (§12.2). |
 | Other ConnectSphere services (HTTP) | **Stub at the HTTP layer with `respx`** | Single-service scope; the other service has its own tests. |
 | RabbitMQ publisher | **Fake** that records published messages | Keeps the broker out of the test while still letting you assert on the message. |
 | Email/SMS, any third-party API | **Fake** | Cost, rate limits, nondeterminism. |
@@ -516,32 +516,31 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 
 | Service | Kind | How the DB URL reaches the app | Outbound HTTP (where base URLs are set) | Identity today | RabbitMQ |
 |---|---|---|---|---|---|
-| user | atomic | `create_app(config)["DATABASE_URL"]` | none | `?role=` filter only; no check | none |
-| event | atomic | `create_app(config)` | none | body/query `coordinatorId`, `?viewerRole=`; `X-Internal-Token` checked against `app.config["INTERNAL_SERVICE_TOKEN"]` | none |
-| venue | atomic | `create_app(config)` | none | `X-Dev-*` headers on `PUT /venues/<id>/safety-info` only (Venue Staff, since SCRUM-167); no identity check on the other routes | none |
-| venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | `X-Dev-*` gated by `CALENDAR_DEV_MODE` / `VENUE_CLOSURE_DEV_MODE`; body `requestedBy`; `X-Internal-Service-Token` (config); outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
-| equipment | atomic | `create_app(config)` | none | `X-Dev-User-Id` / `X-Dev-Role` | none |
-| equipment-request | atomic | `create_app(config)` | none | `X-Dev-*` headers | none (not tier-ready, see Transition) |
-| registration | atomic | `create_app(config)` | none | body `attendeeId` | none |
-| safety-check-record | atomic | `create_app(config)` | none | body IDs | none |
-| notification | atomic | **env only**: `create_app()` takes no config | none | `NOTIFICATION_DEV_MODE` gate | consumer (pika) |
-| attendee-registration | composite | n/a | Event, Registration, User (`app/clients.py`, frozen at import) | body `attendeeId` | none |
-| coordinator-assignment | composite | n/a | User, Event (`app/clients.py`, frozen at import) | role looked up via User Service | none |
-| equipment-reservation | composite | n/a | Equipment Request, Event, Equipment, Safety Check Record (`app/clients.py`, **read per call**) | `X-Dev-*` headers | none (not tier-ready, see Transition) |
-| event-workflow | composite | n/a | Event, User, Venue Availability, Venue, Equipment Request, Equipment (`app/clients.py`, frozen at import, plus `INTERNAL_SERVICE_TOKEN`) | role via User Service | none |
-| safety-check | composite | n/a | Event, Venue Availability, Equipment Request, Safety Check Record, User, Venue, Equipment (`app/clients.py`, frozen at import; uses a `ThreadPoolExecutor`) | body/query IDs; role via User Service | none |
-| venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | `X-Dev-*` for Venue Staff review (`GET /booking-requests/<id>`, `/review`, and since SCRUM-29 the legacy `/approve` and `/reject`) | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
+| user | atomic | `create_app(config)["DATABASE_URL"]` | none | Supabase token; `POST /auth/login` is public | none |
+| event | atomic | `create_app(config)` | none | Supabase token (`?viewerRole=` asks for a wider view, judged on the token's role); `X-Internal-Token` checked against `app.config["INTERNAL_SERVICE_TOKEN"]` | none |
+| venue | atomic | `create_app(config)` | none | Supabase token; Venue Staff role on `PUT /venues/<id>/safety-info` (SCRUM-167) | none |
+| venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | Supabase token (requester/reviewer from it); `X-Internal-Service-Token` (config); outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
+| equipment | atomic | `create_app(config)` | none | Supabase token | none |
+| equipment-request | atomic | `create_app(config)` | none | Supabase token | none (not tier-ready, see Transition) |
+| registration | atomic | `create_app(config)` | none | Supabase token (the attendee) | none |
+| safety-check-record | atomic | `create_app(config)` | none | Supabase token | none |
+| notification | atomic | **env only**: `create_app()` takes no config | none | Supabase token (the inbox owner) | consumer (pika) |
+| attendee-registration | composite | n/a | Event, Registration, User (`app/clients.py`, frozen at import) | Supabase token, forwarded | none |
+| coordinator-assignment | composite | n/a | User, Event (`app/clients.py`, frozen at import) | Supabase token, forwarded; Lead role looked up via User Service | none |
+| equipment-reservation | composite | n/a | Equipment Request, Event, Equipment, Safety Check Record (`app/clients.py`, **read per call**) | Supabase token, forwarded | none (not tier-ready, see Transition) |
+| event-workflow | composite | n/a | Event, User, Venue Availability, Venue, Equipment Request, Equipment (`app/clients.py`, frozen at import, plus `INTERNAL_SERVICE_TOKEN`) | Supabase token, forwarded; role via User Service | none |
+| safety-check | composite | n/a | Event, Venue Availability, Equipment Request, Safety Check Record, User, Venue, Equipment (`app/clients.py`, frozen at import; uses a `ThreadPoolExecutor`) | Supabase token, forwarded; role via User Service | none |
+| venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | Supabase token, forwarded; Venue Staff role for review (`GET /booking-requests/<id>`, `/review`, and since SCRUM-29 the legacy `/approve` and `/reject`) | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
 
 ### 12.2 Known gaps
 
 Each gap below limits what this tier can do today. Don't work around them by
 changing app code; report them.
 
-- **No service verifies caller identity.** Roles and user IDs are whatever the
-  caller sends (`X-Dev-*` headers, query params, body IDs). Use the interim
-  `dev_identity` approach (§3) until the auth/RBAC work lands. *Why it
-  matters:* these tests prove the role checks *given* an asserted identity,
-  not authentication.
+- **Supabase sign-in itself is out of reach.** Every service verifies the
+  caller's Supabase token (SCRUM-8), and tests mint that token with a test key
+  (§3). *Why it matters:* these tests prove verification and the role checks
+  for a signed-in user, not that Supabase issues the token.
 - **One shared `public` schema with cross-service foreign keys**, not one
   schema per atomic (e.g. `VenueBooking → Event/Venue/User`,
   `SafetyCheck → Event/User`). This is why §4 loads the full chain and inserts

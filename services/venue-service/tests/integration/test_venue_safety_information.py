@@ -3,11 +3,11 @@
 Story:      As a Venue Staff member, I want to record a venue's emergency access details
             and known operational restrictions, so that the Safety Officer can take them
             into account when reviewing events at that venue.
-Real:       Flask app and routes, the X-Dev-* role check, validation, app/models.py SQL,
+Real:       Flask app and routes, token verification and the role check, validation, app/models.py SQL,
             postgres:17.6 with the full migration chain (including the User FK on
             safety_info_updated_by).
 Doubled:    nothing (Venue Service makes no outbound calls).
-Not proven: authentication (identity is whatever the X-Dev-* headers say; guide §12.2);
+Not proven: Supabase sign-in itself (the editor is a token signed with a test key, SCRUM-8);
             that the Safety Officer sees the values (Safety Check Service's tests); the UI
             parts of AC1, AC2 and AC4 (frontend Vitest and Playwright).
 
@@ -102,8 +102,8 @@ def test_ac1_saved_details_are_returned_on_the_details_and_catalogue_reads(clien
     venue_id = make_venue(db)
     assert put_safety(client, venue_id).status_code == 200
 
-    details = client.get(f"/venues/{venue_id}").json["venue"]
-    catalogue = client.get("/venues").json["venues"]
+    details = client.get(f"/venues/{venue_id}", headers=staff_headers()).json["venue"]
+    catalogue = client.get("/venues", headers=staff_headers()).json["venues"]
 
     assert details["emergencyAccessDetails"] == EMERGENCY
     assert details["knownRestrictions"] == RESTRICTIONS
@@ -145,7 +145,7 @@ def test_ac2_venue_without_safety_information_reads_as_null(client, db):
     """Boundary: nothing recorded reads as null (the UI shows "Not provided"), not "" or missing."""
     venue_id = make_venue(db)
 
-    venue = client.get(f"/venues/{venue_id}").json["venue"]
+    venue = client.get(f"/venues/{venue_id}", headers=staff_headers()).json["venue"]
 
     for key in ("emergencyAccessDetails", "knownRestrictions", "safetyInfoUpdatedBy", "safetyInfoUpdatedAt"):
         assert key in venue
@@ -278,6 +278,7 @@ def test_ac4_profile_edit_cannot_change_safety_information(client, db):
 
     response = client.put(
         f"/venues/{venue_id}",
+        headers=staff_headers(user_id=OTHER_STAFF_ID),
         json={
             **PROFILE,
             "emergencyAccessDetails": "Smuggled exits",

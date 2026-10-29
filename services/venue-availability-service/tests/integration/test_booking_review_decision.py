@@ -7,7 +7,7 @@ Real:       Flask app, PATCH /venue-bookings/<id>/approve|reject, PATCH /venue-b
             GET /events/<id>/venue-bookings, app/models.py SQL (advisory lock, FOR UPDATE,
             buffered conflict query), postgres:17.6 with the full migration chain.
 Doubled:    nothing (Venue Availability makes no outbound calls).
-Not proven: who the reviewer is (reviewedBy is whatever is sent); the Venue Staff role and
+Not proven: Supabase sign-in itself (the reviewer is a token signed with a test key, SCRUM-8); the Venue Staff role and
             event-status gates, which run in Venue Booking Service.
 
 AC1  Given a venue booking request is pending review, when Venue Staff open the request, then
@@ -66,6 +66,7 @@ from tests.integration.factories import (
     make_user,
     make_venue,
 )
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -83,8 +84,8 @@ def decide(client, booking_id, action, setup=0, turnaround=0, **extra):
     """What Venue Booking Service sends (services/venue-booking-service/app/clients.py)."""
     return client.patch(
         f"/venue-bookings/{booking_id}/{action}",
+        headers=bearer(STAFF_ID, "Venue Staff"),
         json={
-            "reviewedBy": STAFF_ID,
             "setupTimeMinutes": setup,
             "turnaroundTimeMinutes": turnaround,
             **extra,
