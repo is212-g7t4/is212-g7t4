@@ -15,9 +15,13 @@ interface ApiRegistration {
   attendee_organization: string
 }
 
+// While a safety re-check is open, the composite sends the last approved venue
+// name with the approved times (SCRUM-153 AC4/AC5); the live venue may differ.
+type ApiEvent = SubmittedEvent & { attendeeVenueName?: string | null }
+
 interface ApiRegistrationItem {
   registration: ApiRegistration
-  event: SubmittedEvent
+  event: ApiEvent
 }
 
 export interface AttendeeRegistration {
@@ -31,6 +35,7 @@ export interface AttendeeRegistration {
   attendeeOrganization: string
   event: SubmittedEvent
   venue: Venue | null
+  approvedVenueName: string | null
 }
 
 export async function loadAttendeeRegistrations(attendeeId: string): Promise<AttendeeRegistration[]> {
@@ -41,7 +46,7 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
 
   const items = body.registrations as ApiRegistrationItem[]
   if (items.length === 0) return []
-  const eventIds = Array.from(new Set(items.map(({ event }) => event.id)))
+  const eventIds = Array.from(new Set(items.filter(({ event }) => !event.attendeeVenueName).map(({ event }) => event.id)))
   const venueIdByEvent = new Map(await Promise.all(
     eventIds.map(async (eventId) => [eventId, await fetchApprovedVenueId(eventId)] as const),
   ))
@@ -50,7 +55,7 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
     venueIds.map(async (venueId) => [venueId, await fetchVenue(venueId)] as const),
   ))
 
-  return items.map(({ registration, event }) => ({
+  return items.map(({ registration, event: { attendeeVenueName, ...event } }) => ({
     id: registration.registration_id,
     attendeeId: registration.attendee_id,
     registrationDate: registration.registration_date,
@@ -60,7 +65,8 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
     attendeeEmail: registration.attendee_email,
     attendeeOrganization: registration.attendee_organization,
     event,
-    venue: venues.get(venueIdByEvent.get(event.id) ?? '') ?? null,
+    venue: attendeeVenueName ? null : venues.get(venueIdByEvent.get(event.id) ?? '') ?? null,
+    approvedVenueName: attendeeVenueName || null,
   }))
 }
 

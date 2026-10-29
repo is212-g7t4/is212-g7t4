@@ -524,6 +524,45 @@ def list_event_summaries(database_url, event_ids):
             return [_summary(row) for row in cursor.fetchall()]
 
 
+def attendee_view(summary, status, history):
+    """What a registered Attendee sees of one event (SCRUM-153 AC4/AC5, SCRUM-150 AC4).
+
+    A high-impact edit or a SCRUM-28 venue change writes the new values straight
+    to the Event row, because the coordinator and Safety Officer must review
+    them. Attendees must not see them until the new safety check passes, so
+    while the event isn't 'Confirmed' the first `attendeeBaseline` recorded
+    since its last approval replaces the live start, end and venue. That keeps
+    the approved details through changes requested, further edits and a
+    cancellation (AC5). The overlay ends by itself when the Safety Officer
+    approves, because `attendee_baseline` stops at the new 'Confirmed' entry;
+    that is the whole of SCRUM-150 AC4, so the safety workflow needs no change.
+    """
+    baseline = attendee_baseline(history) if status != PREPARATION_STATUS else None
+    view = {**summary, "attendeeVenueName": None}
+    if baseline is None:
+        return view
+    for key, target in (("startDateTime", "startTime"), ("endDateTime", "endTime")):
+        if baseline.get(key):
+            view[target] = _local(_aware(baseline[key])).isoformat()
+    view["attendeeVenueName"] = baseline.get("venueName")
+    return view
+
+
+def list_attendee_event_summaries(database_url, event_ids):
+    """`list_event_summaries` as registered Attendees may see it; see `attendee_view`."""
+    with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
+        with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f'SELECT {SUMMARY_COLUMNS}, description FROM public."Event" '
+                f"WHERE event_id = ANY(%s::uuid[]) AND {NOT_DRAFT}",
+                [event_ids],
+            )
+            return [
+                attendee_view(_summary(row), row["status"], unpack_metadata(row["description"])[5])
+                for row in cursor.fetchall()
+            ]
+
+
 def list_overlapping_events(database_url, start, end, statuses, exclude_event_id=None):
     """Events in `statuses` whose window overlaps [start, end): other.start < end AND other.end > start."""
     query = (

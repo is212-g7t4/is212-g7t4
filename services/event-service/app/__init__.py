@@ -54,6 +54,7 @@ from app.models import (
     get_change_request,
     get_organiser_event,
     list_active_events,
+    list_attendee_event_summaries,
     list_event_summaries,
     list_events,
     list_organiser_drafts,
@@ -469,9 +470,7 @@ def create_app(config=None):
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         return jsonify(events=list_confirmed_events(app.config["DATABASE_URL"]))
 
-    @app.get("/events/summaries")
-    def event_summaries():
-        # Name/status lookup for other screens (e.g. equipment review); no event body or ownership check.
+    def _summaries(lookup):
         raw_ids = [part for part in request.args.get("ids", "").split(",") if part]
         if not raw_ids or len(raw_ids) > 100:
             return jsonify(message="Provide between 1 and 100 comma-separated event IDs."), 400
@@ -481,7 +480,18 @@ def create_app(config=None):
             return jsonify(message="Every event ID must be a valid UUID."), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
-        return jsonify(events=list_event_summaries(app.config["DATABASE_URL"], ids))
+        return jsonify(events=lookup(app.config["DATABASE_URL"], ids))
+
+    @app.get("/events/summaries")
+    def event_summaries():
+        # Name/status lookup for other screens (e.g. equipment review); no event body or ownership check.
+        return _summaries(list_event_summaries)
+
+    @app.get("/events/attendee-summaries")
+    def attendee_event_summaries():
+        # The same lookup for registered Attendees: while a safety re-check is
+        # open they see the last approved times and venue (SCRUM-153 AC4/AC5).
+        return _summaries(list_attendee_event_summaries)
 
     @app.get("/events/overlapping")
     def overlapping_events():

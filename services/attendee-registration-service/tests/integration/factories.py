@@ -25,3 +25,18 @@ def event(withdrawal_deadline="2099-03-01T08:00:00+08:00", start="2099-03-01T09:
         "withdrawalDeadline": withdrawal_deadline,
         "status": "Confirmed",
     }
+
+
+def attendee_summary(status="Pending Safety Check", start="2030-03-01T09:00:00",
+                     end="2030-03-01T17:00:00", venue_name="Hall A"):
+    """GET /events/attendee-summaries item, shaped like
+    services/event-service/app/models.py::list_attendee_event_summaries."""
+    return {
+        "id": EVENT_ID,
+        "eventName": "Community Workshop",
+        "status": status,
+        "coordinatorId": None,
+        "startTime": start,
+        "endTime": end,
+        "attendeeVenueName": venue_name,
+    }

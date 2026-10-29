@@ -25,7 +25,7 @@ const registration: AttendeeRegistration = {
   venue: {
     id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Grand Hall', location: 'Level 1', capacity: 100,
     facilities: ['Projector'], accessibility: 'Step-free access', supportedLayouts: [], status: 'Available',
-  },
+  },  approvedVenueName: null,
 }
 
 beforeEach(() => {
@@ -54,6 +54,26 @@ test('attendee views registration summary and full details', async () => {
   expect(screen.getByRole('heading', { name: 'Event details' })).toBeInTheDocument()
   expect(screen.getByText('Grand Hall')).toBeInTheDocument()
   expect(screen.getByText('A full practical workshop description.')).toBeInTheDocument()
+})
+
+// SCRUM-153 AC4 / SCRUM-150 AC4
+test('shows the approved schedule and venue name while a change awaits safety approval', async () => {
+  vi.mocked(loadAttendeeRegistrations).mockResolvedValue([{
+    ...registration, venue: null, approvedVenueName: 'Hall A',
+    event: { ...registration.event, status: 'Pending Safety Check',
+      preferredStartDate: '2030-03-01T09:00:00', preferredEndDate: '2030-03-01T17:00:00' },
+  }])
+  render(<AttendeeRegistrationsPage role="Attendee" attendeeId={attendeeId} />)
+  const card = await screen.findByRole('button', { name: /Community Workshop/ })
+  expect(card).toHaveTextContent('Fri, 1 Mar · 9:00 am – 5:00 pm')
+  // The venue line is the name alone: no " · location" for an approved-venue snapshot.
+  expect(card.querySelector('.event-row-venue')).toHaveTextContent(/^Hall A$/)
+
+  fireEvent.click(card)
+  const venueRow = screen.getByText('Venue', { selector: 'dt' }).parentElement
+  expect(venueRow).toHaveTextContent('Hall A')
+  expect(screen.queryByText('Location', { selector: 'dt' })).not.toBeInTheDocument()
+  expect(screen.queryByText(/pending/i)).not.toBeInTheDocument()
 })
 
 test('attendee with no registrations sees the required empty state', async () => {
