@@ -31,11 +31,15 @@ def get_confirmed_event(event_id: str):
 
 
 def get_historical_events(event_ids):
-    """Public summaries preserve event history without exposing internal event detail routes."""
+    """Public summaries preserve event history without exposing internal event detail routes.
+
+    The attendee-facing summaries show the last approved times and venue
+    (`attendeeVenueName`) while a safety re-check is open (SCRUM-153 AC4/AC5).
+    """
     events = []
     ids = sorted(set(event_ids))
     for offset in range(0, len(ids), 100):
-        response = httpx.get(f"{EVENT_SERVICE_URL}/events/summaries", params={"ids": ",".join(ids[offset:offset+100])}, timeout=5)
+        response = httpx.get(f"{EVENT_SERVICE_URL}/events/attendee-summaries", params={"ids": ",".join(ids[offset:offset+100])}, timeout=5)
         response.raise_for_status()
         for item in response.json()["events"]:
             events.append({**item, "preferredStartDate": item["startTime"], "preferredEndDate": item["endTime"],

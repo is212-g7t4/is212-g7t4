@@ -48,6 +48,47 @@ test('loads attendee-scoped registrations with event and venue details', async (
   })
 })
 
+// SCRUM-153 AC4 / SCRUM-150 AC4
+test('uses the approved venue name for an event awaiting its safety re-check', async () => {
+  fetcher.mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ registrations: [{ registration: apiRegistration, event: { ...event, attendeeVenueName: 'Hall A' } }] }),
+  } as Response)
+  const [result] = await loadAttendeeRegistrations(attendeeId)
+  expect(fetchApprovedVenueId).not.toHaveBeenCalled()
+  expect(fetchVenue).not.toHaveBeenCalled()
+  expect(result.venue).toBeNull()
+  expect(result.approvedVenueName).toBe('Hall A')
+  expect(result.event).toEqual(event)
+})
+
+test('looks up the live venue when no approved venue name is supplied', async () => {
+  fetcher.mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ registrations: [{ registration: apiRegistration, event: { ...event, attendeeVenueName: null } }] }),
+  } as Response)
+  const [result] = await loadAttendeeRegistrations(attendeeId)
+  expect(fetchApprovedVenueId).toHaveBeenCalledWith(event.id)
+  expect(result.venue).toEqual(venue)
+  expect(result.approvedVenueName).toBeNull()
+})
+
+test('mixes both kinds in one list', async () => {
+  const pending = { ...event, id: '35c9fe40-c44d-4d79-8d5d-de66d40c1678', attendeeVenueName: 'Hall A' }
+  fetcher.mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve({ registrations: [
+      { registration: { ...apiRegistration, registration_id: 'registration-2', event_id: pending.id }, event: pending },
+      { registration: apiRegistration, event },
+    ] }),
+  } as Response)
+  const [awaiting, confirmed] = await loadAttendeeRegistrations(attendeeId)
+  expect(fetchApprovedVenueId).toHaveBeenCalledTimes(1)
+  expect(fetchApprovedVenueId).toHaveBeenCalledWith(event.id)
+  expect(awaiting).toMatchObject({ venue: null, approvedVenueName: 'Hall A' })
+  expect(confirmed).toMatchObject({ venue, approvedVenueName: null })
+})
+
 test('returns an empty list without loading venues', async () => {
   fetcher.mockResolvedValue({
     ok: true,
