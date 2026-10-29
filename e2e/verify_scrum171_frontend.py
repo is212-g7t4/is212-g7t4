@@ -51,6 +51,23 @@ from pathlib import Path
 from urllib.request import urlopen
 from verify_scrum171_postgres import Harness, MIGRATION, ROOT, port, http
 
+ROLES = {'staff': 'Venue Staff', 'coordinator': 'Event Coordinator'}
+
+
+def session(h, who):
+    """SCRUM-8: the app's stored sign-in, with a token from the harness's own issuer."""
+    user = {'id': h.ids[who], 'username': who.title(), 'email': '', 'organization': '', 'role': ROLES[who]}
+    return json.dumps({'accessToken': h.issuer.token(h.ids[who], ROLES[who]), 'expiresAt': 4102444800, 'user': user})
+
+
+def seed(h, who):
+    return f"if (!localStorage.getItem('session')) localStorage.setItem('session', {json.dumps(session(h, who))})"
+
+
+def switch(page, h, who):
+    page.evaluate("value => localStorage.setItem('session', value)", session(h, who))
+    page.reload()
+
 UI = ROOT / 'frontend/event-management-ui'
 
 
@@ -62,7 +79,7 @@ class BrowserHarness(Harness):
         self.services()
         self.ports['user'] = port()
         user = ROOT / 'services/user-service'
-        env = {**os.environ, 'DATABASE_URL': self.dsn, 'PYTHON_DOTENV_DISABLED': '1', 'FLASK_SKIP_DOTENV': '1', 'FLASK_DEBUG': '0', 'FRONTEND_ORIGIN': self.origin}
+        env = {**os.environ, 'DATABASE_URL': self.dsn, 'PYTHON_DOTENV_DISABLED': '1', 'FLASK_SKIP_DOTENV': '1', 'FLASK_DEBUG': '0', 'FRONTEND_ORIGIN': self.origin, 'SUPABASE_URL': self.issuer.url}
         self.spawn([str(user / '.venv/bin/python'), '-m', 'flask', '--app', 'app', 'run', '--host', '127.0.0.1', '--port', str(self.ports['user']), '--no-reload'], user, env, 'user')
         self.wait(self.url('user', '/health'))
         # Every browser API target is explicit. Unused services point at a closed
@@ -117,7 +134,7 @@ def browser_cases(h):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(timezone_id='America/Los_Angeles', viewport={'width': 1440, 'height': 1100})
-        context.add_init_script(f"localStorage.setItem('activeUserId', {json.dumps(h.ids['staff'])})")
+        context.add_init_script(seed(h, 'staff'))
         page = context.new_page()
         requests, errors = [], []
         page.on('request', lambda r: requests.append({'method': r.method, 'url': r.url}))
@@ -213,7 +230,7 @@ def browser_cases(h):
         expect(page.locator('.closure-list').get_by_text('Zero-impact lost response', exact=True)).to_be_visible()
         h.check('lost_response_reconciled_from_real_history', len(h.snapshot()['VenueClosure']) == 3)
         page.screenshot(path=str(h.out / 'desktop-uncertain-reconciled.png'), full_page=True)
-        page.get_by_label('Select active user').select_option(h.ids['coordinator'])
+        switch(page, h, 'coordinator')
         expect(page.get_by_role('region', name='Temporary venue closures')).to_have_count(0)
         h.check('identity_switch_removes_staff_controls', page.get_by_role('region', name='Temporary venue closures').count() == 0)
         context.close()
@@ -221,7 +238,7 @@ def browser_cases(h):
         # A second, mobile browser reads persisted rejection metadata and creates
         # a distinct replacement through the existing Add venue booking form.
         mobile = browser.new_context(timezone_id='America/Los_Angeles', viewport={'width': 390, 'height': 844})
-        mobile.add_init_script(f"if (!localStorage.getItem('activeUserId')) localStorage.setItem('activeUserId', {json.dumps(h.ids['coordinator'])})")
+        mobile.add_init_script(seed(h, 'coordinator'))
         page = mobile.new_page()
         page.on('request', lambda r: requests.append({'method': r.method, 'url': r.url}))
         page.on('pageerror', lambda e: errors.append(str(e)))
@@ -257,7 +274,7 @@ def browser_cases(h):
         expect(page.locator('.venue-booking-item')).to_have_count(len(replacement_after['VenueBooking']))
         page.screenshot(path=str(h.out / 'mobile-replacement.png'), full_page=True)
         # Same mobile viewport also exercises a new zero-impact confirmation.
-        page.get_by_label('Select active user').select_option(h.ids['staff'])
+        switch(page, h, 'staff')
         page.goto(h.origin + '/venues/' + h.ids['venue'])
         fill(60, 62, 'Mobile zero-impact preview')
         expect(page.get_by_text('0 booking requests will be rejected.', exact=True)).to_be_visible()
@@ -300,7 +317,7 @@ def main():
         if args.manual:
             for status in ['Pending', 'Pending Review', 'Approved']:
                 h.booking(status, 10, 12)
-            instructions = {'url': h.origin + '/venues/' + h.ids['venue'], 'eventUrl': h.origin + '/events/' + h.ids['event'], 'staffId': h.ids['staff'], 'coordinatorId': h.ids['coordinator'], 'startSGT': h.stamp(10).strftime('%Y-%m-%dT%H:%M'), 'endSGT': h.stamp(12).strftime('%Y-%m-%dT%H:%M'), 'database': h.name, 'instructions': 'Choose the synthetic staff in Select active user; preview then confirm. Switch to synthetic coordinator and open eventUrl to read rejection details. Press Enter in this terminal to stop and remove only this environment.'}
+            instructions = {'url': h.origin + '/venues/' + h.ids['venue'], 'eventUrl': h.origin + '/events/' + h.ids['event'], 'staffId': h.ids['staff'], 'coordinatorId': h.ids['coordinator'], 'startSGT': h.stamp(10).strftime('%Y-%m-%dT%H:%M'), 'endSGT': h.stamp(12).strftime('%Y-%m-%dT%H:%M'), 'database': h.name, 'staffSession': session(h, 'staff'), 'coordinatorSession': session(h, 'coordinator'), 'instructions': 'Sign in as the synthetic staff by running localStorage.setItem("session", staffSession) in the browser console and reloading; preview then confirm. Do the same with coordinatorSession and open eventUrl to read rejection details. Press Enter in this terminal to stop and remove only this environment.'}
             (h.out / 'manual-instructions.json').write_text(json.dumps(instructions, indent=2))
             print(json.dumps(instructions, indent=2), flush=True)
             h.check('manual_launcher_health', all(http(h.url(s, '/health'))[0] == 200 for s in ['user', 'event', 'venue', 'venue-booking', 'venue-availability']))

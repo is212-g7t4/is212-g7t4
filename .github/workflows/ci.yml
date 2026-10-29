@@ -225,13 +225,13 @@ jobs:
         env:
           SCRUM173_INTEGRATION_EVIDENCE: ${{ env.REPORTS }}/scrum173
         run: |
-          uv run --no-project --no-env-file --with pytest --with psycopg2-binary --with httpx \
+          uv run --no-project --no-env-file --with pytest --with psycopg2-binary --with httpx --with 'pyjwt[crypto]' \
             python -m pytest e2e/test_attendee_notifications.py e2e/test_scrum173_real.py \
             --junitxml="$REPORTS/junit.xml"
       - name: SCRUM-171 venue closure (HTTP + PostgreSQL)
         if: success() || failure()
         run: |
-          uv run --no-project --no-env-file --with psycopg2-binary \
+          uv run --no-project --no-env-file --with psycopg2-binary --with 'pyjwt[crypto]' \
             python e2e/verify_scrum171_postgres.py --output "$REPORTS/scrum171"
       - uses: actions/upload-artifact@v4
         if: always()

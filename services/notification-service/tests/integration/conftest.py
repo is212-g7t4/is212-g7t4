@@ -124,7 +124,6 @@ def empty_tables(database_url):
 def client(database_url, monkeypatch):
     assert_local(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("NOTIFICATION_DEV_MODE", "true")
     app = create_app()
     app.config["TESTING"] = True
     assert app.config["DATABASE_URL"] == database_url

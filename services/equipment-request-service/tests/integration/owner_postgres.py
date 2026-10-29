@@ -9,6 +9,7 @@ from uuid import uuid4
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from app import create_app
+from tests.unit.factories import bearer
 
 ROOT = Path(__file__).resolve().parents[4]
 TOKEN = "disposable-internal-token"
@@ -95,7 +96,7 @@ class OwnerAPI:
         self.client = self.app.test_client()
 
     def identity(self, role="Technical Support", user=None, trusted=True):
-        headers = {"X-Dev-User-Id": user or self.reviewer, "X-Dev-Role": role}
+        headers = bearer(user or self.reviewer, role)
         if trusted:
             headers["X-Internal-Token"] = TOKEN
         return headers

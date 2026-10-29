@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import pytest
 from app.consumer import process
+from tests.unit.factories import bearer
 from tests.integration.factories import (
     ORGANISER, OTHER, make_parents, make_change_envelope, make_envelope, make_notification_coordinator,
 )
@@ -40,7 +41,7 @@ def deliver(client, db, database_url, envelope):
     assert row["payload"] == envelope
     assert str(row["recipient_id"]) == envelope["recipientId"]
     assert row["type"] == envelope["type"]
-    response = client.get("/notifications", headers={"X-Dev-User-Id": envelope["recipientId"], "X-Dev-Role": "Event Organiser"})
+    response = client.get("/notifications", headers=bearer(envelope["recipientId"], "Event Organiser"))
     assert response.status_code == 200
     assert response.json["notifications"][0]["payload"] == envelope
     assert db.execute('SELECT * FROM public."NotificationFailure"') == []
@@ -92,7 +93,7 @@ def test_ac3_event_rejection_keeps_one_inbox_alert_per_recipient_on_replay(clien
     assert len(db.execute('SELECT * FROM public."Notification"')) == 2
     assert db.execute('SELECT * FROM public."NotificationFailure"') == []
     for envelope, role in zip(envelopes, ("Event Organiser", "Event Coordinator")):
-        response = client.get("/notifications", headers={"X-Dev-User-Id": envelope["recipientId"], "X-Dev-Role": role})
+        response = client.get("/notifications", headers=bearer(envelope["recipientId"], role))
         assert response.status_code == 200
         assert [item["payload"] for item in response.json["notifications"]] == [envelope]
 
@@ -118,6 +119,6 @@ def test_ac3_cancellation_keeps_two_recipient_records(client, db, database_url):
     assert acknowledged == [0, 1]
     assert len(db.execute('SELECT * FROM public."Notification"')) == 2
     for envelope in envelopes:
-        response = client.get("/notifications", headers={"X-Dev-User-Id": envelope["recipientId"], "X-Dev-Role": "Event Organiser"})
+        response = client.get("/notifications", headers=bearer(envelope["recipientId"], "Event Organiser"))
         assert response.status_code == 200
         assert [item["payload"] for item in response.json["notifications"]] == [envelope]

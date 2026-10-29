@@ -27,7 +27,6 @@ from httpx import Response
 import app.clients as service_clients
 from tests.integration.factories import (
     BOOKING_ID,
-    COORDINATOR_ID,
     EVENT_ID,
     VENUE_ID,
     booking,
@@ -41,7 +40,6 @@ WITHDRAWN_ID = "77777777-7777-4777-8777-777777777777"
 EDIT = {
     "eventId": EVENT_ID,
     "venueId": VENUE_ID,
-    "coordinatorId": COORDINATOR_ID,
     "requestedStartTime": "2030-03-01T14:00",
     "requestedEndTime": "2030-03-01T16:00",
     "requiredCapacity": 120,
@@ -53,7 +51,6 @@ REASON = "A venue booking (Grand Ballroom) was edited after safety approval."
 def stub_event(router, status):
     return router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-        params={"coordinatorId": COORDINATOR_ID},
     ).mock(return_value=Response(200, json=event(status=status)))
 
 
@@ -96,8 +93,10 @@ def test_confirmed_edit_withdraws_the_approval_then_updates_the_booking(client):
         f"/venue-bookings/{BOOKING_ID}",
     ]
     assert json.loads(withdraw.calls.last.request.content) == {
-        "eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID, "bookingId": BOOKING_ID, "reason": REASON,
+        "eventId": EVENT_ID, "bookingId": BOOKING_ID, "reason": REASON,
     }
+    # SCRUM-8: Safety Check Service learns the coordinator from the forwarded token.
+    assert withdraw.calls.last.request.headers["Authorization"] == client.environ_base["HTTP_AUTHORIZATION"]
     assert json.loads(update.calls.last.request.content) == {
         "eventId": EVENT_ID,
         "venueId": VENUE_ID,
@@ -133,13 +132,13 @@ def test_conflicting_confirmed_edit_restores_the_approval_once(client):
     assert response.json["code"] == "VENUE_UNAVAILABLE"
     assert restore.call_count == 1
     assert json.loads(restore.calls.last.request.content) == {
-        "eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID, "withdrawnSafetyCheckId": WITHDRAWN_ID,
+        "eventId": EVENT_ID, "withdrawnSafetyCheckId": WITHDRAWN_ID,
     }
 
 
 @pytest.mark.parametrize("path, body", [
     (f"/booking-requests/{BOOKING_ID}", EDIT),
-    (f"/booking-requests/{BOOKING_ID}/cancel", {"eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID}),
+    (f"/booking-requests/{BOOKING_ID}/cancel", {"eventId": EVENT_ID}),
 ], ids=["edit", "cancel"])
 def test_pending_safety_check_event_refuses_changes_with_only_the_event_read(client, path, body):
     """Conflict: only Event Service is registered, so any later call would fail the test."""
