@@ -1,4 +1,5 @@
 import type { SubmittedEvent } from './submission'
+import { authFetch } from '../auth/session'
 
 // SCRUM-20: editing an event's details. Calls Event Workflow Service (the
 // composite), which validates a high-impact change against the event's venue
@@ -170,7 +171,7 @@ export async function updateEventDetails(
   coordinatorId: string,
   changes: EventChanges,
 ): Promise<SubmittedEvent> {
-  const response = await fetch(`${serviceUrl()}/events/${eventId}/details`, {
+  const response = await authFetch(`${serviceUrl()}/events/${eventId}/details`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ coordinatorId, changes }),

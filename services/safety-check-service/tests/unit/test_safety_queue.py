@@ -18,9 +18,10 @@ tests exercise the orchestration and the error mapping, not HTTP
 import logging
 
 import pytest
+from flask import g
 
 from app import clients, create_app
-from tests.unit.factories import OFFICER_ID, booking, record, user
+from tests.unit.factories import OFFICER_ID, booking, record, user, signed_in
 
 EVENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 EVENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -65,7 +66,8 @@ class Downstream:
         self._maybe_fail("get_user")
         return self.user
 
-    def list_events_by_status(self, status, viewer_id, viewer_role):
+    def list_events_by_status(self, status, viewer_role):
+        viewer_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("list_events", status, viewer_id, viewer_role))
         self._maybe_fail("list_events")
         return self.events
@@ -105,7 +107,7 @@ def downstream(monkeypatch):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def queue(client, safety_officer_id=OFFICER_ID):
@@ -365,18 +367,12 @@ def test_event_with_no_open_round_is_left_out_and_logged(client, downstream, cap
 # --- Who may see it ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("safety_officer_id", ["", "not-a-uuid"])
-def test_bad_officer_id_is_rejected(safety_officer_id, client, downstream):
-    response = queue(client, safety_officer_id)
+def test_a_signed_in_officer_is_required(client, downstream):
+    """SCRUM-8: without a token there is no officer to check."""
+    response = client.application.test_client().get("/safety-checks/queue")
 
-    assert response.status_code == 400
+    assert response.status_code == 401
     assert downstream.calls == []
-
-
-def test_missing_officer_id_is_rejected(client, downstream):
-    response = client.get("/safety-checks/queue")
-
-    assert response.status_code == 400
 
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Venue Staff", "Event Organiser"])

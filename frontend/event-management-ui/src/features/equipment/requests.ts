@@ -1,6 +1,6 @@
-import type { User } from '../../types'
 import { eventApi } from '../event/submission'
 import type { SubmittedEvent } from '../event/submission'
+import { authFetch } from '../auth/session'
 
 export const REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected'] as const
 export type EquipmentRequestStatus = (typeof REQUEST_STATUSES)[number]
@@ -44,21 +44,19 @@ export type ReviewedRequest = Omit<EquipmentRequest, 'equipment' | 'availability
 // Equipment Reservation Service decides availability, so the page talks only to it.
 const serviceUrl = () => import.meta.env.VITE_EQUIPMENT_RESERVATION_SERVICE_URL || 'http://localhost:5010'
 
-/** DEV headers identify the switcher user; they are spoofable until real auth lands. */
-const devHeaders = (user: Pick<User, 'id' | 'role'>) => ({ 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role })
 
-export async function fetchEventReservations(user: Pick<User, 'id' | 'role'>, status?: EquipmentRequestStatus): Promise<EventReservation[]> {
+export async function fetchEventReservations(status?: EquipmentRequestStatus): Promise<EventReservation[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : ''
-  const response = await fetch(`${serviceUrl()}/equipment-reservations${query}`, { headers: devHeaders(user) })
+  const response = await authFetch(`${serviceUrl()}/equipment-reservations${query}`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load equipment requests.')
   return body.events as EventReservation[]
 }
 
-export async function reviewEquipmentRequest(id: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>, rejectionReason?: string): Promise<ReviewedRequest> {
-  const response = await fetch(`${serviceUrl()}/equipment-reservations/requests/${encodeURIComponent(id)}`, {
+export async function reviewEquipmentRequest(id: string, status: 'Approved' | 'Rejected', rejectionReason?: string): Promise<ReviewedRequest> {
+  const response = await authFetch(`${serviceUrl()}/equipment-reservations/requests/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...devHeaders(user) },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, ...(status === 'Rejected' ? { rejectionReason } : {}) }),
   })
   const body = await response.json().catch(() => ({}))
@@ -66,10 +64,10 @@ export async function reviewEquipmentRequest(id: string, status: 'Approved' | 'R
   return body.request as ReviewedRequest
 }
 
-export async function reviewAllEventEquipmentRequests(eventId: string, status: 'Approved' | 'Rejected', user: Pick<User, 'id' | 'role'>, rejectionReason?: string): Promise<ReviewedRequest[]> {
-  const response = await fetch(`${serviceUrl()}/equipment-reservations/events/${encodeURIComponent(eventId)}`, {
+export async function reviewAllEventEquipmentRequests(eventId: string, status: 'Approved' | 'Rejected', rejectionReason?: string): Promise<ReviewedRequest[]> {
+  const response = await authFetch(`${serviceUrl()}/equipment-reservations/events/${encodeURIComponent(eventId)}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...devHeaders(user) },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, ...(status === 'Rejected' ? { rejectionReason } : {}) }),
   })
   const body = await response.json().catch(() => ({}))
@@ -89,10 +87,10 @@ export async function fetchRequestableEvents(coordinatorId: string): Promise<Sub
   return (body.events as SubmittedEvent[]).filter((event) => (REQUESTABLE_EVENT_STATUSES as readonly string[]).includes(event.status))
 }
 
-export async function createEquipmentRequests(eventId: string, items: NewEquipmentRequestItem[], user: Pick<User, 'id' | 'role'>): Promise<ReviewedRequest[]> {
-  const response = await fetch(`${serviceUrl()}/equipment-reservations/events/${encodeURIComponent(eventId)}/requests`, {
+export async function createEquipmentRequests(eventId: string, items: NewEquipmentRequestItem[]): Promise<ReviewedRequest[]> {
+  const response = await authFetch(`${serviceUrl()}/equipment-reservations/events/${encodeURIComponent(eventId)}/requests`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...devHeaders(user) },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items }),
   })
   const body = await response.json().catch(() => ({}))

@@ -38,7 +38,8 @@ class NotificationComposeConfiguration(unittest.TestCase):
                          'INTERNAL_SERVICE_TOKEN=stale-service-token\n')
         self.settings = {'DATABASE_URL': DATABASE, 'INTERNAL_SERVICE_TOKEN': TOKEN,
                          'MONGODB_URL': 'mongodb://unrelated.invalid',
-                         'SUPABASE_ANON_KEY': 'unrelated-synthetic-setting'}
+                         'SUPABASE_ANON_KEY': 'unrelated-synthetic-setting',
+                         'SUPABASE_URL': 'https://fixture.supabase.invalid'}
 
     def render(self, success=True):
         (self.root / '.env').write_text(''.join(f'{k}={v}\n' for k,v in self.settings.items()))
@@ -104,13 +105,6 @@ class NotificationComposeConfiguration(unittest.TestCase):
                 else:
                     self.settings['INTERNAL_SERVICE_TOKEN']=value
                 self.render(success=False)
-
-    def test_dev_flags_default_off_and_can_be_enabled(self):
-        services = self.render()
-        self.assertEqual(services['notification-service']['environment']['NOTIFICATION_DEV_MODE'],'false')
-        self.settings['NOTIFICATION_DEV_MODE']='true'
-        services = self.render()
-        self.assertEqual(services['notification-service']['environment']['NOTIFICATION_DEV_MODE'],'true')
 
     def test_broker_and_clients_share_root_credentials(self):
         self.settings.update(RABBITMQ_USER='fixture',RABBITMQ_PASSWORD='synthetic-local-value')

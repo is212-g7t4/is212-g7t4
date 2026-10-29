@@ -22,12 +22,13 @@ import psycopg2
 import pytest
 
 from app import create_app
+from tests.unit.factories import bearer
 
 EVENT, MIC, TABLE, ACTOR, COORDINATOR, TSS1, TSS2, R1, R2, SOURCE, LEASE = [
     f"10000000-0000-4000-8000-{i:012d}" for i in range(1, 12)]
 INTERNAL = {"X-Internal-Token": "synthetic"}
-STAFF = {**INTERNAL, "X-Dev-User-Id": ACTOR, "X-Dev-Role": "Technical Support"}
-SUBMITTER = {**INTERNAL, "X-Dev-User-Id": COORDINATOR, "X-Dev-Role": "Event Coordinator"}
+STAFF = {**INTERNAL, **bearer(ACTOR, "Technical Support")}
+SUBMITTER = {**INTERNAL, **bearer(COORDINATOR, "Event Coordinator")}
 
 
 def request_row(identifier=R1, equipment=MIC, quantity=5, status="Approved"):
@@ -429,7 +430,7 @@ def test_safety_reset_to_pending_does_not_enqueue_an_approval_or_rejection(bound
     """
     boundary.cursor.fetchall.side_effect = [[request_row()], [request_row(status="Pending")]]
     response = boundary.client.post(f"/events/{EVENT}/equipment-requests/safety-reset",
-        headers={"X-Internal-Service-Token": "synthetic"}, json={"requestIds": [R1]})
+        headers={**bearer(ACTOR, "Safety Officer"), "X-Internal-Service-Token": "synthetic"}, json={"requestIds": [R1]})
     assert response.status_code == 200
     assert response.json["requests"][0]["status"] == "Pending"
     assert intents(boundary) == []

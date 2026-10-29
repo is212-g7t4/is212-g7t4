@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 from app import create_app
 from app.models import RECORD_STATUSES
-from tests.unit.factories import COORDINATOR_ID, EVENT_ID, RECORD_ID, record_row
+from tests.unit.factories import COORDINATOR_ID, EVENT_ID, RECORD_ID, record_row, signed_in
 
 
 @pytest.fixture
@@ -27,17 +27,17 @@ def setup(monkeypatch):
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client(), COORDINATOR_ID), connection, cursor
 
 
 @pytest.fixture
 def no_database():
     app = create_app({"TESTING": True, "DATABASE_URL": None})
-    return app.test_client()
+    return signed_in(app.test_client(), COORDINATOR_ID)
 
 
 def post(client, **overrides):
-    body = {"eventId": EVENT_ID, "submittedBy": COORDINATOR_ID, **overrides}
+    body = {"eventId": EVENT_ID, **overrides}
     return client.post("/safety-check-records", json=body)
 
 
@@ -222,10 +222,7 @@ def test_round_is_chosen_under_a_row_lock(setup):
 @pytest.mark.parametrize(
     "body",
     [
-        {"eventId": "not-a-uuid", "submittedBy": COORDINATOR_ID},
-        {"eventId": EVENT_ID, "submittedBy": "nope"},
-        {"eventId": EVENT_ID},
-        {"submittedBy": COORDINATOR_ID},
+        {"eventId": "not-a-uuid"},
         {},
     ],
 )
@@ -235,7 +232,7 @@ def test_bad_identifiers_are_rejected(body, setup):
     response = client.post("/safety-check-records", json=body)
 
     assert response.status_code == 400
-    assert response.json["message"] == "eventId and submittedBy must be valid UUIDs."
+    assert response.json["message"] == "eventId must be a valid UUID."
     cursor.execute.assert_not_called()
 
 
@@ -252,7 +249,7 @@ def test_non_object_body_is_rejected(setup):
 def test_create_without_database_url(no_database):
     response = no_database.post(
         "/safety-check-records",
-        json={"eventId": EVENT_ID, "submittedBy": COORDINATOR_ID},
+        json={"eventId": EVENT_ID},
     )
 
     assert response.status_code == 503
@@ -437,7 +434,7 @@ def test_cors_rejects_another_origin(setup):
 
 def test_cors_with_no_configured_origin_allows_nothing():
     """A blank FRONTEND_ORIGIN must not become a wildcard."""
-    client = create_app({"TESTING": True, "FRONTEND_ORIGIN": ""}).test_client()
+    client = signed_in(create_app({"TESTING": True, "FRONTEND_ORIGIN": ""}).test_client(), COORDINATOR_ID)
 
     response = client.get("/health", headers={"Origin": "http://localhost:5174"})
 

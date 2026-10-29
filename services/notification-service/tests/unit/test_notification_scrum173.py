@@ -27,6 +27,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from app.consumer import process, run, connect
 from app.diagnostics import replay, main
+from tests.unit.factories import bearer
 # Synthetic fixtures local to this story; no cross-module test package imports.
 from datetime import datetime, timezone
 
@@ -309,9 +310,8 @@ class TestInbox:
 
     def test_inbox_uses_authenticated_identity_not_query_recipient(self, monkeypatch):
         """## AC1 supporting ownership
-        The DEV caller identity, not an attacker-supplied recipient query, scopes inbox access.
+        The signed-in caller (SCRUM-8), not an attacker-supplied recipient query, scopes inbox access.
         """
-        monkeypatch.setenv("NOTIFICATION_DEV_MODE", "true")
         monkeypatch.setenv("DATABASE_URL", "synthetic-not-a-real-dsn")
         client = create_app().test_client()
         with patch(
@@ -319,7 +319,7 @@ class TestInbox:
         ) as listing:
             response = client.get(
                 "/notifications?recipientId=someone-else",
-                headers={"X-Dev-User-Id": INBOX_USER, "X-Dev-Role": "Event Coordinator"},
+                headers=bearer(INBOX_USER, "Event Coordinator"),
             )
         assert response.status_code == 200
         assert listing.call_args.args[1] == INBOX_USER
@@ -331,14 +331,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import psycopg2
 from app import create_app
-HEADERS = {"X-Dev-User-Id": USER, "X-Dev-Role": "Event Coordinator"}
+HEADERS = bearer(USER, "Event Coordinator")
 
 class TestInboxBehavior:
     """SCRUM-173 AC1/AC3 — inbox HTTP seam (hermetic database driver). Own listing, keyset pagination, unread filtering, read/unread, CORS and denials. Actual SQL ownership/filter/order/dedup is verified separately in PostgreSQL."""
 
     @pytest.fixture
     def setup(self, monkeypatch):
-        monkeypatch.setenv("NOTIFICATION_DEV_MODE", "true")
         monkeypatch.setenv("DATABASE_URL", "synthetic")
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
@@ -416,19 +415,21 @@ class TestInboxBehavior:
 
 
     @pytest.mark.parametrize(
-        "headers", [{}, {"X-Dev-User-Id": "bad"}, {"X-Dev-User-Id": USER}]
+        "headers",
+        [{}, {"X-Dev-User-Id": USER, "X-Dev-Role": "Event Coordinator"}, {"X-Internal-Token": "internal-test-token"}],
     )
-    def test_identity_required(self, setup, headers):
+    def test_identity_required(self, setup, headers, monkeypatch):
         """## AC1 supporting ownership
-        Missing/malformed DEV identity is denied before any recipient-scoped read.
+        Without a signed-in user (SCRUM-8) access is denied before any recipient-scoped read.
         """
+        monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal-test-token")
         client, _ = setup
         assert client.get("/notifications", headers=headers).status_code == 401
 
 
     def test_disabled_missing_database_cors_and_health(self, setup):
         """## Supporting infrastructure/security
-        Disabled mode and missing storage fail closed; trusted CORS and process-health semantics remain explicit.
+        Missing storage fails closed; trusted CORS and process-health semantics remain explicit.
         """
         client, _ = setup
         assert client.get("/health").json == {"status": "ok"}
@@ -444,9 +445,7 @@ class TestInboxBehavior:
                 "/health", headers={"Origin": "https://untrusted.invalid"}
             ).headers
         )
-        client.application.config["NOTIFICATION_DEV_MODE"] = False
-        assert client.get("/notifications", headers=HEADERS).status_code == 503
-        client.application.config.update(NOTIFICATION_DEV_MODE=True, DATABASE_URL=None)
+        client.application.config.update(DATABASE_URL=None)
         assert client.get("/notifications", headers=HEADERS).status_code == 503
 
 

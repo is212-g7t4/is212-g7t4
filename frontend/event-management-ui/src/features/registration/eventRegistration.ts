@@ -1,3 +1,4 @@
+import { authFetch } from '../auth/session'
 // The attendee's name, email and organisation come from their User record,
 // so a registration needs only the event and the attendee.
 export interface EventRegistrationData {
@@ -14,7 +15,7 @@ export class EventRegistrationError extends Error {
 }
 
 export async function registerForEvent(data: EventRegistrationData) {
-  const response = await fetch(
+  const response = await authFetch(
     `${import.meta.env.VITE_ATTENDEE_REGISTRATION_SERVICE_URL || 'http://localhost:5009'}/registrations`,
     {
       method: 'POST',

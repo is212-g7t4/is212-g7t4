@@ -23,10 +23,12 @@ covers that).
 import logging
 
 import pytest
+from flask import g
 
 from app import clients, create_app
 from app.routes import HIGH_IMPACT_FIELDS, LOW_IMPACT_FIELDS
 from tests.unit.factories import (
+    signed_in,
     COORDINATOR_ID,
     EVENT_ID,
     OFFICER_ID,
@@ -82,7 +84,8 @@ class Downstream:
         if name in self.fail:
             raise self.fail[name]
 
-    def get_event(self, event_id, viewer_id, viewer_role=None):
+    def get_event(self, event_id, viewer_role=None):
+        viewer_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("get_event", event_id, viewer_id, viewer_role))
         self._maybe_fail("get_event")
         return self.event
@@ -92,7 +95,8 @@ class Downstream:
         self._maybe_fail("list_records")
         return self.rounds
 
-    def withdraw_safety_approval(self, round_id, withdrawn_by, reason):
+    def withdraw_safety_approval(self, round_id, reason):
+        withdrawn_by = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("withdraw", round_id, withdrawn_by, reason))
         self._maybe_fail("withdraw")
         return self.withdrawn, self.opened
@@ -102,7 +106,8 @@ class Downstream:
         self._maybe_fail("restore")
         return self.rounds[0]
 
-    def update_event_details(self, event_id, coordinator_id, changes, safety_recheck):
+    def update_event_details(self, event_id, changes, safety_recheck):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(
             ("patch_details", event_id, coordinator_id, changes, safety_recheck)
         )
@@ -132,7 +137,7 @@ def downstream(monkeypatch):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 DEFAULT_CHANGES = {"expectedAttendance": "400"}
@@ -364,8 +369,6 @@ def test_a_missing_event_is_404(client, downstream):
     "body",
     [
         {"eventId": "nope", "coordinatorId": COORDINATOR_ID},
-        {"eventId": EVENT_ID, "coordinatorId": "nope"},
-        {"eventId": EVENT_ID},
         {"coordinatorId": OTHER_COORDINATOR_ID},
         {},
     ],
@@ -376,7 +379,7 @@ def test_bad_identifiers_are_rejected(body, client, downstream):
     )
 
     assert response.status_code == 400
-    assert response.json["message"] == "eventId and coordinatorId must be valid UUIDs."
+    assert response.json["message"] == "eventId must be a valid UUID."
     assert downstream.names() == []
 
 

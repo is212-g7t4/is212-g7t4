@@ -1,4 +1,5 @@
 import type { Venue } from './venues'
+import { authFetch } from '../auth/session'
 
 /** SCRUM-26: a venue's freedom in the searched window, decided by Venue
  *  Booking Service. Only these two reach the UI — Booked and Not operational
@@ -85,7 +86,7 @@ const venueBookingServiceUrl = () =>
 
 /** AC3: the shortlist of venues that fit and are free, from the composite. */
 export async function searchVenues(criteria: VenueSearchCriteria): Promise<VenueSearchResult[]> {
-  const response = await fetch(`${venueBookingServiceUrl()}/venue-search?${toQuery(criteria)}`)
+  const response = await authFetch(`${venueBookingServiceUrl()}/venue-search?${toQuery(criteria)}`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to search venues right now.')
   return body.venues as VenueSearchResult[]

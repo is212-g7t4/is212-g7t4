@@ -21,7 +21,7 @@ const closure = { venueId: 'v1', startDateTime: '2099-01-01T10:00:00+08:00', end
 const preview = { closure, venueName: 'Hall', affectedCount: 2, confirmationToken: 'signed', affectedRequests: ['one', 'two'].map(id => ({ id, eventId: id, venueId: 'v1', eventName: `Event ${id}`, venueName: 'Hall', status: 'Approved', requestedStartTime: closure.startDateTime, requestedEndTime: closure.endDateTime })) }
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(api.listClosures).mockResolvedValue({ closures: [], nextCursor: null }); vi.mocked(api.previewClosure).mockResolvedValue(preview) })
 async function draft() {
- render(<VenueClosuresPanel venueId="v1" venueName="Hall" user={{ id: 'staff', role: 'Venue Staff' }} />)
+ render(<VenueClosuresPanel venueId="v1" venueName="Hall" />)
  fireEvent.click(screen.getByRole('button', { name: 'Record temporary closure' }))
  fireEvent.change(screen.getByLabelText('Closure start (SGT)'), { target: { value: '2099-01-01T10:00' } })
  fireEvent.change(screen.getByLabelText('Closure end (SGT)'), { target: { value: '2099-01-01T12:00' } })
@@ -38,12 +38,12 @@ test('uncertain save restarts history and ignores a stale in-flight old page', a
   .mockImplementationOnce(() => new Promise(resolve => { finishFresh = resolve }))
  await draft(); await screen.findByText('Event one')
  fireEvent.click(screen.getByRole('button', { name: 'Load more closures' }))
- const oldSignal = vi.mocked(api.listClosures).mock.calls[1][3]!
+ const oldSignal = vi.mocked(api.listClosures).mock.calls[1][2]!
  vi.mocked(api.createClosure).mockRejectedValue(Object.assign(new Error('Maybe saved'), { uncertain: true }))
  fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
  await screen.findByRole('alert')
  expect(oldSignal.aborted).toBe(true)
- expect(api.listClosures).toHaveBeenLastCalledWith('v1', { id: 'staff', role: 'Venue Staff' }, undefined, expect.any(AbortSignal))
+ expect(api.listClosures).toHaveBeenLastCalledWith('v1', undefined, expect.any(AbortSignal))
  expect(screen.queryByText('Old history')).not.toBeInTheDocument()
  await act(async () => { finishOld({ closures: [{ ...row, reason: 'Stale result' }], nextCursor: null }) })
  expect(screen.queryByText('Stale result')).not.toBeInTheDocument()
@@ -54,7 +54,7 @@ test('uncertain save restarts history and ignores a stale in-flight old page', a
  vi.mocked(api.listClosures).mockResolvedValueOnce({ closures: [], nextCursor: null })
  fireEvent.click(screen.getByRole('button', { name: 'Load more closures' }))
  await waitFor(() => expect(screen.getByRole('button', { name: 'I checked all recorded closures; start a new preview' })).toBeEnabled())
- expect(api.listClosures).toHaveBeenLastCalledWith('v1', { id: 'staff', role: 'Venue Staff' }, 'fresh-cursor', expect.any(AbortSignal))
+ expect(api.listClosures).toHaveBeenLastCalledWith('v1', 'fresh-cursor', expect.any(AbortSignal))
 })
 
 test('back and edits discard confirmation without writes; full list remains available', async () => {
@@ -105,7 +105,7 @@ test('changed impact refreshes preview but requires another explicit confirmatio
  fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
  expect(await screen.findByText('Closure recorded.')).toBeInTheDocument()
  expect(api.createClosure).toHaveBeenCalledTimes(2)
- expect(api.createClosure).toHaveBeenLastCalledWith('v1', '2099-01-01T10:00', '2099-01-01T12:00', 'Maintenance', { id: 'staff', role: 'Venue Staff' }, 'fresh', expect.any(AbortSignal))
+ expect(api.createClosure).toHaveBeenLastCalledWith('v1', '2099-01-01T10:00', '2099-01-01T12:00', 'Maintenance', 'fresh', expect.any(AbortSignal))
 })
 test('preview shows request count and complete named list before explicit confirmation', async () => {
  await draft()
@@ -123,7 +123,7 @@ test('preview shows request count and complete named list before explicit confir
  expect(api.createClosure).not.toHaveBeenCalled()
  vi.mocked(api.createClosure).mockResolvedValue({ ...closure, closureId: 'c', createdBy: 'staff', createdAt: closure.startDateTime, rejectedCount: 2 })
  fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
- await waitFor(() => expect(api.createClosure).toHaveBeenCalledWith('v1', '2099-01-01T10:00', '2099-01-01T12:00', 'Maintenance', { id: 'staff', role: 'Venue Staff' }, 'signed', expect.any(AbortSignal)))
+ await waitFor(() => expect(api.createClosure).toHaveBeenCalledWith('v1', '2099-01-01T10:00', '2099-01-01T12:00', 'Maintenance', 'signed', expect.any(AbortSignal)))
  expect(await screen.findByText('Closure recorded.')).toBeInTheDocument()
  expect(screen.getByText('2 booking requests rejected.')).toBeInTheDocument()
 })

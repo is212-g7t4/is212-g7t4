@@ -12,8 +12,7 @@
  */
 import { afterEach, expect, test, vi } from 'vitest'
 import { createClosure, previewClosure } from './venueClosures'
-const user = { id: 'staff', role: 'Venue Staff' as const }
-const args = ['v1', '2099-01-01T10:00', '2099-01-01T12:00', ' Reason ', user] as const
+const args = ['v1', '2099-01-01T10:00', '2099-01-01T12:00', ' Reason '] as const
 const closure = { venueId: 'v1', startDateTime: '2099-01-01T10:00:00+08:00', endDateTime: '2099-01-01T12:00:00+08:00', reason: 'Reason' }
 const valid = { closure, venueName: 'Hall', affectedCount: 0, affectedRequests: [], confirmationToken: 'signed' }
 afterEach(() => vi.unstubAllGlobals())

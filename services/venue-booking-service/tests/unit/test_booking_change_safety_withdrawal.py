@@ -25,6 +25,7 @@ from app.clients import (
     SafetyApprovalError,
 )
 from app.routes import CHANGEABLE_EVENT_STATUSES
+from tests.unit.factories import signed_in
 
 EVENT_ID = "evt-1"
 BOOKING_ID = "booking-1"
@@ -89,7 +90,7 @@ ACTIONS = {"edit": (edit, "update_booking"), "cancel": (cancel, "cancel_booking"
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 # --- The gate -----------------------------------------------------------------
@@ -143,7 +144,7 @@ def test_confirmed_edit_withdraws_the_approval_before_updating_the_booking(clien
     assert response.status_code == 200
     assert calls.names() == ["get_event", "get_venues", "withdraw_safety_for_venue_change", "update_booking"]
     assert calls.args("withdraw_safety_for_venue_change") == (
-        EVENT_ID, "coord-1", BOOKING_ID,
+        EVENT_ID, BOOKING_ID,
         "A venue booking (Grand Ballroom) was edited after safety approval.",
     )
 
@@ -156,7 +157,7 @@ def test_confirmed_cancel_withdraws_the_approval_before_cancelling(client, monke
 
     assert response.status_code == 200
     assert calls.names() == ["get_event", "withdraw_safety_for_venue_change", "cancel_booking"]
-    assert calls.args("withdraw_safety_for_venue_change")[3] == "A venue booking was cancelled after safety approval."
+    assert calls.args("withdraw_safety_for_venue_change")[2] == "A venue booking was cancelled after safety approval."
 
 
 def test_confirmed_edit_that_fails_validation_never_withdraws(client, monkeypatch):
@@ -186,7 +187,7 @@ def test_failed_edit_restores_the_approval_and_returns_the_booking_error(client,
 
     assert response.status_code == status
     assert calls.names()[-1] == "restore_safety_after_venue_change"
-    assert calls.args("restore_safety_after_venue_change") == (EVENT_ID, "coord-1", WITHDRAWN_ID)
+    assert calls.args("restore_safety_after_venue_change") == (EVENT_ID, WITHDRAWN_ID)
 
 
 def test_conflicting_edit_still_reports_the_conflict_types(client, monkeypatch):
@@ -270,11 +271,11 @@ def test_withdraw_wrapper_posts_the_change(monkeypatch):
 
     monkeypatch.setattr(clients.httpx, "post", post)
 
-    result = clients.withdraw_safety_for_venue_change(EVENT_ID, "coord-1", BOOKING_ID, "why")
+    result = clients.withdraw_safety_for_venue_change(EVENT_ID, BOOKING_ID, "why")
 
     assert result["withdrawnSafetyCheck"]["id"] == WITHDRAWN_ID
     assert sent["url"] == f"{clients.SAFETY_CHECK_SERVICE_URL}/safety-checks/withdraw-for-venue-change"
-    assert sent["json"] == {"eventId": EVENT_ID, "coordinatorId": "coord-1", "bookingId": BOOKING_ID, "reason": "why"}
+    assert sent["json"] == {"eventId": EVENT_ID, "bookingId": BOOKING_ID, "reason": "why"}
 
 
 @pytest.mark.parametrize(
@@ -288,7 +289,7 @@ def test_withdraw_wrapper_carries_the_refusal(monkeypatch, response, body):
     monkeypatch.setattr(clients.httpx, "post", lambda url, **kwargs: response(httpx.Request("POST", url)))
 
     with pytest.raises(SafetyApprovalError) as raised:
-        clients.withdraw_safety_for_venue_change(EVENT_ID, "coord-1", BOOKING_ID, "why")
+        clients.withdraw_safety_for_venue_change(EVENT_ID, BOOKING_ID, "why")
 
     assert raised.value.body == body
 
@@ -302,10 +303,10 @@ def test_restore_wrapper_posts_the_withdrawn_round(monkeypatch):
 
     monkeypatch.setattr(clients.httpx, "post", post)
 
-    clients.restore_safety_after_venue_change(EVENT_ID, "coord-1", WITHDRAWN_ID)
+    clients.restore_safety_after_venue_change(EVENT_ID, WITHDRAWN_ID)
 
     assert sent["url"] == f"{clients.SAFETY_CHECK_SERVICE_URL}/safety-checks/restore-after-venue-change"
-    assert sent["json"] == {"eventId": EVENT_ID, "coordinatorId": "coord-1", "withdrawnSafetyCheckId": WITHDRAWN_ID}
+    assert sent["json"] == {"eventId": EVENT_ID, "withdrawnSafetyCheckId": WITHDRAWN_ID}
 
 
 def test_restore_wrapper_raises_on_failure(monkeypatch):
@@ -315,4 +316,4 @@ def test_restore_wrapper_raises_on_failure(monkeypatch):
     )
 
     with pytest.raises(httpx.HTTPStatusError):
-        clients.restore_safety_after_venue_change(EVENT_ID, "coord-1", WITHDRAWN_ID)
+        clients.restore_safety_after_venue_change(EVENT_ID, WITHDRAWN_ID)

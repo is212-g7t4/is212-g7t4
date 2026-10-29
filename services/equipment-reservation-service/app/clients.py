@@ -1,11 +1,11 @@
 import os
 
 import httpx
+from flask import has_request_context, request
 
 # Composites are the only services allowed to call other services (see
 # AGENTS.md). One thin wrapper per downstream endpoint; URLs are read per call
 # so tests and compose can override them.
-FORWARDED_HEADERS = ("X-Dev-User-Id", "X-Dev-Role")
 PASSED_THROUGH = (401, 403, 404, 409)
 
 
@@ -20,7 +20,15 @@ def _base(name, default):
     return os.environ.get(name) or default
 
 
+def _forwarded_auth():
+    """The caller's Supabase token, so downstream services see the same signed-in user (SCRUM-8)."""
+    if has_request_context() and request.headers.get("Authorization"):
+        return {"Authorization": request.headers["Authorization"]}
+    return {}
+
+
 def _call(method, url, **kwargs):
+    kwargs["headers"] = {**_forwarded_auth(), **kwargs.get("headers", {})}
     try:
         response = httpx.request(method, url, timeout=10, **kwargs)
     except httpx.HTTPError:
@@ -39,12 +47,8 @@ def _request_service(path):
     return f"{_base('EQUIPMENT_REQUEST_SERVICE_URL', 'http://localhost:5011')}{path}"
 
 
-def _identity(headers):
-    return {name: headers[name] for name in FORWARDED_HEADERS if name in headers}
-
-
 # Equipment Request Service (atomic): request records and decisions.
-def list_requests(headers, status=None, event_ids=None):
+def list_requests(status=None, event_ids=None):
     if event_ids is not None and not event_ids:
         return []
     params = {}
@@ -52,42 +56,42 @@ def list_requests(headers, status=None, event_ids=None):
         params["status"] = status
     if event_ids is not None:
         params["eventIds"] = ",".join(event_ids)
-    return _call("GET", _request_service("/equipment-requests"), params=params, headers=_identity(headers))["requests"]
+    return _call("GET", _request_service("/equipment-requests"), params=params)["requests"]
 
 
-def get_request(headers, request_id):
-    return _call("GET", _request_service(f"/equipment-requests/{request_id}"), headers=_identity(headers))["request"]
+def get_request(request_id):
+    return _call("GET", _request_service(f"/equipment-requests/{request_id}"))["request"]
 
 
-def review_request(headers, request_id, status, rejection_reason=None):
-    row = get_request(headers, request_id)
+def review_request(request_id, status, rejection_reason=None):
+    row = get_request(request_id)
     payload = {"status": status, "notificationContext": notification_snapshot(row["eventId"])}
     if status == "Rejected":
         payload["rejectionReason"] = rejection_reason
-    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload, headers=_mutation_headers(headers))
+    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload, headers=_mutation_headers())
     return body["request"]
 
 
-def review_event_requests(headers, event_id, status, rejection_reason=None):
+def review_event_requests(event_id, status, rejection_reason=None):
     payload = {"status": status, "notificationContext": notification_snapshot(event_id)}
     if status == "Rejected":
         payload["rejectionReason"] = rejection_reason
-    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload, headers=_mutation_headers(headers))
+    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload, headers=_mutation_headers())
     return body["requests"]
 
 
-def create_event_requests(headers, event_id, items):
+def create_event_requests(event_id, items):
     context = notification_snapshot(event_id, submission=True)
     body = _call("POST", _request_service(f"/events/{event_id}/equipment-requests"),
-                 json={"items": items, "notificationContext": context}, headers=_mutation_headers(headers))
+                 json={"items": items, "notificationContext": context}, headers=_mutation_headers())
     return body["requests"]
 
 
-def _mutation_headers(headers):
+def _mutation_headers():
     token = os.getenv("INTERNAL_SERVICE_TOKEN")
     if not token:
         raise DownstreamError(503, "Internal service authentication is not configured.")
-    return {**_identity(headers), "X-Internal-Token": token}
+    return {"X-Internal-Token": token}
 
 
 def notification_snapshot(event_id, submission=False):
@@ -123,16 +127,13 @@ def get_event_summaries(event_ids):
     return summaries
 
 
-def list_assigned_events(coordinator_id):
-    return _call(
-        "GET",
-        _event_service("/events"),
-        params={"coordinatorId": coordinator_id},
-    )["events"]
+def list_assigned_events():
+    """The signed-in coordinator's events (Event Service reads who from the token)."""
+    return _call("GET", _event_service("/events"))["events"]
 
 
-def list_assigned_event_ids(coordinator_id):
-    return [event["id"] for event in list_assigned_events(coordinator_id)]
+def list_assigned_event_ids():
+    return [event["id"] for event in list_assigned_events()]
 
 
 def get_overlapping_events(start, end, statuses, exclude_event_id):

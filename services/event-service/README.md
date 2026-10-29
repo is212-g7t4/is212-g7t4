@@ -35,9 +35,8 @@ If Vite uses a different port, set FRONTEND_ORIGIN in the service .env to that o
 
 ## Event Coordinator approval and rejection
 
-The frontend's Topbar user picker (backed by `user-service`) supplies the
-signed-in user's real UUID as `coordinatorId` on every request — there's no
-mock role selector anymore. `VITE_CURRENT_COORDINATOR_ID`/`_NAME` in
+The frontend sends the signed-in user's Supabase access token on every
+request; the service takes the caller from it. `VITE_CURRENT_COORDINATOR_ID`/`_NAME` in
 `frontend/event-management-ui/.env` are only a fallback used briefly while
 the real user list is still loading.
 
@@ -46,17 +45,18 @@ the caller's id. Rejection requires a non-empty reason. The backend repeats the 
 check while locking the event row and only approves or rejects requests whose current
 status is `Submitted`.
 
-`coordinatorId` is required on the coordinator read endpoints (`/events`,
-`/events/submitted`, `/events/<id>`). Passing `viewerRole` widens them from
-"assigned to me" to every event: `Event Coordinator Lead` on all three, and
+Every endpoint except `/health` needs `Authorization: Bearer <token>`
+(SCRUM-8). The caller's id and role come from the token: any
+`coordinatorId`, `organiserId`, `decidedBy` or `assignedBy` the caller sends
+is not trusted as their identity. On the coordinator read endpoints (`/events`,
+`/events/submitted`, `/events/<id>`) the caller is the coordinator unless the
+request asks for the organiser view with `?organiserId=`. Passing
+`viewerRole` (any value) widens them from "assigned to me" to every event,
+judged on the token's role: `Event Coordinator Lead` on all three, and
 `Venue Staff`/`Technical Support` on `/events` and `/events/<id>` only. Any
-other `viewerRole` gets `403`. Approve and reject are **not** widened: the Lead
+other role gets `403`. Approve and reject are **not** widened: the Lead
 must be the assigned coordinator to approve or reject, the same as anyone else.
-
-The role is whatever the caller sends, the same as `coordinatorId`. Atomics
-can't call User Service to check it, so this stays trust-based until services
-verify the Supabase JWT (see AGENTS.md). The retired `isManager=true` flag is
-ignored.
+The retired `isManager=true` flag is ignored.
 
 `GET /events/unassigned` returns `Submitted` events with no `coordinator_id`,
 oldest submission first. It remains available for consumers needing only
@@ -81,7 +81,7 @@ Review`. The row is locked, the assignment is checked again, and the event
 moves to `Clarification Requested`. The original event fields are not changed.
 
 The owning organiser answers through `PATCH
-/events/<id>/clarification-response` with `{organiserId, response}`. This
+/events/<id>/clarification-response` with `{response}`; the organiser is the signed-in caller. This
 returns the event to `Submitted` and deliberately leaves `coordinator_id`
 untouched. Reassignment is blocked while the clarification is open, ensuring
 the response returns to the same coordinator who asked the question. Both
@@ -104,7 +104,7 @@ one of them); flagging either date flags both. `reason` is required, at most
 event moves to `Amendment Requested`. No event field changes.
 
 The owning organiser resubmits through `PATCH /events/<id>/amendment-response`
-with `{organiserId, changes, note?}`. Only the flagged fields may appear in
+with `{changes, note?}`; the organiser is the signed-in caller. Only the flagged fields may appear in
 `changes`: any other key is refused whole with `400 AMENDMENT_FIELD_LOCKED`
 and `lockedFields`, even if its value is unchanged, so every other field stays
 as submitted. At least one flagged value must actually differ
@@ -126,7 +126,6 @@ event is `Submitted`, `Under Review` or `Approved`:
 
 ```json
 {
-  "organiserId": "<user UUID>",
   "changes": {
     "preferredStartDate": "2026-11-05T09:00",
     "expectedAttendance": "80"
@@ -267,7 +266,6 @@ endpoint, submit and approve alike.
 PATCH /events/<id>/safety-status
 {
   "status": "Pending Safety Check",
-  "coordinatorId": "<uuid>",
   "safetyCheckId": "<uuid>",
   "roundNumber": 1
 }
@@ -277,7 +275,6 @@ PATCH /events/<id>/safety-status
 PATCH /events/<id>/safety-status
 {
   "status": "Confirmed",
-  "decidedBy": "<uuid>",
   "safetyCheckId": "<uuid>",
   "roundNumber": 1,
   "remarks": "Looks safe."
@@ -361,12 +358,10 @@ the authoritative times. The coordinator's `decision`/`decisionHistory` are
 untouched throughout: a safety decision is its own thing, kept on the
 `SafetyCheck` round.
 
-Like every endpoint today there is no JWT, so this one trusts `coordinatorId`
-and `decidedBy`. The internal token plus the assignment/round checks mean a
-direct browser call still can't submit someone else's event or invent a
-decision (AC5, AC3), but it could skip the arrangements check or role lookup
-if it somehow had the token — the same trust level as the rest of the system
-until auth lands.
+The deciding Safety Officer (`decidedBy`) is the signed-in caller whose
+token Safety Check Service forwards. The internal token plus the
+assignment/round checks mean a direct browser call still can't submit
+someone else's event or invent a decision (AC5, AC3).
 
 ### `PATCH /events/<id>/details` — editing an event, and the re-check gate
 
@@ -377,7 +372,6 @@ contradiction checks in front of it later and reuses this write).
 ```json
 PATCH /events/<id>/details
 {
-  "coordinatorId": "<uuid>",
   "changes": {"expectedAttendance": "400", "eventName": "Community Workshop"}
 }
 ```
@@ -433,7 +427,7 @@ What happens, by the event's status:
   change that caused it:
 
   ```json
-  {"coordinatorId": "<uuid>", "changes": {...},
+  {"changes": {...},
    "safetyRecheck": {"withdrawnSafetyCheckId": "<round N>",
                      "safetyCheckId": "<round N+1>", "roundNumber": 3}}
   ```

@@ -18,7 +18,7 @@ import pytest
 
 from app import create_app
 from tests.unit.availability_db import AvailabilityDB
-from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
 
 PAYLOAD = dict(
     eventId=EVENT_ID,
@@ -39,9 +39,9 @@ def submit(monkeypatch):
         db = AvailabilityDB(bookings, closures)
         databases.append(db)
         monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: db)
-        client = create_app(
+        client = signed_in(create_app(
             {"TESTING": True, "DATABASE_URL": "isolated-sqlite"}
-        ).test_client()
+        ).test_client())
         return client.post("/venue-bookings", json=payload or PAYLOAD), db
 
     yield run
@@ -100,9 +100,9 @@ def test_existing_edit_and_approval_report_closure_type(monkeypatch, action):
     )
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: db)
     try:
-        client = create_app(
+        client = signed_in(create_app(
             {"TESTING": True, "DATABASE_URL": "isolated-sqlite"}
-        ).test_client()
+        ).test_client())
         path = f"/venue-bookings/{BOOKING_ID}" + (
             "/approve" if action == "approve" else ""
         )
@@ -243,9 +243,9 @@ def test_database_failure_never_reports_availability_or_persists(monkeypatch, st
     monkeypatch.setattr("app.models.psycopg2.connect", connect)
     monkeypatch.setattr(db, "execute", failing_execute)
     try:
-        client = create_app(
+        client = signed_in(create_app(
             {"TESTING": True, "DATABASE_URL": "isolated-sqlite"}
-        ).test_client()
+        ).test_client())
         response = client.post("/venue-bookings", json=PAYLOAD)
         assert response.status_code == 503
         assert response.json == {"message": "Unable to save or load venue bookings."}
@@ -288,5 +288,5 @@ def test_aware_times_keep_same_instant_at_sql_boundary():
 
 
 def test_event_bookings_without_database_configuration_returns_503():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert client.get(f"/events/{EVENT_ID}/venue-bookings").status_code == 503

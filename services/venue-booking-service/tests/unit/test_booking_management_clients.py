@@ -94,4 +94,4 @@ def test_review_cancelled_booking_maps_terminal_state(monkeypatch):
         ),
     )
     with pytest.raises(BookingStateError):
-        clients.decide_booking("booking-1", "staff-1", "Approved")
+        clients.decide_booking("booking-1", "Approved")

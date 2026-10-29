@@ -13,6 +13,7 @@ import pytest
 
 from app import clients, create_app
 from tests.unit.factories import (
+    signed_in,
     EVENT_ID,
     OFFICER_ID,
     booking,
@@ -28,7 +29,7 @@ ROOM_ID = "89898989-8989-4989-8989-898989898989"
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def stub_review(monkeypatch, bookings, venues):

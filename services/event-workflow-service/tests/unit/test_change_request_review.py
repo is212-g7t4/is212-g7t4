@@ -3,6 +3,7 @@
 import pytest
 
 from app import checks, clients, create_app
+from tests.unit.factories import signed_in
 
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
 CHANGE_ID = "22222222-2222-4222-8222-222222222222"
@@ -11,7 +12,7 @@ EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client(), COORDINATOR_ID)
 
 
 @pytest.fixture
@@ -33,7 +34,7 @@ def downstream(monkeypatch):
     }
     calls = {"decisions": [], "previews": [], "checks": []}
     monkeypatch.setattr(clients, "get_user", lambda _id: {"role": state["role"]})
-    monkeypatch.setattr(clients, "list_pending_change_requests", lambda _id: [state["change"]])
+    monkeypatch.setattr(clients, "list_pending_change_requests", lambda: [state["change"]])
     monkeypatch.setattr(clients, "get_change_request", lambda *_args: state["change"])
 
     def preview(*args):
@@ -46,7 +47,7 @@ def downstream(monkeypatch):
 
     def decide(*args):
         calls["decisions"].append(args)
-        return {"id": CHANGE_ID, "status": args[2]}
+        return {"id": CHANGE_ID, "status": args[1]}
 
     monkeypatch.setattr(clients, "preview_event_details", preview)
     monkeypatch.setattr(checks, "find_conflicts", find_conflicts)
@@ -55,12 +56,12 @@ def downstream(monkeypatch):
 
 
 def patch(client, **overrides):
-    body = {"coordinatorId": COORDINATOR_ID, "decision": "Approved", **overrides}
+    body = {"decision": "Approved", **overrides}
     return client.patch(f"/change-requests/{CHANGE_ID}", json=body)
 
 
 def test_ac1_ac2_assigned_coordinator_can_list_pending_requests(client, downstream):
-    response = client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}")
+    response = client.get(f"/change-requests")
 
     assert response.status_code == 200
     assert response.json["changeRequests"][0]["id"] == CHANGE_ID
@@ -74,7 +75,7 @@ def test_ac3_low_impact_approval_is_committed_without_arrangement_reads(client, 
     assert response.status_code == 200
     assert calls["previews"]
     assert calls["checks"] == []
-    assert calls["decisions"] == [(CHANGE_ID, COORDINATOR_ID, "Approved", None)]
+    assert calls["decisions"] == [(CHANGE_ID, "Approved", None)]
 
 
 def test_ac3_high_impact_approval_checks_arrangements_before_committing(client, downstream):
@@ -122,7 +123,7 @@ def test_ac4_rejection_requires_and_records_a_reason_without_impact_checks(clien
     assert calls["previews"] == []
     assert calls["checks"] == []
     assert calls["decisions"] == [
-        (CHANGE_ID, COORDINATOR_ID, "Rejected", "Dates cannot be supported.")
+        (CHANGE_ID, "Rejected", "Dates cannot be supported.")
     ]
 
 
@@ -138,26 +139,23 @@ def test_non_coordinator_role_is_refused(client, downstream):
 
 
 def test_event_service_refusal_is_passed_through_on_the_queue(client, downstream, monkeypatch):
-    def refused(_coordinator_id):
+    def refused():
         raise clients.EventRejectedError(409, {"code": "STALE", "message": "Reload."})
 
     monkeypatch.setattr(clients, "list_pending_change_requests", refused)
-    response = client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}")
+    response = client.get(f"/change-requests")
     assert response.status_code == 409
     assert response.json == {"code": "STALE", "message": "Reload."}
 
 
-@pytest.mark.parametrize("body", [None, {}, {"coordinatorId": "bad", "decision": "Approved"}, {"coordinatorId": COORDINATOR_ID, "decision": "Maybe"}])
+@pytest.mark.parametrize("body", [None, {}, {"decision": "Maybe"}])
 def test_malformed_decisions_are_rejected(client, downstream, body):
     response = client.patch(f"/change-requests/{CHANGE_ID}", json=body)
     assert response.status_code == 400
 
 
 def test_invalid_ids_are_rejected(client, downstream):
-    assert client.get("/change-requests?coordinatorId=bad").status_code == 400
-    assert client.patch("/change-requests/bad", json={
-        "coordinatorId": COORDINATOR_ID, "decision": "Approved"
-    }).status_code == 400
+    assert client.patch("/change-requests/bad", json={"decision": "Approved"}).status_code == 400
 
 
 def test_rejection_reason_length_is_bounded(client, downstream):

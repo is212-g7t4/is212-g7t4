@@ -30,27 +30,28 @@ this up alongside every other service.
 
 ## Endpoints
 
+The acting user is whoever signed in: every endpoint except `/health` needs
+`Authorization: Bearer <token>` (SCRUM-8), `401` without it, and forwards that
+header to `user-service` and `event-service`.
+
 - `GET /coordinators` — everyone an event can be assigned to: the Event
   Coordinator Lead (so the Lead can take an event on themselves) and every
   Event Coordinator, fetched from `user-service`.
-- `GET /queue?actingUserId=<user id>` — the Lead's assignment worklist:
+- `GET /queue` — the Lead's assignment worklist:
   unassigned `Submitted` requests and assigned `Under Review` requests, oldest
   submission first (from `event-service`'s `GET /events/submitted`). Only the
-  Event Coordinator Lead may view it — `403` for everyone else, `400` without
-  `actingUserId`. Assigned requests remain visible so the Lead can reassign
+  Event Coordinator Lead may view it — `403` for everyone else. Assigned requests remain visible so the Lead can reassign
   them without leaving the worklist.
-- `GET /workload?actingUserId=<user id>` — the Lead's read-only workload
+- `GET /workload` — the Lead's read-only workload
   view: every coordinator from `GET /coordinators` (the Lead included, and
   those with nothing assigned) with their active events under `events`, plus
   `unassigned` (active events with no coordinator) and `otherAssigned`
   (events whose coordinator is no longer an Event Coordinator, so they don't
   silently vanish). Events come from `event-service`'s `GET /events/active`,
   which leaves out `Confirmed`, `Rejected` and `Cancelled`. Only the Event
-  Coordinator Lead may view it — `403` for everyone else, `400` without
-  `actingUserId`.
+  Coordinator Lead may view it — `403` for everyone else.
 - `POST /events/<event_id>/assign-coordinator/<coordinator_id>` — assigns or
-  reassigns the coordinator on an event. Body must include
-  `{"actingUserId": "<user id>"}`; only the Event Coordinator Lead (role
+  reassigns the coordinator on an event. Only the Event Coordinator Lead (role
   `Event Coordinator Lead`) may do this — `403` otherwise.
   Validates `coordinator_id` is a real, available Event Coordinator before
   calling `event-service` to persist the change. The acting Lead is sent as

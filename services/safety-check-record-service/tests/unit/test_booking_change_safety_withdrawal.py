@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
-from tests.unit.factories import COORDINATOR_ID, NEXT_RECORD_ID, RECORD_ID, record_row
+from tests.unit.factories import COORDINATOR_ID, NEXT_RECORD_ID, RECORD_ID, record_row, signed_in
 
 REASON = "Venue booking for Grand Hall changed after safety approval."
 
@@ -25,7 +25,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), cursor
+    return signed_in(app.test_client(), COORDINATOR_ID), cursor
 
 
 def approved(round_number=2):
@@ -50,7 +50,7 @@ def test_withdraw_without_next_round_opens_nothing(setup):
 
     response = client.post(
         f"/safety-check-records/{RECORD_ID}/withdraw",
-        json={"withdrawnBy": COORDINATOR_ID, "reason": REASON, "openNextRound": False},
+        json={"reason": REASON, "openNextRound": False},
     )
 
     assert response.status_code == 201
@@ -70,7 +70,7 @@ def test_withdraw_by_default_still_opens_the_next_round(setup):
 
     response = client.post(
         f"/safety-check-records/{RECORD_ID}/withdraw",
-        json={"withdrawnBy": COORDINATOR_ID, "reason": REASON},
+        json={"reason": REASON},
     )
 
     assert response.status_code == 201
@@ -85,7 +85,7 @@ def test_open_next_round_must_be_a_boolean(setup, value):
 
     response = client.post(
         f"/safety-check-records/{RECORD_ID}/withdraw",
-        json={"withdrawnBy": COORDINATOR_ID, "reason": REASON, "openNextRound": value},
+        json={"reason": REASON, "openNextRound": value},
     )
 
     assert response.status_code == 400

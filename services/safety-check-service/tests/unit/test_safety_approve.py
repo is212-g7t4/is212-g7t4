@@ -15,9 +15,11 @@ tests exercise the orchestration and the error mapping, not HTTP
 import logging
 
 import pytest
+from flask import g
 
 from app import clients, create_app
 from tests.unit.factories import (
+    signed_in,
     EVENT_ID,
     OFFICER_ID,
     RECORD_ID,
@@ -57,7 +59,8 @@ class Downstream:
         self._maybe_fail("get_user")
         return self.user
 
-    def get_event(self, event_id, viewer_id, viewer_role=None):
+    def get_event(self, event_id, viewer_role=None):
+        viewer_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("get_event", event_id, viewer_id, viewer_role))
         self._maybe_fail("get_event")
         return self.event
@@ -68,8 +71,9 @@ class Downstream:
         return self.rounds
 
     def decide_safety_check_record(
-        self, safety_check_id, status, decided_by, remarks=None, flags=None
+        self, safety_check_id, status, remarks=None, flags=None
     ):
+        decided_by = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("decide", safety_check_id, status, decided_by, remarks))
         if "decide" in self.apply_despite_failure:
             self.rounds = [self.decided]
@@ -82,11 +86,10 @@ class Downstream:
         status,
         safety_check_id,
         round_number,
-        coordinator_id=None,
-        decided_by=None,
         remarks=None,
         areas=None,
     ):
+        decided_by = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(
             ("patch_event", event_id, status, safety_check_id, round_number, decided_by, remarks)
         )
@@ -123,7 +126,7 @@ def downstream(monkeypatch):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def approve(client, **overrides):
@@ -501,16 +504,14 @@ def test_non_object_body_is_rejected(client, downstream):
     "overrides",
     [
         {"eventId": "not-a-uuid"},
-        {"safetyOfficerId": "not-a-uuid"},
         {"eventId": ""},
-        {"safetyOfficerId": ""},
     ],
 )
 def test_bad_identifiers_are_rejected(overrides, client, downstream):
     response = approve(client, **overrides)
 
     assert response.status_code == 400
-    assert response.json["message"] == "eventId and safetyOfficerId must be valid UUIDs."
+    assert response.json["message"] == "eventId must be a valid UUID."
     assert downstream.calls == []
 
 

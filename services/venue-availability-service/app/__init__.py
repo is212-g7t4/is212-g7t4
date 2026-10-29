@@ -5,7 +5,7 @@ from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 from app.calendar import parse_boundary
 from app.models import (
@@ -32,6 +32,7 @@ from app.models import (
     update_booking,
     _shift,
 )
+from app.auth import authenticate
 
 # SCRUM-26: the longest window the venue search will answer for. Same spirit
 # as the calendar's 42-day bound — an unbounded range is an unbounded read.
@@ -85,12 +86,11 @@ def _parse_buffer_minutes(value, default=0):
 
 def create_app(config=None):
     app = Flask(__name__)
-    app.config["VENUE_CLOSURE_DEV_MODE"] = os.getenv("VENUE_CLOSURE_DEV_MODE") == "true"
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         CLOSURE_CONFIRMATION_KEY=os.getenv("CLOSURE_CONFIRMATION_KEY"),
         INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN"),
-        CALENDAR_DEV_MODE=os.getenv("CALENDAR_DEV_MODE") == "true",
         # The Vite dev server is pinned to 5174 (strictPort in
         # vite.config.ts), so that is the origin the browser sends.
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN") or "http://localhost:5174",
@@ -108,15 +108,9 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            if request.path in {
-                "/venue-bookings",
-                "/venue-holds",
-                "/venue-holds/reminders",
-            } or request.path.startswith("/venue-closures"):
-                response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
-                response.headers["Access-Control-Allow-Headers"] = (
-                    "Content-Type, X-Dev-User-Id, X-Dev-Role"
-                )
+            # Every browser call carries a bearer token, so every path needs the preflight answer.
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS, POST"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         return response
 
     @app.errorhandler(CalendarDataError)
@@ -130,12 +124,7 @@ def create_app(config=None):
 
     @app.get("/venue-bookings")
     def get_bookings():
-        if app.config["CALENDAR_DEV_MODE"] is not True:
-            return jsonify(message="Calendar DEV mode is disabled."), 503
-        role = request.headers.get("X-Dev-Role")
-        if not _parse_uuid(request.headers.get("X-Dev-User-Id")) or not role:
-            return jsonify(message="DEV user UUID and role headers are required."), 401
-        if role not in {
+        if g.role not in {
             "Event Coordinator",
             "Event Coordinator Lead",
             "Venue Staff",
@@ -202,10 +191,9 @@ def create_app(config=None):
         which needs the whole catalogue's bookings at once; `GET
         /venue-bookings` answers for a single venue, as a calendar grid needs.
 
-        Deliberately not behind CALENDAR_DEV_MODE or the X-Dev-* headers:
-        those simulate the browser's user switcher, and this caller is a
-        composite, not a browser. It exposes no more than the calendar read
-        does, and the composite does its own role check.
+        Not role-gated: the caller is a composite (forwarding the signed-in
+        user's token), not a browser. It exposes no more than the calendar
+        read does, and the composite does its own role check.
         """
         if any(len(request.args.getlist(key)) != 1 for key in ("dateFrom", "dateTo")):
             return jsonify(message="Provide dateFrom and dateTo exactly once."), 400
@@ -249,13 +237,10 @@ def create_app(config=None):
     @app.get("/venue-holds/reminders")
     def get_hold_reminders():
         """Holds expiring within 3 days that were placed for the calling coordinator."""
-        if app.config["CALENDAR_DEV_MODE"] is not True:
-            return jsonify(message="Venue hold DEV mode is disabled."), 503
-        coordinator_id = _parse_uuid(request.headers.get("X-Dev-User-Id"))
-        role = request.headers.get("X-Dev-Role")
-        if not coordinator_id or not role:
-            return jsonify(message="DEV user UUID and role headers are required."), 401
-        if role not in {"Event Coordinator", "Event Coordinator Lead"}:
+        coordinator_id = g.user_id
+        if not coordinator_id:
+            return jsonify(message="Sign in to continue."), 401
+        if g.role not in {"Event Coordinator", "Event Coordinator Lead"}:
             return jsonify(message="Event Coordinator role is required."), 403
         if not app.config["DATABASE_URL"]:
             return jsonify(
@@ -267,12 +252,10 @@ def create_app(config=None):
 
     @app.post("/venue-holds")
     def place_hold():
-        if app.config["CALENDAR_DEV_MODE"] is not True:
-            return jsonify(message="Venue hold DEV mode is disabled."), 503
-        staff_id = _parse_uuid(request.headers.get("X-Dev-User-Id"))
-        if not staff_id or not request.headers.get("X-Dev-Role"):
-            return jsonify(message="DEV user UUID and role headers are required."), 401
-        if request.headers.get("X-Dev-Role") != "Venue Staff":
+        staff_id = g.user_id
+        if not staff_id:
+            return jsonify(message="Sign in to continue."), 401
+        if g.role != "Venue Staff":
             return jsonify(message="Venue Staff role is required to place a hold."), 403
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
@@ -333,17 +316,18 @@ def create_app(config=None):
 
         event_id = _parse_uuid(data.get("eventId"))
         venue_id = _parse_uuid(data.get("venueId"))
-        requested_by = _parse_uuid(data.get("requestedBy"))
+        # The coordinator whose token Venue Booking Service forwards.
+        requested_by = g.user_id
+        if not requested_by:
+            return jsonify(message="Sign in to continue."), 401
         start = _parse_datetime(data.get("requestedStartTime"))
         end = _parse_datetime(data.get("requestedEndTime"))
         required_capacity = data.get("requiredCapacity")
         venue_requirements = data.get("venueRequirements")
         setup_time = _parse_buffer_minutes(data.get("setupTimeMinutes"))
         turnaround_time = _parse_buffer_minutes(data.get("turnaroundTimeMinutes"))
-        if not event_id or not venue_id or not requested_by:
-            return jsonify(
-                message="eventId, venueId and requestedBy must be valid ids."
-            ), 400
+        if not event_id or not venue_id:
+            return jsonify(message="eventId and venueId must be valid ids."), 400
         if not start or not end:
             return jsonify(
                 message="requestedStartTime and requestedEndTime must be valid dates and times."
@@ -541,9 +525,8 @@ def create_app(config=None):
 
     def _decide(booking_id, status):
         data = request.get_json(silent=True)
-        reviewed_by = (
-            _parse_uuid(data.get("reviewedBy")) if isinstance(data, dict) else None
-        )
+        # The Venue Staff reviewer whose token Venue Booking Service forwards.
+        reviewed_by = g.user_id
         setup_time = _parse_buffer_minutes(
             data.get("setupTimeMinutes") if isinstance(data, dict) else None
         )
@@ -551,7 +534,7 @@ def create_app(config=None):
             data.get("turnaroundTimeMinutes") if isinstance(data, dict) else None
         )
         if not reviewed_by:
-            return jsonify(message="reviewedBy must be a valid id."), 400
+            return jsonify(message="Sign in to continue."), 401
         if setup_time is None or turnaround_time is None:
             return jsonify(
                 message="Venue buffer times must be non-negative whole minutes."

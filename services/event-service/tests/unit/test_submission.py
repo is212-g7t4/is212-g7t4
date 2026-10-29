@@ -9,6 +9,7 @@ import psycopg2
 import pytest
 from app import create_app
 from app.models import FIELDS, SINGAPORE, RejectionReasonError, reject_event, serialize, unpack_description
+from tests.unit.factories import signed_in
 
 VALID = {
     "eventName": "Community Workshop",
@@ -32,7 +33,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def saved_row():
@@ -78,7 +79,8 @@ def test_ac1_ac2_ac3_submit_existing_columns_and_return_confirmation_data(setup)
     assert parameters[4] == datetime(2026, 10, 1, 17, tzinfo=SINGAPORE)
     assert parameters[5] == 25
     assert json.loads(parameters[2])["purpose"] == "Learning"
-    assert parameters[6:] == ["", "", "", "", None, None]  # deadline + organiser are absent
+    # No deadline; the organiser is the signed-in caller (SCRUM-8), not a body field.
+    assert parameters[6:] == ["", "", "", "", None, "00000000-0000-4000-8000-000000000001"]
     connection.__exit__.assert_called_once()
     connection.close.assert_called_once()
 
@@ -203,11 +205,12 @@ def test_optional_field_wrong_type(setup):
     )
 
 
-def test_submitted_queue_requires_a_coordinator_id(setup):
-    """No caller-less "show me everything" — the old unfiltered fallback is gone."""
-    client, _, cursor = setup
+def test_submitted_queue_requires_a_signed_in_coordinator(setup):
+    """No caller-less "show me everything" — the old unfiltered fallback is gone (SCRUM-8: no token, no queue)."""
+    _, _, cursor = setup
+    client = setup[0].application.test_client()
     response = client.get("/events/submitted")
-    assert response.status_code == 400
+    assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 
@@ -233,14 +236,6 @@ def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
     query, params = cursor.execute.call_args.args
     assert "coordinator_id = %s" not in query
     assert params == []
-
-
-@pytest.mark.parametrize("query_string", ["?coordinatorId=not-a-uuid"])
-def test_submitted_queue_rejects_invalid_optional_coordinator_id(query_string, setup):
-    client, _, cursor = setup
-    response = client.get(f"/events/submitted{query_string}")
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
 
 
 def test_empty_queue(setup):
@@ -348,18 +343,17 @@ def test_reassign_to_the_current_coordinator_is_rejected_as_no_change(setup):
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize("assigned_by", [None, "", "not-a-uuid", 123])
-def test_assign_coordinator_requires_a_valid_assigning_user(setup, assigned_by):
-    """Without a valid assigner there's nothing to show on the detail page."""
-    client, _, cursor = setup
-    body = {"assignedCoordinatorId": COORDINATOR_ID}
-    if assigned_by is not None:
-        body["assignedBy"] = assigned_by
+def test_assign_coordinator_requires_a_signed_in_assigner(setup):
+    """Without a signed-in assigner (SCRUM-8) there's nothing to show on the detail page."""
+    _, _, cursor = setup
+    client = setup[0].application.test_client()
 
-    response = client.patch("/events/00000000-0000-0000-0000-000000000001", json=body)
+    response = client.patch(
+        "/events/00000000-0000-0000-0000-000000000001",
+        json={"assignedCoordinatorId": COORDINATOR_ID},
+    )
 
-    assert response.status_code == 400
-    assert "assigning user" in response.json["message"]
+    assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 
@@ -424,7 +418,7 @@ def test_database_failure_never_reports_success(setup, operation):
 
 
 def test_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert client.post("/events", json=VALID).status_code == 503
     assert (
         client.get(f"/events/submitted?coordinatorId={COORDINATOR_ID}").status_code
@@ -549,13 +543,12 @@ def test_approval_returns_not_found_for_unknown_event(setup):
     assert response.status_code == 404
 
 
-@pytest.mark.parametrize("body", [{}, None, {"coordinatorId": "not-a-uuid"}])
-def test_approval_requires_valid_current_coordinator(body, setup):
-    response = setup[0].patch(
+def test_approval_requires_a_signed_in_coordinator(setup):
+    response = setup[0].application.test_client().patch(
         "/events/00000000-0000-0000-0000-000000000001/approve",
-        json=body,
+        json={"coordinatorId": COORDINATOR_ID},
     )
-    assert response.status_code == 400
+    assert response.status_code == 401
     setup[2].execute.assert_not_called()
 
 
@@ -671,13 +664,6 @@ def test_submit_persists_organiser_id(setup):
     assert event_insert.args[1][-1] == ORGANISER_ID
 
 
-def test_submit_rejects_invalid_organiser_id(setup):
-    client, _, cursor = setup
-    response = client.post("/events", json={**VALID, "organiserId": "not-a-uuid"})
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
-
-
 def test_timestamptz_values_serialize_as_singapore_local():
     """TIMESTAMPTZ columns come back aware in the session zone (UTC on Supabase);
     the API keeps returning the naive Singapore-local strings it always has."""
@@ -704,7 +690,7 @@ def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
 
 
 def test_unassigned_queue_needs_database(monkeypatch):
-    client = create_app({"TESTING": True, "DATABASE_URL": ""}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client())
     assert client.get("/events/unassigned").status_code == 503
 
 
@@ -725,7 +711,7 @@ def test_active_events_include_unassigned_and_exclude_confirmed_rejected_cancell
 
 
 def test_active_events_need_database(monkeypatch):
-    client = create_app({"TESTING": True, "DATABASE_URL": ""}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client())
     assert client.get("/events/active").status_code == 503
 
 
@@ -801,7 +787,7 @@ def test_public_rejection_model_refuses_whitespace_reason_before_writing(setup):
 
 def test_unconfigured_frontend_origin_does_not_authorise_browser_access():
     """Boundary: no configured frontend origin leaves a foreign browser origin disallowed."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None, "FRONTEND_ORIGIN": ""}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None, "FRONTEND_ORIGIN": ""}).test_client())
 
     response = client.get("/health", headers={"Origin": "http://localhost:5174"})
 

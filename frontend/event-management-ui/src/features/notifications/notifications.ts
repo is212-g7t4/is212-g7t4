@@ -1,4 +1,4 @@
-import type { User } from '../../types'
+import { authFetch } from '../auth/session'
 
 export interface InboxItem {
   id: string
@@ -23,10 +23,10 @@ export interface InboxItem {
 }
 export interface InboxPage { notifications: InboxItem[]; nextCursor: string | null }
 
-export async function notificationApi(user: User, path: string, init: RequestInit = {}) {
-  const response = await fetch(`${import.meta.env.VITE_NOTIFICATION_SERVICE_URL || 'http://localhost:5015'}${path}`, {
+export async function notificationApi(path: string, init: RequestInit = {}) {
+  const response = await authFetch(`${import.meta.env.VITE_NOTIFICATION_SERVICE_URL || 'http://localhost:5015'}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+    headers: { 'Content-Type': 'application/json' },
   })
   const body = await response.json()
   if (!response.ok) throw new Error(body.message || 'Unable to load notifications.')

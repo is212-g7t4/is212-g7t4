@@ -32,6 +32,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import psycopg2
 from app import create_app
+from tests.unit.factories import bearer, signed_in
 ID = "10000000-0000-0000-0000-000000000001"
 TOKEN = "20000000-0000-0000-0000-000000000001"
 HEADERS = {"X-Internal-Token": "synthetic-token"}
@@ -83,7 +84,7 @@ class TestNotificationLeases:
         cursor.fetchone.return_value = row
         cursor.fetchall.return_value = [row]
         with patch("psycopg2.connect", return_value=connection):
-            yield create_app({"DATABASE_URL": "synthetic"}).test_client(), cursor, row
+            yield signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client()), cursor, row
 
 
     def test_claim_freeze_once_retry_and_publish(self, setup):
@@ -201,7 +202,7 @@ class TestNotificationOutbox:
         Internal claim denies unconfigured or incorrect service tokens before database access.
         """
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic-internal-token")
-        client = create_app({"DATABASE_URL": "synthetic"}).test_client()
+        client = signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client())
         assert (
             client.post("/internal/notification-outbox/claim", json={}).status_code == 401
         )
@@ -220,7 +221,7 @@ class TestNotificationOutbox:
         An untrusted non-ASCII token is denied safely rather than causing a comparison exception.
         """
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic-token")
-        client = create_app({"DATABASE_URL": "synthetic"}).test_client()
+        client = signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client())
         assert (
             client.post(
                 "/internal/notification-outbox/claim", headers={"X-Internal-Token": "é"}
@@ -266,12 +267,11 @@ class TestNotificationTransaction:
         app = create_app(
             {
                 "DATABASE_URL": "synthetic",
-                "VENUE_CLOSURE_DEV_MODE": True,
                 "CLOSURE_CONFIRMATION_KEY": "synthetic-signing-key-with-32-bytes",
             }
         )
-        client = app.test_client()
-        headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"}
+        client = signed_in(app.test_client())
+        headers = bearer(USER_ID, "Venue Staff")
         data = dict(
             venueId=VENUE_ID,
             startDateTime="2099-01-01T08:00:00+08:00",

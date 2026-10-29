@@ -43,7 +43,7 @@ describe('SCRUM-48 supporting target-view decision boundaries', () => {
     await waitFor(() => expect(screen.queryByText('Mic')).not.toBeInTheDocument())
     expect(screen.getByText('Projector')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Some requested equipment is unavailable or you no longer have access.')
-    expect(reviewEquipmentRequest).toHaveBeenCalledWith('mic', 'Approved', user)
+    expect(reviewEquipmentRequest).toHaveBeenCalledWith('mic', 'Approved')
   })
 
   it('an ordinary empty list is not incorrectly described as a missing notification target', async () => {

@@ -6,6 +6,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import type { Role } from '../../types'
 import { NotificationProvider, NotificationsPage, NotificationBell } from './NotificationCenter'
 import { notificationPayload } from './notifications'
+import { signInAs, tokenOf } from '../../test/session'
 import type { InboxItem } from './notifications'
 const eventId = '30000000-0000-0000-0000-000000000001'
 const user = (role: Role) => ({ id: '10000000-0000-0000-0000-000000000001', role, username: '', email: '', organization: '' })
@@ -70,12 +71,12 @@ test('role switches clear bell, inbox, cursor, filter and late responses, includ
  const held = new Promise(resolve => { resolveOld = resolve })
  let hold = false
  const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
-  const role = (init.headers as Record<string,string>)['X-Dev-Role']
+  const role = tokenOf(init).replace(/^Bearer \S+ /, '')
   if (role === 'Event Coordinator' && hold) return held
   return { ok: true, json: async () => ({ notifications: role === 'Event Coordinator' ? [row('coordinator_assigned', { eventName: 'Old identity event' })] : [], nextCursor: role === 'Event Coordinator' ? 'old-cursor' : null, unreadCount: role === 'Event Coordinator' ? 1 : 0 }) }
  })
  vi.stubGlobal('fetch', fetcher)
- const ui = (role: Role) => <NotificationProvider user={user(role)} onNavigate={vi.fn()}><NotificationBell onViewAll={vi.fn()} /><NotificationsPage /></NotificationProvider>
+ const ui = (role: Role) => (signInAs(user(role)), <NotificationProvider user={user(role)} onNavigate={vi.fn()}><NotificationBell onViewAll={vi.fn()} /><NotificationsPage /></NotificationProvider>)
  const view = render(ui('Event Coordinator'))
  await screen.findByText('Old identity event')
  fireEvent.click(screen.getByRole('button', { name: 'Notifications, 1 unread' }))

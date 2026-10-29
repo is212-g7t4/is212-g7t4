@@ -4,7 +4,7 @@ import uuid
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 load_dotenv()
 
@@ -21,11 +21,13 @@ from app.models import (
 )
 
 from app import outbox
+from app.auth import authenticate
 
 STATUSES = ("Pending", "Approved", "Rejected")
 DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
-READ_ROLES = REVIEW_ROLES | {"Event Coordinator", "Safety Officer"}
+# The Lead is a coordinator with extra rights; composites read on a Lead's behalf with their token.
+READ_ROLES = REVIEW_ROLES | {"Event Coordinator", "Event Coordinator Lead", "Safety Officer"}
 CREATE_ROLES = {"Event Coordinator"}
 MAX_ITEMS = 50
 MAX_REQUIREMENTS_LENGTH = 1000
@@ -75,6 +77,7 @@ def _rejection_reason(payload, status):
 
 def create_app(config=None):
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN"),
@@ -99,7 +102,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = (
-                "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
+                "Content-Type, Accept, Authorization"
             )
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
@@ -112,19 +115,16 @@ def create_app(config=None):
         return jsonify(message="Unable to load or save equipment requests."), 503
 
     def authorise(allowed_roles, denied_message):
-        # DEV-only identity headers, same as Equipment Service; replace with Supabase JWT verification.
-        role = request.headers.get("X-Dev-Role")
-        user_id = _uuid_or_none(request.headers.get("X-Dev-User-Id"))
-        if not user_id or not role:
-            return None, (jsonify(message="DEV user UUID and role headers are required."), 401)
-        if role not in allowed_roles:
+        if not g.user_id:
+            return None, (jsonify(message="Sign in to continue."), 401)
+        if g.role not in allowed_roles:
             return None, (jsonify(message=denied_message), 403)
         if not app.config["DATABASE_URL"]:
             return None, (
                 jsonify(message="DATABASE_URL is not configured for Equipment Request Service."),
                 503,
             )
-        return user_id, None
+        return g.user_id, None
 
     @app.get("/health")
     def health():

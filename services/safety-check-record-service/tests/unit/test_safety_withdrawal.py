@@ -24,7 +24,9 @@ from tests.unit.factories import (
     NEXT_RECORD_ID,
     OFFICER_ID,
     RECORD_ID,
+    bearer,
     record_row,
+    signed_in,
 )
 
 REASON = "Date/time and Expected attendance changed after safety approval."
@@ -39,17 +41,17 @@ def setup(monkeypatch):
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client(), COORDINATOR_ID), connection, cursor
 
 
 @pytest.fixture
 def no_database():
     app = create_app({"TESTING": True, "DATABASE_URL": None})
-    return app.test_client()
+    return signed_in(app.test_client(), COORDINATOR_ID)
 
 
 def withdraw(client, record_id=RECORD_ID, **overrides):
-    body = {"withdrawnBy": COORDINATOR_ID, "reason": REASON, **overrides}
+    body = {"reason": REASON, **overrides}
     return client.post(f"/safety-check-records/{record_id}/withdraw", json=body)
 
 
@@ -285,15 +287,14 @@ def test_a_reason_over_the_limit_is_rejected(setup):
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("withdrawn_by", ["not-a-uuid", "", None])
-def test_withdrawn_by_must_be_a_uuid(withdrawn_by, setup):
+def test_withdrawer_is_the_signed_in_coordinator_not_the_body(setup):
+    """SCRUM-8: a forged withdrawnBy is ignored; the token names the withdrawer."""
     client, _, cursor = setup
+    cursor.fetchone.return_value = record_row(status="Safety Approved", decided=True)
 
-    response = withdraw(client, withdrawnBy=withdrawn_by)
+    withdraw(client, withdrawnBy="99999999-9999-4999-8999-999999999999")
 
-    assert response.status_code == 400
-    assert response.json["message"] == "withdrawnBy must be a valid UUID."
-    cursor.execute.assert_not_called()
+    assert all("99999999-9999-4999-8999-999999999999" not in str(c.args) for c in cursor.execute.call_args_list)
 
 
 def test_withdraw_requires_a_valid_record_id(setup):
@@ -394,7 +395,8 @@ def test_a_withdrawn_round_cannot_be_decided(setup):
 
     response = client.patch(
         f"/safety-check-records/{RECORD_ID}/decision",
-        json={"status": "Safety Approved", "decidedBy": OFFICER_ID},
+        json={"status": "Safety Approved"},
+        headers=bearer(OFFICER_ID, "Safety Officer"),
     )
 
     assert response.status_code == 409

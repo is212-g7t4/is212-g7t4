@@ -37,6 +37,8 @@ import pytest
 from app import create_app
 from app.models import _has_conflict
 from tests.unit.factories import (
+    signed_in,
+    bearer,
     BOOKING_ID,
     EVENT_ID,
     USER_ID,
@@ -47,7 +49,7 @@ from tests.unit.factories import (
 
 
 def test_health():
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.get("/health")
     assert response.status_code == 200
 
@@ -274,10 +276,9 @@ def test_get_bookings_lists_for_venue(setup):
     client, cursor = setup
     cursor.fetchall.return_value = [booking_row()]
 
-    client.application.config["CALENDAR_DEV_MODE"] = True
     response = client.get(
         f"/venue-bookings?venueId={VENUE_ID}&dateFrom=2026-10-01T00:00&dateTo=2026-10-02T00:00",
-        headers={"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"},
+        headers=bearer(USER_ID, "Venue Staff"),
     )
 
     assert response.status_code == 200
@@ -457,7 +458,7 @@ def test_update_booking_validates_each_mutable_field(setup):
 
 
 def test_update_and_cancel_report_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     details = {
         "eventId": EVENT_ID,
         "venueId": VENUE_ID,

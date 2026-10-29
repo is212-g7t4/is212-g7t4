@@ -7,6 +7,8 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+
+from tests.unit.factories import TEST_SIGNING_KEY
 import respx
 
 from app.dispatcher import OutboxAPI
@@ -84,3 +86,10 @@ def attendee_http(monkeypatch):
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic")
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         yield OutboxAPI(), router
+
+
+@pytest.fixture(autouse=True)
+def trusted_test_signing_key(monkeypatch):
+    """Verify tokens against the test key instead of fetching Supabase's JWKS (SCRUM-8)."""
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.test")
+    monkeypatch.setattr("app.auth.signing_key", lambda token: TEST_SIGNING_KEY.public_key())

@@ -1,5 +1,6 @@
 import type { SubmittedEvent } from './submission'
 import type { EditableField, EventChanges, ArrangementConflict } from './eventDetails'
+import { authFetch } from '../auth/session'
 
 export interface EventChangeRequest {
   id: string
@@ -40,7 +41,7 @@ export class ChangeRequestReviewError extends Error {
 const serviceUrl = () => import.meta.env.VITE_EVENT_WORKFLOW_SERVICE_URL || 'http://localhost:5014'
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${serviceUrl()}${path}`, init)
+  const response = await authFetch(`${serviceUrl()}${path}`, init)
   const body = await response.json().catch(() => ({}))
   if (response.ok) return body
   throw new ChangeRequestReviewError(

@@ -1,17 +1,17 @@
-"""Own-inbox HTTP API. DEV identity is opt-in, not production authentication."""
+"""Own-inbox HTTP API for the signed-in user."""
 
 import os
-from uuid import UUID
-from flask import Flask, request, jsonify
+from flask import Flask, g, request, jsonify
 import psycopg2
 from app import store
+from app.auth import authenticate
 
 
 def create_app():
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.update(
         DATABASE_URL=os.getenv("DATABASE_URL"),
-        NOTIFICATION_DEV_MODE=os.getenv("NOTIFICATION_DEV_MODE") == "true",
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
     )
 
@@ -28,7 +28,7 @@ def create_app():
                 {
                     "Access-Control-Allow-Origin": origin,
                     "Vary": "Origin",
-                    "Access-Control-Allow-Headers": "Content-Type, X-Dev-User-Id, X-Dev-Role",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
                     "Access-Control-Allow-Methods": "GET, PATCH, OPTIONS",
                 }
             )
@@ -42,14 +42,9 @@ def create_app():
     @app.get("/notifications/unread-count")
     @app.patch("/notifications/<uuid:notification_id>")
     def inbox(notification_id=None):
-        if not app.config["NOTIFICATION_DEV_MODE"]:
-            return jsonify(message="Notification DEV mode is disabled."), 503
-        try:
-            user = str(UUID(request.headers.get("X-Dev-User-Id", "")))
-            if not request.headers.get("X-Dev-Role"):
-                raise ValueError()
-        except ValueError:
-            return jsonify(message="DEV identity is required."), 401
+        user = g.user_id
+        if not user:
+            return jsonify(message="Sign in to continue."), 401
         if not app.config["DATABASE_URL"]:
             return jsonify(message="Notification database is not configured."), 503
         try:

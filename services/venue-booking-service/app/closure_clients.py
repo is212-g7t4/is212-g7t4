@@ -5,6 +5,7 @@ from app.clients import (
     VENUE_SERVICE_URL,
     VENUE_AVAILABILITY_SERVICE_URL,
     EVENT_SERVICE_URL,
+    _forwarded_auth,
 )
 
 
@@ -17,7 +18,7 @@ class ClosureUpstreamError(Exception):
 
 def call(method, url, **kwargs):
     try:
-        response = httpx.request(method, url, timeout=5.0, **kwargs)
+        response = httpx.request(method, url, timeout=5.0, headers=_forwarded_auth(), **kwargs)
     except httpx.RequestError as error:
         raise ClosureUpstreamError(503) from error
     if response.status_code == 409:
@@ -39,7 +40,7 @@ def call(method, url, **kwargs):
         raise ClosureUpstreamError(502) from error
 
 
-def create(data, headers):
+def create(data):
     result = call("GET", f"{VENUE_SERVICE_URL}/venues/{data['venueId']}")
     if (
         not isinstance(result, dict)
@@ -52,12 +53,11 @@ def create(data, headers):
             "POST",
             f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-closures",
             json=data,
-            headers=headers,
         )
     )
 
 
-def preview(data, headers):
+def preview(data):
     from app.closure_contract import uuid_value, timestamp
 
     try:
@@ -72,7 +72,6 @@ def preview(data, headers):
             "POST",
             f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-closures/preview",
             json=data,
-            headers=headers,
         )
         rows = result["affectedRequests"]
         if (
@@ -128,13 +127,13 @@ def preview(data, headers):
         raise ClosureUpstreamError(502) from error
 
 
-def read(closure_id, params, headers):
+def read(closure_id, params):
     path = (
         f"/venue-closures/{closure_id}" if closure_id is not None else "/venue-closures"
     )
     return checked(
         call(
-            "GET", VENUE_AVAILABILITY_SERVICE_URL + path, params=params, headers=headers
+            "GET", VENUE_AVAILABILITY_SERVICE_URL + path, params=params
         ),
         collection=closure_id is None,
     )

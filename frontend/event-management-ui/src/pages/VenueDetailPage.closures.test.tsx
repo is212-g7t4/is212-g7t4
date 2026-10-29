@@ -36,7 +36,7 @@ test('SCRUM-170 persisted list uses Singapore dates, reaches later pages and ref
  expect(screen.getByText(/1 Jan 2020, 09:00/)).toBeInTheDocument()
  fireEvent.click(screen.getByRole('button', { name: 'Load more closures' }))
  expect(await screen.findByText('Second page')).toBeInTheDocument()
- expect(listClosures).toHaveBeenLastCalledWith('v1', user, 'next', expect.any(AbortSignal))
+ expect(listClosures).toHaveBeenLastCalledWith('v1', 'next', expect.any(AbortSignal))
  expect(screen.queryByRole('button', { name: 'Load more closures' })).not.toBeInTheDocument()
  fireEvent.click(screen.getByRole('button', { name: 'Refresh closures' }))
  expect(await screen.findByText('No recorded closures.')).toBeInTheDocument()
@@ -61,8 +61,8 @@ test('SCRUM-170 role change cancels list and save, clears state, ignores late re
  const { rerender } = render(<VenueDetailPage {...props} />)
  await fill()
  fireEvent.click(screen.getByRole('button', { name: 'Confirm closure and reject requests' }))
- const saveSignal = vi.mocked(createClosure).mock.calls[0][6]
- const listSignal = vi.mocked(listClosures).mock.calls[0][3]
+ const saveSignal = vi.mocked(createClosure).mock.calls[0][5]
+ const listSignal = vi.mocked(listClosures).mock.calls[0][2]
  rerender(<VenueDetailPage {...props} role="Event Coordinator" />)
  expect(saveSignal?.aborted).toBe(true)
  expect(listSignal?.aborted).toBe(true)
@@ -88,7 +88,7 @@ test('SCRUM-170 venue change aborts stale reads and never shows old closure data
  await screen.findByRole('button', { name: 'Record temporary closure' })
  // The list request starts in an effect after the button renders; wait for it, not for the button.
  await waitFor(() => expect(listClosures).toHaveBeenCalled())
- const signal = vi.mocked(listClosures).mock.calls[0][3]
+ const signal = vi.mocked(listClosures).mock.calls[0][2]
  vi.mocked(fetchVenue).mockResolvedValue({ id: 'v2', name: 'Other Hall', status: 'On Hold', location: '', capacity: 1, accessibility: '', facilities: [], supportedLayouts: [] })
  rerender(<VenueDetailPage {...props} venueId="v2" />)
  expect(signal?.aborted).toBe(true)
@@ -139,7 +139,7 @@ test.each([false, true])('SCRUM-170 failed polling preserves draft and pending s
   expect(screen.getByRole('alert')).toHaveTextContent('Venue refresh offline')
   expect(screen.getByRole('heading', { name: 'Grand Hall' })).toBeInTheDocument()
   if (saving) {
-   expect(vi.mocked(createClosure).mock.calls[0][6]?.aborted).toBe(false)
+   expect(vi.mocked(createClosure).mock.calls[0][5]?.aborted).toBe(false)
    await act(async () => finish(row))
    expect(screen.getByText('Closure recorded.')).toBeInTheDocument()
    expect(listClosures).toHaveBeenCalledTimes(2)
@@ -171,7 +171,7 @@ test('SCRUM-170 identity change clears previous staff errors and aborts late fai
  vi.mocked(listClosures).mockReturnValueOnce(new Promise((_, fail) => { reject = fail }))
  const view = render(<VenueDetailPage {...props} />)
  await fill()
- const signal = vi.mocked(listClosures).mock.calls[0][3]
+ const signal = vi.mocked(listClosures).mock.calls[0][2]
  view.rerender(<VenueDetailPage {...props} user={{ ...user, id: 'staff2' }} />)
  expect(signal?.aborted).toBe(true)
  await act(async () => reject(new Error('Old staff error')))
@@ -200,7 +200,7 @@ test('SCRUM-170 refresh supersedes stale page, nullable legacy metadata and dupl
  vi.mocked(listClosures).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
  render(<VenueDetailPage {...props} />)
  const button = await screen.findByRole('button', { name: 'Refresh closures' })
- const signal = vi.mocked(listClosures).mock.calls[0][3]
+ const signal = vi.mocked(listClosures).mock.calls[0][2]
  vi.mocked(listClosures).mockResolvedValueOnce({ closures: [{ ...row, createdBy: null, createdAt: null }], nextCursor: 'next' })
  fireEvent.click(button)
  expect(signal?.aborted).toBe(true)

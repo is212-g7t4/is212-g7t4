@@ -69,7 +69,6 @@ test('Venue Staff can submit a timed hold from venue details', async () => {
   await waitFor(() => expect(placeVenueHold).toHaveBeenCalledWith(
     venue.id,
     '2026-10-09T12:00',
-    { id: 'staff-1', role: 'Venue Staff' },
     undefined,
     venue,
   ))
@@ -98,7 +97,6 @@ test('Venue Staff can assign a coordinator reminder without losing venue buffers
   await waitFor(() => expect(placeVenueHold).toHaveBeenCalledWith(
     venue.id,
     '2026-10-09T12:00',
-    { id: 'staff-1', role: 'Venue Staff' },
     'coordinator-1',
     venue,
   ))

@@ -1,9 +1,8 @@
 import os
-from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 load_dotenv()
 
@@ -20,6 +19,7 @@ from app.models import (
     update_venue,
 )
 from app.validation import validate, validate_safety_info
+from app.auth import authenticate
 
 
 class InvalidCriteriaError(Exception):
@@ -64,15 +64,9 @@ def read_criteria(args):
     }
 
 
-def _uuid_or_none(value):
-    try:
-        return str(UUID(value or ""))
-    except ValueError:
-        return None
-
-
 def create_app(config=None):
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         # The Vite dev server is pinned to 5174 (strictPort in
@@ -94,7 +88,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = (
-                "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
+                "Content-Type, Accept, Authorization"
             )
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
         if request.method == "OPTIONS":
@@ -221,16 +215,10 @@ def create_app(config=None):
     @app.route("/venues/<uuid:venue_id>/safety-info", methods=["PUT"])
     def edit_safety_info(venue_id):
         """SCRUM-167: Venue Staff record emergency access and known restrictions."""
-        # DEV-only role check, same headers as Equipment Service and Venue
-        # Availability. Spoofable; replace with Supabase JWT verification when
-        # real auth lands.
-        editor_id = _uuid_or_none(request.headers.get("X-Dev-User-Id"))
+        editor_id = g.user_id
         if not editor_id:
-            return jsonify(message="A valid DEV user UUID is required."), 401
-        role = request.headers.get("X-Dev-Role")
-        if not role:
-            return jsonify(message="A DEV role header is required."), 401
-        if role != "Venue Staff":
+            return jsonify(message="Sign in to continue."), 401
+        if g.role != "Venue Staff":
             return jsonify(
                 code="VENUE_STAFF_ONLY",
                 message="Only Venue Staff can edit venue safety information.",

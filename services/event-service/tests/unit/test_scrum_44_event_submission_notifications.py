@@ -15,6 +15,7 @@ from uuid import UUID, uuid5
 
 import pytest
 from app import create_app
+from tests.unit.factories import signed_in
 
 ID = '10000000-0000-0000-0000-000000000001'
 RECIPIENT = '10000000-0000-0000-0000-000000000002'
@@ -29,7 +30,7 @@ def boundary(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr('app.outbox.psycopg2.connect', lambda *a, **kw: connection)
-    client = create_app({'TESTING': True, 'DATABASE_URL': 'unused', 'INTERNAL_SERVICE_TOKEN': 'synthetic'}).test_client()
+    client = signed_in(create_app({'TESTING': True, 'DATABASE_URL': 'unused', 'INTERNAL_SERVICE_TOKEN': 'synthetic'}).test_client())
     row = dict(source_id=ID, type='event.submission-fanout', source=SOURCE, envelope=None,
                created_at=datetime(2026, 10, 25, tzinfo=UTC), lease_token=ID, lease_valid=True, attempts=1)
     cursor.fetchone.side_effect = lambda: row

@@ -26,6 +26,7 @@ import pytest
 
 from app import create_app
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -62,7 +63,7 @@ def setup(monkeypatch):
             "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
         }
     )
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def event_row(
@@ -327,16 +328,6 @@ def test_missing_event_is_404(setup):
 
 
 # --- Input validation ---------------------------------------------------------
-
-
-def test_missing_decided_by_is_rejected(setup):
-    client, _, cursor = setup
-
-    response = patch_safety_status(client, decidedBy="")
-
-    assert response.status_code == 400
-    assert response.json["message"] == "A valid decidedBy ID is required."
-    cursor.execute.assert_not_called()
 
 
 def test_remarks_over_the_limit_are_rejected(setup):

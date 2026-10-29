@@ -1,5 +1,5 @@
-import type { User } from '../../types'
 import { singaporeInput, timestampMicros } from '../calendar/dates'
+import { authFetch } from '../auth/session'
 export interface VenueClosure {
   closureId: string; venueId: string | null; startDateTime: string; endDateTime: string
   reason: string; createdBy: string | null; createdAt: string | null
@@ -11,9 +11,8 @@ export interface ClosurePreview {
   confirmationToken: string
   affectedRequests: { id: string; eventId: string; venueId: string; eventName: string; venueName: string; requestedStartTime: string; requestedEndTime: string; status: string }[]
 }
-type Identity = Pick<User, 'id' | 'role'>
 const url = () => (import.meta.env.VITE_VENUE_BOOKING_SERVICE_URL || 'http://localhost:5007') + '/venue-closures'
-const headers = (user: Identity) => ({ 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role })
+const headers = { 'Content-Type': 'application/json' }
 const ambiguous = 'The closure may have been recorded. Refresh the closure list and load all pages before retrying; a retry can create a duplicate. If uncertain, reconcile with staff.'
 function validClosure(value: unknown, venueId: string): value is VenueClosure {
   if (!value || typeof value !== 'object') return false
@@ -24,7 +23,7 @@ function validClosure(value: unknown, venueId: string): value is VenueClosure {
     (row.createdBy === null || typeof row.createdBy === 'string') &&
     (row.createdAt === null || timestampMicros(row.createdAt) !== null)
 }
-export async function createClosure(venueId: string, start: string, end: string, reason: string, user: Identity, confirmationToken: string, signal?: AbortSignal): Promise<VenueClosure & { rejectedCount: number }> {
+export async function createClosure(venueId: string, start: string, end: string, reason: string, confirmationToken: string, signal?: AbortSignal): Promise<VenueClosure & { rejectedCount: number }> {
   const startDateTime = singaporeInput(start), endDateTime = singaporeInput(end)
   const a = timestampMicros(startDateTime), b = timestampMicros(endDateTime)
   if (a === null || b === null || b <= a || b <= BigInt(Date.now()) * 1000n)
@@ -32,7 +31,7 @@ export async function createClosure(venueId: string, start: string, end: string,
   if (!reason.trim()) throw new Error('A reason is required.')
   let response: Response
   try {
-    response = await fetch(url(), { method: 'POST', headers: headers(user), signal,
+    response = await authFetch(url(), { method: 'POST', headers, signal,
       body: JSON.stringify({ venueId, startDateTime, endDateTime, reason: reason.trim(), confirmed: true, confirmationToken }) })
   } catch { throw Object.assign(new Error(ambiguous), { uncertain: true }) }
   const body = await response.json().catch(() => null)
@@ -40,8 +39,8 @@ export async function createClosure(venueId: string, start: string, end: string,
   if (response.status !== 201 || !validClosure(body?.closure, venueId) || !Number.isInteger(body?.rejectedCount) || body.rejectedCount < 0) throw Object.assign(new Error(ambiguous), { uncertain: true })
   return { ...body.closure, rejectedCount: body.rejectedCount }
 }
-export async function previewClosure(venueId: string, start: string, end: string, reason: string, user: Identity, signal?: AbortSignal): Promise<ClosurePreview> {
-  const response = await fetch(`${url()}/preview`, { method: 'POST', headers: headers(user), signal,
+export async function previewClosure(venueId: string, start: string, end: string, reason: string, signal?: AbortSignal): Promise<ClosurePreview> {
+  const response = await authFetch(`${url()}/preview`, { method: 'POST', headers, signal,
     body: JSON.stringify({ venueId, startDateTime: singaporeInput(start), endDateTime: singaporeInput(end), reason: reason.trim() }) })
   const body = await response.json()
   if (!response.ok) throw new Error(body?.message || 'Unable to preview affected requests.')
@@ -63,10 +62,10 @@ export async function previewClosure(venueId: string, start: string, end: string
     throw new Error('Unable to verify the complete affected-request preview. Please preview again.')
   return body
 }
-export async function listClosures(venueId: string, user: Identity, cursor?: string, signal?: AbortSignal): Promise<{ closures: VenueClosure[]; nextCursor: string | null }> {
+export async function listClosures(venueId: string, cursor?: string, signal?: AbortSignal): Promise<{ closures: VenueClosure[]; nextCursor: string | null }> {
   const query = new URLSearchParams({ venueId, limit: '50' })
   if (cursor) query.set('cursor', cursor)
-  const response = await fetch(`${url()}?${query}`, { headers: headers(user), signal })
+  const response = await authFetch(`${url()}?${query}`, { signal })
   const body = await response.json().catch(() => null)
   if (!response.ok || !Array.isArray(body?.closures) || !body.closures.every((row: unknown) => validClosure(row, venueId)) ||
     !(body.nextCursor === null || (typeof body.nextCursor === 'string' && body.nextCursor.length > 0)) ||

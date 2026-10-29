@@ -18,8 +18,9 @@ import { fetchUsers } from './features/user/users'
 import type { InboxItem } from './features/notifications/notifications'
 import type { EquipmentRequest, EventReservation } from './features/equipment/requests'
 import type { User } from './types'
+import { signInAs, tokenOf } from './test/session'
 
-vi.mock('./features/user/users', () => ({ fetchUsers: vi.fn() }))
+vi.mock('./features/user/users', async (original) => ({ ...await original<typeof import('./features/user/users')>(), fetchUsers: vi.fn() }))
 // Venue reminders are unrelated to the agreed equipment/inbox seam.
 vi.mock('./features/venue/venueHolds', () => ({ fetchHoldReminders: vi.fn(async () => []) }))
 
@@ -66,7 +67,7 @@ beforeEach(() => {
   unexpected = []
   equipmentRead = async () => response({ events: rows })
   vi.mocked(fetchUsers).mockResolvedValue([staff, coordinator, otherCoordinator, attendee])
-  vi.stubGlobal('localStorage', { getItem: () => staff.id, setItem: vi.fn() })
+  signInAs(staff)
   window.history.replaceState({}, '', '/notifications')
   http = vi.fn(async (input: string, init: RequestInit = {}) => {
     const url = new URL(input)
@@ -76,6 +77,7 @@ beforeEach(() => {
       const item = inbox.find(item => item.id === decodeURIComponent(url.pathname.split('/').at(-1)!))!
       return response({ notification: { ...item, readAt: '2026-10-28T01:01:00Z' } })
     }
+    if (url.pathname === '/auth/login') return response({ accessToken: 'unused', expiresAt: 4102444800, user: { user_id: attendee.id, username: attendee.username, email: '', role: attendee.role, organization: '', contact_details: '' } })
     if (url.pathname === '/equipment-reservations') return equipmentRead(init)
     // Ordinary navigation from a targeted coordinator view can visit and leave
     // the real new-request form; no creation writes are part of this test seam.
@@ -127,13 +129,13 @@ describe('SCRUM-48 original ACs — click an equipment alert through App', () =>
     expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(2)
     expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
-    expect(http).toHaveBeenCalledWith('http://localhost:5010/equipment-reservations', expect.objectContaining({ headers: { 'X-Dev-User-Id': staff.id, 'X-Dev-Role': 'Technical Support' } }))
+    expect(http).toHaveBeenCalledWith('http://localhost:5010/equipment-reservations', { headers: { Authorization: `Bearer ${staff.id} ${staff.role}` } })
   })
 
   /** AC2=Approved; AC3=Rejected. A workflow reason may appear only after navigation. */
   it.each(['Approved', 'Rejected'] as const)('%s decision (AC2/AC3): opens only the decided row as the assigned coordinator', async status => {
     // Arrange: producer-like decision envelope; workflow reason is NOT in the alert.
-    vi.stubGlobal('localStorage', { getItem: () => coordinator.id, setItem: vi.fn() })
+    signInAs(coordinator)
     const message = `HD projector x2 for SCRUM48 Symposium was ${status.toLowerCase()}.`
     inbox = [alert('decision', [PROJECTOR], 'equipment.request-decision', message)]
     rows[0].requests[1] = { ...line(PROJECTOR, 'HD projector', 2, status), rejectionReason: status === 'Rejected' ? 'Workflow-only technician reason.' : null }
@@ -146,7 +148,7 @@ describe('SCRUM-48 original ACs — click an equipment alert through App', () =>
     expect(window.location.pathname + window.location.search).toBe(target([PROJECTOR]))
     expect(screen.queryByText('Wireless microphone')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
-    expect(http).toHaveBeenCalledWith('http://localhost:5010/equipment-reservations', expect.objectContaining({ headers: { 'X-Dev-User-Id': coordinator.id, 'X-Dev-Role': 'Event Coordinator' } }))
+    expect(http).toHaveBeenCalledWith('http://localhost:5010/equipment-reservations', { headers: { Authorization: `Bearer ${coordinator.id} ${coordinator.role}` } })
     // The workflow page may show its reason; AC3 forbids it in the notification, not here.
     if (status === 'Rejected') expect(screen.getByText('Workflow-only technician reason.')).toBeInTheDocument()
   })
@@ -178,28 +180,29 @@ describe('SCRUM-48 supporting navigation and access rules (not extra ACs)', () =
     expect(screen.getAllByRole('button', { name: 'Approve All' })).toHaveLength(2)
   })
 
-  it('role/user change removes previous rows immediately and ignores their late HTTP response', async () => {
-    // Arrange: start with staff data, then make the next coordinator request unresolved.
+  it('signing out removes previous rows immediately, ignores their late HTTP response and the next user starts clean', async () => {
+    // Arrange: start with staff data, then leave a refresh unresolved.
     render(<App />)
     await openAlert()
     await expectRows(['Wireless microphonePending', 'HD projectorPending'])
     let finish!: (value: Response) => void
     equipmentRead = () => new Promise(resolve => { finish = resolve })
-    // Act: change identity while staying on the deep link.
-    await userEvent.selectOptions(screen.getByLabelText('Select active user'), otherCoordinator.id)
-    expect(screen.queryByText('Wireless microphone')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Refresh requests/ }))
     await waitFor(() => expect(finish).toBeTypeOf('function'))
-    await userEvent.selectOptions(screen.getByLabelText('Select active user'), attendee.id)
+    // Act: sign out, then sign in as an attendee while staying on the deep link.
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(screen.queryByText('Wireless microphone')).not.toBeInTheDocument()
+    signInAs(attendee)
+    await userEvent.type(screen.getByLabelText(/Email/), 'attendee@example.com')
+    await userEvent.type(screen.getByLabelText(/Password/), 'secret')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     await act(async () => { finish(response({ events: reservations() })) })
     // Assert: unauthorized role sees no stale/late event data or equipment actions.
-    expect(screen.getByText('Equipment requests are visible to Technical Support and assigned Event Coordinators.')).toBeInTheDocument()
+    expect(await screen.findByText('Equipment requests are visible to Technical Support and assigned Event Coordinators.')).toBeInTheDocument()
     expect(screen.queryByText('Wireless microphone')).not.toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
     const equipmentCalls = http.mock.calls.filter(([url]) => new URL(url).pathname === '/equipment-reservations')
-    expect(equipmentCalls.map(([, init]) => (init as RequestInit).headers)).toEqual([
-      { 'X-Dev-User-Id': staff.id, 'X-Dev-Role': staff.role },
-      { 'X-Dev-User-Id': otherCoordinator.id, 'X-Dev-Role': otherCoordinator.role },
-    ])
+    expect(equipmentCalls.map(([, init]) => tokenOf(init))).toEqual([`Bearer ${staff.id} ${staff.role}`, `Bearer ${staff.id} ${staff.role}`])
   })
 
   it('partial missing/deleted targets show available target rows and an access-safe warning only', async () => {
@@ -219,7 +222,7 @@ describe('SCRUM-48 supporting navigation and access rules (not extra ACs)', () =
     if (situation === 'deleted event') rows = []
     if (situation === 'reassigned coordinator') {
       rows = [rows[1]]
-      vi.stubGlobal('localStorage', { getItem: () => otherCoordinator.id, setItem: vi.fn() })
+      signInAs(otherCoordinator)
     }
     if (situation === 'missing request') inbox = [alert('missing', [MISSING])]
     render(<App />)
@@ -268,7 +271,7 @@ describe('SCRUM-48 supporting navigation and access rules (not extra ACs)', () =
 
   it('leaving a targeted view for the new-request form and returning clears the old target', async () => {
     // Arrange: a coordinator opens one request through the inbox.
-    vi.stubGlobal('localStorage', { getItem: () => coordinator.id, setItem: vi.fn() })
+    signInAs(coordinator)
     inbox = [alert('single', [PROJECTOR])]
     render(<App />)
     await openAlert()

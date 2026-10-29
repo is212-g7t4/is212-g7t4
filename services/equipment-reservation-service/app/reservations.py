@@ -29,27 +29,27 @@ def _equipment_view(item):
     return {key: item[key] for key in ("description", "type", "totalQuantity", "status")}
 
 
-def _reserved_by_equipment(event, headers):
+def _reserved_by_equipment(event):
     """Quantity per equipment held by *other* non-rejected events overlapping this event's window."""
     start, end = event.get("startTime"), event.get("endTime")
     if not start or not end:
         return {}
     others = clients.get_overlapping_events(start, end, RESERVING_EVENT_STATUSES, event["id"])
     totals = defaultdict(int)
-    for item in clients.list_requests(headers, "Approved", [other["id"] for other in others]):
+    for item in clients.list_requests("Approved", [other["id"] for other in others]):
         totals[item["equipmentId"]] += item["quantityRequested"]
     return totals
 
 
-def _evaluate_pending(event, pending, catalogue, headers):
-    reserved = _reserved_by_equipment(event, headers) if pending else {}
+def _evaluate_pending(event, pending, catalogue):
+    reserved = _reserved_by_equipment(event) if pending else {}
     return {
         item["id"]: evaluate_request(item, catalogue.get(item["equipmentId"]), reserved.get(item["equipmentId"], 0))
         for item in pending
     }
 
 
-def build_event_views(requests, headers):
+def build_event_views(requests):
     """Group requests by event; only Pending lines carry an availability result."""
     event_ids = list(dict.fromkeys(item["eventId"] for item in requests))
     if not event_ids:
@@ -61,7 +61,7 @@ def build_event_views(requests, headers):
         event = summaries.get(event_id, {"id": event_id})
         items = [item for item in requests if item["eventId"] == event_id]
         pending = [item for item in items if item["status"] == "Pending"]
-        availability = _evaluate_pending(event, pending, catalogue, headers)
+        availability = _evaluate_pending(event, pending, catalogue)
         safety_round = None
         if event.get("status") == "Safety Changes Requested":
             rounds = clients.get_event_safety_checks(event_id)
@@ -95,10 +95,10 @@ def _safety_feedback(safety_round, request_id):
     return {"reason": safety_round.get("remarks"), "requestedChanges": changes}
 
 
-def _ensure_sufficient(event_id, pending, headers):
+def _ensure_sufficient(event_id, pending):
     event = next(iter(clients.get_event_summaries([event_id])), {"id": event_id})
     catalogue = _catalogue()
-    availability = _evaluate_pending(event, pending, catalogue, headers)
+    availability = _evaluate_pending(event, pending, catalogue)
     short = [
         f"{(catalogue.get(item['equipmentId']) or {}).get('description', 'Unknown equipment')} "
         f"(requested {item['quantityRequested']}, available {availability[item['id']]['availableStock']})"
@@ -109,28 +109,28 @@ def _ensure_sufficient(event_id, pending, headers):
         raise InsufficientStockError("Cannot approve, insufficient stock: " + "; ".join(short) + ".")
 
 
-def review_request(headers, request_id, status, rejection_reason=None):
+def review_request(request_id, status, rejection_reason=None):
     if status == "Approved":
-        request = clients.get_request(headers, request_id)
+        request = clients.get_request(request_id)
         if request["status"] == "Pending":
-            _ensure_sufficient(request["eventId"], [request], headers)
-    return clients.review_request(headers, request_id, status, rejection_reason)
+            _ensure_sufficient(request["eventId"], [request])
+    return clients.review_request(request_id, status, rejection_reason)
 
 
-def review_event(headers, event_id, status, rejection_reason=None):
+def review_event(event_id, status, rejection_reason=None):
     if status == "Approved":
-        pending = clients.list_requests(headers, "Pending", [event_id])
+        pending = clients.list_requests("Pending", [event_id])
         if pending:
-            _ensure_sufficient(event_id, pending, headers)
-    return clients.review_event_requests(headers, event_id, status, rejection_reason)
+            _ensure_sufficient(event_id, pending)
+    return clients.review_event_requests(event_id, status, rejection_reason)
 
 
-def create_requests(headers, coordinator_id, event_id, items):
+def create_requests(event_id, items):
     """Check assignment, event status and physical status, then save the lines as Pending.
 
     Stock over the event's window is not checked here; Technical Support checks it at review.
     """
-    event = next((e for e in clients.list_assigned_events(coordinator_id) if e["id"] == event_id), None)
+    event = next((e for e in clients.list_assigned_events() if e["id"] == event_id), None)
     if event is None:
         raise RequestNotAllowedError(403, "You can only request equipment for events assigned to you.")
     if event.get("status") not in OPEN_EVENT_STATUSES:
@@ -145,4 +145,4 @@ def create_requests(headers, coordinator_id, event_id, items):
     ]
     if unavailable:
         raise RequestNotAllowedError(409, "This equipment is Unavailable: " + ", ".join(unavailable) + ".")
-    return clients.create_event_requests(headers, event_id, items)
+    return clients.create_event_requests(event_id, items)

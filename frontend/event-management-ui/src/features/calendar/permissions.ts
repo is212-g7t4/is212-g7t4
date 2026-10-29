@@ -1,4 +1,4 @@
-/** Untrusted role text → DEV calendar visibility only, not authentication.
+/** Signed-in role → calendar visibility in the UI; services enforce access.
  * Separate from catalogue permissions: Technical Support also inspects availability. */
 export function canViewCalendar(role: string): boolean {
   return [

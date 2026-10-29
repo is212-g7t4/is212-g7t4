@@ -97,9 +97,8 @@ Service reads them from the catalogue list for the Safety Officer's review.
   Information. Venue Staff only. Replaces both texts and stamps the editor and
   the database's `now()`.
 
-  Headers: `X-Dev-User-Id: <uuid>`, `X-Dev-Role: Venue Staff`. This is the same
-  DEV-only, spoofable identity as Equipment Service and Venue Availability;
-  replace it with Supabase JWT verification when real auth lands.
+  Header: `Authorization: Bearer <token>` (SCRUM-8). The editor and role come
+  from the signed-in user's token.
 
   Body (both keys required; send `null` to clear one):
 
@@ -114,7 +113,7 @@ Service reads them from the catalogue list for the Safety Officer's review.
   | --- | --- |
   | `200 { venue }` | saved. If neither value changed, nothing is written and the existing stamp is kept |
   | `400 { message, errors }` | not a JSON object, a key missing, a value not text, or over 2000 characters |
-  | `401 { message }` | `X-Dev-User-Id` missing or not a UUID, or `X-Dev-Role` missing |
+  | `401 { message }` | no valid sign-in token |
   | `403 { code: "VENUE_STAFF_ONLY" }` | any role other than Venue Staff |
   | `403 { code: "UNKNOWN_EDITOR" }` | the editor id is not a `User` row (the `safety_info_updated_by` foreign key refuses it) |
   | `404` | no such venue |

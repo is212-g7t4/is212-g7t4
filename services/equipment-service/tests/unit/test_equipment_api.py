@@ -5,9 +5,10 @@ import psycopg2
 import pytest
 
 from app import create_app
+from tests.unit.factories import bearer
 
 USER_ID = "ad3d6da3-7220-4f80-9157-2ee4abc0455c"
-TS_HEADERS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}
+TS_HEADERS = bearer(USER_ID, "Technical Support")
 ORIGIN = "http://localhost:5173"
 
 
@@ -31,7 +32,9 @@ def setup(monkeypatch):
     connect = MagicMock(return_value=connection)
     monkeypatch.setattr("app.models.psycopg2.connect", connect)
     app = create_app({"DATABASE_URL": "postgresql://x", "FRONTEND_ORIGIN": ORIGIN})
-    return app.test_client(), cursor, connect
+    client = app.test_client()
+    client.environ_base["HTTP_AUTHORIZATION"] = bearer(USER_ID, "Event Coordinator")["Authorization"]
+    return client, cursor, connect
 
 
 def body(**overrides):
@@ -82,7 +85,7 @@ def test_list_rejects_unknown_status(setup):
 
 def test_list_without_database_url_is_503():
     client = create_app({"DATABASE_URL": None}).test_client()
-    assert client.get("/equipment").status_code == 503
+    assert client.get("/equipment", headers=TS_HEADERS).status_code == 503
 
 
 def test_database_error_is_503_and_generic(setup):
@@ -130,19 +133,17 @@ def test_create_accepts_explicit_status(setup):
     assert cursor.execute.call_args[0][1][-1] == "Unavailable"
 
 
-def test_create_requires_dev_headers(setup):
+def test_create_ignores_dev_identity_headers(setup):
+    """SCRUM-8: a DEV role header no longer grants Technical Support rights; the token's role decides."""
     client, _, connect = setup
-    assert client.post("/equipment", json=body()).status_code == 401
-    assert client.post(
-        "/equipment", json=body(), headers={"X-Dev-User-Id": "nope", "X-Dev-Role": "Technical Support"}
-    ).status_code == 401
+    headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}
+    assert client.post("/equipment", json=body(), headers=headers).status_code == 403
     connect.assert_not_called()
 
 
 def test_create_forbidden_for_other_roles(setup):
     client, _, connect = setup
-    headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
-    assert client.post("/equipment", json=body(), headers=headers).status_code == 403
+    assert client.post("/equipment", json=body(), headers=bearer(USER_ID, "Event Coordinator")).status_code == 403
     connect.assert_not_called()
 
 
@@ -183,10 +184,11 @@ def test_create_without_database_url_is_503():
     assert client.post("/equipment", json=body(), headers=TS_HEADERS).status_code == 503
 
 
-def test_cors_allows_post_and_dev_headers_for_frontend_origin(setup):
+def test_cors_allows_post_and_authorization_for_frontend_origin(setup):
     client, _, _ = setup
     response = client.options("/equipment", headers={"Origin": ORIGIN})
     assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == ORIGIN
     assert "POST" in response.headers["Access-Control-Allow-Methods"]
-    assert "X-Dev-Role" in response.headers["Access-Control-Allow-Headers"]
+    assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
+    assert "X-Dev-Role" not in response.headers["Access-Control-Allow-Headers"]

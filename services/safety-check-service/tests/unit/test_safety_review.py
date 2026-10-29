@@ -3,6 +3,7 @@ import pytest
 
 from app import clients, create_app
 from tests.unit.factories import (
+    signed_in,
     EVENT_ID,
     OFFICER_ID,
     booking,
@@ -19,7 +20,7 @@ EQUIPMENT_ID = "99999999-9999-4999-8999-999999999999"
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 @pytest.fixture
@@ -98,11 +99,11 @@ def test_review_aggregates_event_arrangements_and_prior_decisions(client, review
     assert body["history"][0]["remarks"] == "The exit route is unclear."
 
 
-@pytest.mark.parametrize("query", [{}, {"safetyOfficerId": "not-a-uuid"}])
-def test_review_requires_a_valid_officer_id(client, query):
-    response = client.get(f"/safety-checks/{EVENT_ID}/review", query_string=query)
+def test_review_requires_a_signed_in_officer(client):
+    """SCRUM-8: without a token there is no officer to check."""
+    response = client.application.test_client().get(f"/safety-checks/{EVENT_ID}/review")
 
-    assert response.status_code == 400
+    assert response.status_code == 401
 
 
 def test_review_requires_a_safety_officer(client, review_data, monkeypatch):

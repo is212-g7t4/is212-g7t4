@@ -148,7 +148,7 @@ def equipment_conflicts(own_requests, equipment, reserved, start, end):
     return conflicts
 
 
-def find_conflicts(event, changes, high_fields, coordinator_id):
+def find_conflicts(event, changes, high_fields):
     """Every contradiction between a high-impact change and the event's arrangements.
 
     Empty means the change may go ahead. A downstream failure propagates as
@@ -170,7 +170,7 @@ def find_conflicts(event, changes, high_fields, coordinator_id):
     conflicts = []
     if dates_changed:
         conflicts += venue_date_conflicts(bookings, start, end)
-        conflicts += _equipment_window_conflicts(event["id"], start, end, coordinator_id)
+        conflicts += _equipment_window_conflicts(event["id"], start, end)
     if more_people:
         attendance = int(str(merged["expectedAttendance"]).strip())
         if live_bookings(bookings):
@@ -178,10 +178,10 @@ def find_conflicts(event, changes, high_fields, coordinator_id):
     return conflicts
 
 
-def _equipment_window_conflicts(event_id, start, end, coordinator_id):
+def _equipment_window_conflicts(event_id, start, end):
     own = [
         line
-        for line in clients.list_event_equipment_requests(event_id, coordinator_id)
+        for line in clients.list_event_equipment_requests(event_id)
         if line.get("status") in HELD_REQUEST_STATUSES
     ]
     if not own:
@@ -192,7 +192,7 @@ def _equipment_window_conflicts(event_id, start, end, coordinator_id):
     reserved = defaultdict(int)
     if others:
         for line in clients.list_approved_equipment_requests(
-            [other["id"] for other in others], coordinator_id
+            [other["id"] for other in others]
         ):
             reserved[line["equipmentId"]] += line["quantityRequested"]
     return equipment_conflicts(own, clients.list_equipment(), reserved, start, end)
