@@ -22,6 +22,7 @@ Historical tests are retrospective evidence, not a new claim of test-first histo
 
 from unittest.mock import patch
 from app import create_app
+from tests.unit.factories import signed_in
 
 ID = "10000000-0000-0000-0000-000000000001"
 
@@ -30,9 +31,9 @@ def test_preparation_requires_internal_token_and_returns_current_assignment():
     """## AC1 + supporting authorization
     A token-authenticated preparation lookup returns the current assignment; a missing/wrong token is denied.
     """
-    client = create_app(
+    client = signed_in(create_app(
         {"DATABASE_URL": "synthetic", "INTERNAL_SERVICE_TOKEN": "synthetic-token"}
-    ).test_client()
+    ).test_client())
     path = f"/internal/events/{ID}/notification-context"
     assert client.get(path).status_code == 401
     with patch(
@@ -51,9 +52,9 @@ def test_context_missing_config_and_event_are_explicit():
     from app import EventNotFoundError
 
     headers = {"X-Internal-Token": "synthetic-token"}
-    client = create_app(
+    client = signed_in(create_app(
         {"DATABASE_URL": None, "INTERNAL_SERVICE_TOKEN": "synthetic-token"}
-    ).test_client()
+    ).test_client())
     path = f"/internal/events/{ID}/notification-context"
     assert client.get(path, headers=headers).status_code == 503
     client.application.config["DATABASE_URL"] = "synthetic"

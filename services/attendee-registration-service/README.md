@@ -7,11 +7,14 @@ asking Registration Service to timestamp the status change atomically.
 
 ## Endpoint
 
-- `POST /registrations` with `eventId` and `attendeeId`.
-- `GET /registrations?attendeeId=<uuid>` returns that attendee's registration
-  records combined with their confirmed event details.
-- `PATCH /registrations/<registrationId>/withdraw` with `attendeeId` withdraws
-  the attendee's own registration before the applicable deadline.
+The attendee is the signed-in caller: every endpoint needs
+`Authorization: Bearer <token>` (SCRUM-8), which is forwarded downstream.
+
+- `POST /registrations` with `eventId`.
+- `GET /registrations` returns the caller's registration records combined
+  with their confirmed event details.
+- `PATCH /registrations/<registrationId>/withdraw` withdraws the caller's own
+  registration before the applicable deadline.
 
 No database is owned by this composite and no database schema changes are
 required.

@@ -68,12 +68,11 @@ def test_preview_sends_a_dry_run_with_the_internal_token(send, monkeypatch):
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "secret")
     replies.append(Reply(200, {"highImpactFields": []}))
 
-    clients.preview_event_details("e1", "c1", {"eventName": "x"}, "Event Coordinator Lead")
+    clients.preview_event_details("e1", {"eventName": "x"}, "Event Coordinator Lead")
 
     method, url, kwargs = sent[0]
     assert (method, url.endswith("/events/e1/details")) == ("PATCH", True)
     assert kwargs["json"] == {
-        "coordinatorId": "c1",
         "changes": {"eventName": "x"},
         "dryRun": True,
         "actorRole": "Event Coordinator Lead",
@@ -86,9 +85,9 @@ def test_save_is_not_a_dry_run_and_omits_a_missing_role(send, monkeypatch):
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", None)
     replies.append(Reply(200, {"id": "e1"}))
 
-    assert clients.save_event_details("e1", "c1", {"eventName": "x"}) == {"id": "e1"}
+    assert clients.save_event_details("e1", {"eventName": "x"}) == {"id": "e1"}
 
-    assert sent[0][2]["json"] == {"coordinatorId": "c1", "changes": {"eventName": "x"}, "dryRun": False}
+    assert sent[0][2]["json"] == {"changes": {"eventName": "x"}, "dryRun": False}
     assert sent[0][2]["headers"] == {"X-Internal-Service-Token": ""}
 
 
@@ -101,31 +100,28 @@ def test_change_request_wrappers_use_event_service_and_internal_token(send, monk
         Reply(200, {"id": "c1", "status": "Rejected"}),
     ])
 
-    assert clients.list_pending_change_requests("u1") == [{"id": "c1"}]
-    assert clients.get_change_request("c1", "u1") == {"id": "c1"}
-    assert clients.decide_change_request("c1", "u1", "Rejected", "No") == {
+    assert clients.list_pending_change_requests() == [{"id": "c1"}]
+    assert clients.get_change_request("c1") == {"id": "c1"}
+    assert clients.decide_change_request("c1", "Rejected", "No") == {
         "id": "c1", "status": "Rejected"
     }
-    assert sent[0][2]["params"] == {"coordinatorId": "u1"}
-    assert sent[1][2]["params"] == {"coordinatorId": "u1"}
-    assert sent[2][2]["json"] == {
-        "coordinatorId": "u1", "decision": "Rejected", "reason": "No"
-    }
+    assert "params" not in sent[0][2] and "params" not in sent[1][2]
+    assert sent[2][2]["json"] == {"decision": "Rejected", "reason": "No"}
     assert all(call[2]["headers"] == {"X-Internal-Service-Token": "secret"} for call in sent)
 
 
 def test_change_request_approval_omits_a_rejection_reason(send):
     sent, replies = send
     replies.append(Reply(200, {"status": "Approved"}))
-    clients.decide_change_request("c1", "u1", "Approved")
-    assert sent[0][2]["json"] == {"coordinatorId": "u1", "decision": "Approved"}
+    clients.decide_change_request("c1", "Approved")
+    assert sent[0][2]["json"] == {"decision": "Approved"}
 
 
 def test_change_request_event_service_refusal_is_preserved(send):
     _, replies = send
     replies.append(Reply(409, {"code": "ALREADY_DECIDED"}))
     with pytest.raises(clients.EventRejectedError) as raised:
-        clients.get_change_request("c1", "u1")
+        clients.get_change_request("c1")
     assert raised.value.status == 409
     assert raised.value.body == {"code": "ALREADY_DECIDED"}
 
@@ -135,7 +131,7 @@ def test_event_service_refusals_keep_their_status_and_body(send, status):
     _, replies = send
     replies.append(Reply(status, {"code": "X"}))
     with pytest.raises(clients.EventRejectedError) as raised:
-        clients.save_event_details("e1", "c1", {"eventName": "x"})
+        clients.save_event_details("e1", {"eventName": "x"})
     assert (raised.value.status, raised.value.body) == (status, {"code": "X"})
 
 
@@ -143,7 +139,7 @@ def test_an_unreadable_refusal_body_becomes_empty(send):
     _, replies = send
     replies.append(Reply(409, json_error=True))
     with pytest.raises(clients.EventRejectedError) as raised:
-        clients.save_event_details("e1", "c1", {"eventName": "x"})
+        clients.save_event_details("e1", {"eventName": "x"})
     assert raised.value.body == {}
 
 
@@ -174,19 +170,23 @@ def test_each_read_unwraps_its_list(send):
     )
     assert clients.get_event_venue_bookings("e1") == ["b"]
     assert clients.list_venues() == ["v"]
-    assert clients.list_event_equipment_requests("e1", "c1") == ["r"]
-    assert clients.list_approved_equipment_requests(["o1", "o2"], "c1") == ["a"]
+    assert clients.list_event_equipment_requests("e1") == ["r"]
+    assert clients.list_approved_equipment_requests(["o1", "o2"]) == ["a"]
     assert clients.list_equipment() == ["q"]
 
 
-def test_equipment_requests_are_read_as_an_event_coordinator(send):
+def test_equipment_requests_are_read_with_the_callers_token(send):
+    """SCRUM-8: the signed-in coordinator's (or Lead's) token, not a claimed DEV identity."""
+    from app import create_app
+
     sent, replies = send
     replies.extend([Reply(200, {"requests": []}), Reply(200, {"requests": []})])
 
-    clients.list_event_equipment_requests("e1", "c1")
-    clients.list_approved_equipment_requests(["o1", "o2"], "c1")
+    with create_app().test_request_context(headers={"Authorization": "Bearer lead-token"}):
+        clients.list_event_equipment_requests("e1")
+        clients.list_approved_equipment_requests(["o1", "o2"])
 
     assert sent[0][2]["params"] == {"eventId": "e1"}
     assert sent[1][2]["params"] == {"status": "Approved", "eventIds": "o1,o2"}
     for _, _, kwargs in sent:
-        assert kwargs["headers"] == {"X-Dev-User-Id": "c1", "X-Dev-Role": "Event Coordinator"}
+        assert kwargs["headers"] == {"Authorization": "Bearer lead-token"}

@@ -1,4 +1,4 @@
-import { allUsers, asUser, json, makeEvent, mock, mockSafetyQueue, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, switchUser, json, makeEvent, mock, mockSafetyQueue, test, expect, users, venues } from './fixtures'
 
 // SCRUM-152: ties the gate (PR #38, safety-gate.spec.ts) and the approval
 // route (SCRUM-150, PR #54, safety-approve.spec.ts) into one journey, so the
@@ -54,7 +54,7 @@ test('SCRUM-152: a coordinator is blocked until the Safety Officer approves, the
   // A full navigation would re-run the init script that sets the active
   // user, reverting back to the coordinator, so switch and move around
   // in-app instead of page.goto.
-  await page.getByLabel('Select active user').selectOption({ label: 'Nurul Huda — Safety Officer' })
+  await switchUser(page, users.safetyOfficer)
   await page.getByRole('button', { name: 'Safety checks' }).click()
   await expect(page.getByText('Events waiting for an Operational Safety Check decision.')).toBeVisible()
   await page.getByRole('button', { name: /Safety Journey Expo/ }).click()
@@ -70,7 +70,7 @@ test('SCRUM-152: a coordinator is blocked until the Safety Officer approves, the
   })
 
   // 3. Switch back to the coordinator: Confirmed, and the safety note is gone.
-  await page.getByLabel('Select active user').selectOption({ label: 'Carl Ng — Event Coordinator' })
+  await switchUser(page, users.coordinator)
   await page.getByRole('button', { name: 'Events', exact: true }).click()
   await page.getByRole('button', { name: /Safety Journey Expo/ }).click()
   await expect(page.getByRole('heading', { name: 'Safety Journey Expo' })).toBeVisible()

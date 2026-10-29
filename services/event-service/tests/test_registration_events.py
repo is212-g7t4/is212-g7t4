@@ -8,6 +8,7 @@ import pytest
 
 from app import create_app
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), cursor
+    return signed_in(app.test_client()), cursor
 
 
 def confirmed_row():
@@ -54,5 +55,5 @@ def test_attendee_catalogue_returns_confirmed_events(setup):
 
 
 def test_attendee_catalogue_reports_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert client.get("/events/registration").status_code == 503

@@ -18,17 +18,3 @@ test('does not silently treat a failed reconciliation as conflict-free', async (
 
   await expect(fetchLegacyConflicts('venue-1')).rejects.toThrow('Conflict review unavailable')
 })
-
-test('sends the Venue Staff identity so the composite can resolve event names', async () => {
-  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    venueId: 'venue-1', conflictCount: 0, conflicts: [],
-  })))
-  vi.stubGlobal('fetch', fetcher)
-
-  await fetchLegacyConflicts('venue-1', { id: 'staff-1', role: 'Venue Staff' })
-
-  expect(fetcher).toHaveBeenCalledWith(
-    'http://localhost:5007/venues/venue-1/legacy-conflicts',
-    { headers: { 'X-Dev-User-Id': 'staff-1', 'X-Dev-Role': 'Venue Staff' } },
-  )
-})

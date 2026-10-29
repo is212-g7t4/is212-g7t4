@@ -16,7 +16,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row
+from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row, signed_in
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def test_ac3_valid_submission_is_saved_and_visible_in_catalogue(setup):
@@ -183,7 +183,7 @@ def test_database_error_returns_503(setup, monkeypatch):
 
 def test_missing_database_url_returns_503():
     """Failure: an unconfigured service says so rather than crashing."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     response = client.post("/venues", json=VALID_PAYLOAD)
 

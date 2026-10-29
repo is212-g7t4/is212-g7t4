@@ -65,7 +65,7 @@ test('AC1: defaults to all requests and shows equipment details', async () => {
   const equipmentCell = within(row).getByText('Wireless mic').closest('td')!
   expect(within(equipmentCell).getByText('Pending')).toHaveClass('status-badge')
   expect(screen.queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument()
-  expect(fetchEventReservations).toHaveBeenCalledWith(user, undefined)
+  expect(fetchEventReservations).toHaveBeenCalledWith(undefined)
 })
 
 
@@ -118,7 +118,7 @@ test('status filter shows only requests matching the selected status', async () 
 
   expect(await screen.findByText('Wireless mic')).toBeInTheDocument()
   expect(screen.queryByText('Folding chair')).not.toBeInTheDocument()
-  expect(fetchEventReservations).toHaveBeenLastCalledWith(user, 'Pending')
+  expect(fetchEventReservations).toHaveBeenLastCalledWith('Pending')
 })
 
 // Review AC3 (supporting identity): identify the coordinator assigned to the event.
@@ -190,7 +190,7 @@ test.each(['Under Review', 'Safety Changes Requested'])('assigned Event Coordina
   vi.mocked(fetchEventReservations).mockResolvedValue([event([line()], { eventStatus })])
   show('Event Coordinator')
   expect(await screen.findByRole('heading', { name: 'Hackday' })).toBeInTheDocument()
-  expect(fetchEventReservations).toHaveBeenCalledWith(coordinator, undefined)
+  expect(fetchEventReservations).toHaveBeenCalledWith(undefined)
   expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
@@ -221,7 +221,7 @@ test.each(['Approved', 'Rejected'] as const)('assigned coordinator sees %s and i
     expect(within(updatedRow).getByText(rejectionReason)).toBeInTheDocument()
     expect(updatedRow.closest('table')).toHaveClass('with-reject-reason')
   }
-  expect(fetchEventReservations).toHaveBeenLastCalledWith(coordinator, undefined)
+  expect(fetchEventReservations).toHaveBeenLastCalledWith(undefined)
   expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
 })
 
@@ -354,7 +354,7 @@ test('AC2: Approve updates one equipment row and the other stays pending under A
   await screen.findByText('Folding chair')
   expect(screen.getAllByRole('button', { name: 'Approve' })).toHaveLength(2)
   await userEvent.click(screen.getAllByRole('button', { name: 'Approve' })[0])
-  await waitFor(() => expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Approved', user))
+  await waitFor(() => expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Approved'))
   expect(within(screen.getByText('Wireless mic').closest('tr')!).getByText('Approved')).toBeInTheDocument()
   expect(screen.getByText('Folding chair')).toBeInTheDocument()
   expect(reviewEquipmentRequest).toHaveBeenCalledTimes(1)
@@ -375,7 +375,7 @@ test('AC2: rejecting one row under the All filter updates only that row and remo
   await userEvent.type(within(dialog).getByRole('textbox', { name: /Reason for rejection/ }), '  No technician available.  ')
   await userEvent.click(confirm)
   await waitFor(() => expect(document.querySelectorAll('.status-badge.rejected')).toHaveLength(1))
-  expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Rejected', user, 'No technician available.')
+  expect(reviewEquipmentRequest).toHaveBeenCalledWith('r1', 'Rejected', 'No technician available.')
   expect(screen.getByRole('columnheader', { name: 'Reject Reason' })).toBeInTheDocument()
   expect(within(screen.getByText('Wireless mic').closest('tr')!).getByText('No technician available.')).toBeInTheDocument()
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -393,7 +393,7 @@ test('Approve All approves every pending request in the event', async () => {
   expect(button).toBeEnabled()
   expect(button.closest('footer')).toHaveClass('equipment-request-bulk-actions')
   await userEvent.click(button)
-  await waitFor(() => expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Approved', user))
+  await waitFor(() => expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Approved'))
   await waitFor(() => expect(document.querySelectorAll('tbody .status-badge.approved')).toHaveLength(2))
   expect(screen.queryByRole('button', { name: 'Approve All' })).not.toBeInTheDocument()
 })
@@ -409,7 +409,7 @@ test('Reject All works even when a line is insufficient and updates all rows und
   await userEvent.type(screen.getByRole('textbox', { name: /Reason for rejection/ }), 'Not supported.')
   await userEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }))
   await waitFor(() => expect(document.querySelectorAll('.status-badge.rejected')).toHaveLength(2))
-  expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Rejected', user, 'Not supported.')
+  expect(reviewAllEventEquipmentRequests).toHaveBeenCalledWith('ev1', 'Rejected', 'Not supported.')
   expect(screen.getAllByText('Not supported.')).toHaveLength(2)
   expect(screen.queryByRole('button', { name: 'Reject All' })).not.toBeInTheDocument()
 })

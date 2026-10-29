@@ -23,9 +23,10 @@ are not standalone proof of the complete user-facing confirmation criterion.
 import httpx
 import pytest
 from app import create_app
+from tests.unit.factories import signed_in, bearer
 
 UID = "00000000-0000-0000-0000-000000000001"
-HEADERS = {"X-Dev-User-Id": UID, "X-Dev-Role": "Venue Staff"}
+HEADERS = bearer(UID, "Venue Staff")
 BODY = dict(
     venueId=UID,
     startDateTime="2099-01-01T10:00:00+08:00",
@@ -44,7 +45,6 @@ ROW = dict(
 
 @pytest.fixture
 def setup(monkeypatch):
-    monkeypatch.setenv("VENUE_CLOSURE_DEV_MODE", "true")
     calls = []
 
     def reply(method, url, **kw):
@@ -63,7 +63,7 @@ def setup(monkeypatch):
         return httpx.Response(200, json=body, request=httpx.Request(method, url))
 
     monkeypatch.setattr(httpx, "request", reply)
-    return create_app().test_client(), calls
+    return signed_in(create_app().test_client()), calls
 
 
 @pytest.mark.parametrize(

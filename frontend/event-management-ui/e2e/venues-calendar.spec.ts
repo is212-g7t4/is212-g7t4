@@ -51,8 +51,7 @@ test('calendar shows a blocking booking for the selected venue', async ({ page }
   await calendar.getByLabel('Anchor date').fill('2026-10-01')
 
   await expect(calendar.getByText('Unavailable · 09:00–10:00 SGT')).toBeVisible()
-  expect(headers[0]['x-dev-user-id']).toBe(users.venueStaff.user_id)
-  expect(headers[0]['x-dev-role']).toBe('Venue Staff')
+  expect(headers[0]['authorization']).toBe(`Bearer e2e-${users.venueStaff.user_id}`)
 
   await calendar.getByRole('button', { name: 'Week' }).click()
   await expect(calendar.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true')

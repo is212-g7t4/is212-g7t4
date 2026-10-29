@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
-from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row
+from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row, signed_in
 
 
 @pytest.fixture
@@ -14,7 +14,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), cursor
+    return signed_in(app.test_client()), cursor
 
 
 def test_each_venue_returns_its_own_saved_buffer_times(setup):

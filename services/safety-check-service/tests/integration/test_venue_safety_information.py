@@ -12,7 +12,7 @@ Doubled:    with respx: User Service (officer role lookup), Event Service
             (GET /safety-check-records), Venue Service (GET /venues), Equipment Service
             (GET /equipment).
 Not proven: that Venue Service stores or returns these fields (Venue Service's tests);
-            authentication (the officer is the safetyOfficerId the caller sends).
+            Supabase sign-in itself (the officer is a token signed with a test key, SCRUM-8).
 
 AC1  Given authorised Venue Staff edit a venue, when they enter emergency access details
      (e.g. exits, assembly point, emergency vehicle access) and known restrictions (e.g.
@@ -48,6 +48,7 @@ from tests.integration.factories import (
     user,
     venue,
 )
+from tests.unit.factories import signed_in
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -62,7 +63,7 @@ def stub_review(router, bookings, venues_response):
     )
     router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-        params={"coordinatorId": OFFICER_ID, "viewerRole": "Safety Officer"},
+        params={"viewerRole": "Safety Officer"},
     ).mock(return_value=Response(200, json=event()))
     router.get(
         f"{service_clients.VENUE_AVAILABILITY_SERVICE_URL}/events/{EVENT_ID}/venue-bookings"
@@ -70,7 +71,6 @@ def stub_review(router, bookings, venues_response):
     router.get(
         f"{service_clients.EQUIPMENT_REQUEST_SERVICE_URL}/equipment-requests",
         params={"eventId": EVENT_ID},
-        headers={"X-Dev-User-Id": OFFICER_ID, "X-Dev-Role": "Safety Officer"},
     ).mock(return_value=Response(200, json={"requests": []}))
     router.get(
         f"{service_clients.SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records",
@@ -85,10 +85,7 @@ def stub_review(router, bookings, venues_response):
 
 
 def get_review(client):
-    return client.get(
-        f"/safety-checks/{EVENT_ID}/review",
-        query_string={"safetyOfficerId": OFFICER_ID},
-    )
+    return signed_in(client, OFFICER_ID, "Safety Officer").get(f"/safety-checks/{EVENT_ID}/review")
 
 
 # AC1 ----------------------------------------------------------------------
@@ -111,6 +108,8 @@ def test_ac1_safety_officer_review_shows_recorded_emergency_access_and_restricti
     assert reviewed["restrictions"] == HALL_RESTRICTIONS
     assert venues.call_count == 1
     assert all(route.call_count == 1 for route in stubs.routes)
+    # SCRUM-8: the officer is identified downstream by their forwarded token.
+    assert {call.request.headers["Authorization"] for call in stubs.calls} == {client.environ_base["HTTP_AUTHORIZATION"]}
 
 
 def test_ac1_two_venues_each_show_their_own_safety_information(client, stubs):

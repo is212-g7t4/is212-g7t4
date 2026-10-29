@@ -17,6 +17,7 @@ from uuid import UUID
 import pytest
 from app import create_app
 from app.models import FIELDS, NOT_DRAFT
+from tests.unit.factories import signed_in
 
 ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
 OTHER_ORGANISER_ID = "44444444-4444-4444-8444-444444444444"
@@ -40,7 +41,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def draft_row(**overrides):
@@ -140,7 +141,7 @@ def test_ac1_save_as_draft_rejects_a_body_that_is_not_an_object(setup):
 )
 def test_ac1_draft_requests_fail_loudly_without_a_database(method, path):
     """AC1: a draft is never reported as saved when there is nowhere to store it."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     response = getattr(client, method)(path, json={"organiserId": ORGANISER_ID, **COMPLETE})
 
@@ -298,19 +299,20 @@ def test_ac4_another_organiser_cannot_view_edit_delete_or_submit_a_draft(setup, 
     "method, path",
     [
         ("post", "/events/drafts"),
-        ("get", "/events/drafts?organiserId=nope"),
+        ("get", "/events/drafts"),
         ("patch", f"/events/drafts/{DRAFT_ID}"),
         ("post", f"/events/drafts/{DRAFT_ID}/submit"),
-        ("delete", f"/events/drafts/{DRAFT_ID}?organiserId=nope"),
+        ("delete", f"/events/drafts/{DRAFT_ID}"),
     ],
 )
-def test_ac4_draft_requests_without_a_valid_organiser_id_are_refused(setup, method, path):
-    """AC4: a draft is only ever reached as a known organiser's own."""
-    client, _, cursor = setup
+def test_ac4_draft_requests_without_a_signed_in_organiser_are_refused(setup, method, path):
+    """AC4: a draft is only ever reached as a signed-in organiser's own (SCRUM-8)."""
+    _, _, cursor = setup
+    client = setup[0].application.test_client()
 
-    response = getattr(client, method)(path, json={"organiserId": "nope", **COMPLETE})
+    response = getattr(client, method)(path, json={"organiserId": ORGANISER_ID, **COMPLETE})
 
-    assert response.status_code == 400
+    assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 

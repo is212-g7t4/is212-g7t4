@@ -13,7 +13,7 @@ Doubled:    Venue Availability (GET /venue-bookings/<id>, PATCH /venue-bookings/
             URLs frozen in app.clients.
 Not proven: that the decision is persisted, or the buffered conflict rule (only Venue
             Availability's tests prove them); that the real atomics accept these payloads;
-            caller identity (X-Dev-* headers and coordinatorId are whatever the caller sends).
+            Supabase sign-in itself (callers are tokens signed with a test key, SCRUM-8).
 
 AC1  Given a venue booking request is pending review, when Venue Staff open the request, then
      they can view the relevant event timing and venue requirements needed to assess the
@@ -55,11 +55,12 @@ from tests.integration.factories import (
     event,
     venue,
 )
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
 # What the frontend sends (frontend/event-management-ui/src/features/venue/venueBookings.ts).
-STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 REASON = "Hall is too small for the stage"
 AVAILABILITY = service_clients.VENUE_AVAILABILITY_SERVICE_URL
 
@@ -73,7 +74,7 @@ def stub_booking(router, payload=None):
 def stub_staff_event(router, payload=None, **mock):
     route = router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-        params={"coordinatorId": STAFF_ID, "viewerRole": "Venue Staff"},
+        params={"viewerRole": "Venue Staff"},
     )
     return route.mock(**(mock or {"return_value": Response(200, json=payload or event())}))
 
@@ -94,7 +95,7 @@ def review(client, status, **extra):
     return client.patch(
         f"/booking-requests/{BOOKING_ID}/review",
         headers=STAFF_HEADERS,
-        json={"status": status, "reviewedBy": STAFF_ID, **extra},
+        json={"status": status, **extra},
     )
 
 
@@ -111,9 +112,10 @@ def test_ac1_opened_request_combines_booking_event_and_venue_details(client):
         response = client.get(f"/booking-requests/{BOOKING_ID}", headers=STAFF_HEADERS)
 
     assert response.status_code == 200
-    params = event_stub.calls.last.request.url.params
-    assert params["coordinatorId"] == STAFF_ID
-    assert params["viewerRole"] == "Venue Staff"
+    request = event_stub.calls.last.request
+    assert dict(request.url.params) == {"viewerRole": "Venue Staff"}
+    # SCRUM-8: the reviewer reaches Event Service as their forwarded token, not an ID.
+    assert request.headers["Authorization"] == STAFF_HEADERS["Authorization"]
     body = response.json
     assert body["event"] == {
         "id": EVENT_ID,
@@ -146,7 +148,7 @@ def test_ac1_request_view_for_non_staff_makes_no_downstream_call(client):
     with respx.mock(assert_all_mocked=True):
         response = client.get(
             f"/booking-requests/{BOOKING_ID}",
-            headers={"X-Dev-User-Id": COORDINATOR_ID, "X-Dev-Role": "Event Coordinator"},
+            headers=bearer(COORDINATOR_ID, "Event Coordinator"),
         )
 
     assert response.status_code == 403
@@ -183,7 +185,6 @@ def test_ac2_approve_forwards_reviewer_and_buffers_once(client):
     assert response.json["reviewedAt"] == "2030-02-02T09:00:00+08:00"
     assert approve.call_count == 1
     assert json.loads(approve.calls.last.request.content) == {
-        "reviewedBy": STAFF_ID,
         "setupTimeMinutes": 30,
         "turnaroundTimeMinutes": 45,
     }
@@ -236,7 +237,6 @@ def test_ac3_ac4_reject_forwards_the_stripped_reason_once(client):
     assert response.json["rejectionReason"] == REASON
     assert reject.call_count == 1
     assert json.loads(reject.calls.last.request.content) == {
-        "reviewedBy": STAFF_ID,
         "setupTimeMinutes": 0,
         "turnaroundTimeMinutes": 0,
         "rejectionReason": REASON,
@@ -309,7 +309,7 @@ def test_ac5_staff_queue_no_longer_lists_decided_request_as_awaiting(client):
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events",
-            params={"coordinatorId": STAFF_ID, "viewerRole": "Venue Staff"},
+            params={"viewerRole": "Venue Staff"},
         ).mock(return_value=Response(200, json={"events": [event()]}))
         router.get(f"{service_clients.VENUE_SERVICE_URL}/venues").mock(
             return_value=Response(200, json={"venues": [venue()]})
@@ -338,7 +338,6 @@ def test_ac6_coordinator_sees_rejection_reason_and_decision_time(client):
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-            params={"coordinatorId": COORDINATOR_ID},
         ).mock(return_value=Response(200, json=event()))
         router.get(f"{AVAILABILITY}/events/{EVENT_ID}/venue-bookings").mock(
             return_value=Response(200, json={"bookings": [rejected]})
@@ -347,7 +346,7 @@ def test_ac6_coordinator_sees_rejection_reason_and_decision_time(client):
             return_value=Response(200, json={"venues": [venue()]})
         )
 
-        response = client.get(f"/events/{EVENT_ID}/booking-requests?coordinatorId={COORDINATOR_ID}")
+        response = client.get(f"/events/{EVENT_ID}/booking-requests")
 
     assert response.status_code == 200
     [item] = response.json["bookings"]

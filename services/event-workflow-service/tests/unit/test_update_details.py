@@ -5,6 +5,7 @@ Every downstream call is mocked; `--disable-socket` would fail an unmocked one.
 import pytest
 
 from app import clients, create_app
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -13,11 +14,11 @@ EVENT = {"id": EVENT_ID, "expectedAttendance": "100"}
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client(), COORDINATOR_ID)
 
 
 def patch(client, changes=None, **overrides):
-    body = {"coordinatorId": COORDINATOR_ID, "changes": changes or {"eventName": "New"}}
+    body = {"changes": changes or {"eventName": "New"}}
     body.update(overrides)
     return client.patch(f"/events/{EVENT_ID}/details", json=body)
 
@@ -38,15 +39,15 @@ def downstream(monkeypatch):
 
     monkeypatch.setattr(clients, "get_user", lambda user_id: {"role": state["role"]})
 
-    def fake_preview(event_id, coordinator_id, changes, actor_role=None):
+    def fake_preview(event_id, changes, actor_role=None):
         calls["previewed"].append(actor_role)
         return state["preview"]
 
-    def fake_save(event_id, coordinator_id, changes, actor_role=None):
+    def fake_save(event_id, changes, actor_role=None):
         calls["saved"].append(changes)
         return {"id": event_id, "status": "Approved"}
 
-    def fake_conflicts(event, changes, high, coordinator_id):
+    def fake_conflicts(event, changes, high):
         calls["checked"].append(high)
         return state["conflicts"]
 
@@ -167,11 +168,9 @@ def test_unreadable_arrangements_fail_closed(client, downstream, monkeypatch, er
     "body",
     [
         None,
-        {"changes": {"eventName": "x"}},
-        {"coordinatorId": "nope", "changes": {"eventName": "x"}},
-        {"coordinatorId": COORDINATOR_ID},
-        {"coordinatorId": COORDINATOR_ID, "changes": {}},
-        {"coordinatorId": COORDINATOR_ID, "changes": {"expectedAttendance": 5}},
+        {},
+        {"changes": {}},
+        {"changes": {"expectedAttendance": 5}},
     ],
 )
 def test_malformed_bodies_are_rejected(client, downstream, body):
@@ -189,7 +188,7 @@ def test_a_non_json_body_is_rejected(client):
 def test_an_invalid_event_id_is_rejected(client):
     response = client.patch(
         "/events/not-a-uuid/details",
-        json={"coordinatorId": COORDINATOR_ID, "changes": {"eventName": "x"}},
+        json={"changes": {"eventName": "x"}},
     )
 
     assert response.status_code == 400
@@ -210,6 +209,6 @@ def test_cors_allows_the_frontend_origin_only(client):
 def test_cors_is_off_when_no_origin_is_configured(monkeypatch):
     monkeypatch.setenv("FRONTEND_ORIGIN", "")
 
-    response = create_app().test_client().options("/health", headers={"Origin": "http://localhost:5174"})
+    response = signed_in(create_app().test_client()).options("/health", headers={"Origin": "http://localhost:5174"})
 
     assert "Access-Control-Allow-Origin" not in response.headers

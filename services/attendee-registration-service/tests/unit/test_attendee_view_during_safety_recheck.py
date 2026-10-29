@@ -31,6 +31,7 @@ import respx
 from httpx import Response
 
 from app import clients, create_app, routes
+from tests.unit.factories import signed_in
 
 ATTENDEE = "22222222-2222-4222-8222-222222222222"
 EVENT = "11111111-1111-4111-8111-111111111111"
@@ -48,9 +49,9 @@ def summary(event_id=EVENT, **overrides):
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(routes, "get_attendee_registrations", lambda attendee: [dict(REGISTRATION)])
+    monkeypatch.setattr(routes, "get_attendee_registrations", lambda: [dict(REGISTRATION)])
     monkeypatch.setattr(routes, "get_user", lambda attendee: dict(username="Synthetic", email="user@example.com"))
-    return create_app({"TESTING": True, "FRONTEND_ORIGIN": "http://localhost:5174"}).test_client()
+    return signed_in(create_app({"TESTING": True, "FRONTEND_ORIGIN": "http://localhost:5174"}).test_client())
 
 
 def history(*events):
@@ -76,7 +77,7 @@ def test_ac4_pending_event_is_listed_with_the_approved_details_it_was_given(clie
     monkeypatch.setattr(routes, "get_confirmed_events", lambda: [])
     monkeypatch.setattr(routes, "get_historical_events", lookup)
 
-    response = client.get(f"/registrations?attendeeId={ATTENDEE}")
+    response = client.get(f"/registrations")
 
     assert response.status_code == 200
     [item] = response.json["registrations"]
@@ -126,7 +127,7 @@ def test_scrum150_ac4_confirmed_events_come_from_the_catalogue_without_history_l
     monkeypatch.setattr(routes, "get_confirmed_events", lambda: [confirmed])
     monkeypatch.setattr(routes, "get_historical_events", no_history)
 
-    response = client.get(f"/registrations?attendeeId={ATTENDEE}")
+    response = client.get(f"/registrations")
 
     assert response.status_code == 200
     assert response.json["registrations"][0]["event"] == confirmed
@@ -140,7 +141,7 @@ def test_dr_attendee_summaries_failure_returns_502(client, monkeypatch):
     monkeypatch.setattr(routes, "get_confirmed_events", lambda: [])
     monkeypatch.setattr(routes, "get_historical_events", broken)
 
-    response = client.get(f"/registrations?attendeeId={ATTENDEE}")
+    response = client.get(f"/registrations")
 
     assert response.status_code == 502
     assert response.json == {"message": "Unable to load your registrations right now."}

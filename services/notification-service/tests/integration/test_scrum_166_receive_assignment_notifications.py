@@ -29,6 +29,7 @@ from uuid import uuid4
 import pytest
 from app.consumer import process
 from tests.integration.factories import ORGANISER, OTHER, COORDINATOR, EVENT, make_parents
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -41,7 +42,7 @@ def parents(db):
 
 
 def identity(recipient):
-    return {"X-Dev-User-Id": recipient, "X-Dev-Role": "Event Coordinator"}
+    return bearer(recipient, "Event Coordinator")
 
 
 def envelope(kind="assigned", recipient=COORDINATOR):

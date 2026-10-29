@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
+from tests.unit.factories import signed_in
 
 
 @pytest.fixture
@@ -32,7 +33,7 @@ def unconfigured(monkeypatch):
             "INTERNAL_SERVICE_TOKEN": None,
         }
     )
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -54,7 +55,7 @@ def setup(monkeypatch):
             "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
         }
     )
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def body():

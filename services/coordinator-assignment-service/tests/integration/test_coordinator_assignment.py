@@ -6,8 +6,9 @@ Real:       Flask app, role checks, assignment orchestration, error translation,
             real httpx calls in app/clients.py.
 Doubled:    User Service and Event Service at their HTTP boundaries with respx, using the
             URLs frozen in app.clients.
-Not proven: User/Event database persistence, JWT authentication, or the frontend; those
-            belong to the atomic integration and browser/e2e tiers.
+Not proven: User/Event database persistence, Supabase sign-in itself (the Lead is a token
+            signed with a test key, SCRUM-8), or the frontend; those belong to the atomic
+            integration and browser/e2e tiers.
 
 AC1  The Manager sees submitted requests with event name, organiser, proposed date, and
      Assigned/Unassigned state.
@@ -93,13 +94,10 @@ def test_ac1_lead_sees_assigned_and_unassigned_submitted_requests(client):
         stub_acting_user(router)
         event_route = router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events/submitted",
-            params={
-                "coordinatorId": LEAD_ID,
-                "viewerRole": "Event Coordinator Lead",
-            },
+            params={"viewerRole": "Event Coordinator Lead"},
         ).mock(return_value=Response(200, json={"events": [unassigned, assigned]}))
 
-        response = client.get(f"/queue?actingUserId={LEAD_ID}")
+        response = client.get("/queue")
 
     assert response.status_code == 200
     assert response.get_json()["events"] == [unassigned, assigned]
@@ -111,7 +109,7 @@ def test_ac1_non_lead_is_forbidden_before_event_service_is_called(client):
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         stub_acting_user(router, user())
 
-        response = client.get(f"/queue?actingUserId={LEAD_ID}")
+        response = client.get("/queue")
 
     assert response.status_code == 403
     assert "Lead" in response.get_json()["error"]
@@ -123,13 +121,10 @@ def test_ac1_event_service_outage_is_not_reported_as_an_empty_worklist(client):
         stub_acting_user(router)
         router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events/submitted",
-            params={
-                "coordinatorId": LEAD_ID,
-                "viewerRole": "Event Coordinator Lead",
-            },
+            params={"viewerRole": "Event Coordinator Lead"},
         ).mock(return_value=Response(503, json={"message": "Event Service unavailable"}))
 
-        response = client.get(f"/queue?actingUserId={LEAD_ID}")
+        response = client.get("/queue")
 
     assert response.status_code == 500
     assert "Failed to fetch assignment events" in response.get_json()["error"]
@@ -139,7 +134,7 @@ def test_ac1_event_service_outage_is_not_reported_as_an_empty_worklist(client):
 
 
 def test_ac2_available_coordinator_and_lead_identity_are_forwarded_once(client):
-    """Normal: assignment sends the selected coordinator and acting Lead for auditing."""
+    """Normal: assignment sends the selected coordinator, and the acting Lead's token for auditing."""
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         stub_acting_user(router)
         stub_coordinator_pool(router)
@@ -147,7 +142,6 @@ def test_ac2_available_coordinator_and_lead_identity_are_forwarded_once(client):
 
         response = client.post(
             f"/events/{EVENT_ID}/assign-coordinator/{COORDINATOR_ID}",
-            json={"actingUserId": LEAD_ID},
         )
 
     assert response.status_code == 200
@@ -155,10 +149,9 @@ def test_ac2_available_coordinator_and_lead_identity_are_forwarded_once(client):
     assert response.get_json()["assignedBy"] == LEAD_ID
     assert response.get_json()["assignedAt"] == ASSIGNED_AT
     assert assignment.call_count == 1
-    assert json.loads(assignment.calls.last.request.content) == {
-        "assignedCoordinatorId": COORDINATOR_ID,
-        "assignedBy": LEAD_ID,
-    }
+    assert json.loads(assignment.calls.last.request.content) == {"assignedCoordinatorId": COORDINATOR_ID}
+    # SCRUM-8: the acting Lead reaches Event Service as their forwarded token.
+    assert assignment.calls.last.request.headers["Authorization"] == client.environ_base["HTTP_AUTHORIZATION"]
 
 
 def test_ac2_lead_can_assign_the_event_to_themselves(client):
@@ -170,12 +163,11 @@ def test_ac2_lead_can_assign_the_event_to_themselves(client):
 
         response = client.post(
             f"/events/{EVENT_ID}/assign-coordinator/{LEAD_ID}",
-            json={"actingUserId": LEAD_ID},
         )
 
     assert response.status_code == 200
     assert response.get_json()["coordinatorId"] == LEAD_ID
-    assert json.loads(assignment.calls.last.request.content)["assignedBy"] == LEAD_ID
+    assert json.loads(assignment.calls.last.request.content) == {"assignedCoordinatorId": LEAD_ID}
 
 
 def test_ac2_unavailable_coordinator_is_refused_before_event_service_is_called(client):
@@ -187,7 +179,6 @@ def test_ac2_unavailable_coordinator_is_refused_before_event_service_is_called(c
 
         response = client.post(
             f"/events/{EVENT_ID}/assign-coordinator/{unavailable_id}",
-            json={"actingUserId": LEAD_ID},
         )
 
     assert response.status_code == 404
@@ -213,17 +204,13 @@ def test_ac3_reassignment_replaces_the_coordinator_and_returns_the_handover(clie
 
         response = client.post(
             f"/events/{EVENT_ID}/assign-coordinator/{OTHER_COORDINATOR_ID}",
-            json={"actingUserId": LEAD_ID},
         )
 
     assert response.status_code == 200
     assert response.get_json()["coordinatorId"] == OTHER_COORDINATOR_ID
     assert response.get_json()["previousCoordinatorId"] == COORDINATOR_ID
     assert response.get_json()["assignedBy"] == LEAD_ID
-    assert json.loads(assignment.calls.last.request.content) == {
-        "assignedCoordinatorId": OTHER_COORDINATOR_ID,
-        "assignedBy": LEAD_ID,
-    }
+    assert json.loads(assignment.calls.last.request.content) == {"assignedCoordinatorId": OTHER_COORDINATOR_ID}
 
 
 def test_ac3_same_coordinator_conflict_is_passed_back_unchanged(client):
@@ -236,7 +223,6 @@ def test_ac3_same_coordinator_conflict_is_passed_back_unchanged(client):
 
         response = client.post(
             f"/events/{EVENT_ID}/assign-coordinator/{COORDINATOR_ID}",
-            json={"actingUserId": LEAD_ID},
         )
 
     assert response.status_code == 409
@@ -261,7 +247,6 @@ def test_ac3_event_service_failure_never_reports_a_successful_reassignment(clien
 
         response = client.post(
             f"/events/{EVENT_ID}/assign-coordinator/{OTHER_COORDINATOR_ID}",
-            json={"actingUserId": LEAD_ID},
         )
 
     assert response.status_code == 500

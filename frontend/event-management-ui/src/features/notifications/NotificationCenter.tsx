@@ -68,16 +68,16 @@ function Session({ user, children, onNavigate }: { user?: User; children: ReactN
     }
     try {
       const readWindow = async () => {
-        let page: InboxPage = await notificationApi(user, listQuery)
+        let page: InboxPage = await notificationApi(listQuery)
         const rows = [...page.notifications]
         while (valid() && boundary && page.nextCursor && (!rows.length || !coversBoundary(rows[rows.length - 1]))) {
-          page = await notificationApi(user, listQuery + '&cursor=' + encodeURIComponent(page.nextCursor))
+          page = await notificationApi(listQuery + '&cursor=' + encodeURIComponent(page.nextCursor))
           rows.push(...page.notifications)
         }
         return { rows: [...new Map(rows.map(row => [row.id, row])).values()], cursor: page.nextCursor }
       }
       const [page, total, recentPage]: [{ rows: InboxItem[]; cursor: string | null }, { unreadCount: number }, InboxPage] = await Promise.all([
-        readWindow(), notificationApi(user, '/notifications/unread-count'), notificationApi(user, '/notifications?limit=5'),
+        readWindow(), notificationApi('/notifications/unread-count'), notificationApi('/notifications?limit=5'),
       ])
       if (!valid()) return
       storeWindow(page.rows, page.cursor); setRecent(recentPage.notifications); setCount(total.unreadCount); setWarning('')
@@ -109,7 +109,7 @@ function Session({ user, children, onNavigate }: { user?: User; children: ReactN
     const valid = () => alive.current && version === revision.current
     setLoading(true)
     try {
-      const page: InboxPage = await notificationApi(user, listQuery + '&cursor=' + encodeURIComponent(cursor))
+      const page: InboxPage = await notificationApi(listQuery + '&cursor=' + encodeURIComponent(cursor))
       if (!valid()) return
       const current = windowState.current.rows
       storeWindow([...current, ...page.notifications.filter(item => !current.some(old => old.id === item.id))], page.nextCursor)
@@ -128,7 +128,7 @@ function Session({ user, children, onNavigate }: { user?: User; children: ReactN
     writing.current = true; revision.current++; reader.current = null; refreshQueued.current = false; setPending(true); setLoading(false)
     let saved = false
     try {
-      const body: { notification: InboxItem } = await notificationApi(user, '/notifications/' + encodeURIComponent(item.id), { method: 'PATCH', body: JSON.stringify({ read }) })
+      const body: { notification: InboxItem } = await notificationApi('/notifications/' + encodeURIComponent(item.id), { method: 'PATCH', body: JSON.stringify({ read }) })
       if (!alive.current) return false
       const replace = (rows: InboxItem[]) => rows.map(row => row.id === item.id ? body.notification : row)
       setRecent(replace); storeWindow(replace(windowState.current.rows).filter(row => !unread || !row.readAt), windowState.current.cursor)

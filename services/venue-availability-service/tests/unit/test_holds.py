@@ -12,45 +12,33 @@ names and assertions specify the scenario. No group is credited with all five AC
 from datetime import datetime
 
 from app.calendar import SINGAPORE
-from tests.unit.factories import USER_ID, VENUE_ID
+from tests.unit.factories import USER_ID, VENUE_ID, bearer
 
 
-HOLD_HEADERS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"}
+HOLD_HEADERS = bearer(USER_ID, "Venue Staff")
 
 
 def test_place_hold_requires_venue_staff(setup):
     client, _ = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
     response = client.post(
         "/venue-holds",
         json={"venueId": VENUE_ID, "expiresAt": "2099-10-01T12:00"},
-        headers={**HOLD_HEADERS, "X-Dev-Role": "Event Coordinator"},
+        headers=bearer(USER_ID, "Event Coordinator"),
     )
 
     assert response.status_code == 403
 
 
-def test_place_hold_is_disabled_without_dev_mode(setup):
+def test_place_hold_requires_a_signed_in_user(setup, monkeypatch):
+    """SCRUM-8: a background worker's internal token cannot place a hold."""
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal-test-token")
     client, cursor = setup
 
-    response = client.post(
+    response = client.application.test_client().post(
         "/venue-holds",
         json={"venueId": VENUE_ID, "expiresAt": "2099-10-01T12:00"},
-        headers=HOLD_HEADERS,
-    )
-
-    assert response.status_code == 503
-    cursor.execute.assert_not_called()
-
-
-def test_place_hold_requires_identity_headers(setup):
-    client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
-
-    response = client.post(
-        "/venue-holds",
-        json={"venueId": VENUE_ID, "expiresAt": "2099-10-01T12:00"},
+        headers={"X-Internal-Token": "internal-test-token"},
     )
 
     assert response.status_code == 401
@@ -59,7 +47,6 @@ def test_place_hold_requires_identity_headers(setup):
 
 def test_place_hold_requires_expiry(setup):
     client, _ = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
     response = client.post(
         "/venue-holds", json={"venueId": VENUE_ID}, headers=HOLD_HEADERS
@@ -70,7 +57,6 @@ def test_place_hold_requires_expiry(setup):
 
 def test_place_hold_requires_json_object(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
     response = client.post("/venue-holds", json=[], headers=HOLD_HEADERS)
 
@@ -80,7 +66,6 @@ def test_place_hold_requires_json_object(setup):
 
 def test_place_hold_rejects_expiry_in_the_past(setup):
     client, _ = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
     response = client.post(
         "/venue-holds",
@@ -94,7 +79,6 @@ def test_place_hold_rejects_expiry_in_the_past(setup):
 
 def test_place_hold_succeeds(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchone.side_effect = [
         {"venue_id": VENUE_ID},
         None,
@@ -127,7 +111,6 @@ def test_place_hold_succeeds(setup):
 
 def test_place_hold_rejects_overlap_with_existing_booking(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, {"booking_id": "existing"}]
 
     response = client.post(
@@ -146,7 +129,6 @@ def test_place_hold_rejects_overlap_with_existing_booking(setup):
 def test_place_hold_rejects_overlap_with_another_active_hold(setup):
     """Holds are 'On Hold' VenueBooking rows, so the same overlap check sees them."""
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, {"booking_id": "active"}]
 
     response = client.post(
@@ -160,7 +142,6 @@ def test_place_hold_rejects_overlap_with_another_active_hold(setup):
 
 def test_place_hold_returns_404_for_unknown_venue(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchone.return_value = None
 
     response = client.post(
@@ -223,7 +204,7 @@ def test_hold_cors_preflight(setup):
 
 def test_place_hold_database_unconfigured(setup):
     client, cursor = setup
-    client.application.config.update(CALENDAR_DEV_MODE=True, DATABASE_URL=None)
+    client.application.config.update(DATABASE_URL=None)
 
     response = client.post(
         "/venue-holds",
@@ -234,7 +215,7 @@ def test_place_hold_database_unconfigured(setup):
     assert response.status_code == 503
     cursor.execute.assert_not_called()
 
-COORDINATOR_HEADERS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
+COORDINATOR_HEADERS = bearer(USER_ID, "Event Coordinator")
 HOLD_ROW = {
     "hold_id": "00000000-0000-0000-0000-000000000010",
     "venue_id": VENUE_ID,
@@ -246,7 +227,6 @@ HOLD_ROW = {
 
 def test_place_hold_stores_the_coordinator_it_is_held_for(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, None, HOLD_ROW]
 
     response = client.post(
@@ -268,7 +248,6 @@ def test_place_hold_stores_the_coordinator_it_is_held_for(setup):
 def test_place_hold_keeps_coordinator_and_buffer_conflict_rules_together(setup):
     """The reminder assignment must not discard the venue's buffer times."""
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchone.side_effect = [{"venue_id": VENUE_ID}, None, HOLD_ROW]
 
     response = client.post(
@@ -292,7 +271,6 @@ def test_place_hold_keeps_coordinator_and_buffer_conflict_rules_together(setup):
 
 def test_place_hold_rejects_malformed_coordinator_id(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
     response = client.post(
         "/venue-holds",
@@ -311,7 +289,6 @@ def test_place_hold_rejects_malformed_coordinator_id(setup):
 def test_reminders_return_the_coordinators_holds_expiring_in_three_days(setup):
     """Coordinator is told which venue and when the hold expires."""
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchall.return_value = [HOLD_ROW]
 
     response = client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
@@ -327,7 +304,6 @@ def test_reminders_return_the_coordinators_holds_expiring_in_three_days(setup):
 def test_reminders_exclude_expired_and_no_longer_active_holds(setup):
     """No reminder once the hold has expired or is no longer 'On Hold'."""
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchall.return_value = []
 
     client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
@@ -341,12 +317,11 @@ def test_reminders_exclude_expired_and_no_longer_active_holds(setup):
 
 def test_reminders_accept_the_coordinator_lead(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
     cursor.fetchall.return_value = []
 
     response = client.get(
         "/venue-holds/reminders",
-        headers={**COORDINATOR_HEADERS, "X-Dev-Role": "Event Coordinator Lead"},
+        headers=bearer(USER_ID, "Event Coordinator Lead"),
     )
 
     assert response.status_code == 200
@@ -354,7 +329,6 @@ def test_reminders_accept_the_coordinator_lead(setup):
 
 def test_reminders_require_coordinator_role(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
     response = client.get("/venue-holds/reminders", headers=HOLD_HEADERS)
 
@@ -362,28 +336,22 @@ def test_reminders_require_coordinator_role(setup):
     cursor.execute.assert_not_called()
 
 
-def test_reminders_require_identity_headers(setup):
+def test_reminders_require_a_signed_in_user(setup, monkeypatch):
+    """SCRUM-8: reminders are for the signed-in coordinator; an internal token has none."""
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal-test-token")
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = True
 
-    response = client.get("/venue-holds/reminders")
+    response = client.application.test_client().get(
+        "/venue-holds/reminders", headers={"X-Internal-Token": "internal-test-token"}
+    )
 
     assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 
-def test_reminders_are_disabled_without_dev_mode(setup):
-    client, cursor = setup
-
-    response = client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
-
-    assert response.status_code == 503
-    cursor.execute.assert_not_called()
-
-
 def test_reminders_database_unconfigured(setup):
     client, cursor = setup
-    client.application.config.update(CALENDAR_DEV_MODE=True, DATABASE_URL=None)
+    client.application.config.update(DATABASE_URL=None)
 
     response = client.get("/venue-holds/reminders", headers=COORDINATOR_HEADERS)
 

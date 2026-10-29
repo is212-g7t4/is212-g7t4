@@ -14,7 +14,7 @@
  * All APIs mocked by shared fixture: proves UI routing/accessibility, NOT persistence.
  * Separate real-browser harness verifies actual services, queue and PostgreSQL.
  */
-import { test, expect, mock, json, asUser, allUsers, users, venues, makeEvent } from './fixtures'
+import { test, expect, mock, json, asUser, switchUser, allUsers, users, venues, makeEvent } from './fixtures'
 const eventId = '30000000-0000-0000-0000-000000000001'
 const bookingId = '40000000-0000-0000-0000-000000000001'
 const item = { id: 'n1', type: 'venue.closure-rejection', eventId, createdAt: '2026-10-17T01:00:00Z', readAt: null as string | null, payload: { message: 'Frozen disruption', destination: { kind: 'event-venue-request', eventId, bookingId }, details: { eventName: 'Historic conference', venueName: 'Historic hall', startDateTime: '2099-01-01T00:00:00Z', endDateTime: '2099-01-02T00:00:00Z', reason: 'Maintenance\nOperational safety' } } }
@@ -22,8 +22,8 @@ test('bell opens without reading; click focuses exact rejected request; unread a
  await mockApi(page)
  await mock(page, 'user', '/users', route => json(route, { users: allUsers }))
  let read = false, writes = 0
- await mock(page, 'notification', '/notifications', route => json(route, { notifications: route.request().headers()['x-dev-user-id'] === users.coordinator.user_id ? [{ ...item, readAt: read ? '2026-10-17T02:00:00Z' : null }] : [], nextCursor: null }))
- await mock(page, 'notification', '/notifications/unread-count', route => json(route, { unreadCount: route.request().headers()['x-dev-user-id'] === users.coordinator.user_id && !read ? 1 : 0 }))
+ await mock(page, 'notification', '/notifications', route => json(route, { notifications: route.request().headers()['authorization'] === `Bearer e2e-${users.coordinator.user_id}` ? [{ ...item, readAt: read ? '2026-10-17T02:00:00Z' : null }] : [], nextCursor: null }))
+ await mock(page, 'notification', '/notifications/unread-count', route => json(route, { unreadCount: route.request().headers()['authorization'] === `Bearer e2e-${users.coordinator.user_id}` && !read ? 1 : 0 }))
  await mock(page, 'notification', '/notifications/n1', route => { writes++; read = route.request().postDataJSON().read; return json(route, { notification: { ...item, readAt: read ? '2026-10-17T02:00:00Z' : null } }) })
  await mock(page, 'event', `/events/${eventId}`, route => json(route, makeEvent({ id: eventId, status: 'Under Review' })))
  await mock(page, 'venue', '/venues', route => json(route, { venues }))
@@ -48,7 +48,7 @@ test('bell opens without reading; click focuses exact rejected request; unread a
  await expect(page).toHaveURL('/notifications')
  await page.getByRole('button', { name: 'Mark unread' }).click()
  await expect(page.getByRole('button', { name: 'Notifications, 1 unread', exact: true })).toBeVisible()
- await page.getByLabel('Select active user').selectOption(users.attendee.user_id)
+ await switchUser(page, users.attendee)
  await expect(page.getByText('No notifications yet.', { exact: true })).toBeVisible()
  await expect(page.getByText('Historic conference')).toHaveCount(0)
 })

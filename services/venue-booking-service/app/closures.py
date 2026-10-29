@@ -1,7 +1,6 @@
-"""SCRUM-170 closure routes; DEV headers are explicitly spoofable."""
+"""SCRUM-170 closure routes, for signed-in Venue Staff."""
 
-from uuid import UUID
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 bp = Blueprint("closures", __name__)
 
@@ -10,16 +9,9 @@ bp = Blueprint("closures", __name__)
 def staff_only():
     if request.method == "OPTIONS":
         return None
-    if current_app.config["VENUE_CLOSURE_DEV_MODE"] is not True:
-        return jsonify(message="Venue closure DEV mode is disabled."), 503
-    try:
-        UUID(request.headers.get("X-Dev-User-Id", ""))
-    except ValueError:
-        return jsonify(message="DEV user UUID is required."), 401
-    role = request.headers.get("X-Dev-Role")
-    if not role:
-        return jsonify(message="DEV role is required."), 401
-    if role != "Venue Staff":
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
+    if g.role != "Venue Staff":
         return jsonify(message="Venue Staff role is required."), 403
 
 
@@ -32,12 +24,8 @@ def preview():
         data = create_input(request.get_json(silent=True))
     except (ValueError, OverflowError) as error:
         return jsonify(message=str(error)), 400
-    headers = {
-        "X-Dev-User-Id": str(UUID(request.headers["X-Dev-User-Id"])),
-        "X-Dev-Role": "Venue Staff",
-    }
     try:
-        return jsonify(closure_clients.preview(data, headers))
+        return jsonify(closure_clients.preview(data))
     except closure_clients.ClosureUpstreamError as error:
         return jsonify(message="Unable to load complete closure impact."), error.status
 
@@ -59,16 +47,10 @@ def closures(closure_id=None):
         return jsonify(message=str(error)), 400
     from app import closure_clients
 
-    headers = {
-        "X-Dev-User-Id": str(UUID(request.headers["X-Dev-User-Id"])),
-        "X-Dev-Role": "Venue Staff",
-    }
     try:
         if request.method == "POST":
-            return jsonify(closure_clients.create(data, headers)), 201
-        return jsonify(
-            closure_clients.read(closure_id, request.args.to_dict(), headers)
-        )
+            return jsonify(closure_clients.create(data)), 201
+        return jsonify(closure_clients.read(closure_id, request.args.to_dict()))
     except closure_clients.ClosureUpstreamError as error:
         if error.code == "CLOSURE_PREVIEW_CHANGED":
             return (

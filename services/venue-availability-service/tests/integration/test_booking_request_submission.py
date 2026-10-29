@@ -7,7 +7,7 @@ Real:       Flask app, POST /venue-bookings and GET /events/<id>/venue-bookings,
             app/models.py SQL (advisory lock, venue row lock, buffered overlap query),
             postgres:17.6 with the full migration chain.
 Doubled:    nothing (Venue Availability makes no outbound calls).
-Not proven: who the caller is (requestedBy is whatever is sent); the event-status gate and
+Not proven: Supabase sign-in itself (the coordinator is a token signed with a test key, SCRUM-8); the event-status gate and
             the venue catalogue/capacity checks, which run in Venue Booking Service.
 
 AC1  Given an Event Coordinator is preparing a venue booking request for an event, when they
@@ -82,7 +82,6 @@ def request_body(event_id, venue_id, start="2030-03-01T13:00", end="2030-03-01T1
     body = {
         "eventId": event_id,
         "venueId": venue_id,
-        "requestedBy": COORDINATOR_ID,
         "requestedStartTime": start,
         "requestedEndTime": end,
         "requiredCapacity": 60,

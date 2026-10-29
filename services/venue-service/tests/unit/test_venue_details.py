@@ -14,6 +14,7 @@ import psycopg2
 import pytest
 
 from app import create_app
+from tests.unit.factories import signed_in
 
 VENUE_ID = "8381b11e-aaae-4d58-bdba-2607e9e2bde2"
 MISSING_ID = "00000000-0000-0000-0000-000000000000"
@@ -46,7 +47,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def test_ac1_returns_all_venue_characteristics(setup):
@@ -183,7 +184,7 @@ def test_database_error_returns_503(setup, monkeypatch):
 
 def test_missing_database_url_returns_503():
     """Failure: an unconfigured service says so rather than crashing."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     assert client.get(f"/venues/{VENUE_ID}").status_code == 503
     assert client.get("/venues").status_code == 503

@@ -27,6 +27,7 @@ from psycopg2.extras import Json
 from tests.integration.factories import (
     COORDINATOR_ID, STAFF_ID, at, make_user, make_venue, make_event, make_booking,
 )
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 OTHER_STAFF = "44444444-4444-4444-8444-444444444444"
@@ -44,7 +45,7 @@ def world(client, db, monkeypatch):
 
 def request_body(world, day=1):
     event, venue = world
-    return dict(eventId=event, venueId=venue, requestedBy=COORDINATOR_ID,
+    return dict(eventId=event, venueId=venue,
                 requestedStartTime=f"2030-03-{day:02d}T13:00",
                 requestedEndTime=f"2030-03-{day:02d}T15:00",
                 requiredCapacity=50, venueRequirements="Stage")
@@ -69,7 +70,7 @@ def claim(client):
 def decide(client, booking, action):
     # Upstream rejection workflow requires input; no notification reason assertion.
     return client.patch(f"/venue-bookings/{booking}/{action}",
-                        json={"reviewedBy": STAFF_ID, "rejectionReason": "Fixture input"})
+                        headers=bearer(STAFF_ID, "Venue Staff"), json={"rejectionReason": "Fixture input"})
 
 
 # AC1 — durable deduplicated fanout.
@@ -222,12 +223,11 @@ def test_ac2_edit_resubmit_later_decision_and_cancel_do_not_add_alerts(client, d
 
 def test_ac2_closure_rejection_creates_only_the_existing_closure_alert(client, db, world):
     """Conflict: closure rejects the booking with one closure alert, never a second decision alert."""
-    client.application.config.update(VENUE_CLOSURE_DEV_MODE=True,
-                                     CLOSURE_CONFIRMATION_KEY="synthetic-confirmation-key-32-bytes-minimum")
+    client.application.config.update(CLOSURE_CONFIRMATION_KEY="synthetic-confirmation-key-32-bytes-minimum")
     booking = make_booking(db, world[0], world[1], at(1, 13), at(1, 15), status="Pending Review")
     data = dict(venueId=world[1], startDateTime="2030-03-01T12:00:00+08:00",
                 endDateTime="2030-03-01T16:00:00+08:00", reason="Fixture maintenance")
-    headers = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+    headers = bearer(STAFF_ID, "Venue Staff")
     preview = client.post("/venue-closures/preview", json=data, headers=headers)
     assert preview.status_code == 200
     result = client.post("/venue-closures", json={**data, "confirmed": True,

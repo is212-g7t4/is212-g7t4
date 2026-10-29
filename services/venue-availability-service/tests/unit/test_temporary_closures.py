@@ -20,29 +20,15 @@ import pytest
 from app import create_app
 from app.closure_store import sign_preview
 from app.closure_contract import create_input
-
-
-@pytest.mark.parametrize(
-    "method,path",
-    [
-        ("post", "/venue-closures"),
-        ("get", "/venue-closures"),
-        ("get", "/venue-closures/00000000-0000-0000-0000-000000000001"),
-    ],
-)
-def test_closure_disabled_by_default(monkeypatch, method, path):
-    monkeypatch.delenv("VENUE_CLOSURE_DEV_MODE", raising=False)
-    client = create_app().test_client()
-    assert getattr(client, method)(path).status_code == 503
+from tests.unit.factories import bearer
 
 
 UID = "00000000-0000-0000-0000-000000000001"
-HEADERS = {"X-Dev-User-Id": UID, "X-Dev-Role": "Venue Staff"}
+HEADERS = bearer(UID, "Venue Staff")
 
 
 @pytest.fixture
-def client(monkeypatch):
-    monkeypatch.setenv("VENUE_CLOSURE_DEV_MODE", "true")
+def client():
     return create_app({"CLOSURE_CONFIRMATION_KEY": KEY}).test_client()
 
 
@@ -50,9 +36,9 @@ def client(monkeypatch):
     "headers,code",
     [
         ({}, 401),
-        ({"X-Dev-User-Id": "bad", "X-Dev-Role": "Venue Staff"}, 401),
-        ({"X-Dev-User-Id": UID}, 401),
-        ({**HEADERS, "X-Dev-Role": "Event Coordinator"}, 403),
+        ({"X-Dev-User-Id": UID, "X-Dev-Role": "Venue Staff"}, 401),
+        ({"Authorization": "Bearer not-a-jwt"}, 401),
+        (bearer(UID, "Event Coordinator"), 403),
     ],
 )
 @pytest.mark.parametrize(
@@ -74,12 +60,12 @@ def test_preflight(client, path):
         headers={
             "Origin": "http://localhost:5174",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "X-Dev-User-Id, X-Dev-Role, Content-Type",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
         },
     )
     assert r.status_code == 200
     assert r.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
-    assert "X-Dev-Role" in r.headers["Access-Control-Allow-Headers"]
+    assert "Authorization" in r.headers["Access-Control-Allow-Headers"]
 
 
 @pytest.mark.parametrize(

@@ -27,7 +27,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
 
 JOB = "10000000-0000-0000-0000-000000000004"
 TOKEN = "10000000-0000-0000-0000-000000000005"
@@ -47,7 +47,7 @@ def owner(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("psycopg2.connect", lambda *args, **kwargs: connection)
-    client = create_app({"TESTING": True, "DATABASE_URL": "synthetic"}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": "synthetic"}).test_client())
     row = dict(source_id=JOB, type="venue.booking-submission-fanout", booking_id=BOOKING_ID,
                source=deepcopy(SOURCE), envelope=None, lease_token=TOKEN, attempts=1,
                created_at=STAMP, lease_valid=True)

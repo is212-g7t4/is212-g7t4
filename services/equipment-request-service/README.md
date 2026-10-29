@@ -22,8 +22,9 @@ Or `docker compose up --build equipment-request-service` (port 5011).
 
 ## Endpoints
 
-Identity is the DEV `X-Dev-User-Id` / `X-Dev-Role` headers (same as Equipment
-Service) until Supabase JWT verification lands.
+Every endpoint needs a Supabase access token (`Authorization: Bearer
+<token>`, SCRUM-8); the caller's id and role come from the token. `401`
+without a valid token.
 
 - `GET /equipment-requests[?status=Pending|Approved|Rejected][&eventId=<uuid>][&eventIds=<uuid>,<uuid>...]`
   — Technical Support or Event Coordinator. `eventIds` takes up to 500 IDs.

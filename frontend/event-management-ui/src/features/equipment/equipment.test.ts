@@ -30,19 +30,18 @@ test('fetchEquipment surfaces the service message or a default', async () => {
   await expect(fetchEquipment()).rejects.toThrow('Unable to load')
 })
 
-test('createEquipment posts JSON with the DEV headers', async () => {
+test('createEquipment posts JSON', async () => {
   const fn = stubFetch(true, { equipment: { id: 'x' } })
   const payload = { equipmentType: 'Laptop', description: 'd', totalQuantity: 1, location: 'l', status: 'Available' } as const
-  await expect(createEquipment(payload, { id: 'u', role: 'Technical Support' })).resolves.toEqual({ id: 'x' })
+  await expect(createEquipment(payload)).resolves.toEqual({ id: 'x' })
   const init = fn.mock.calls[0][1]
   expect(init.method).toBe('POST')
-  expect(init.headers).toMatchObject({ 'X-Dev-User-Id': 'u', 'X-Dev-Role': 'Technical Support' })
   expect(JSON.parse(init.body)).toEqual(payload)
 })
 
 test('createEquipment surfaces errors', async () => {
   stubFetch(false, { message: 'nope' })
-  await expect(createEquipment({ equipmentType: 'Laptop', description: 'd', totalQuantity: 1, location: 'l', status: 'Available' }, { id: 'u', role: 'r' })).rejects.toThrow('nope')
+  await expect(createEquipment({ equipmentType: 'Laptop', description: 'd', totalQuantity: 1, location: 'l', status: 'Available' })).rejects.toThrow('nope')
   stubFetch(false, {})
-  await expect(createEquipment({ equipmentType: 'Laptop', description: 'd', totalQuantity: 1, location: 'l', status: 'Available' }, { id: 'u', role: 'r' })).rejects.toThrow('Unable to add')
+  await expect(createEquipment({ equipmentType: 'Laptop', description: 'd', totalQuantity: 1, location: 'l', status: 'Available' })).rejects.toThrow('Unable to add')
 })

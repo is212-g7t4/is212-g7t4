@@ -41,7 +41,6 @@ def stub_registration_lookup(router):
     # Shape: services/registration-service/app/routes.py GET /registrations.
     return router.get(
         f"{service_clients.REGISTRATION_SERVICE_URL}/registrations",
-        params={"attendeeId": ATTENDEE_ID},
     ).mock(return_value=Response(200, json={"registrations": [registration()]}))
 
 
@@ -76,7 +75,7 @@ def test_ac4_registered_pending_event_reaches_the_attendee_with_approved_details
         stub_event_catalogue(router, [])
         summaries = stub_attendee_summaries(router, Response(200, json={"events": [attendee_summary()]}))
 
-        response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+        response = client.get("/registrations")
 
     assert response.status_code == 200
     [item] = response.json["registrations"]
@@ -99,7 +98,7 @@ def test_scrum150_ac4_confirmed_event_uses_catalogue_and_skips_attendee_summarie
         stub_user(router)
         stub_event_catalogue(router, [approved])
 
-        response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+        response = client.get("/registrations")
 
     assert response.status_code == 200
     assert response.json["registrations"][0]["event"]["preferredStartDate"] == "2030-03-02T09:00:00+08:00"
@@ -116,7 +115,7 @@ def test_dr_attendee_summaries_outage_is_reported_as_502(client):
         stub_event_catalogue(router, [])
         stub_attendee_summaries(router, Response(503, json={"message": "DATABASE_URL is not configured."}))
 
-        response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+        response = client.get("/registrations")
 
     assert response.status_code == 502
     assert response.json["message"] == "Unable to load your registrations right now."

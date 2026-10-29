@@ -1,6 +1,7 @@
 import os
 
 import httpx
+from flask import has_request_context, request
 
 # Composites are the only services allowed to call other services (see
 # AGENTS.md). Each downstream service gets its own base-URL env var and a thin
@@ -109,12 +110,20 @@ class SafetyCheckAlreadyDecidedError(Exception):
         self.existing = existing
 
 
+def _forwarded_auth():
+    """The caller's Supabase token, so downstream services see the same signed-in user (SCRUM-8)."""
+    if has_request_context() and request.headers.get("Authorization"):
+        return {"Authorization": request.headers["Authorization"]}
+    return {}
+
+
 def _send(method, url, **kwargs):
     """One HTTP call, with every transport failure mapped to our own exceptions.
 
     Downstream URLs and error text never leave this module: a caller that
     leaked them would be telling the browser about our internal topology.
     """
+    kwargs["headers"] = {**_forwarded_auth(), **kwargs.get("headers", {})}
     try:
         return httpx.request(method, url, timeout=TIMEOUT, **kwargs)
     except httpx.TimeoutException:
@@ -139,16 +148,14 @@ def _body(response):
 # --- Event Service (atomic, 5003) -------------------------------------------
 
 
-def get_event(event_id: str, viewer_id: str, viewer_role: str = None) -> dict:
-    """The event, scoped to the requesting viewer so Event Service does AC5.
+def get_event(event_id: str, viewer_role: str = None) -> dict:
+    """The event, scoped to the signed-in viewer so Event Service does AC5.
 
-    `viewer_role` is passed through as `viewerRole` when given — a Safety
+    `viewer_role` asks for the role's view as `viewerRole` — a Safety
     Officer isn't the assigned coordinator, so without it Event Service would
-    refuse the read with 403 (SCRUM-150).
+    refuse the read with 403 (SCRUM-150). The role itself comes from the token.
     """
-    params = {"coordinatorId": viewer_id}
-    if viewer_role:
-        params["viewerRole"] = viewer_role
+    params = {"viewerRole": viewer_role} if viewer_role else {}
     response = _send(
         "GET",
         f"{EVENT_SERVICE_URL}/events/{event_id}",
@@ -161,7 +168,7 @@ def get_event(event_id: str, viewer_id: str, viewer_role: str = None) -> dict:
     return _ok(response).json()
 
 
-def list_events_by_status(status: str, viewer_id: str, viewer_role: str) -> list:
+def list_events_by_status(status: str, viewer_role: str) -> list:
     """Every event in `status`, read as a role that may see all events (SCRUM-162).
 
     Event Service answers 403 when `viewer_role` isn't one of its
@@ -172,7 +179,7 @@ def list_events_by_status(status: str, viewer_id: str, viewer_role: str) -> list
         _send(
             "GET",
             f"{EVENT_SERVICE_URL}/events",
-            params={"coordinatorId": viewer_id, "viewerRole": viewer_role, "status": status},
+            params={"viewerRole": viewer_role, "status": status},
         )
     )
     return response.json()["events"]
@@ -183,8 +190,6 @@ def set_event_safety_status(
     status: str,
     safety_check_id: str,
     round_number: int,
-    coordinator_id: str = None,
-    decided_by: str = None,
     remarks: str = None,
     areas: list = None,
     attendee_venue: str = None,
@@ -200,10 +205,7 @@ def set_event_safety_status(
         "safetyCheckId": safety_check_id,
         "roundNumber": round_number,
     }
-    if coordinator_id is not None:
-        body["coordinatorId"] = coordinator_id
-    if decided_by is not None:
-        body["decidedBy"] = decided_by
+    if remarks is not None:
         body["remarks"] = remarks
     if attendee_venue is not None:
         body["attendeeVenue"] = attendee_venue
@@ -228,9 +230,7 @@ def set_event_safety_status(
     return _ok(response).json()
 
 
-def update_event_details(
-    event_id: str, coordinator_id: str, changes: dict, safety_recheck: dict
-) -> dict:
+def update_event_details(event_id: str, changes: dict, safety_recheck: dict) -> dict:
     """Save the edit and move the event back for re-review (SCRUM-153 AC1).
 
     `safety_recheck` names the round whose approval we just withdrew and the
@@ -242,7 +242,6 @@ def update_event_details(
         "PATCH",
         f"{EVENT_SERVICE_URL}/events/{event_id}/details",
         json={
-            "coordinatorId": coordinator_id,
             "changes": changes,
             "safetyRecheck": {**safety_recheck, "venueBefore": attendee_venue_name(event_id)},
         },
@@ -306,21 +305,17 @@ def cancel_venue_booking(booking_id: str, event_id: str) -> dict:
 # --- Equipment Request Service (atomic, 5011) -------------------------------
 
 
-def get_event_equipment_requests(
-    event_id: str, viewer_id: str, viewer_role: str = "Event Coordinator"
-) -> list:
+def get_event_equipment_requests(event_id: str) -> list:
     """Every equipment request for the event.
 
-    This endpoint is behind the DEV identity headers; `READ_ROLES` allows
-    Event Coordinators and Safety Officers, so we pass the verified viewer's
-    identity rather than inventing a service account.
+    Read with the signed-in viewer's own token; `READ_ROLES` allows Event
+    Coordinators (and the Lead) and Safety Officers, so no service account is needed.
     """
     response = _ok(
         _send(
             "GET",
             f"{EQUIPMENT_REQUEST_SERVICE_URL}/equipment-requests",
             params={"eventId": event_id},
-            headers={"X-Dev-User-Id": viewer_id, "X-Dev-Role": viewer_role},
         )
     )
     return response.json()["requests"]
@@ -354,7 +349,6 @@ def reset_venue_safety_bookings(event_id: str, booking_ids: list) -> list:
 
 def create_safety_check_record(
     event_id: str,
-    submitted_by: str,
     equipment_placement_notes=None,
     crowd_movement_notes=None,
 ) -> dict:
@@ -364,7 +358,6 @@ def create_safety_check_record(
         f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records",
         json={
             "eventId": event_id,
-            "submittedBy": submitted_by,
             "equipmentPlacementNotes": equipment_placement_notes,
             "crowdMovementNotes": crowd_movement_notes,
         },
@@ -397,10 +390,10 @@ def delete_safety_check_record(safety_check_id: str) -> None:
 
 
 def decide_safety_check_record(
-    safety_check_id: str, status: str, decided_by: str, remarks=None, flags=None
+    safety_check_id: str, status: str, remarks=None, flags=None
 ) -> dict:
     """Decide the open round (SCRUM-150 AC2, SCRUM-151). The record service is the race guard."""
-    body = {"status": status, "decidedBy": decided_by, "remarks": remarks}
+    body = {"status": status, "remarks": remarks}
     if flags is not None:
         body["flags"] = flags
     response = _send(
@@ -415,7 +408,7 @@ def decide_safety_check_record(
     return _ok(response).json()
 
 
-def withdraw_safety_approval(round_id: str, withdrawn_by: str, reason: str) -> tuple:
+def withdraw_safety_approval(round_id: str, reason: str) -> tuple:
     """Withdraw round N's approval and open round N+1 (SCRUM-153 AC1, AC3).
 
     One call, because the record service does both in one transaction — and
@@ -425,7 +418,7 @@ def withdraw_safety_approval(round_id: str, withdrawn_by: str, reason: str) -> t
     response = _send(
         "POST",
         f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{round_id}/withdraw",
-        json={"withdrawnBy": withdrawn_by, "reason": reason},
+        json={"reason": reason},
     )
     if response.status_code == 404:
         raise RecordNotFoundError
@@ -448,7 +441,7 @@ def restore_safety_approval(round_id: str, opened_round_id: str) -> dict:
     return _ok(response).json()
 
 
-def withdraw_approval_without_next_round(round_id: str, withdrawn_by: str, reason: str) -> dict:
+def withdraw_approval_without_next_round(round_id: str, reason: str) -> dict:
     """SCRUM-28 Part B: withdraw round N's approval and open no round.
 
     A venue booking of a Confirmed event changed, so the event goes back to
@@ -458,7 +451,7 @@ def withdraw_approval_without_next_round(round_id: str, withdrawn_by: str, reaso
     response = _send(
         "POST",
         f"{SAFETY_CHECK_RECORD_SERVICE_URL}/safety-check-records/{round_id}/withdraw",
-        json={"withdrawnBy": withdrawn_by, "reason": reason, "openNextRound": False},
+        json={"reason": reason, "openNextRound": False},
     )
     if response.status_code == 404:
         raise RecordNotFoundError
@@ -485,7 +478,6 @@ def restore_approval_without_next_round(round_id: str) -> dict:
 
 def set_event_venue_change_status(
     event_id: str,
-    coordinator_id: str,
     round_id: str,
     round_number: int,
     withdraw: bool,
@@ -500,7 +492,6 @@ def set_event_venue_change_status(
         "status": "Approved" if withdraw else "Confirmed",
         "safetyCheckId": round_id,
         "roundNumber": round_number,
-        "coordinatorId": coordinator_id,
     }
     if withdraw:
         body["venueBefore"] = attendee_venue_name(event_id)

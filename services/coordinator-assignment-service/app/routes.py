@@ -1,5 +1,5 @@
 import httpx
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify
 
 from app.clients import (
     get_active_events,
@@ -47,16 +47,15 @@ def get_queue():
     Submitted requests and assigned Under Review requests, oldest submission
     first, so the Lead can assign and reassign from one list.
 
-    Query parameters:
-    - actingUserId: the id of the user asking. Only the Event Coordinator
-      Lead may see the queue.
+    The caller is the signed-in user (SCRUM-8). Only the Event Coordinator
+    Lead may see the queue.
 
     Response (200):
     {"events": [...]}
     """
-    acting_user_id = request.args.get("actingUserId")
+    acting_user_id = g.user_id
     if not acting_user_id:
-        return jsonify(error="actingUserId is required"), 400
+        return jsonify(error="Sign in to continue."), 401
 
     try:
         acting_user = get_user(acting_user_id)
@@ -69,7 +68,7 @@ def get_queue():
         ), 403
 
     try:
-        return jsonify(events=get_assignment_events(acting_user_id)), 200
+        return jsonify(events=get_assignment_events()), 200
     except Exception as e:
         return jsonify(error=f"Failed to fetch assignment events: {str(e)}"), 500
 
@@ -81,9 +80,8 @@ def get_workload():
     (the Lead included) with the active events assigned to them, plus the
     active events nobody has been assigned yet.
 
-    Query parameters:
-    - actingUserId: the id of the user asking. Only the Event Coordinator
-      Lead may see the workload.
+    The caller is the signed-in user (SCRUM-8). Only the Event Coordinator
+    Lead may see the workload.
 
     Response (200):
     {
@@ -94,9 +92,9 @@ def get_workload():
     otherAssigned holds events whose coordinator is no longer an Event
     Coordinator, so they still show up rather than silently disappear.
     """
-    acting_user_id = request.args.get("actingUserId")
+    acting_user_id = g.user_id
     if not acting_user_id:
-        return jsonify(error="actingUserId is required"), 400
+        return jsonify(error="Sign in to continue."), 401
 
     try:
         acting_user = get_user(acting_user_id)
@@ -141,10 +139,8 @@ def assign_coordinator(event_id, coordinator_id):
     - event_id: The event ID (format: EVT-XXX)
     - coordinator_id: The user ID of the coordinator to assign
 
-    Body:
-    - actingUserId: the id of the user making the assignment. Only the
-      Event Coordinator Lead (role "Event Coordinator Lead") may assign or
-      reassign.
+    The assigner is the signed-in user (SCRUM-8). Only the Event Coordinator
+    Lead (role "Event Coordinator Lead") may assign or reassign.
 
     Response (200):
     {
@@ -156,10 +152,9 @@ def assign_coordinator(event_id, coordinator_id):
         if not event_id or not coordinator_id:
             return jsonify(error="event_id and coordinator_id are required"), 400
 
-        data = request.get_json(silent=True)
-        acting_user_id = data.get("actingUserId") if isinstance(data, dict) else None
+        acting_user_id = g.user_id
         if not acting_user_id:
-            return jsonify(error="actingUserId is required"), 400
+            return jsonify(error="Sign in to continue."), 401
 
         try:
             acting_user = get_user(acting_user_id)
@@ -188,7 +183,7 @@ def assign_coordinator(event_id, coordinator_id):
         
         # Assign the coordinator to the event via Event Service
         try:
-            result = assign_event_coordinator(event_id, coordinator_id, acting_user_id)
+            result = assign_event_coordinator(event_id, coordinator_id)
             return jsonify(result), 200
         except httpx.HTTPStatusError as e:
             # Event Service's own refusals (unknown event, closed event, no

@@ -3,7 +3,13 @@ name = "user-service"
 version = "0.1.0"
 description = "User accounts and roles (read-only for now; no auth)"
 requires-python = ">=3.12"
-dependencies = ["flask>=3.1.3", "psycopg2-binary>=2.9", "python-dotenv>=1.0.1"]
+dependencies = [
+    "flask>=3.1.3",
+    "httpx>=0.28",
+    "psycopg2-binary>=2.9",
+    "pyjwt[crypto]>=2.10",
+    "python-dotenv>=1.0.1",
+]
 
 [dependency-groups]
 dev = [
@@ -38,5 +44,5 @@ source = ["app"]
 [tool.coverage.report]
 # Coverage floor (a ratchet): today's measured level, so a PR cannot lower it.
 # Raise this in the PR that adds the tests which push it higher.
-fail_under = 97
+fail_under = 98
 show_missing = true

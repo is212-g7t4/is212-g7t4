@@ -42,8 +42,8 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate, t
   const allowed = (role === 'Technical Support' || isCoordinator(role)) && user !== null
   const canReview = role === 'Technical Support'
 
-  const load = useCallback((activeFilter: StatusFilter, reviewer: User) => {
-    return fetchEventReservations(reviewer, activeFilter === 'All' ? undefined : activeFilter)
+  const load = useCallback((activeFilter: StatusFilter) => {
+    return fetchEventReservations(activeFilter === 'All' ? undefined : activeFilter)
       .then((list) => {
         setEvents(list)
         setError('')
@@ -52,8 +52,8 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate, t
   }, [])
 
   useEffect(() => {
-    if (allowed) void load(filter, user)
-  }, [allowed, filter, load, user])
+    if (allowed) void load(filter)
+  }, [allowed, filter, load])
 
   if (!allowed) return <RoleWarning>{EQUIPMENT_REQUESTS_ACCESS_NOTICE}</RoleWarning>
 
@@ -75,8 +75,8 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate, t
     setActionError('')
     try {
       const updated = reason === undefined
-        ? await reviewEquipmentRequest(id, status, user)
-        : await reviewEquipmentRequest(id, status, user, reason)
+        ? await reviewEquipmentRequest(id, status)
+        : await reviewEquipmentRequest(id, status, reason)
       applyDecisions([updated])
       setRejection(null)
     } catch (cause) {
@@ -91,8 +91,8 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate, t
     setActionError('')
     try {
       const updated = reason === undefined
-        ? await reviewAllEventEquipmentRequests(eventId, status, user)
-        : await reviewAllEventEquipmentRequests(eventId, status, user, reason)
+        ? await reviewAllEventEquipmentRequests(eventId, status)
+        : await reviewAllEventEquipmentRequests(eventId, status, reason)
       applyDecisions(updated)
       setRejection(null)
     } catch (cause) {
@@ -134,7 +134,7 @@ export function EquipmentRequestsPage({ role, user, resolveUserName, onCreate, t
             {REQUEST_STATUSES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>
-        <button className="button small" onClick={() => { setLoading(true); void load(filter, user) }}><RefreshIcon size={14} /> Refresh requests</button>
+        <button className="button small" onClick={() => { setLoading(true); void load(filter) }}><RefreshIcon size={14} /> Refresh requests</button>
         {isCoordinator(role) && onCreate && <button className="button small primary" onClick={onCreate}><PlusIcon size={14} /> New request</button>}
       </div>
       {actionError && !rejection && <p className="field-error" role="alert">{actionError}</p>}

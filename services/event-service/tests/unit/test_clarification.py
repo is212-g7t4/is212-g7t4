@@ -8,6 +8,7 @@ import pytest
 
 from app import create_app
 from app.models import FIELDS, RejectionReasonError, _aware, decide_event
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-4000-8000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -51,7 +52,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def test_assigned_coordinator_requests_clarification_with_auditable_history(setup):
@@ -241,16 +242,6 @@ def test_clarification_response_requires_valid_text(response_text, setup):
     setup[2].execute.assert_not_called()
 
 
-@pytest.mark.parametrize("endpoint, identity", [
-    ("clarification-request", {"coordinatorId": "not-a-uuid", "message": "Question"}),
-    ("clarification-response", {"organiserId": "not-a-uuid", "response": "Answer"}),
-])
-def test_clarification_endpoints_require_valid_identity(endpoint, identity, setup):
-    response = setup[0].patch(f"/events/{EVENT_ID}/{endpoint}", json=identity)
-    assert response.status_code == 400
-    setup[2].execute.assert_not_called()
-
-
 @pytest.mark.parametrize("endpoint, body", [
     ("clarification-request", {"coordinatorId": COORDINATOR_ID, "message": "Question"}),
     ("clarification-response", {"organiserId": ORGANISER_ID, "response": "Answer"}),
@@ -266,7 +257,7 @@ def test_clarification_endpoints_return_not_found(endpoint, body, setup):
     ("clarification-response", {"organiserId": ORGANISER_ID, "response": "Answer"}),
 ])
 def test_clarification_endpoints_require_database_configuration(endpoint, body):
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     response = client.patch(f"/events/{EVENT_ID}/{endpoint}", json=body)
     assert response.status_code == 503
 

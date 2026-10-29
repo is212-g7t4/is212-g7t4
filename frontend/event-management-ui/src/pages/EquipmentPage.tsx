@@ -60,7 +60,7 @@ export function EquipmentPage({ role, user }: { role: Role; user: User | null })
     setFormError('')
     setSaving(true)
     try {
-      const created = await createEquipment({ equipmentType: chosenType, description: description.trim(), totalQuantity: total, location: location.trim(), status }, user)
+      const created = await createEquipment({ equipmentType: chosenType, description: description.trim(), totalQuantity: total, location: location.trim(), status })
       setSuccess(`Added ${created.type}: ${created.description}.`)
       setDescription('')
       setCustomType('')

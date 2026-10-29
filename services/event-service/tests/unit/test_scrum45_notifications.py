@@ -25,6 +25,7 @@ import pytest
 from app import create_app
 
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 approval_EVENT = '30000000-0000-0000-0000-000000000001'
 
@@ -46,7 +47,7 @@ def boundary():
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     with patch('psycopg2.connect', return_value=connection):
-        client = create_app({'TESTING': True, 'DATABASE_URL': 'synthetic', 'INTERNAL_SERVICE_TOKEN': 'test-token'}).test_client()
+        client = signed_in(create_app({'TESTING': True, 'DATABASE_URL': 'synthetic', 'INTERNAL_SERVICE_TOKEN': 'test-token'}).test_client())
         yield (client, connection, cursor)
 
 def approval_approve(client, route, actor=approval_ACTOR):

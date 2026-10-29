@@ -38,6 +38,8 @@ import urllib.request
 import urllib.error
 import psycopg2
 
+from signing import TokenIssuer
+
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "scrum173-isolated-test-token-not-production"
 KEY = "scrum173-isolated-preview-key-not-production"
@@ -48,7 +50,9 @@ STAFF = "10000000-0000-0000-0000-000000000004"
 VENUE = "20000000-0000-0000-0000-000000000001"
 EVENT = "30000000-0000-0000-0000-000000000001"
 BOOKING = "40000000-0000-0000-0000-000000000001"
-HEADERS = {"X-Dev-User-Id": STAFF, "X-Dev-Role": "Venue Staff"}
+# SCRUM-8: services verify tokens against this local JWKS.
+ISSUER = TokenIssuer()
+HEADERS = ISSUER.bearer(STAFF, "Venue Staff")
 
 
 def command(args, **kwargs):
@@ -101,9 +105,7 @@ class Harness:
             FRONTEND_ORIGIN="http://127.0.0.1:59999",
             INTERNAL_SERVICE_TOKEN=TOKEN,
             CLOSURE_CONFIRMATION_KEY=KEY,
-            VENUE_CLOSURE_DEV_MODE="true",
-            CALENDAR_DEV_MODE="false",
-            NOTIFICATION_DEV_MODE="true",
+            SUPABASE_URL=ISSUER.url,
         )
 
     def record(self, name, data=None):
@@ -803,7 +805,7 @@ def exercise(h):
         "from app.consumer import *\nc=connect(os.environ['RABBITMQ_URL']); ch=c.channel(); declare(ch); method,props,body=ch.basic_get(QUEUE,auto_ack=False); assert method\nclass LostAck:\n def basic_ack(self,**kw): raise RuntimeError('lost ack after commit')\ntry: process(os.environ['DATABASE_URL'],LostAck(),method,body)\nexcept RuntimeError: pass\nc.close()",
         "notifications",
     )
-    owner = {"X-Dev-User-Id": B, "X-Dev-Role": "Event Coordinator"}
+    owner = ISSUER.bearer(B, "Event Coordinator")
     status, result = h.http(inbox, "GET", "/notifications", headers=owner)
     assert status == 200 and len(result["notifications"]) == 1, (status, result)
     item = result["notifications"][0]
@@ -873,7 +875,7 @@ def exercise(h):
     assert h.http(inbox, "GET", "/notifications/unread-count", headers=owner)[1] == {
         "unreadCount": 0
     }
-    stranger = {"X-Dev-User-Id": C, "X-Dev-Role": "Event Coordinator"}
+    stranger = ISSUER.bearer(C, "Event Coordinator")
     assert (
         h.http(inbox, "GET", "/notifications", headers=stranger)[1]["notifications"]
         == []

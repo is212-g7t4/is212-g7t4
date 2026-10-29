@@ -8,6 +8,8 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from tests.unit.factories import bearer
+
 STAFF_ID = "55555555-5555-4555-8555-555555555555"
 OTHER_STAFF_ID = "66666666-6666-4666-8666-666666666666"
 UNKNOWN_ID = "99999999-9999-4999-8999-999999999999"
@@ -70,4 +72,5 @@ def make_venue(
 
 
 def staff_headers(user_id=STAFF_ID, role="Venue Staff"):
-    return {"X-Dev-User-Id": user_id, "X-Dev-Role": role}
+    """A signed-in user's Authorization header (SCRUM-8)."""
+    return bearer(user_id, role)

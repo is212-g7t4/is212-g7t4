@@ -11,6 +11,7 @@ from app.clients import (
     EventNotAssignedError,
     EventNotFoundError,
 )
+from tests.unit.factories import signed_in, bearer
 
 EVENT = {
     "id": "evt-1",
@@ -57,14 +58,14 @@ REQUEST = {
 
 
 def test_health():
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
 
 
 STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
-STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 
 
 @patch("app.routes.get_safety_records")
@@ -77,7 +78,7 @@ def test_staff_queue_includes_targeted_safety_feedback(events, venues, bookings,
     bookings.return_value = [dict(BOOKING), {**BOOKING, "id": "other", "status": "Approved"}]
     records.return_value = [{"roundNumber": 1, "status": "Changes Requested", "remarks": "Exit blocked.", "flags": [
         {"area": "venue arrangement", "bookingId": "booking-1", "changeRequired": "Move stage."}]}]
-    response = create_app().test_client().get("/booking-requests", headers=STAFF_HEADERS)
+    response = signed_in(create_app().test_client()).get("/booking-requests", headers=STAFF_HEADERS)
     assert response.status_code == 200
     rows = response.json["events"][0]["bookings"]
     assert rows[0]["safetyFeedback"] == {"reason": "Exit blocked.", "requestedChanges": ["Move stage."]}
@@ -85,9 +86,10 @@ def test_staff_queue_includes_targeted_safety_feedback(events, venues, bookings,
     assert rows[0]["venueName"] == "Grand Ballroom"
 
 
-@pytest.mark.parametrize("headers,code", [({}, 401), ({"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Event Coordinator"}, 403)])
+# An empty Authorization header overrides the client's default sign-in: no token.
+@pytest.mark.parametrize("headers,code", [({"Authorization": ""}, 401), (bearer(STAFF_ID, "Event Coordinator"), 403)])
 def test_staff_queue_requires_venue_staff(headers, code):
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     assert client.get("/booking-requests", headers=headers).status_code == code
     assert client.patch("/booking-requests/b/review", headers=headers, json={}).status_code == code
 
@@ -102,7 +104,7 @@ def test_staff_can_review_reopened_safety_booking(decide, booking, event, status
     event.return_value = {"status": "Safety Changes Requested"}
     decide.return_value = {**BOOKING, "status": status}
     with patch("app.routes.get_venue", return_value=VENUES[1]):
-        response = create_app().test_client().patch("/booking-requests/booking-1/review", headers=STAFF_HEADERS,
+        response = signed_in(create_app().test_client()).patch("/booking-requests/booking-1/review", headers=STAFF_HEADERS,
             json={"reviewedBy": STAFF_ID, "status": status, "rejectionReason": "Venue unsuitable"})
     assert response.status_code == 200
     assert response.json["status"] == status
@@ -117,7 +119,7 @@ def test_staff_queue_filters_and_skips_safety_read_outside_revision(events, venu
     events.return_value = [{**EVENT, "eventName": "Workshop", "status": "Under Review"}]
     venues.return_value = VENUES
     bookings.return_value = [dict(BOOKING), {**BOOKING, "id": "approved", "status": "Approved"}]
-    response = create_app().test_client().get(f"/booking-requests?status={status}", headers=STAFF_HEADERS)
+    response = signed_in(create_app().test_client()).get(f"/booking-requests?status={status}", headers=STAFF_HEADERS)
     assert response.status_code == 200
     assert len(response.json["events"]) == count
     if count:
@@ -126,19 +128,19 @@ def test_staff_queue_filters_and_skips_safety_read_outside_revision(events, venu
 
 
 def test_staff_queue_rejects_invalid_status():
-    assert create_app().test_client().get("/booking-requests?status=bad", headers=STAFF_HEADERS).status_code == 400
+    assert signed_in(create_app().test_client()).get("/booking-requests?status=bad", headers=STAFF_HEADERS).status_code == 400
 
 
 @patch("app.routes.get_staff_events")
 @pytest.mark.parametrize("error,code", [(httpx.ReadTimeout("timeout"), 504), (RuntimeError(), 502)])
 def test_staff_queue_reports_downstream_failure(events, error, code):
     events.side_effect = error
-    assert create_app().test_client().get("/booking-requests", headers=STAFF_HEADERS).status_code == code
+    assert signed_in(create_app().test_client()).get("/booking-requests", headers=STAFF_HEADERS).status_code == code
 
 
-@pytest.mark.parametrize("data", [None, {}, {"status": "Pending", "reviewedBy": STAFF_ID}, {"status": "Approved", "reviewedBy": "someone-else"}])
-def test_staff_review_validates_decision_and_actor(data):
-    assert create_app().test_client().patch("/booking-requests/b/review", headers=STAFF_HEADERS, json=data).status_code == 400
+@pytest.mark.parametrize("data", [None, {}, {"status": "Pending"}])
+def test_staff_review_validates_decision(data):
+    assert signed_in(create_app().test_client()).patch("/booking-requests/b/review", headers=STAFF_HEADERS, json=data).status_code == 400
 
 
 @patch("app.routes.get_event_for_internal_viewer")
@@ -147,7 +149,7 @@ def test_staff_review_validates_decision_and_actor(data):
 def test_staff_review_blocks_stale_or_closed_requests(booking, event, event_status, booking_status):
     booking.return_value = {**BOOKING, "status": booking_status}
     event.return_value = {"status": event_status}
-    assert create_app().test_client().patch("/booking-requests/b/review", headers=STAFF_HEADERS,
+    assert signed_in(create_app().test_client()).patch("/booking-requests/b/review", headers=STAFF_HEADERS,
         json={"status": "Approved", "reviewedBy": STAFF_ID}).status_code == 409
 
 
@@ -155,7 +157,7 @@ def test_staff_review_blocks_stale_or_closed_requests(booking, event, event_stat
 @pytest.mark.parametrize("error,code", [(BookingNotFoundError(), 404), (RuntimeError(), 502)])
 def test_staff_review_reports_lookup_failure(booking, error, code):
     booking.side_effect = error
-    assert create_app().test_client().patch("/booking-requests/b/review", headers=STAFF_HEADERS,
+    assert signed_in(create_app().test_client()).patch("/booking-requests/b/review", headers=STAFF_HEADERS,
         json={"status": "Approved", "reviewedBy": STAFF_ID}).status_code == code
 
 
@@ -165,8 +167,8 @@ def test_staff_queue_clients_use_event_and_safety_owners(get):
     response = MagicMock()
     response.json.return_value = {"events": [EVENT], "safetyChecks": [{"roundNumber": 1}]}
     get.return_value = response
-    assert clients.get_staff_events(STAFF_ID) == [EVENT]
-    assert get.call_args.kwargs["params"] == {"coordinatorId": STAFF_ID, "viewerRole": "Venue Staff"}
+    assert clients.get_staff_events() == [EVENT]
+    assert get.call_args.kwargs["params"] == {"viewerRole": "Venue Staff"}
     assert clients.get_safety_records("evt-1") == [{"roundNumber": 1}]
     assert get.call_args.kwargs["params"] == {"eventId": "evt-1"}
 
@@ -182,7 +184,7 @@ def test_booking_request_succeeds_for_catalogued_available_venue(
     mock_get_venues.return_value = VENUES
     mock_create_booking.return_value = BOOKING
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post(
         "/booking-requests",
         json=REQUEST,
@@ -190,15 +192,15 @@ def test_booking_request_succeeds_for_catalogued_available_venue(
 
     assert response.status_code == 201
     assert response.json == BOOKING
-    mock_get_event.assert_called_once_with("evt-1", "coord-1")
+    mock_get_event.assert_called_once_with("evt-1")
     mock_create_booking.assert_called_once_with(
         "evt-1", "ven-2", "2026-10-01T09:00", "2026-10-01T12:00",
-        80, "Projector", "coord-1"
+        80, "Projector"
     )
 
 
 def test_booking_request_requires_all_fields():
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post("/booking-requests", json={"eventId": "evt-1"})
     assert response.status_code == 400
 
@@ -214,7 +216,7 @@ def test_booking_request_requires_all_fields():
     ],
 )
 def test_booking_request_validates_booking_specific_details(change):
-    response = create_app().test_client().post(
+    response = signed_in(create_app().test_client()).post(
         "/booking-requests", json=REQUEST | change
     )
     assert response.status_code == 400
@@ -224,7 +226,7 @@ def test_booking_request_validates_booking_specific_details(change):
 def test_booking_request_rejects_unknown_event(mock_get_event):
     mock_get_event.side_effect = EventNotFoundError
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post(
         "/booking-requests",
         json=REQUEST | {"eventId": "missing", "venueId": "ven-1"},
@@ -236,7 +238,7 @@ def test_booking_request_rejects_unknown_event(mock_get_event):
 def test_booking_request_rejects_coordinator_not_assigned_to_event(mock_get_event):
     mock_get_event.side_effect = EventNotAssignedError
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post(
         "/booking-requests",
         json=REQUEST | {"venueId": "ven-1", "coordinatorId": "someone-else"},
@@ -253,7 +255,7 @@ def test_booking_request_rejects_venue_not_in_catalogue(
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post(
         "/booking-requests",
         json=REQUEST | {"venueId": "not-a-real-venue"},
@@ -271,7 +273,7 @@ def test_booking_request_rejects_venue_that_is_not_available(
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post(
         "/booking-requests",
         json=REQUEST | {"venueId": venue_id},
@@ -286,7 +288,7 @@ def test_booking_request_uses_booking_capacity_not_event_total(mock_get_event, m
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     with patch("app.routes.create_booking", return_value=BOOKING) as mock_create:
         response = client.post(
             "/booking-requests",
@@ -305,7 +307,7 @@ def test_booking_request_rejects_booking_capacity_above_venue_capacity(
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
 
-    response = create_app().test_client().post(
+    response = signed_in(create_app().test_client()).post(
         "/booking-requests", json=REQUEST | {"venueId": "ven-1", "requiredCapacity": 61}
     )
 
@@ -323,7 +325,7 @@ def test_booking_request_rejects_double_booking(
     mock_get_venues.return_value = VENUES
     mock_create_booking.side_effect = BookingConflictError
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.post(
         "/booking-requests",
         json=REQUEST,
@@ -344,7 +346,7 @@ def test_lists_multiple_bookings_for_same_event_separately(
     ]
     mock_get_venues.return_value = VENUES
 
-    response = create_app().test_client().get(
+    response = signed_in(create_app().test_client()).get(
         "/events/evt-1/booking-requests?coordinatorId=coord-1"
     )
 
@@ -366,19 +368,19 @@ def test_approve_booking_request(mock_decide_booking, mock_get_booking, mock_get
     mock_get_booking.return_value = {**BOOKING, "venueId": "ven-2"}
     mock_get_venue.return_value = {"id": "ven-2", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.patch(
         "/booking-requests/booking-1/approve", headers=STAFF_HEADERS, json={"reviewedBy": STAFF_ID}
     )
 
     assert response.status_code == 200
     assert response.json["status"] == "Approved"
-    mock_decide_booking.assert_called_once_with("booking-1", STAFF_ID, "Approved", 30, 45)
+    mock_decide_booking.assert_called_once_with("booking-1", "Approved", 30, 45)
 
 
 @patch("app.routes.decide_booking")
 def test_reject_booking_request_requires_reviewer(mock_decide_booking):
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.patch("/booking-requests/booking-1/reject", headers=STAFF_HEADERS, json={})
     assert response.status_code == 400
     mock_decide_booking.assert_not_called()
@@ -389,7 +391,7 @@ def test_reject_booking_request_requires_reviewer(mock_decide_booking):
 def test_approve_booking_request_missing_returns_404(mock_decide_booking, mock_get_booking):
     mock_get_booking.side_effect = BookingNotFoundError
 
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     response = client.patch(
         "/booking-requests/missing/approve", headers=STAFF_HEADERS, json={"reviewedBy": STAFF_ID}
     )
@@ -403,7 +405,7 @@ def test_approve_booking_request_missing_returns_404(mock_decide_booking, mock_g
 def test_cancelled_booking_cannot_be_reviewed(mock_decide_booking, *_):
     mock_decide_booking.side_effect = BookingStateError
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1/approve", headers=STAFF_HEADERS, json={"reviewedBy": STAFF_ID}
     )
 
@@ -426,14 +428,14 @@ def test_update_booking_revalidates_and_resubmits_only_selected_booking(
         "reviewedBy": None,
     }
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1",
         json=REQUEST | {"requiredCapacity": 50},
     )
 
     assert response.status_code == 200
     assert response.json["status"] == "Pending Review"
-    mock_get_event.assert_called_once_with("evt-1", "coord-1")
+    mock_get_event.assert_called_once_with("evt-1")
     mock_update_booking.assert_called_once_with(
         "booking-1", "evt-1", "ven-2", "2026-10-01T09:00",
         "2026-10-01T12:00", 50, "Projector"
@@ -449,7 +451,7 @@ def test_update_booking_rechecks_capacity_before_saving(
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1",
         json=REQUEST | {"venueId": "ven-1", "requiredCapacity": 61},
     )
@@ -468,7 +470,7 @@ def test_update_booking_reports_conflict_without_changing_siblings(
     mock_get_venues.return_value = VENUES
     mock_update_booking.side_effect = BookingConflictError
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=REQUEST
     )
 
@@ -486,7 +488,7 @@ def test_cancelled_booking_cannot_be_resubmitted(
     mock_get_venues.return_value = VENUES
     mock_update_booking.side_effect = BookingStateError
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=REQUEST
     )
 
@@ -500,14 +502,14 @@ def test_cancel_booking_updates_only_selected_booking(mock_get_event, mock_cance
     mock_get_event.return_value = EVENT
     mock_cancel_booking.return_value = {**BOOKING, "status": "Cancelled"}
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1/cancel",
         json={"eventId": "evt-1", "coordinatorId": "coord-1"},
     )
 
     assert response.status_code == 200
     assert response.json["status"] == "Cancelled"
-    mock_get_event.assert_called_once_with("evt-1", "coord-1")
+    mock_get_event.assert_called_once_with("evt-1")
     mock_cancel_booking.assert_called_once_with("booking-1", "evt-1")
 
 
@@ -516,7 +518,7 @@ def test_cancel_booking_updates_only_selected_booking(mock_get_event, mock_cance
 def test_cancel_booking_requires_assigned_coordinator(mock_get_event, mock_cancel_booking):
     mock_get_event.side_effect = EventNotAssignedError
 
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1/cancel",
         json={"eventId": "evt-1", "coordinatorId": "someone-else"},
     )
@@ -536,7 +538,7 @@ def test_cancel_booking_requires_assigned_coordinator(mock_get_event, mock_cance
     ],
 )
 def test_update_booking_validates_request(payload):
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=payload
     )
     assert response.status_code == 400
@@ -551,7 +553,7 @@ def test_update_booking_requires_access_to_parent_event(
     mock_get_event, event_error, expected_status
 ):
     mock_get_event.side_effect = event_error
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=REQUEST
     )
     assert response.status_code == expected_status
@@ -568,7 +570,7 @@ def test_update_booking_rechecks_venue_catalogue(
 ):
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=REQUEST | {"venueId": venue_id}
     )
     assert response.status_code == expected_status
@@ -579,7 +581,7 @@ def test_update_booking_rechecks_venue_catalogue(
 def test_update_booking_reports_venue_service_failure(mock_get_event, mock_get_venues):
     mock_get_event.return_value = EVENT
     mock_get_venues.side_effect = RuntimeError("down")
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=REQUEST
     )
     assert response.status_code == 502
@@ -598,14 +600,14 @@ def test_update_booking_reports_atomic_failure(
     mock_get_event.return_value = EVENT
     mock_get_venues.return_value = VENUES
     mock_update_booking.side_effect = update_error
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1", json=REQUEST
     )
     assert response.status_code == expected_status
 
 
 def test_cancel_booking_requires_parent_event_and_coordinator():
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1/cancel", json={}
     )
     assert response.status_code == 400
@@ -622,7 +624,7 @@ def test_cancel_booking_reports_atomic_failure(
 ):
     mock_get_event.return_value = EVENT
     mock_cancel_booking.side_effect = cancel_error
-    response = create_app().test_client().patch(
+    response = signed_in(create_app().test_client()).patch(
         "/booking-requests/booking-1/cancel",
         json={"eventId": "evt-1", "coordinatorId": "coord-1"},
     )

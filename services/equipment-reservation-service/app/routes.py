@@ -1,6 +1,6 @@
 import uuid
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app import clients, reservations
 from app.clients import DownstreamError
@@ -50,11 +50,9 @@ def _validate_items(payload):
 
 
 def _authorise(allowed_roles, denied_message):
-    # DEV-only identity headers, same as the atomics; replace with Supabase JWT verification.
-    role = request.headers.get("X-Dev-Role")
-    if not _uuid_or_none(request.headers.get("X-Dev-User-Id")) or not role:
-        return jsonify(message="DEV user UUID and role headers are required."), 401
-    if role not in allowed_roles:
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
+    if g.role not in allowed_roles:
         return jsonify(message=denied_message), 403
     return None
 
@@ -104,10 +102,10 @@ def reservations_list():
     if status is not None and status not in STATUSES:
         return jsonify(message=f"status must be one of: {', '.join(STATUSES)}."), 400
     event_ids = None
-    if request.headers.get("X-Dev-Role") == "Event Coordinator":
-        event_ids = clients.list_assigned_event_ids(request.headers["X-Dev-User-Id"])
-    requests = clients.list_requests(request.headers, status, event_ids)
-    return jsonify(events=reservations.build_event_views(requests, request.headers))
+    if g.role == "Event Coordinator":
+        event_ids = clients.list_assigned_event_ids()
+    requests = clients.list_requests(status, event_ids)
+    return jsonify(events=reservations.build_event_views(requests))
 
 
 @bp.patch("/equipment-reservations/requests/<request_id>")
@@ -124,7 +122,7 @@ def request_review(request_id):
     reason, error = _rejection_reason(status)
     if error:
         return jsonify(message=error), 400
-    return jsonify(request=reservations.review_request(request.headers, request_id, status, reason))
+    return jsonify(request=reservations.review_request(request_id, status, reason))
 
 
 @bp.patch("/equipment-reservations/events/<event_id>")
@@ -141,7 +139,7 @@ def event_review(event_id):
     reason, error = _rejection_reason(status)
     if error:
         return jsonify(message=error), 400
-    return jsonify(requests=reservations.review_event(request.headers, event_id, status, reason))
+    return jsonify(requests=reservations.review_event(event_id, status, reason))
 
 
 @bp.post("/equipment-reservations/events/<event_id>/requests")
@@ -155,6 +153,5 @@ def event_requests_create(event_id):
     items, error = _validate_items(request.get_json(silent=True))
     if error:
         return jsonify(message=error), 400
-    coordinator_id = _uuid_or_none(request.headers["X-Dev-User-Id"])
-    created = reservations.create_requests(request.headers, coordinator_id, event_id, items)
+    created = reservations.create_requests(event_id, items)
     return jsonify(requests=created), 201

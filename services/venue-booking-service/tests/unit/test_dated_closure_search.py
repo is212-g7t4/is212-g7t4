@@ -3,6 +3,7 @@
 import httpx
 import pytest
 from app import create_app
+from tests.unit.factories import signed_in
 from app import clients
 
 VENUE = "00000000-0000-0000-0000-000000000001"
@@ -28,15 +29,15 @@ def closure(**changes):
 
 def search(monkeypatch, payload, **query):
     def get(url, **kwargs):
-        assert "headers" not in kwargs
+        # Only the caller's own token travels downstream; no impersonated identity (SCRUM-8).
+        assert set(kwargs["headers"]) == {"Authorization"}
         assert not url.endswith("/venue-closures")
         body = {"venues": CATALOGUE} if url.endswith("/venues") else payload
         return httpx.Response(200, json=body, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(clients.httpx, "get", get)
     return (
-        create_app()
-        .test_client()
+        signed_in(create_app().test_client())
         .get(
             "/venue-search",
             query_string={"start": START, "end": END, "expectedAttendance": "10"}

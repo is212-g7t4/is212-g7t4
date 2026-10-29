@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 
+
 @pytest.fixture
 def storage(monkeypatch):
     """Return a fresh mocked libpq connection and context-managed cursor per test.

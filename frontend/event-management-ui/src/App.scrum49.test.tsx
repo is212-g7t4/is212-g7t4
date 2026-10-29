@@ -28,6 +28,7 @@ import { fetchUsers } from './features/user/users'
 import type { EventChangeRequest } from './features/event/changeRequests'
 import type { InboxItem } from './features/notifications/notifications'
 import type { User } from './types'
+import { signInAs } from './test/session'
 
 vi.mock('./features/user/users', () => ({ fetchUsers: vi.fn() }))
 vi.mock('./features/venue/venueHolds', () => ({ fetchHoldReminders: vi.fn(async () => []) }))
@@ -62,7 +63,7 @@ let http: ReturnType<typeof vi.fn>
 beforeEach(() => {
   unexpected = []
   vi.mocked(fetchUsers).mockResolvedValue([coordinator])
-  vi.stubGlobal('localStorage', { getItem: () => coordinator.id, setItem: vi.fn() })
+  signInAs(coordinator)
   window.history.replaceState({}, '', '/notifications')
   http = vi.fn(async (input: string, init: RequestInit = {}) => {
     const url = new URL(input)
@@ -107,6 +108,7 @@ describe('SCRUM-49 AC1 — direct request review', () => {
     expect(within(selected).getByRole('button', { name: 'Approve changes' })).toBeEnabled()
     expect(within(selected).getByRole('button', { name: 'Reject changes' })).toBeEnabled()
     expect(screen.getByText('45')).toBeInTheDocument()
-    expect(http).toHaveBeenCalledWith(`http://localhost:5014/change-requests?coordinatorId=${coordinator.id}`, undefined)
+    expect(http).toHaveBeenCalledWith(`http://localhost:5014/change-requests?coordinatorId=${coordinator.id}`,
+      { headers: { Authorization: `Bearer ${coordinator.id} ${coordinator.role}` } })
   })
 })

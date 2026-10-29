@@ -10,6 +10,7 @@ import pytest
 
 from app import create_app
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 VALID = {
     "eventName": "Community Workshop", "description": "A workshop", "purpose": "Learning",
@@ -28,7 +29,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def saved_row():
@@ -95,16 +96,18 @@ def test_ac1_forbidden_when_event_has_no_coordinator_assigned(setup):
     assert response.status_code == 403
 
 
-@pytest.mark.parametrize("query_string", ["", "?coordinatorId=", "?coordinatorId=not-a-uuid"])
-def test_ac1_requires_valid_coordinator_id(query_string, setup):
-    client, _, cursor = setup
+@pytest.mark.parametrize("query_string", ["", f"?coordinatorId={COORDINATOR_ID}"])
+def test_ac1_requires_a_signed_in_user(query_string, setup):
+    """SCRUM-8: the viewer is the signed-in user; a query id alone grants nothing."""
+    _, _, cursor = setup
+    client = setup[0].application.test_client()
     response = client.get(f"/events/{EVENT_ID}{query_string}")
-    assert response.status_code == 400
+    assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 
 def test_ac1_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     response = client.get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}")
     assert response.status_code == 503
 
@@ -195,13 +198,6 @@ def test_organiser_event_not_found(setup):
     client, _, cursor = setup
     cursor.fetchone.return_value = None
     assert client.get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}").status_code == 404
-
-
-def test_organiser_event_rejects_invalid_id(setup):
-    client, _, cursor = setup
-    response = client.get(f"/events/{EVENT_ID}?organiserId=nope")
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
 
 
 def test_organiser_event_reports_missing_database_url(setup):

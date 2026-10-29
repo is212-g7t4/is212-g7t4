@@ -23,6 +23,7 @@ import pytest
 
 from app import create_app
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -57,7 +58,7 @@ def setup(monkeypatch):
             "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
         }
     )
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def event_row(status="Approved", coordinator_id=COORDINATOR_ID, action_history=None):
@@ -308,8 +309,6 @@ def test_pre_safety_statuses_are_not_accepted(status, setup):
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"coordinatorId": "not-a-uuid"}, "A valid coordinator ID is required."),
-        ({"coordinatorId": ""}, "A valid coordinator ID is required."),
         ({"safetyCheckId": "not-a-uuid"}, "A valid safety check ID is required."),
         ({"safetyCheckId": None}, "A valid safety check ID is required."),
     ],
@@ -348,13 +347,13 @@ def test_non_object_body_is_rejected(setup):
 
 
 def test_without_database_url():
-    client = create_app(
+    client = signed_in(create_app(
         {
             "TESTING": True,
             "DATABASE_URL": None,
             "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
         }
-    ).test_client()
+    ).test_client())
 
     response = patch_safety_status(client)
 

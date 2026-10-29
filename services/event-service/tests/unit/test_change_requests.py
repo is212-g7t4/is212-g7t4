@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from app import create_app
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 EVENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 ORGANISER_ID = "11111111-1111-4111-8111-111111111111"
@@ -73,7 +74,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def post(client, **overrides):
@@ -142,9 +143,8 @@ def test_request_body_must_be_a_json_object(setup, body):
     cursor.execute.assert_not_called()
 
 
-def test_organiser_id_and_nonempty_changes_are_required_before_database_access(setup):
+def test_nonempty_changes_are_required_before_database_access(setup):
     client, _, cursor = setup
-    assert post(client, organiserId="not-a-uuid").status_code == 400
     assert post(client, changes={}).status_code == 400
     assert post(client, changes="expected attendance").status_code == 400
     cursor.execute.assert_not_called()
@@ -152,7 +152,7 @@ def test_organiser_id_and_nonempty_changes_are_required_before_database_access(s
 
 def test_unconfigured_database_returns_service_unavailable():
     app = create_app({"TESTING": True, "DATABASE_URL": None})
-    response = post(app.test_client())
+    response = post(signed_in(app.test_client()))
     assert response.status_code == 503
 
 
@@ -421,10 +421,7 @@ def test_review_already_applied_values_can_still_close_the_request(setup):
 @pytest.mark.parametrize(
     "path,method,body",
     [
-        ("/change-requests", "get", None),
-        (f"/change-requests/{CHANGE_ID}", "get", None),
         (f"/change-requests/{CHANGE_ID}/decision", "patch", None),
-        (f"/change-requests/{CHANGE_ID}/decision", "patch", {"coordinatorId": "bad", "decision": "Approved"}),
         (f"/change-requests/{CHANGE_ID}/decision", "patch", {"coordinatorId": COORDINATOR_ID, "decision": "Maybe"}),
         (f"/change-requests/{CHANGE_ID}/decision", "patch", {"coordinatorId": COORDINATOR_ID, "decision": "Rejected", "reason": "x" * 2001}),
     ],
@@ -440,7 +437,7 @@ def test_review_malformed_requests_are_rejected_before_database_access(setup, pa
 
 
 def test_review_unconfigured_database_returns_service_unavailable():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}").status_code == 503
     assert client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}").status_code == 503
     assert client.patch(
@@ -452,11 +449,11 @@ def test_review_unconfigured_database_returns_service_unavailable():
 def test_review_internal_endpoints_honor_the_configured_service_token(monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
-    client = create_app({
+    client = signed_in(create_app({
         "TESTING": True,
         "DATABASE_URL": "unused-test-url",
         "INTERNAL_SERVICE_TOKEN": "secret",
-    }).test_client()
+    }).test_client())
 
     responses = [
         client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}"),

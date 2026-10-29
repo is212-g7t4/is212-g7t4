@@ -1,13 +1,15 @@
 """Equipment availability checking and review validation. Every atomic is stubbed; no network."""
 import pytest
+from flask import g
 
 from app import create_app
 from app.availability import RESERVING_EVENT_STATUSES
 from app.clients import DownstreamError
+from tests.unit.factories import bearer
 
 USER = "ad3d6da3-7220-4f80-9157-2ee4abc0455c"
-TS = {"X-Dev-User-Id": USER, "X-Dev-Role": "Technical Support"}
-COORDINATOR = {"X-Dev-User-Id": USER, "X-Dev-Role": "Event Coordinator"}
+TS = bearer(USER, "Technical Support")
+COORDINATOR = bearer(USER, "Event Coordinator")
 
 TARGET = "00000000-0000-4000-8000-0000000000a1"
 OTHER = "00000000-0000-4000-8000-0000000000b2"
@@ -45,32 +47,33 @@ class World:
         self.calls.append(("safety_checks", event_id))
         return self.safety_rounds
 
-    def list_requests(self, headers, status=None, event_ids=None):
+    def list_requests(self, status=None, event_ids=None):
         self.calls.append(("list_requests", status, event_ids))
         return [r for r in self.requests if (status is None or r["status"] == status) and (event_ids is None or r["eventId"] in event_ids)]
 
-    def get_request(self, headers, request_id):
+    def get_request(self, request_id):
         return next(r for r in self.requests if r["id"] == request_id)
 
-    def review_request(self, headers, request_id, status, rejection_reason=None):
+    def review_request(self, request_id, status, rejection_reason=None):
         self.calls.append(("review_request", request_id, status))
-        return {**self.get_request(headers, request_id), "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason}
+        return {**self.get_request(request_id), "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason}
 
-    def review_event_requests(self, headers, event_id, status, rejection_reason=None):
+    def review_event_requests(self, event_id, status, rejection_reason=None):
         self.calls.append(("review_event_requests", event_id, status))
         return [{**r, "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason} for r in self.requests if r["eventId"] == event_id and r["status"] == "Pending"]
 
     def get_event_summaries(self, ids):
         return [self.events[i] for i in ids if i in self.events]
 
-    def list_assigned_event_ids(self, coordinator_id):
+    def list_assigned_event_ids(self):
+        coordinator_id = g.user_id  # Event Service reads the coordinator from the forwarded token.
         self.calls.append(("assigned_events", coordinator_id))
         return [event_id for event_id, assigned_id in self.coordinator_assignments.items() if assigned_id == coordinator_id]
 
-    def list_assigned_events(self, coordinator_id):
-        return [self.events[event_id] for event_id in self.list_assigned_event_ids(coordinator_id) if event_id in self.events]
+    def list_assigned_events(self):
+        return [self.events[event_id] for event_id in self.list_assigned_event_ids() if event_id in self.events]
 
-    def create_event_requests(self, headers, event_id, items):
+    def create_event_requests(self, event_id, items):
         self.calls.append(("create_event_requests", event_id, items))
         return [{"id": f"new-{i}", "eventId": event_id, **item, "status": "Pending", "reviewedBy": None} for i, item in enumerate(items)]
 
@@ -401,15 +404,15 @@ def test_reassigned_coordinator_loses_access_and_new_coordinator_gains_it(world,
     world.coordinator_assignments = {event_id: THIRD}
 
     old_coordinator = client.get("/equipment-reservations", headers=COORDINATOR)
-    new_coordinator = client.get("/equipment-reservations", headers={"X-Dev-User-Id": THIRD, "X-Dev-Role": "Event Coordinator"})
+    new_coordinator = client.get("/equipment-reservations", headers=bearer(THIRD, "Event Coordinator"))
 
     assert old_coordinator.json["events"] == []
     assert [event["eventId"] for event in new_coordinator.json["events"]] == [event_id]
 
 
-@pytest.mark.parametrize("headers,code", [({}, 401), ({"X-Dev-User-Id": "bad", "X-Dev-Role": "Technical Support"}, 401), ({"X-Dev-User-Id": USER, "X-Dev-Role": "Attendee"}, 403)])
-def test_requires_an_authorised_dev_user(world, client, headers, code):
-    # Review AC1/AC3 (access): deny anonymous, malformed and unrelated-role readers.
+@pytest.mark.parametrize("headers,code", [({}, 401), ({"X-Dev-User-Id": USER, "X-Dev-Role": "Technical Support"}, 401), (bearer(USER, "Attendee"), 403)])
+def test_requires_a_signed_in_authorised_user(world, client, headers, code):
+    # Review AC1/AC3 (access): deny anonymous (SCRUM-8: DEV headers are not a sign-in) and unrelated-role readers.
     assert client.get("/equipment-reservations", headers=headers).status_code == code
     assert world.calls == []
 
@@ -459,7 +462,7 @@ def test_batch_approve_succeeds_when_every_line_fits(world, client):
 
 # Review AC2 (conflict): surface the absence of Pending lines instead of reporting a new decision.
 def test_batch_approve_with_nothing_pending_defers_to_the_request_service(world, client, monkeypatch):
-    def conflict(headers, event_id, status, rejection_reason=None):
+    def conflict(event_id, status, rejection_reason=None):
         raise DownstreamError(409, "This event has no Pending equipment requests.")
 
     monkeypatch.setattr("app.clients.review_event_requests", conflict)
@@ -542,7 +545,7 @@ def test_cors_allows_the_frontend_origin_and_patch(client):
     assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert "PATCH" in response.headers["Access-Control-Allow-Methods"]
-    assert "X-Dev-Role" in response.headers["Access-Control-Allow-Headers"]
+    assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
     assert "Access-Control-Allow-Origin" not in client.options("/equipment-reservations", headers={"Origin": "http://evil.example"}).headers
 
 
@@ -632,7 +635,7 @@ def test_create_rejects_equipment_missing_from_the_catalogue(assigned, client):
 
 
 # Create request AC1 (access): other roles cannot record a coordinator's equipment needs.
-@pytest.mark.parametrize("headers,code", [({}, 401), (TS, 403), ({"X-Dev-User-Id": USER, "X-Dev-Role": "Event Organiser"}, 403)])
+@pytest.mark.parametrize("headers,code", [({}, 401), (TS, 403), (bearer(USER, "Event Organiser"), 403)])
 def test_only_event_coordinators_can_create(world, client, headers, code):
     assert client.post(CREATE_URL, headers=headers, json={"items": [new_item()]}).status_code == code
     assert world.calls == []

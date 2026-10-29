@@ -29,8 +29,8 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       }))
       await mock(page, 'venueBooking', '/booking-requests/b1/review', (route) => {
         expect(route.request().postDataJSON()).toEqual(decision === 'Rejected'
-          ? { status: decision, reviewedBy: users.venueStaff.user_id, rejectionReason: 'Exit still blocked.' }
-          : { status: decision, reviewedBy: users.venueStaff.user_id })
+          ? { status: decision, rejectionReason: 'Exit still blocked.' }
+          : { status: decision })
         status = decision
         return json(route, booking())
       })

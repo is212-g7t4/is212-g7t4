@@ -21,6 +21,7 @@ import pytest
 
 from app import create_app
 from app.models import ALLOWED_TRANSITIONS, FIELDS, SAFETY_TRANSITIONS
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -44,7 +45,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def event_row(status="Submitted", coordinator_id=COORDINATOR_ID, action_details=""):

@@ -1,10 +1,10 @@
+import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from uuid import UUID
 
 import httpx
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.clients import (
     BookingAlreadyDecidedError,
@@ -38,6 +38,13 @@ from app.search import SearchError, shortlist, validate_search
 
 bp = Blueprint("venue_booking_service", __name__)
 logger = logging.getLogger(__name__)
+
+
+class _RequestPool(ThreadPoolExecutor):
+    """Worker threads run in this request's context, so they forward the caller's token (SCRUM-8)."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        return super().submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
 # Event statuses in which Venue Staff can act on a venue request (unchanged
 # behaviour of the staff review route, now named once).
@@ -92,9 +99,9 @@ def _queue_order(booking):
     )
 
 
-def _add_event_names(result, viewer_id, viewer_role):
+def _add_event_names(result, viewer_role):
     """Best-effort display enrichment; conflict identification must still work if Event Service is down."""
-    if not viewer_id or viewer_role != "Venue Staff":
+    if viewer_role != "Venue Staff":
         return result
     names = {}
     for conflict in result.get("conflicts", []):
@@ -105,7 +112,7 @@ def _add_event_names(result, viewer_id, viewer_role):
                 continue
             if event_id not in names:
                 try:
-                    event = get_event_for_internal_viewer(event_id, viewer_id, viewer_role)
+                    event = get_event_for_internal_viewer(event_id, viewer_role)
                     names[event_id] = event.get("eventName") or None
                 except Exception:
                     names[event_id] = None
@@ -120,28 +127,26 @@ def health():
 
 
 def _venue_staff():
-    try:
-        viewer_id = str(UUID(request.headers.get("X-Dev-User-Id", "")))
-    except ValueError:
-        return None, (jsonify(message="A valid DEV user UUID is required."), 401)
-    if request.headers.get("X-Dev-Role") != "Venue Staff":
-        return None, (jsonify(message="Only Venue Staff can review venue requests."), 403)
-    return viewer_id, None
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
+    if g.role != "Venue Staff":
+        return jsonify(message="Only Venue Staff can review venue requests."), 403
+    return None
 
 
 @bp.get("/booking-requests")
 def staff_booking_requests():
-    viewer_id, failure = _venue_staff()
+    failure = _venue_staff()
     if failure:
         return failure
     status = request.args.get("status")
     if status not in (None, "Pending", "Approved", "Rejected"):
         return jsonify(message="Invalid booking status filter."), 400
     try:
-        events = get_staff_events(viewer_id)
+        events = get_staff_events()
         venues = {venue["id"]: venue["name"] for venue in get_venues()}
         result = []
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with _RequestPool(max_workers=8) as pool:
             booking_lists = list(pool.map(get_event_bookings, [event["id"] for event in events]))
         for event, bookings in zip(events, booking_lists):
             selected = [booking for booking in bookings if status is None or
@@ -209,15 +214,13 @@ def staff_booking_request(booking_id):
     requirements (Event Service) and the venue's capacity and buffers (Venue
     Service), so the occupied window shows what an approval would block.
     """
-    viewer_id, failure = _venue_staff()
+    failure = _venue_staff()
     if failure:
         return failure
     try:
         booking = get_booking(booking_id)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            event_call = pool.submit(
-                get_event_for_internal_viewer, booking["eventId"], viewer_id, "Venue Staff"
-            )
+        with _RequestPool(max_workers=2) as pool:
+            event_call = pool.submit(get_event_for_internal_viewer, booking["eventId"], "Venue Staff")
             venue_call = pool.submit(get_venue, booking["venueId"])
             event = event_call.result()
             venue = venue_call.result()
@@ -262,13 +265,13 @@ def _review_decision(booking_id, status=None):
     `/review` reads the decision from the body; the legacy `/approve` and
     `/reject` routes pass it in, but run every same check.
     """
-    viewer_id, failure = _venue_staff()
+    failure = _venue_staff()
     if failure:
         return failure
     data = request.get_json(silent=True)
     decision = status or (data.get("status") if isinstance(data, dict) else None)
-    if not isinstance(data, dict) or decision not in ("Approved", "Rejected") or data.get("reviewedBy") != viewer_id:
-        return jsonify(message="A valid decision and matching reviewedBy are required."), 400
+    if not isinstance(data, dict) or decision not in ("Approved", "Rejected"):
+        return jsonify(message="A valid decision is required."), 400
     rejection_reason = None
     if decision == "Rejected":
         # Checked before any downstream call so a bad request costs nothing.
@@ -277,7 +280,7 @@ def _review_decision(booking_id, status=None):
             return _rejection_reason_required()
     try:
         booking = get_booking(booking_id)
-        event = get_event_for_internal_viewer(booking["eventId"], viewer_id, "Venue Staff")
+        event = get_event_for_internal_viewer(booking["eventId"], "Venue Staff")
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
     except Exception:
@@ -291,7 +294,7 @@ def _review_decision(booking_id, status=None):
         ), 409
     if booking.get("status") not in AWAITING_REVIEW_STATUSES:
         return _already_decided()
-    return _decide(booking_id, booking, viewer_id, decision, rejection_reason)
+    return _decide(booking_id, booking, decision, rejection_reason)
 
 
 def _rejection_reason_required():
@@ -331,7 +334,7 @@ def venue_search():
         # Preserve the existing parallel fast path. If any matching venue has
         # padding, issue one widened read after the catalogue reveals the safe
         # bound; zero-buffer catalogues still cost only the slower first call.
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with _RequestPool(max_workers=2) as pool:
             venues_call = pool.submit(search_venues, criteria["filters"])
             window_call = pool.submit(
                 get_bookings_between, criteria["start"], criteria["end"]
@@ -377,30 +380,28 @@ def create_booking_request():
     - eventId: the event this booking is for
     - venueId: the venue being requested — must exist in Venue Service's
       catalogue, be Available, and have enough capacity
-    - coordinatorId: the Event Coordinator making the request; must be the
-      coordinator assigned to the event
+    The requester is the signed-in Event Coordinator (SCRUM-8); they must be
+    the coordinator assigned to the event.
     - requestedStartTime/requestedEndTime: this booking's own window
     - requiredCapacity: this booking's expected attendance, independent from
       the event's total expected attendance
     - venueRequirements: this booking's own free-text requirements
     """
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
 
     event_id = data.get("eventId")
     venue_id = data.get("venueId")
-    coordinator_id = data.get("coordinatorId")
     start = data.get("requestedStartTime")
     end = data.get("requestedEndTime")
     required_capacity = data.get("requiredCapacity")
     venue_requirements = data.get("venueRequirements")
-    if not event_id or not venue_id or not coordinator_id or not start or not end:
+    if not event_id or not venue_id or not start or not end:
         return jsonify(
-            message=(
-                "eventId, venueId, coordinatorId, requestedStartTime and "
-                "requestedEndTime are required."
-            )
+            message="eventId, venueId, requestedStartTime and requestedEndTime are required."
         ), 400
     if (
         isinstance(required_capacity, bool)
@@ -433,7 +434,7 @@ def create_booking_request():
         ), 400
 
     try:
-        event = get_event(event_id, coordinator_id)
+        event = get_event(event_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -483,7 +484,6 @@ def create_booking_request():
             end,
             required_capacity,
             venue_requirements.strip(),
-            coordinator_id,
         )
         if "setupTimeMinutes" in venue or "turnaroundTimeMinutes" in venue:
             booking = create_booking(
@@ -508,11 +508,10 @@ def create_booking_request():
 @bp.get("/events/<event_id>/booking-requests")
 def list_booking_requests(event_id):
     """Return each venue request for an event as a separate record."""
-    coordinator_id = request.args.get("coordinatorId")
-    if not coordinator_id:
-        return jsonify(message="coordinatorId is required."), 400
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
     try:
-        get_event(event_id, coordinator_id)
+        get_event(event_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -522,7 +521,7 @@ def list_booking_requests(event_id):
     except Exception as error:
         return jsonify(message=f"Failed to look up the event: {error}"), 502
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with _RequestPool(max_workers=2) as pool:
         bookings_call = pool.submit(get_event_bookings, event_id)
         venues_call = pool.submit(get_venues)
         try:
@@ -550,23 +549,21 @@ def list_booking_requests(event_id):
 @bp.patch("/booking-requests/<booking_id>")
 def update_booking_request(booking_id):
     """Modify and resubmit only the selected booking."""
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
 
     event_id = data.get("eventId")
     venue_id = data.get("venueId")
-    coordinator_id = data.get("coordinatorId")
     start = data.get("requestedStartTime")
     end = data.get("requestedEndTime")
     required_capacity = data.get("requiredCapacity")
     venue_requirements = data.get("venueRequirements")
-    if not event_id or not venue_id or not coordinator_id or not start or not end:
+    if not event_id or not venue_id or not start or not end:
         return jsonify(
-            message=(
-                "eventId, venueId, coordinatorId, requestedStartTime and "
-                "requestedEndTime are required."
-            )
+            message="eventId, venueId, requestedStartTime and requestedEndTime are required."
         ), 400
     if (
         isinstance(required_capacity, bool)
@@ -599,7 +596,7 @@ def update_booking_request(booking_id):
         ), 400
 
     try:
-        event = get_event(event_id, coordinator_id)
+        event = get_event(event_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -633,7 +630,7 @@ def update_booking_request(booking_id):
         ), 422
 
     withdrawn_id, failure = _withdraw_safety_approval(
-        event, event_id, coordinator_id, booking_id,
+        event, event_id, booking_id,
         f"A venue booking ({venue['name']}) was edited after safety approval.",
     )
     if failure:
@@ -642,7 +639,7 @@ def update_booking_request(booking_id):
         booking_id, event_id, venue_id, start, end, required_capacity,
         venue_requirements.strip(), venue,
     )
-    return _restore_if_failed(result, event_id, coordinator_id, withdrawn_id)
+    return _restore_if_failed(result, event_id, withdrawn_id)
 
 
 def _save_booking_update(
@@ -690,13 +687,14 @@ def _save_booking_update(
 @bp.patch("/booking-requests/<booking_id>/cancel")
 def cancel_booking_request(booking_id):
     """Cancel only the selected booking and retain its event association."""
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
     data = request.get_json(silent=True)
     event_id = data.get("eventId") if isinstance(data, dict) else None
-    coordinator_id = data.get("coordinatorId") if isinstance(data, dict) else None
-    if not event_id or not coordinator_id:
-        return jsonify(message="eventId and coordinatorId are required."), 400
+    if not event_id:
+        return jsonify(message="eventId is required."), 400
     try:
-        event = get_event(event_id, coordinator_id)
+        event = get_event(event_id)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
@@ -709,13 +707,13 @@ def cancel_booking_request(booking_id):
     if closed:
         return closed
     withdrawn_id, failure = _withdraw_safety_approval(
-        event, event_id, coordinator_id, booking_id,
+        event, event_id, booking_id,
         "A venue booking was cancelled after safety approval.",
     )
     if failure:
         return failure
     result = _save_booking_cancellation(booking_id, event_id)
-    return _restore_if_failed(result, event_id, coordinator_id, withdrawn_id)
+    return _restore_if_failed(result, event_id, withdrawn_id)
 
 
 def _save_booking_cancellation(booking_id, event_id):
@@ -750,7 +748,7 @@ def _changes_closed(event):
     ), 409
 
 
-def _withdraw_safety_approval(event, event_id, coordinator_id, booking_id, reason):
+def _withdraw_safety_approval(event, event_id, booking_id, reason):
     """For a Confirmed event, withdraw its safety approval before the booking changes.
 
     Returns `(withdrawn_safety_check_id, failure)`. Any other status needs no
@@ -760,7 +758,7 @@ def _withdraw_safety_approval(event, event_id, coordinator_id, booking_id, reaso
     if event.get("status") != "Confirmed":
         return None, None
     try:
-        result = withdraw_safety_for_venue_change(event_id, coordinator_id, booking_id, reason)
+        result = withdraw_safety_for_venue_change(event_id, booking_id, reason)
     except SafetyApprovalError as error:
         status = error.status if error.status in (403, 404, 409) else 502
         body = error.body or {"message": "Unable to withdraw the event's safety approval."}
@@ -773,7 +771,7 @@ def _withdraw_safety_approval(event, event_id, coordinator_id, booking_id, reaso
     return result["withdrawnSafetyCheck"]["id"], None
 
 
-def _restore_if_failed(result, event_id, coordinator_id, withdrawn_id):
+def _restore_if_failed(result, event_id, withdrawn_id):
     """Undo the withdrawal when the booking change it was made for didn't happen.
 
     The original booking error is what the caller gets either way. If the
@@ -782,7 +780,7 @@ def _restore_if_failed(result, event_id, coordinator_id, withdrawn_id):
     """
     if withdrawn_id and result[1] >= 400:
         try:
-            restore_safety_after_venue_change(event_id, coordinator_id, withdrawn_id)
+            restore_safety_after_venue_change(event_id, withdrawn_id)
         except Exception:
             logger.error(
                 "Could not restore safety approval %s for event %s after its venue "
@@ -806,13 +804,12 @@ def reject_booking_request(booking_id):
     return _review_decision(booking_id, "Rejected")
 
 
-def _decide(booking_id, booking, reviewed_by, status, rejection_reason=None):
+def _decide(booking_id, booking, status, rejection_reason=None):
     try:
         if status == "Approved":
             venue = get_venue(booking["venueId"])
             decided = decide_booking(
                 booking_id,
-                reviewed_by,
                 status,
                 int(venue.get("setupTimeMinutes", 0)),
                 int(venue.get("turnaroundTimeMinutes", 0)),
@@ -821,7 +818,7 @@ def _decide(booking_id, booking, reviewed_by, status, rejection_reason=None):
             # Rejection cannot create a scheduling conflict, so it needs no
             # venue buffers.
             decided = decide_booking(
-                booking_id, reviewed_by, status, rejection_reason=rejection_reason
+                booking_id, status, rejection_reason=rejection_reason
             )
     except BookingNotFoundError:
         return jsonify(message="Venue booking not found."), 404
@@ -887,11 +884,7 @@ def list_venue_legacy_conflicts(venue_id):
         venue = get_venue(str(venue_id))
         conflicts = reconcile_legacy_conflicts(venue)
         return jsonify(
-            _add_event_names(
-                conflicts,
-                request.headers.get("X-Dev-User-Id"),
-                request.headers.get("X-Dev-Role"),
-            )
+            _add_event_names(conflicts, g.role)
         )
     except httpx.HTTPStatusError as error:
         if error.response.status_code == 404:

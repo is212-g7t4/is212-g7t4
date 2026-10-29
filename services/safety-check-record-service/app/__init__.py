@@ -3,7 +3,7 @@ from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 load_dotenv()
 
@@ -31,6 +31,7 @@ from app.models import (
     restore_approval,
     withdraw_approval,
 )
+from app.auth import authenticate
 
 NO_DATABASE = (
     "DATABASE_URL is not configured for Safety Check Record Service."
@@ -46,6 +47,7 @@ def _uuid_or_none(value):
 
 def create_app(config=None) -> Flask:
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         # The Vite dev server is pinned to 5174 (strictPort in
@@ -101,12 +103,13 @@ def create_app(config=None) -> Flask:
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
+        # The coordinator whose token Safety Check Service forwards.
+        submitted_by = g.user_id
+        if not submitted_by:
+            return jsonify(message="Sign in to continue."), 401
         event_id = _uuid_or_none(data.get("eventId"))
-        submitted_by = _uuid_or_none(data.get("submittedBy"))
-        if not event_id or not submitted_by:
-            return jsonify(
-                message="eventId and submittedBy must be valid UUIDs."
-            ), 400
+        if not event_id:
+            return jsonify(message="eventId must be a valid UUID."), 400
         notes, failure = _notes(data)
         if failure:
             return failure
@@ -184,9 +187,9 @@ def create_app(config=None) -> Flask:
             return jsonify(
                 message=f"status must be one of: {', '.join(DECISION_STATUSES)}."
             ), 400
-        decided_by = _uuid_or_none(data.get("decidedBy"))
+        decided_by = g.user_id
         if not decided_by:
-            return jsonify(message="decidedBy must be a valid UUID."), 400
+            return jsonify(message="Sign in to continue."), 401
         remarks_required = status in (CHANGES_REQUESTED, SAFETY_REJECTED)
         remarks, failure = _remarks(data, required=remarks_required)
         if failure:
@@ -270,9 +273,9 @@ def create_app(config=None) -> Flask:
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
-        withdrawn_by = _uuid_or_none(data.get("withdrawnBy"))
+        withdrawn_by = g.user_id
         if not withdrawn_by:
-            return jsonify(message="withdrawnBy must be a valid UUID."), 400
+            return jsonify(message="Sign in to continue."), 401
         reason, failure = _withdrawal_reason(data)
         if failure:
             return failure

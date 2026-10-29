@@ -30,7 +30,8 @@ Each line is compared to the pool on its own.
 
 ## Endpoints
 
-DEV `X-Dev-User-Id` / `X-Dev-Role` headers are forwarded to the atomics.
+The caller's `Authorization: Bearer <token>` (SCRUM-8) is forwarded to the
+atomics, which decide access from it.
 
 - `GET /equipment-reservations[?status=Pending|Approved|Rejected]` — Technical
   Support or Event Coordinator. Returns `{events: [{eventId, eventName,

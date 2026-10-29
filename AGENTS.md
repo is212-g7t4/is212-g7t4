@@ -66,7 +66,16 @@ See [INDEX.md](INDEX.md) for the concrete list of every service directory.
     atomic service (see INDEX.md for which services these are).
   - Supabase Auth — used by User Service for login/JWT issuance rather than
     hand-rolled auth. Other services verify the JWT Supabase issues; they
-    don't call Supabase Auth themselves.
+    don't call Supabase Auth themselves. User Service's `POST /auth/login`
+    exchanges email + password for a Supabase access token (there is no
+    sign-up). Each service's own `app/auth.py` verifies that token (ES256,
+    against `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`) before every
+    request and puts the caller's id (`sub`) and role (the `user_role` claim,
+    see `docs/supabase-setup.md`) on `flask.g`. **Caller identity comes only
+    from the token** — never from a body, query param or other header.
+    Composites forward the caller's `Authorization` header downstream. Only
+    `/health`, `OPTIONS`, `/internal/*` and background workers sending
+    `X-Internal-Token` (and no `Authorization`) skip the token.
   - MongoDB (Atlas) — Forum/Communication Service only. This is the one
     deliberate polyglot-persistence choice in the system (variable-shape,
     append-only, no relational joins needed). Do not "fix" this to Postgres.
@@ -129,10 +138,10 @@ env file .../services/<name>-service/.env not found
 
 Under `npm run dev` the frontend still comes up, so the app looks like it's
 running while every API call fails. Worse, some failures don't look like
-outages: if User Service is down the role falls back to `Event Organiser`,
-so role-gated nav items silently disappear and it reads as a permissions
-bug. Check the backend pane, or `docker compose ps`, before debugging the
-UI.
+outages: if User Service is down nobody can sign in, and a service that
+can't reach Supabase's JWKS answers every request with `503`, which reads
+as an auth bug. Check the backend pane, or `docker compose ps`, before
+debugging the UI.
 
 Fix — one `.env` per service with an `env_file` in `docker-compose.yml`. Read
 that list out of the compose file rather than keeping one by hand here, so a
@@ -155,8 +164,10 @@ Check and Event Workflow are the three today, which is why no file is expected
 for them.
 
 Each service also ships a `.env.example` listing the variables it needs; the
-root `.env` is a superset and works for all of them today. `.env` files are
-git-ignored — never commit one.
+root `.env` is a superset and works for all of them today. Compose refuses
+to start without `SUPABASE_URL` in the root `.env` (every service verifies
+sign-in tokens against it); User Service also needs `SUPABASE_ANON_KEY`.
+`.env` files are git-ignored — never commit one.
 
 Check it worked without building anything:
 

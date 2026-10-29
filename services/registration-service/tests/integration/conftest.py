@@ -13,6 +13,8 @@ from psycopg2.extras import RealDictCursor  # noqa: E402
 from testcontainers.community.postgres import PostgresContainer  # noqa: E402
 
 from app import create_app  # noqa: E402
+from tests.integration.factories import ATTENDEE_ID  # noqa: E402
+from tests.unit.factories import signed_in  # noqa: E402
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
@@ -83,7 +85,7 @@ def client(database_url, monkeypatch):
     """
     assert_local(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    return create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client()
+    return signed_in(create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client(), ATTENDEE_ID)
 
 
 class Database:

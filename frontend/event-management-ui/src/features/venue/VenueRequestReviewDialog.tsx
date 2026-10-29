@@ -65,7 +65,7 @@ export function VenueRequestReviewDialog({ bookingId, user, onClose, onDecided, 
 
   useEffect(() => {
     let active = true
-    fetchVenueRequestDetail(bookingId, user).then((loaded) => { if (active) setDetail(loaded) })
+    fetchVenueRequestDetail(bookingId).then((loaded) => { if (active) setDetail(loaded) })
       .catch((cause: unknown) => { if (active) setLoadError(cause instanceof Error ? cause.message : 'Unable to load this venue request.') })
     return () => { active = false }
   }, [bookingId, user])
@@ -75,7 +75,7 @@ export function VenueRequestReviewDialog({ bookingId, user, onClose, onDecided, 
     setSubmitting(true)
     setError('')
     try {
-      const updated = await reviewVenueRequest(bookingId, status, user, status === 'Rejected' ? reason.trim() : undefined)
+      const updated = await reviewVenueRequest(bookingId, status, status === 'Rejected' ? reason.trim() : undefined)
       onDecided(updated, status === 'Approved' ? 'Venue request approved.' : 'Venue request rejected.')
     } catch (cause) {
       if (cause instanceof VenueBookingError && cause.status === 409

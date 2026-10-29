@@ -5,7 +5,7 @@ Story:      As an Attendee, I want to withdraw my registration for an event,
 Real:       Flask app and routes, app/models.py SQL, and postgres:17.6 with
             the full migration chain.
 Doubled:    nothing (Registration Service makes no outbound calls).
-Not proven: authentication; attendeeId is supplied by the caller.
+Not proven: Supabase sign-in itself; the attendee is a token signed with a test key (SCRUM-8).
 
 AC1  The Attendee can access a "Withdraw" option from their registered event details page.
      Not covered here: button visibility belongs to the frontend component suite.
@@ -23,10 +23,10 @@ from datetime import datetime, timezone
 import pytest
 
 from tests.integration.factories import (
-    ATTENDEE_ID,
     OTHER_ATTENDEE_ID,
     make_withdrawal_world,
 )
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -41,7 +41,7 @@ def test_ac2_confirmed_registration_becomes_withdrawn_and_frees_capacity(client,
 
     response = client.patch(
         f"/registrations/{registration_id}/withdraw",
-        json={"attendeeId": ATTENDEE_ID},
+        json={},
     )
     after = datetime.now(timezone.utc)
 
@@ -60,7 +60,7 @@ def test_ac3_already_withdrawn_registration_keeps_original_audit_timestamp(clien
 
     response = client.patch(
         f"/registrations/{registration_id}/withdraw",
-        json={"attendeeId": ATTENDEE_ID},
+        json={},
     )
 
     assert response.status_code == 409
@@ -76,7 +76,8 @@ def test_ac2_another_attendee_cannot_withdraw_the_registration(client, db):
 
     response = client.patch(
         f"/registrations/{registration_id}/withdraw",
-        json={"attendeeId": OTHER_ATTENDEE_ID},
+        json={},
+        headers=bearer(OTHER_ATTENDEE_ID, "Attendee"),
     )
 
     assert response.status_code == 403
