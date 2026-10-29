@@ -85,6 +85,7 @@ export function SafetyFeedbackPanel({ eventId, coordinatorId, refreshKey = 0, on
         <strong>{item.type === 'venue' ? 'Venue' : 'Equipment'}: {item.label}</strong><span>{item.reason}</span>
       </li>)}
     </ul>}
+    {readiness && <p className="muted">Rejected venue bookings and equipment requests don't block a safety check. The Safety Officer still sees them in the review.</p>}
     {equipmentError && <p className="field-error" role="alert">{equipmentError}</p>}
     {submitError && <p className="field-error" role="alert">{submitError}</p>}
     <button className="button primary" type="button" disabled={disabled} onClick={() => { void resubmit() }}>

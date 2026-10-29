@@ -136,7 +136,7 @@ test('AC2: a 422 carries the outstanding arrangements so the panel can list them
   ]
   vi.stubGlobal('fetch', respond(422, {
     code: 'ARRANGEMENTS_OUTSTANDING',
-    message: "This event can't be submitted for a safety check until every venue booking and equipment request is approved.",
+    message: "This event can't be submitted for a safety check until it has an approved venue booking and no venue booking or equipment request is still waiting for a decision.",
     outstanding,
   }))
 

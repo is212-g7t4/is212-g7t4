@@ -11,6 +11,7 @@ STAFF_ID = "55555555-5555-4555-8555-555555555555"
 HALL_ID = "88888888-8888-4888-8888-888888888888"
 ROOM_ID = "89898989-8989-4989-8989-898989898989"
 ROUND_ID = "77777777-7777-4777-8777-777777777777"
+EQUIPMENT_ID = "99999999-9999-4999-8999-999999999999"
 
 
 def user(role="Safety Officer", user_id=OFFICER_ID):
@@ -55,7 +56,7 @@ def event(status="Pending Safety Check"):
     }
 
 
-def booking(venue_id, booking_id):
+def booking(venue_id, booking_id, status="Approved"):
     """services/venue-availability-service/app/models.py::serialize."""
     return {
         "id": booking_id,
@@ -65,7 +66,7 @@ def booking(venue_id, booking_id):
         "requestedEndTime": "2030-03-01T22:00:00+08:00",
         "requiredCapacity": 100,
         "venueRequirements": "Stage",
-        "status": "Approved",
+        "status": status,
         "requestedBy": COORDINATOR_ID,
         "reviewedBy": STAFF_ID,
         "requestedAt": "2030-01-05T10:00:00+08:00",
@@ -111,4 +112,18 @@ def venue(venue_id, name, emergency=None, restrictions=None):
         "knownRestrictions": restrictions,
         "safetyInfoUpdatedBy": STAFF_ID if emergency or restrictions else None,
         "safetyInfoUpdatedAt": "2030-01-08T10:30:00+08:00" if emergency or restrictions else None,
+    }
+
+
+def equipment_request(status, request_id):
+    """services/equipment-request-service/app/models.py::serialize."""
+    return {
+        "id": request_id,
+        "eventId": EVENT_ID,
+        "equipmentId": EQUIPMENT_ID,
+        "quantityRequested": 100,
+        "technicalRequirements": "",
+        "status": status,
+        "reviewedBy": STAFF_ID if status != "Pending" else None,
+        "rejectionReason": "Not enough stock." if status == "Rejected" else None,
     }

@@ -105,6 +105,7 @@ export function SafetySubmitPanel({ eventId, coordinatorId, refreshKey = 0, onSu
             </li>)}
           </ul>
         </div>}
+    {!loadError && <p className="muted">Rejected venue bookings and equipment requests don't block a safety check. The Safety Officer still sees them in the review.</p>}
     {!loadError && <form onSubmit={submit}>
       {/* Labels are associated explicitly rather than by wrapping, so the
           character count can sit in the same field without becoming part of

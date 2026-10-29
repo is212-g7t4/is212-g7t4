@@ -1,4 +1,9 @@
-"""SCRUM-149 AC1/AC2: is every arrangement for this event approved?
+"""SCRUM-149 AC1/AC2: are this event's arrangements ready for a safety check?
+
+Ready means at least one approved venue booking and nothing still pending.
+Rejected venue bookings (SCRUM-171) and rejected equipment requests (29 Oct
+2026 dead-end fix) are final decisions the event no longer relies on, so they
+are ignored rather than blocking for good.
 
 A pure function over the two downstream responses, so the rule can be read and
 tested without HTTP. Shared by `POST /safety-checks` and
@@ -17,9 +22,12 @@ from datetime import datetime
 IGNORED_BOOKING_STATUSES = frozenset({"Cancelled", "Expired", "Rejected"})
 APPROVED_BOOKING_STATUSES = frozenset({"Approved"})
 
+# A request the event no longer relies on. 'Rejected' is a final decision
+# (SCRUM-33) with no withdraw path, so blocking on it was a dead end; it is
+# ignored, mirroring rejected venue bookings above.
+IGNORED_REQUEST_STATUSES = frozenset({"Cancelled", "Rejected"})
 # 'Reserved' is the Jira/db-structure.md wording for an allocated request; no
 # endpoint sets it today, so this is harmless either way.
-IGNORED_REQUEST_STATUSES = frozenset({"Cancelled"})
 APPROVED_REQUEST_STATUSES = frozenset({"Approved", "Reserved"})
 
 NO_VENUE_BOOKING = {
@@ -36,9 +44,6 @@ VENUE_REASONS = {
 }
 EQUIPMENT_REASONS = {
     "Pending": "Waiting for Technical Support approval.",
-    # Equipment requests have no withdraw path today, so a rejected one keeps
-    # blocking (AC2) until Technical Support revisits it.
-    "Rejected": "Rejected by Technical Support.",
 }
 
 
@@ -49,7 +54,9 @@ def _unknown_reason(status):
 def outstanding_arrangements(bookings, requests):
     """Arrangements standing between this event and its safety check (AC2).
 
-    Empty means ready (AC1). Venue items come first, then equipment, each in
+    Empty means ready (AC1): at least one approved venue booking, and no venue
+    booking or equipment request still pending. Rejected, cancelled or expired
+    bookings and rejected or cancelled requests are skipped. Venue items come first, then equipment, each in
     the order its service returned them, so the UI's list is stable.
     """
     return [

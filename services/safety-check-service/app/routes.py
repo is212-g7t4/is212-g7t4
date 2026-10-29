@@ -229,13 +229,16 @@ def submit_safety_check():
     if failure:
         return failure
     if outstanding:
-        # AC2: blocked, and the outstanding arrangements are listed. Nothing
-        # has been written at this point.
+        # AC2: something is still pending, or no approved venue booking is
+        # left, so submission is blocked and the outstanding arrangements are
+        # listed. Rejected ones were already dropped by the rule. Nothing has
+        # been written at this point.
         return jsonify(
             code="ARRANGEMENTS_OUTSTANDING",
             message=(
-                "This event can't be submitted for a safety check until every "
-                "venue booking and equipment request is approved."
+                "This event can't be submitted for a safety check until it has "
+                "an approved venue booking and no venue booking or equipment "
+                "request is still waiting for a decision."
             ),
             outstanding=outstanding,
         ), 422

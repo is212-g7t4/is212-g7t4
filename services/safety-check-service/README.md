@@ -62,8 +62,10 @@ Arrangement revision and resubmission are separate increments of the story.
 returns `{ready, eventStatus, outstanding}` for the assigned coordinator.
 `ready` requires `Safety Changes Requested`, at least one active approved
 venue booking, and no outstanding venue or equipment arrangements. Pending
-and rejected equipment block; rejected venue history is ignored when an
-approved replacement exists. Loading failures leave the button disabled.
+venue bookings and equipment requests block; rejected ones are final
+decisions the event no longer relies on, so they are ignored (see
+[the readiness rule](#the-readiness-rule--appreadinesspy)). Loading failures
+leave the button disabled.
 
 `POST /safety-checks/resubmit` accepts the same body as initial submission,
 but requires `Safety Changes Requested` and rechecks venue and equipment readiness
@@ -107,6 +109,12 @@ UI ──POST /safety-checks──► Safety Check Service (composite, 5012)
  7. 201 {safetyCheck, event}
 ```
 
+Step 4's rule (AC1/AC2, changed 29 Oct 2026): the event needs at least one
+approved venue booking and nothing still pending. Rejected venue bookings and
+rejected equipment requests don't block — equipment decisions are final and a
+request can't be withdrawn, so blocking on a rejection left the event stuck at
+`Approved` for good.
+
 | Case | Response |
 |---|---|
 | Bad body, bad UUIDs, non-text notes, a note over 2000 characters | `400 {"message": ...}` |
@@ -114,7 +122,7 @@ UI ──POST /safety-checks──► Safety Check Service (composite, 5012)
 | Caller isn't the assigned coordinator (AC5) | `403 {"code": "NOT_ASSIGNED_COORDINATOR"}` |
 | Event already `Pending Safety Check` (AC4) | `409 {"code": "SAFETY_CHECK_ALREADY_PENDING", "safetyCheck": {...}}`, nothing created |
 | Any other status but `Approved` | `409 {"code": "EVENT_NOT_READY_FOR_SAFETY_CHECK", "currentStatus": "..."}` |
-| Outstanding arrangements (AC2) | `422 {"code": "ARRANGEMENTS_OUTSTANDING", "outstanding": [...]}`, nothing created |
+| Something still pending, or no approved venue booking (AC2) | `422 {"code": "ARRANGEMENTS_OUTSTANDING", "outstanding": [...]}`, nothing created |
 | A downstream service failed / timed out | `502` / `504` |
 | Success (AC1, AC3) | `201 {"safetyCheck": {...}, "event": {...}}` |
 
@@ -535,16 +543,19 @@ can't disagree, and unit-tested without HTTP.
 
 | Arrangement | Ready | Outstanding | Ignored |
 |---|---|---|---|
-| Venue booking | `Approved` | `Pending Review`, `Pending`, `Rejected`, missing/unknown status | `Cancelled`, `Expired` — withdrawn or lapsed, the same set Venue Availability treats as inactive |
-| Equipment request | `Approved`, `Reserved` | `Pending`, `Rejected`, missing/unknown status | `Cancelled` (no endpoint sets it today) |
+| Venue booking | `Approved` | `Pending Review`, `Pending`, missing/unknown status | `Cancelled`, `Expired` — withdrawn or lapsed; `Rejected` — retained history (SCRUM-171) |
+| Equipment request | `Approved`, `Reserved` | `Pending`, missing/unknown status | `Rejected` — a final decision with no withdraw path (SCRUM-149 fix, 29 Oct 2026); `Cancelled` (no endpoint sets it today) |
+
+The Safety Officer's review (`GET /safety-checks/<id>/review`) still lists
+rejected bookings and requests with their status; only readiness skips them.
 
 Plus two rules AC1 implies but doesn't spell out:
 
 - **No equipment requested is ready** — AC1 says so outright.
 - **No live venue booking is outstanding**, with the item
   `"No venue booking has been made for this event."` An event with nowhere to
-  happen isn't ready for a safety check. Only cancelled or expired bookings
-  counts as the same thing.
+  happen isn't ready for a safety check. Only cancelled, expired or rejected
+  bookings counts as the same thing.
 
 Labels use only what the two responses carry (times, `requiredCapacity`,
 `quantityRequested`). The composite deliberately does **not** call Venue or
