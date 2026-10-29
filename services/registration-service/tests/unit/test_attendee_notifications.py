@@ -19,7 +19,7 @@ from app.models import (
     withdraw_registration,
     DuplicateRegistrationError,
 )
-from tests.unit.factories import EVENT, USER, REF, JOB, LEASE, row, outbox_row, envelope
+from tests.unit.factories import EVENT, USER, REF, JOB, LEASE, row, outbox_row, envelope, signed_in
 
 
 # AC1 ----
@@ -86,9 +86,9 @@ def test_dr_owner_freezes_required_content_once_and_returns_saved_payload(
     not actual persistence: the route/validation run, but libpq is mocked.
     """
     _, cursor = storage
-    client = create_app(
+    client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
-    ).test_client()
+    ).test_client())
     saved = envelope(kind, naive)
     record = outbox_row(kind)
     cursor.fetchone.side_effect = [record, {**record, "envelope": saved}]
@@ -148,9 +148,9 @@ def test_dr_invalid_registration_envelope_cannot_be_frozen(storage, defect):
     elif defect == "message":
         value["message"] = "Wrong workshop"
     cursor.fetchone.return_value = outbox_row()
-    client = create_app(
+    client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
-    ).test_client()
+    ).test_client())
     response = client.post(
         f"/internal/notification-outbox/{JOB}/freeze",
         headers={"X-Internal-Token": "synthetic"},
@@ -176,9 +176,9 @@ def test_dr_completion_requires_freeze_and_retry_retains_business_state(
         **outbox_row(),
         "envelope": envelope() if frozen else None,
     }
-    client = create_app(
+    client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
-    ).test_client()
+    ).test_client())
     response = client.post(
         f"/internal/notification-outbox/{JOB}/{action}",
         headers={"X-Internal-Token": "synthetic"},
@@ -204,9 +204,9 @@ def test_dr_expired_or_missing_lease_cannot_publish(storage, state):
     cursor.fetchone.return_value = (
         None if state == "missing" else {**outbox_row(), "lease_valid": False}
     )
-    client = create_app(
+    client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
-    ).test_client()
+    ).test_client())
     response = client.post(
         f"/internal/notification-outbox/{JOB}/published",
         headers={"X-Internal-Token": "synthetic"},
@@ -263,7 +263,7 @@ def test_dr_owner_api_refuses_unsafe_work_and_serializes_claims(storage, case, s
         data["leaseToken"] = "invalid"
     elif case == "database-error":
         cursor.execute.side_effect = psycopg2.OperationalError()
-    response = create_app(config).test_client().post(path, headers=headers, json=data)
+    response = signed_in(create_app(config).test_client()).post(path, headers=headers, json=data)
     assert response.status_code == status
     if case == "claim":
         assert response.json["jobs"][0]["id"] == JOB
@@ -282,7 +282,7 @@ def test_ac1_ac2_action_time_display_snapshot_is_persisted_or_refused(
     integrity. HTTP validation/mutations run; the database cursor is a unit double.
     """
     _, cursor = storage
-    client = create_app(dict(TESTING=True, DATABASE_URL="unused")).test_client()
+    client = signed_in(create_app(dict(TESTING=True, DATABASE_URL="unused")).test_client())
     context = dict(
         eventName="Workshop",
         startDateTime="2030-03-01T09:00:00",
@@ -297,14 +297,14 @@ def test_ac1_ac2_action_time_display_snapshot_is_persisted_or_refused(
         response = client.post(
             "/registrations",
             json=dict(
-                eventId=EVENT, attendeeId=USER, capacity=10, notificationContext=context
+                eventId=EVENT, capacity=10, notificationContext=context
             ),
         )
     else:
         cursor.fetchone.side_effect = [row(), row("Withdrawn")]
         response = client.patch(
             f"/registrations/{REF}/withdraw",
-            json=dict(attendeeId=USER, notificationContext=context),
+            json=dict(notificationContext=context),
         )
     assert response.status_code == (
         (201 if action == "register" else 200) if valid else 400
@@ -334,8 +334,8 @@ def test_ac1_nonrenderable_snapshot_dates_are_refused_before_registration_writes
     context = dict(eventName="Workshop", startDateTime="2030-03-01T09:00:00",
                    endDateTime="2030-03-01T17:00:00", venueName="Hall A")
     context[field] = invalid
-    response = create_app(dict(TESTING=True, DATABASE_URL="unused")).test_client().post(
-        "/registrations", json=dict(eventId=EVENT, attendeeId=USER, capacity=10,
+    response = signed_in(create_app(dict(TESTING=True, DATABASE_URL="unused")).test_client()).post(
+        "/registrations", json=dict(eventId=EVENT, capacity=10,
                                     notificationContext=context))
     assert response.status_code == 400
     assert not any(c.args[0].lstrip().startswith(("INSERT", "UPDATE"))

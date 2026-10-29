@@ -7,7 +7,7 @@ to Event Service; this service only orchestrates.
 """
 from uuid import UUID
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app import checks, clients
 
@@ -42,7 +42,7 @@ def _uuid_or_none(value):
 def update_event_details(event_id):
     """Validate an edit, then save it (SCRUM-20 AC2, AC3, AC4).
 
-    Body: `{coordinatorId, changes: {<field>: text}}`.
+    Body: `{changes: {<field>: text}}`; the editor is the signed-in user (SCRUM-8).
 
     1. The caller must be the assigned coordinator, or the Lead when no
        coordinator is assigned; the role is
@@ -61,9 +61,9 @@ def update_event_details(event_id):
         return jsonify(message="A valid event ID is required."), 400
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
-    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
+    coordinator_id = g.user_id
     if not coordinator_id:
-        return jsonify(message="A valid current coordinator ID is required."), 400
+        return jsonify(message="Sign in to continue."), 401
     changes = data.get("changes")
     if (
         not isinstance(changes, dict)
@@ -76,14 +76,10 @@ def update_event_details(event_id):
 
     try:
         actor_role = _lead_role(coordinator_id)
-        preview = clients.preview_event_details(
-            event_id, coordinator_id, changes, actor_role
-        )
+        preview = clients.preview_event_details(event_id, changes, actor_role)
         high = preview["highImpactFields"]
         if high:
-            conflicts = checks.find_conflicts(
-                preview["event"], changes, high, coordinator_id
-            )
+            conflicts = checks.find_conflicts(preview["event"], changes, high)
             if conflicts:
                 return jsonify(
                     code="CHANGE_CONTRADICTS_ARRANGEMENTS",
@@ -95,9 +91,7 @@ def update_event_details(event_id):
                     highImpactFields=high,
                     conflicts=conflicts,
                 ), 409
-        saved = clients.save_event_details(
-            event_id, coordinator_id, changes, actor_role
-        )
+        saved = clients.save_event_details(event_id, changes, actor_role)
     except clients.UserNotFoundError:
         return jsonify(code="NOT_ASSIGNED_COORDINATOR", message=NOT_ASSIGNED), 403
     except clients.EventRejectedError as refused:
@@ -137,12 +131,12 @@ def _workflow_failure(error):
 
 @bp.get("/change-requests")
 def pending_change_requests():
-    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
+    coordinator_id = g.user_id
     if not coordinator_id:
-        return jsonify(message="A valid current coordinator ID is required."), 400
+        return jsonify(message="Sign in to continue."), 401
     try:
         _coordinator_role(coordinator_id)
-        changes = clients.list_pending_change_requests(coordinator_id)
+        changes = clients.list_pending_change_requests()
     except (
         clients.UserNotFoundError,
         clients.EventRejectedError,
@@ -161,9 +155,9 @@ def process_change_request(change_request_id):
         return jsonify(message="A valid change request ID is required."), 400
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
-    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
+    coordinator_id = g.user_id
     if not coordinator_id:
-        return jsonify(message="A valid current coordinator ID is required."), 400
+        return jsonify(message="Sign in to continue."), 401
     decision = data.get("decision")
     if decision not in ("Approved", "Rejected"):
         return jsonify(message="decision must be Approved or Rejected."), 400
@@ -179,12 +173,11 @@ def process_change_request(change_request_id):
 
     try:
         role = _coordinator_role(coordinator_id)
-        change = clients.get_change_request(change_request_id, coordinator_id)
+        change = clients.get_change_request(change_request_id)
         if decision == "Approved":
             actor_role = LEAD_ROLE if role == LEAD_ROLE else None
             preview = clients.preview_event_details(
                 change["eventId"],
-                coordinator_id,
                 change["proposedChanges"],
                 actor_role,
             )
@@ -194,7 +187,6 @@ def process_change_request(change_request_id):
                     preview["event"],
                     change["proposedChanges"],
                     high,
-                    coordinator_id,
                 )
                 if conflicts:
                     return jsonify(
@@ -207,9 +199,7 @@ def process_change_request(change_request_id):
                         highImpactFields=high,
                         conflicts=conflicts,
                     ), 409
-        decided = clients.decide_change_request(
-            change_request_id, coordinator_id, decision, reason
-        )
+        decided = clients.decide_change_request(change_request_id, decision, reason)
     except (
         clients.UserNotFoundError,
         clients.EventRejectedError,

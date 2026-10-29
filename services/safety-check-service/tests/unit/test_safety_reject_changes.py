@@ -22,9 +22,11 @@ tests exercise the orchestration and the error mapping, not HTTP
 import logging
 
 import pytest
+from flask import g
 
 from app import clients, create_app
 from tests.unit.factories import (
+    signed_in,
     BOOKING_ID,
     EVENT_ID,
     OFFICER_ID,
@@ -67,7 +69,8 @@ class Downstream:
         self._maybe_fail("get_user")
         return self.user
 
-    def get_event(self, event_id, viewer_id, viewer_role=None):
+    def get_event(self, event_id, viewer_role=None):
+        viewer_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("get_event", event_id, viewer_id, viewer_role))
         self._maybe_fail("get_event")
         return self.event
@@ -77,7 +80,8 @@ class Downstream:
         self._maybe_fail("list_records")
         return self.rounds
 
-    def decide_safety_check_record(self, safety_check_id, status, decided_by, remarks=None, flags=None):
+    def decide_safety_check_record(self, safety_check_id, status, remarks=None, flags=None):
+        decided_by = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("decide", safety_check_id, status, decided_by, remarks, flags))
         if "decide" in self.apply_despite_failure:
             self.rounds = [self.decided]
@@ -90,11 +94,10 @@ class Downstream:
         status,
         safety_check_id,
         round_number,
-        coordinator_id=None,
-        decided_by=None,
         remarks=None,
         areas=None,
     ):
+        decided_by = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(
             (
                 "patch_event",
@@ -126,7 +129,8 @@ class Downstream:
         self._maybe_fail("cancel_booking")
         return {"id": booking_id, "status": "Cancelled"}
 
-    def get_event_equipment_requests(self, event_id, coordinator_id):
+    def get_event_equipment_requests(self, event_id):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("get_equipment", event_id, coordinator_id))
         self._maybe_fail("get_equipment")
         return self.equipment
@@ -173,7 +177,7 @@ def downstream(monkeypatch):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def request_changes(client, **overrides):

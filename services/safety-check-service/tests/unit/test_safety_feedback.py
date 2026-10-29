@@ -4,12 +4,12 @@ from unittest.mock import patch
 import pytest
 
 from app import create_app, clients
-from tests.unit.factories import COORDINATOR_ID, EVENT_ID, event, record
+from tests.unit.factories import COORDINATOR_ID, EVENT_ID, event, record, signed_in
 
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def feedback_url(event_id=EVENT_ID, coordinator_id=COORDINATOR_ID):
@@ -29,7 +29,7 @@ def test_assigned_coordinator_sees_complete_feedback_and_earlier_rounds(client):
         response = client.get(feedback_url())
     assert response.status_code == 200
     assert response.json == {"safetyChecks": rounds}
-    get_event.assert_called_once_with(EVENT_ID, COORDINATOR_ID)
+    get_event.assert_called_once_with(EVENT_ID)
     list_records.assert_called_once_with(EVENT_ID)
 
 
@@ -41,7 +41,7 @@ def test_no_review_rounds_returns_empty_feedback(client):
     assert response.json == {"safetyChecks": []}
 
 
-@pytest.mark.parametrize("event_id,coordinator_id", [("bad", COORDINATOR_ID), (EVENT_ID, "bad"), ("", "")])
+@pytest.mark.parametrize("event_id,coordinator_id", [("bad", COORDINATOR_ID), ("", "")])
 def test_feedback_rejects_invalid_identity(client, event_id, coordinator_id):
     with patch("app.clients.get_event") as get_event:
         assert client.get(feedback_url(event_id, coordinator_id)).status_code == 400

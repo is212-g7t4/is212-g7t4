@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from app import clients
+from app import clients, create_app
 
 EVENT, OTHER, COORDINATOR, TSS1, TSS2, MIC = [
     f"10000000-0000-4000-8000-{i:012d}" for i in range(1, 7)]
@@ -58,22 +58,23 @@ def test_mutations_replace_attacker_context_with_trusted_lookup_and_token(upstre
     Why: Trusted snapshot selection must not be delegated to an untrusted caller.
     """
     _, request = upstream
-    headers = {"X-Dev-User-Id": COORDINATOR, "X-Dev-Role": "Event Coordinator",
+    headers = {"Authorization": "Bearer coordinator-token",
                "X-Internal-Token": "attacker-token", "Cookie": "attacker-cookie",
                "notificationContext": "attacker-snapshot"}
-    if operation == "submit":
-        clients.create_event_requests(headers, EVENT, [{"equipmentId": MIC, "quantityRequested": 5}])
-    else:
-        decision = "Rejected" if operation.endswith("reject") else "Approved"
-        if operation.startswith("bulk"):
-            clients.review_event_requests(headers, EVENT, decision, "Private workflow reason")
+    with create_app().test_request_context(headers=headers):
+        if operation == "submit":
+            clients.create_event_requests(EVENT, [{"equipmentId": MIC, "quantityRequested": 5}])
         else:
-            clients.review_request(headers, OTHER, decision, "Private workflow reason")
+            decision = "Rejected" if operation.endswith("reject") else "Approved"
+            if operation.startswith("bulk"):
+                clients.review_event_requests(EVENT, decision, "Private workflow reason")
+            else:
+                clients.review_request(OTHER, decision, "Private workflow reason")
     method, url = request.call_args.args
     kwargs = request.call_args.kwargs
     assert method == ("POST" if operation == "submit" else "PATCH")
     assert url.startswith("http://owner.invalid/")
-    assert kwargs["headers"] == {"X-Dev-User-Id": COORDINATOR, "X-Dev-Role": "Event Coordinator",
+    assert kwargs["headers"] == {"Authorization": "Bearer coordinator-token",
                                  "X-Internal-Token": "trusted-config-token"}
     expected = dict(eventId=EVENT, eventName="Community Fair", equipmentNames={MIC: "Microphone"})
     if operation == "submit":
@@ -84,7 +85,8 @@ def test_mutations_replace_attacker_context_with_trusted_lookup_and_token(upstre
     assert ("rejectionReason" in kwargs["json"]) is operation.endswith("reject")
     reads = [c for c in request.call_args_list if c.args[1].endswith("/notification-context")]
     assert len(reads) == 1
-    assert reads[0].kwargs["headers"] == {"X-Internal-Token": "trusted-config-token"}
+    assert reads[0].kwargs["headers"] == {"Authorization": "Bearer coordinator-token",
+                                          "X-Internal-Token": "trusted-config-token"}
     assert request.call_args_list.index(reads[0]) < len(request.call_args_list) - 1
 
 
@@ -100,8 +102,9 @@ def test_missing_internal_configuration_prevents_mutation(upstream, monkeypatch,
         monkeypatch.delenv("INTERNAL_SERVICE_TOKEN")
     else:
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", configured)
-    with pytest.raises(clients.DownstreamError) as error:
-        clients.create_event_requests({"X-Internal-Token": "attacker"}, EVENT, [])
+    with pytest.raises(clients.DownstreamError) as error, \
+            create_app().test_request_context(headers={"X-Internal-Token": "attacker"}):
+        clients.create_event_requests(EVENT, [])
     assert error.value.status == 503
     assert error.value.message == "Internal service authentication is not configured."
     assert all(c.args[0] == "GET" for c in request.call_args_list)
@@ -116,7 +119,7 @@ def test_mismatched_event_snapshot_prevents_owner_write(upstream):
     state, request = upstream
     state["event"]["id"] = OTHER
     with pytest.raises(clients.DownstreamError) as error:
-        clients.review_event_requests({}, EVENT, "Approved")
+        clients.review_event_requests(EVENT, "Approved")
     assert error.value.status == 502
     assert error.value.message == "Event notification context does not match this event."
     assert all(c.args[0] == "GET" for c in request.call_args_list)
@@ -137,7 +140,7 @@ def test_snapshot_dependency_failure_produces_no_owner_mutation(upstream, failed
         return original(method, url, **kwargs)
     request.side_effect = fail
     with pytest.raises(clients.DownstreamError) as error:
-        clients.create_event_requests({}, EVENT, [])
+        clients.create_event_requests(EVENT, [])
     assert error.value.status == 503
     assert "private" not in error.value.message
     assert all(c.args[0] == "GET" for c in request.call_args_list)

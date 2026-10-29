@@ -26,17 +26,19 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { fetchUsers } from './features/user/users'
 import type { Role } from './types'
+import { signInAs } from './test/session'
 // SCRUM-173 supporting shell fixture: no real inbox I/O in calendar unit tests.
 vi.mock('./features/notifications/notifications', async (original) => ({
   ...await original<typeof import('./features/notifications/notifications')>(),
-  notificationApi: vi.fn(async (_user, path: string) => path.includes('unread-count') ? { unreadCount: 0 } : { notifications: [], nextCursor: null }),
+  notificationApi: vi.fn(async (path: string) => path.includes('unread-count') ? { unreadCount: 0 } : { notifications: [], nextCursor: null }),
 }))
 vi.mock('./features/user/users', () => ({ fetchUsers: vi.fn() }))
 vi.mock('./features/venue/venues', () => ({
   fetchVenues: vi.fn().mockResolvedValue([]),
 }))
 beforeEach(() => {
-  vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
+  // No real network: a live stack would answer 401 to the fake token and end the session.
+  vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
   window.history.replaceState({}, '', '/venue-availability')
 })
 test.each([
@@ -46,18 +48,12 @@ test.each([
   'Event Organiser',
   'Attendee',
 ] as Role[])('calendar direct route and nav reflect %s', async (role) => {
-  vi.mocked(fetchUsers).mockResolvedValue([
-    {
-      id: 'id',
-      username: 'test',
-      email: '',
-      organization: '',
-      role,
-    },
-  ])
+  const user = { id: 'id', username: 'test', email: '', organization: '', role }
+  vi.mocked(fetchUsers).mockResolvedValue([user])
+  signInAs(user)
   render(<App />)
   expect(screen.getByRole('heading', { name: 'Venue availability calendar' })).toBeInTheDocument()
-  await screen.findByRole('option', { name: `test — ${role}` })
+  await screen.findByText(`Signed in as test — ${role}`)
   expect(document.title).toBe('Venue availability calendar · ConnectSphere')
   if (['Event Organiser', 'Attendee'].includes(role)) {
     expect(screen.getByRole('alert')).toHaveTextContent('Permission denied')

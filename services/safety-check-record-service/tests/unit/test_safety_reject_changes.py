@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from app import create_app
-from tests.unit.factories import EVENT_ID, OFFICER_ID, RECORD_ID, record_row
+from tests.unit.factories import EVENT_ID, OFFICER_ID, RECORD_ID, record_row, signed_in
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def setup(monkeypatch):
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client(), OFFICER_ID, "Safety Officer"), connection, cursor
 
 
 def flag_row(area="venue arrangement", change_required="Move the stage.", flag_id="55555555-5555-4555-8555-555555555555"):
@@ -42,7 +42,6 @@ def flag_row(area="venue arrangement", change_required="Move the stage.", flag_i
 def request_changes(client, safety_check_id=RECORD_ID, **overrides):
     body = {
         "status": "Changes Requested",
-        "decidedBy": OFFICER_ID,
         "remarks": "Needs another look.",
         "flags": [
             {"area": "venue arrangement", "changeRequired": "Move the stage."},
@@ -55,7 +54,6 @@ def request_changes(client, safety_check_id=RECORD_ID, **overrides):
 def reject(client, safety_check_id=RECORD_ID, **overrides):
     body = {
         "status": "Safety Rejected",
-        "decidedBy": OFFICER_ID,
         "remarks": "Unsafe egress plan.",
         **overrides,
     }
@@ -205,7 +203,7 @@ def test_null_flags_are_treated_as_empty_for_approval(setup):
 
     response = client.patch(
         f"/safety-check-records/{RECORD_ID}/decision",
-        json={"status": "Safety Approved", "decidedBy": OFFICER_ID, "flags": None},
+        json={"status": "Safety Approved", "flags": None},
     )
 
     assert response.status_code == 200
@@ -283,8 +281,7 @@ def test_safety_approved_rejects_flags(setup):
         f"/safety-check-records/{RECORD_ID}/decision",
         json={
             "status": "Safety Approved",
-            "decidedBy": OFFICER_ID,
-            "flags": [{"area": "venue arrangement", "changeRequired": "x"}],
+                "flags": [{"area": "venue arrangement", "changeRequired": "x"}],
         },
     )
 
@@ -302,7 +299,7 @@ def test_safety_approved_without_remarks_still_succeeds(setup):
 
     response = client.patch(
         f"/safety-check-records/{RECORD_ID}/decision",
-        json={"status": "Safety Approved", "decidedBy": OFFICER_ID},
+        json={"status": "Safety Approved"},
     )
 
     assert response.status_code == 200

@@ -32,6 +32,7 @@ import pytest
 from app import create_app
 from app.models import NOT_DRAFT
 from tests.unit.factories import (
+    signed_in,
     COORDINATOR,
     EVENT,
     ROUND,
@@ -54,7 +55,7 @@ def setup(monkeypatch):
     connect = MagicMock(return_value=connection)
     monkeypatch.setattr("app.models.psycopg2.connect", connect)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), cursor, connect
+    return signed_in(app.test_client()), cursor, connect
 
 
 def attendee_summary(client, *ids):
@@ -288,7 +289,7 @@ def test_dr_missing_or_invalid_ids_are_rejected_before_any_query(setup, query):
 
 def test_dr_missing_database_url_is_503():
     """Failure: without DATABASE_URL the service reports itself unavailable."""
-    client = create_app({"DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"DATABASE_URL": None}).test_client())
     assert client.get(f"/events/attendee-summaries?ids={EVENT}").status_code == 503
 
 

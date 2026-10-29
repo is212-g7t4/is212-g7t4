@@ -18,6 +18,7 @@ from app.models import (
     create_registration,
     withdraw_registration,
 )
+from tests.unit.factories import signed_in
 
 EVENT_ID = "25c9fe40-c44d-4d79-8d5d-de66d40c1678"
 ATTENDEE_ID = "56b34ab1-92cd-4b35-83c7-f04e176e2bd0"
@@ -46,7 +47,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client(), ATTENDEE_ID), connection, cursor
 
 
 def test_list_registrations_returns_all_rows_for_event(setup):
@@ -78,11 +79,11 @@ def test_list_registrations_returns_empty_list_when_none_exist(setup):
 
 
 def test_lists_only_the_current_attendees_registrations(setup):
-    """View Registration Status AC1: registrations are scoped by attendee ID."""
+    """View Registration Status AC1: registrations are scoped to the signed-in attendee (SCRUM-8)."""
     client, _, cursor = setup
     cursor.fetchall.return_value = [registration_row(attendee_id=ATTENDEE_ID)]
 
-    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    response = client.get("/registrations")
 
     assert response.status_code == 200
     assert response.json["registrations"][0]["attendee_id"] == ATTENDEE_ID
@@ -95,7 +96,7 @@ def test_lists_only_the_current_attendees_registrations(setup):
 def test_attendee_registration_list_can_be_empty(setup):
     client, _, cursor = setup
     cursor.fetchall.return_value = []
-    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    response = client.get("/registrations")
     assert response.status_code == 200
     assert response.json == {"registrations": []}
 
@@ -132,7 +133,7 @@ def test_null_registration_date_serializes_to_none(setup):
     assert response.json["registrations"][0]["registration_date"] is None
 
 
-@pytest.mark.parametrize("query_string", ["", "?eventId=", "?eventId=not-a-uuid"])
+@pytest.mark.parametrize("query_string", ["?eventId=", "?eventId=not-a-uuid"])
 def test_requires_valid_event_id(query_string, setup):
     client, _, cursor = setup
     response = client.get(f"/registrations{query_string}")
@@ -140,30 +141,33 @@ def test_requires_valid_event_id(query_string, setup):
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("value", ["", "not-a-uuid"])
-def test_requires_valid_attendee_id(value, setup):
+def test_attendee_query_cannot_list_someone_elses_registrations(setup):
+    """SCRUM-8: the attendee comes from the token; a forged attendeeId is ignored."""
     client, _, cursor = setup
-    response = client.get(f"/registrations?attendeeId={value}")
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
+    cursor.fetchall.return_value = []
+    response = client.get("/registrations?attendeeId=11111111-1111-4111-8111-111111111111")
+    assert response.status_code == 200
+    assert cursor.execute.call_args.args[1] == [ATTENDEE_ID]
 
 
-def test_rejects_event_and_attendee_id_together(setup):
+def test_background_worker_must_name_an_event(setup, monkeypatch):
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal-test-token")
     client, _, cursor = setup
-    response = client.get(f"/registrations?eventId={EVENT_ID}&attendeeId={ATTENDEE_ID}")
+    unsigned = client.application.test_client()
+    response = unsigned.get("/registrations", headers={"X-Internal-Token": "internal-test-token"})
     assert response.status_code == 400
     cursor.execute.assert_not_called()
 
 
 def test_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), ATTENDEE_ID)
     response = client.get(f"/registrations?eventId={EVENT_ID}")
     assert response.status_code == 503
 
 
 def test_attendee_list_reports_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
-    response = client.get(f"/registrations?attendeeId={ATTENDEE_ID}")
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), ATTENDEE_ID)
+    response = client.get("/registrations")
     assert response.status_code == 503
 
 
@@ -256,7 +260,7 @@ def test_withdrawal_endpoint_returns_updated_record(setup, monkeypatch):
 
     response = client.patch(
         f"/registrations/{saved['registration_id']}/withdraw",
-        json={"attendeeId": ATTENDEE_ID},
+        json={},
     )
 
     assert response.status_code == 200
@@ -277,7 +281,7 @@ def test_withdrawal_endpoint_maps_domain_errors(setup, monkeypatch, error, statu
     monkeypatch.setattr("app.withdraw_registration", MagicMock(side_effect=error))
     response = client.patch(
         f"/registrations/{registration_row()['registration_id']}/withdraw",
-        json={"attendeeId": ATTENDEE_ID},
+        json={},
     )
     assert response.status_code == status
     assert response.json["code"] == code
@@ -287,15 +291,13 @@ def test_withdrawal_endpoint_validates_body_and_configuration(setup):
     client = setup[0]
     path = f"/registrations/{registration_row()['registration_id']}/withdraw"
     assert client.patch(path).status_code == 400
-    assert client.patch(path, json={"attendeeId": "bad"}).status_code == 400
     client.application.config["DATABASE_URL"] = None
-    assert client.patch(path, json={"attendeeId": ATTENDEE_ID}).status_code == 503
+    assert client.patch(path, json={}).status_code == 503
 
 
 def registration_payload(**overrides):
     payload = {
         "eventId": EVENT_ID,
-        "attendeeId": ATTENDEE_ID,
         "capacity": 30,
     }
     payload.update(overrides)
@@ -344,7 +346,7 @@ def test_create_registration_endpoint_needs_no_profile_fields(setup, monkeypatch
 
 @pytest.mark.parametrize(
     "payload",
-    [None, {}, registration_payload(eventId="bad"), registration_payload(attendeeId="bad"),
+    [None, {}, registration_payload(eventId="bad"),
      registration_payload(capacity=0), registration_payload(capacity="many")],
 )
 def test_create_registration_endpoint_validates_required_values(setup, payload):

@@ -6,6 +6,8 @@ os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
 import pytest
 
+from tests.unit.factories import TEST_SIGNING_KEY
+
 
 @pytest.fixture(autouse=True)
 def no_live_io(monkeypatch, request):
@@ -18,3 +20,12 @@ def no_live_io(monkeypatch, request):
     monkeypatch.setattr(socket.socket, "connect_ex", blocked)
     import psycopg2
     monkeypatch.setattr(psycopg2, "connect", blocked)
+
+
+@pytest.fixture(autouse=True)
+def trusted_test_signing_key(monkeypatch, request):
+    """Verify tokens against the test key instead of fetching Supabase's JWKS (SCRUM-8)."""
+    if request.node.get_closest_marker("integration"):
+        return
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.test")
+    monkeypatch.setattr("app.auth.signing_key", lambda token: TEST_SIGNING_KEY.public_key())

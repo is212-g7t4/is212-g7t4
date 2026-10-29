@@ -1,7 +1,6 @@
-"""SCRUM-170 closure routes; DEV headers are explicitly spoofable."""
+"""SCRUM-170 closure routes, for signed-in Venue Staff."""
 
-from uuid import UUID
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 bp = Blueprint("closures", __name__)
 
@@ -10,16 +9,9 @@ bp = Blueprint("closures", __name__)
 def staff_only():
     if request.method == "OPTIONS":
         return None
-    if current_app.config["VENUE_CLOSURE_DEV_MODE"] is not True:
-        return jsonify(message="Venue closure DEV mode is disabled."), 503
-    try:
-        UUID(request.headers.get("X-Dev-User-Id", ""))
-    except ValueError:
-        return jsonify(message="DEV user UUID is required."), 401
-    role = request.headers.get("X-Dev-Role")
-    if not role:
-        return jsonify(message="DEV role is required."), 401
-    if role != "Venue Staff":
+    if not g.user_id:
+        return jsonify(message="Sign in to continue."), 401
+    if g.role != "Venue Staff":
         return jsonify(message="Venue Staff role is required."), 403
 
 
@@ -40,7 +32,7 @@ def preview():
     try:
         return jsonify(
             closure_store.preview(
-                dsn, data, str(UUID(request.headers["X-Dev-User-Id"])), key
+                dsn, data, g.user_id, key
             )
         )
     except psycopg2.Error:
@@ -77,7 +69,7 @@ def closures(closure_id=None):
                     closure_store.create(
                         dsn,
                         data,
-                        str(UUID(request.headers["X-Dev-User-Id"])),
+                        g.user_id,
                         token,
                         key,
                     )

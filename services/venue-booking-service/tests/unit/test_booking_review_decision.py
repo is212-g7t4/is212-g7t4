@@ -17,9 +17,10 @@ import pytest
 
 from app import clients, create_app
 from app.clients import BookingAlreadyDecidedError, BookingConflictError, BookingNotFoundError
+from tests.unit.factories import signed_in, bearer
 
 STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
-STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 REASON = "Hall is too small for the stage"
 
 BOOKING = {
@@ -65,7 +66,7 @@ VENUE = {
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def open_request(client, booking=BOOKING, event=EVENT, venue=VENUE, headers=STAFF_HEADERS):
@@ -132,7 +133,7 @@ def test_ac1_opening_a_request_shows_event_timing_and_requirements(client):
     assert body["booking"]["awaitingReview"] is True
     assert body["canDecide"] is True
     assert body["decisionBlockedReason"] is None
-    get_event.assert_called_once_with("evt-1", STAFF_ID, "Venue Staff")
+    get_event.assert_called_once_with("evt-1", "Venue Staff")
     get_venue.assert_called_once_with("ven-1")
 
 
@@ -172,7 +173,8 @@ def test_ac1_venue_without_a_name_is_labelled_unknown(client):
 
 @pytest.mark.parametrize(
     "headers,code",
-    [({}, 401), ({"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Event Coordinator"}, 403)],
+    # An empty Authorization header overrides the client's default sign-in: no token.
+    [({"Authorization": ""}, 401), (bearer(STAFF_ID, "Event Coordinator"), 403)],
 )
 def test_ac1_request_view_requires_venue_staff(client, headers, code):
     """Failure: only Venue Staff can open a request, and nothing is fetched otherwise."""
@@ -247,7 +249,7 @@ def test_ac2_approval_is_recorded_and_returned(client):
     assert response.status_code == 200
     assert response.json["status"] == "Approved"
     assert response.json["reviewedAt"] == "2030-02-02T09:00:00+08:00"
-    decide.assert_called_once_with("booking-1", STAFF_ID, "Approved", 30, 45)
+    decide.assert_called_once_with("booking-1", "Approved", 30, 45)
 
 
 def test_ac2_approval_conflict_is_passed_through(client):
@@ -281,7 +283,7 @@ def test_ac3_rejection_with_reason_is_recorded(client):
 
     assert response.status_code == 200
     assert response.json["rejectionReason"] == REASON
-    decide.assert_called_once_with("booking-1", STAFF_ID, "Rejected", rejection_reason=REASON)
+    decide.assert_called_once_with("booking-1", "Rejected", rejection_reason=REASON)
 
 
 # AC4 ------------------------------------------------------------------------
@@ -407,7 +409,9 @@ def test_ac6_coordinator_list_returns_decision_and_reason(_event, bookings, _ven
 def test_legacy_reject_route_requires_staff_and_reason(client):
     """Failure: /reject can no longer bypass the role check or the reason."""
     assert client.patch(
-        "/booking-requests/booking-1/reject", json={"reviewedBy": STAFF_ID, "rejectionReason": REASON}
+        "/booking-requests/booking-1/reject",
+        json={"rejectionReason": REASON},
+        headers={"Authorization": ""},  # no token
     ).status_code == 401
 
     response, get_booking, decide = review(client, "Rejected", path="reject")
@@ -417,7 +421,7 @@ def test_legacy_reject_route_requires_staff_and_reason(client):
 
     response, _, decide = review(client, "Rejected", path="reject", rejectionReason=REASON)
     assert response.status_code == 200
-    decide.assert_called_once_with("booking-1", STAFF_ID, "Rejected", rejection_reason=REASON)
+    decide.assert_called_once_with("booking-1", "Rejected", rejection_reason=REASON)
 
 
 def test_legacy_approve_route_runs_the_event_status_gate(client):
@@ -443,7 +447,7 @@ def test_decide_booking_sends_reason_only_when_rejecting(monkeypatch, status, se
     sent = MagicMock(return_value=_reply(200, {"id": "booking-1"}))
     monkeypatch.setattr(clients.httpx, "patch", sent)
 
-    clients.decide_booking("booking-1", STAFF_ID, status, 30, 45, REASON)
+    clients.decide_booking("booking-1", status, 30, 45, REASON)
 
     url = sent.call_args.args[0]
     body = sent.call_args.kwargs["json"]
@@ -466,7 +470,7 @@ def test_decide_booking_maps_already_decided_and_reason_required(monkeypatch, st
     monkeypatch.setattr(clients.httpx, "patch", lambda *a, **k: _reply(status, {"code": code}))
 
     with pytest.raises(error):
-        clients.decide_booking("booking-1", STAFF_ID, "Rejected", rejection_reason=REASON)
+        clients.decide_booking("booking-1", "Rejected", rejection_reason=REASON)
 
 
 def test_event_without_a_status_is_refused_not_a_crash(client):

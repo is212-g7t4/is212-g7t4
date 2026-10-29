@@ -4,10 +4,11 @@ import httpx
 import pytest
 
 from app import clients, create_app
+from tests.unit.factories import signed_in, bearer
 
 # SCRUM-29 D7: the legacy approve/reject routes now require Venue Staff.
 STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
-STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 
 PAYLOAD = dict(
     eventId="event-1",
@@ -56,7 +57,7 @@ def prepare(monkeypatch, status, body):
 
     monkeypatch.setattr(clients.httpx, "get", get)
     monkeypatch.setattr(clients.httpx, "post", post)
-    return create_app().test_client(), calls
+    return signed_in(create_app().test_client()), calls
 
 
 def test_approved_conflict_survives_client_and_route(monkeypatch):
@@ -70,8 +71,10 @@ def test_approved_conflict_survives_client_and_route(monkeypatch):
     assert response.status_code == 409
     assert response.json["code"] == body["code"]
     assert response.json["conflictTypes"] == body["conflictTypes"]
-    assert calls[0][1]["params"] == {"coordinatorId": "coordinator-1"}
-    assert calls[-1][1]["json"]["requestedBy"] == "coordinator-1"
+    # SCRUM-8: the coordinator travels as their token, not as request fields.
+    assert "params" not in calls[0][1]
+    assert "requestedBy" not in calls[-1][1]["json"]
+    assert all(call[1]["headers"]["Authorization"].startswith("Bearer ") for call in calls)
 
 
 @pytest.mark.parametrize("action", ["edit", "approve"])
@@ -134,7 +137,7 @@ def test_submission_success_preserves_201_and_pending_record(monkeypatch):
     assert response.json == booking
     assert calls[-1][1]["json"] == {
         key: value
-        for key, value in (PAYLOAD | {"requestedBy": "coordinator-1"}).items()
+        for key, value in PAYLOAD.items()
         if key != "coordinatorId"
     }
 
@@ -202,7 +205,7 @@ def test_assignment_and_catalogue_errors_prevent_submission(
 
 def test_create_non_object_payload_is_rejected():
     assert (
-        create_app().test_client().post("/booking-requests", json=[]).status_code == 400
+        signed_in(create_app().test_client()).post("/booking-requests", json=[]).status_code == 400
     )
 
 
@@ -211,7 +214,7 @@ def test_create_non_object_payload_is_rejected():
 def test_review_client_success_not_found_and_failure(
     monkeypatch, action, status, expected
 ):
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     monkeypatch.setattr(
         clients.httpx,
         "get",
@@ -272,19 +275,15 @@ def test_listing_parent_access_errors(monkeypatch, status, expected):
         ),
     )
     assert (
-        create_app()
-        .test_client()
+        signed_in(create_app().test_client())
         .get("/events/event-1/booking-requests?coordinatorId=coord-1")
         .status_code
         == expected
     )
 
 
-def test_listing_requires_coordinator():
-    assert (
-        create_app().test_client().get("/events/event-1/booking-requests").status_code
-        == 400
-    )
+def test_listing_requires_a_signed_in_coordinator():
+    assert create_app().test_client().get("/events/event-1/booking-requests").status_code == 401
 
 
 @pytest.mark.parametrize("status,expected", [(200, 200), (503, 502)])
@@ -316,8 +315,7 @@ def test_cancellation_parent_lookup_errors(monkeypatch, status, expected):
         ),
     )
     response = (
-        create_app()
-        .test_client()
+        signed_in(create_app().test_client())
         .patch(
             "/booking-requests/booking-1/cancel",
             json={"eventId": "event-1", "coordinatorId": "coord-1"},
@@ -328,8 +326,7 @@ def test_cancellation_parent_lookup_errors(monkeypatch, status, expected):
 
 def test_edit_rejects_offset_times():
     response = (
-        create_app()
-        .test_client()
+        signed_in(create_app().test_client())
         .patch(
             "/booking-requests/booking-1",
             json=PAYLOAD | {"requestedStartTime": "2026-10-01T09:00+08:00"},
@@ -340,5 +337,5 @@ def test_edit_rejects_offset_times():
 
 def test_preflight_and_unconfigured_origin(monkeypatch):
     monkeypatch.setenv("FRONTEND_ORIGIN", "")
-    response = create_app().test_client().options("/booking-requests")
+    response = signed_in(create_app().test_client()).options("/booking-requests")
     assert response.status_code == 200

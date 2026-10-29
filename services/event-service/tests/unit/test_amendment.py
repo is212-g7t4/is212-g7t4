@@ -34,6 +34,7 @@ from app.models import (
     update_event_progress,
     update_event_safety_status,
 )
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-4000-8000-000000000016"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -112,7 +113,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": URL})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def request_amendment(client, **overrides):
@@ -268,22 +269,18 @@ def test_ac1_missing_or_draft_event_is_not_found(row, setup):
 ])
 def test_amendment_endpoints_require_database_configuration(endpoint, body):
     """Without DATABASE_URL both endpoints answer 503."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert client.patch(f"/events/{EVENT_ID}/{endpoint}", json=body).status_code == 503
 
 
 @pytest.mark.parametrize("endpoint, body, message", [
-    ("amendment-request", {"coordinatorId": "not-a-uuid"},
-     "A valid current coordinator ID is required."),
     ("amendment-request", ["not", "an", "object"],
-     "A valid current coordinator ID is required."),
-    ("amendment-response", {"organiserId": "not-a-uuid"},
-     "A valid current organiser ID is required."),
+     "Flag at least one field that needs amending."),
     ("amendment-response", "not an object",
-     "A valid current organiser ID is required."),
+     "Send the amended values for the flagged fields."),
 ])
-def test_amendment_endpoints_require_valid_identity(endpoint, body, message, setup):
-    """A body that isn't an object, or a bad id, is refused before any database work."""
+def test_amendment_endpoints_refuse_a_non_object_body(endpoint, body, message, setup):
+    """A body that isn't an object is refused before any database work (the caller is the token's, SCRUM-8)."""
     response = setup[0].patch(f"/events/{EVENT_ID}/{endpoint}", json=body)
     assert response.status_code == 400
     assert response.json["message"] == message

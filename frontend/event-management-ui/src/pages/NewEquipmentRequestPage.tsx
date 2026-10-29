@@ -91,7 +91,7 @@ export function NewEquipmentRequestPage({ role, user, onBack, onCreated }: {
     try {
       await createEquipmentRequests(eventId, added.map((item) => ({
         equipmentId: item.equipmentId, quantityRequested: item.quantity, technicalRequirements: item.requirements,
-      })), coordinator)
+      })))
       const eventName = events.find((event) => event.id === eventId)?.eventName ?? 'the event'
       onCreated(`Requested ${added.length} equipment item${added.length === 1 ? '' : 's'} for ${eventName}.`)
     } catch (cause) {

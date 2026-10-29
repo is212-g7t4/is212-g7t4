@@ -88,7 +88,7 @@ function VenueFormPage({ role, onSaved, venueId, onCancel, user }: VenueFormPage
         || safety.knownRestrictions.trim() !== savedSafety.knownRestrictions.trim()
       if (venueId && user && canEditSafety && safetyChanged) {
         try {
-          await updateVenueSafetyInfo(venueId, safety, user)
+          await updateVenueSafetyInfo(venueId, safety)
           setSavedSafety(safety)
         } catch (cause) {
           // The profile is already saved; keep the form filled so staff can retry.

@@ -117,8 +117,8 @@ function Calendar({
           const next = addDays(from, Math.min(42, (Date.parse(until) - Date.parse(from)) / 86400000))
           const venue = venues.find(item => item.id === venueId)
           const rows = hasBuffers(venue)
-            ? await fetchCalendar(venueId, {start: from, end: next}, user, controller.signal, venue)
-            : await fetchCalendar(venueId, {start: from, end: next}, user, controller.signal)
+            ? await fetchCalendar(venueId, {start: from, end: next}, controller.signal, venue)
+            : await fetchCalendar(venueId, {start: from, end: next}, controller.signal)
           if (version !== inspectionVersion.current) return
           for (const row of rows) {
             const prior = unique.get(`${row.venueId}:${row.id}`)
@@ -210,8 +210,8 @@ function Calendar({
     Promise.all(venueIds.map(id => {
       const venue = venues.find(item => item.id === id)
       return hasBuffers(venue)
-        ? fetchCalendar(id, window, user, controller.signal, venue)
-        : fetchCalendar(id, window, user, controller.signal)
+        ? fetchCalendar(id, window, controller.signal, venue)
+        : fetchCalendar(id, window, controller.signal)
     })).then(groups => groups.flat())
       .then((rows) => {
         if (active) {
@@ -368,7 +368,7 @@ function Calendar({
       {inspectorOpen && (
         <aside id="calendar-inspector" className="calendar-inspector" aria-label="Time range inspector">
         <button onClick={() => setInspectorOpen(false)}>Close inspector</button>
-        <p>Asia/Singapore (SGT). DEV identity simulation — not authentication.</p>
+        <p>Asia/Singapore (SGT).</p>
         <p>Unavailable periods are visual indicators only: every range can be inspected. Pending confirmation does not reserve time.</p>
         <h3>Explore a time range</h3>
         <p className="calendar-window">Choose any dates — you do not need to navigate the calendar first. All times are Singapore time.</p>

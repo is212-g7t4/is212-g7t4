@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 import pytest
 from app import create_app
+from tests.unit.factories import bearer, signed_in
 
 VENUE = "00000000-0000-0000-0000-000000000001"
 CLOSURE = "00000000-0000-0000-0000-000000000002"
@@ -28,15 +29,15 @@ def test_ac1_ac2_distinct_original_closures(path, monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchall.side_effect = [[], [row()]]
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: connection)
-    client = create_app(
-        {"TESTING": True, "DATABASE_URL": "unused", "CALENDAR_DEV_MODE": True}
-    ).test_client()
+    client = signed_in(create_app(
+        {"TESTING": True, "DATABASE_URL": "unused"}
+    ).test_client())
     response = client.get(
         path,
         query_string=dict(
             venueId=VENUE, dateFrom=START.isoformat(), dateTo=END.isoformat()
         ),
-        headers={"X-Dev-User-Id": VENUE, "X-Dev-Role": "Event Coordinator"},
+        headers=bearer(VENUE, "Event Coordinator"),
     )
     assert response.status_code == 200
     assert response.json == {
@@ -268,16 +269,16 @@ def test_calendar_closure_roles_unchanged(monkeypatch, role, code):
 
     db = ClosureReadDB([row()])
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: db)
-    client = create_app(
-        {"TESTING": True, "DATABASE_URL": "unused", "CALENDAR_DEV_MODE": True}
-    ).test_client()
+    client = signed_in(create_app(
+        {"TESTING": True, "DATABASE_URL": "unused"}
+    ).test_client())
     try:
         response = client.get(
             "/venue-bookings",
             query_string=dict(
                 venueId=VENUE, dateFrom=START.isoformat(), dateTo=END.isoformat()
             ),
-            headers={"X-Dev-User-Id": VENUE, "X-Dev-Role": role},
+            headers=bearer(VENUE, role),
         )
         assert response.status_code == code
         if code == 200:
@@ -294,16 +295,16 @@ def test_malformed_closure_aborts_entire_http_read(monkeypatch, path):
 
     db = ClosureReadDB([row(reason=None)])
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: db)
-    client = create_app(
-        {"TESTING": True, "DATABASE_URL": "unused", "CALENDAR_DEV_MODE": True}
-    ).test_client()
+    client = signed_in(create_app(
+        {"TESTING": True, "DATABASE_URL": "unused"}
+    ).test_client())
     try:
         response = client.get(
             path,
             query_string=dict(
                 venueId=VENUE, dateFrom=START.isoformat(), dateTo=END.isoformat()
             ),
-            headers={"X-Dev-User-Id": VENUE, "X-Dev-Role": "Event Coordinator"},
+            headers=bearer(VENUE, "Event Coordinator"),
         )
         assert response.status_code == 503
         assert "bookings" not in response.json and "closures" not in response.json
@@ -318,16 +319,16 @@ def test_closure_collection_preserves_existing_booking_contract(monkeypatch, pat
 
     db = ClosureReadDB([row()], [booking_row(venue_id=VENUE, status="Approved")])
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: db)
-    client = create_app(
-        {"TESTING": True, "DATABASE_URL": "unused", "CALENDAR_DEV_MODE": True}
-    ).test_client()
+    client = signed_in(create_app(
+        {"TESTING": True, "DATABASE_URL": "unused"}
+    ).test_client())
     try:
         response = client.get(
             path,
             query_string=dict(
                 venueId=VENUE, dateFrom=START.isoformat(), dateTo=END.isoformat()
             ),
-            headers={"X-Dev-User-Id": VENUE, "X-Dev-Role": "Event Coordinator"},
+            headers=bearer(VENUE, "Event Coordinator"),
         )
         assert response.status_code == 200
         assert len(response.json["bookings"]) == len(response.json["closures"]) == 1

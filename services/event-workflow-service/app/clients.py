@@ -1,6 +1,7 @@
 import os
 
 import httpx
+from flask import has_request_context, request
 
 # Composites are the only services allowed to call other services (see
 # AGENTS.md). One thin wrapper per downstream call, and one base-URL env var
@@ -45,12 +46,20 @@ class EventRejectedError(Exception):
         self.body = body
 
 
+def _forwarded_auth():
+    """The caller's Supabase token, so downstream services see the same signed-in user (SCRUM-8)."""
+    if has_request_context() and request.headers.get("Authorization"):
+        return {"Authorization": request.headers["Authorization"]}
+    return {}
+
+
 def _send(method, url, **kwargs):
     """One HTTP call with every transport failure mapped to our own exceptions.
 
     Downstream URLs and error text never leave this module, so the browser
     learns nothing about the internal topology.
     """
+    kwargs["headers"] = {**_forwarded_auth(), **kwargs.get("headers", {})}
     try:
         return httpx.request(method, url, timeout=TIMEOUT, **kwargs)
     except httpx.TimeoutException:
@@ -86,8 +95,8 @@ def get_user(user_id: str) -> dict:
 # --- Event Service (atomic, 5003) -------------------------------------------
 
 
-def _details_call(event_id, coordinator_id, changes, actor_role, dry_run):
-    body = {"coordinatorId": coordinator_id, "changes": changes, "dryRun": dry_run}
+def _details_call(event_id, changes, actor_role, dry_run):
+    body = {"changes": changes, "dryRun": dry_run}
     if actor_role:
         body["actorRole"] = actor_role
     response = _send(
@@ -113,42 +122,35 @@ def _event_workflow_call(method, path, **kwargs):
     return _ok(response).json()
 
 
-def preview_event_details(event_id, coordinator_id, changes, actor_role=None) -> dict:
+def preview_event_details(event_id, changes, actor_role=None) -> dict:
     """Event Service's verdict on an edit with nothing written.
 
     It is the one authority on what counts as high-impact, so this is asked
     rather than re-derived. Returns `event`, `changedFields`,
     `highImpactFields` and `labels`.
     """
-    return _details_call(event_id, coordinator_id, changes, actor_role, dry_run=True)
+    return _details_call(event_id, changes, actor_role, dry_run=True)
 
 
-def save_event_details(event_id, coordinator_id, changes, actor_role=None) -> dict:
+def save_event_details(event_id, changes, actor_role=None) -> dict:
     """Save the edit; Event Service re-checks everything under its own row lock."""
-    return _details_call(event_id, coordinator_id, changes, actor_role, dry_run=False)
+    return _details_call(event_id, changes, actor_role, dry_run=False)
 
 
-def list_pending_change_requests(coordinator_id: str) -> list:
-    return _event_workflow_call(
-        "GET", "/change-requests", params={"coordinatorId": coordinator_id}
-    )["changeRequests"]
+def list_pending_change_requests() -> list:
+    return _event_workflow_call("GET", "/change-requests")["changeRequests"]
 
 
-def get_change_request(change_request_id: str, coordinator_id: str) -> dict:
-    return _event_workflow_call(
-        "GET",
-        f"/change-requests/{change_request_id}",
-        params={"coordinatorId": coordinator_id},
-    )
+def get_change_request(change_request_id: str) -> dict:
+    return _event_workflow_call("GET", f"/change-requests/{change_request_id}")
 
 
 def decide_change_request(
     change_request_id: str,
-    coordinator_id: str,
     decision: str,
     reason: str | None = None,
 ) -> dict:
-    body = {"coordinatorId": coordinator_id, "decision": decision}
+    body = {"decision": decision}
     if reason is not None:
         body["reason"] = reason
     return _event_workflow_call(
@@ -194,30 +196,23 @@ def list_venues() -> list:
 # --- Equipment Request Service (atomic, 5011) -------------------------------
 
 
-def _identity(viewer_id):
-    # DEV identity headers, as the other composites send; READ_ROLES allows Event Coordinators.
-    return {"X-Dev-User-Id": viewer_id, "X-Dev-Role": "Event Coordinator"}
-
-
-def list_event_equipment_requests(event_id: str, viewer_id: str) -> list:
+def list_event_equipment_requests(event_id: str) -> list:
     response = _ok(
         _send(
             "GET",
             f"{EQUIPMENT_REQUEST_SERVICE_URL}/equipment-requests",
             params={"eventId": event_id},
-            headers=_identity(viewer_id),
         )
     )
     return response.json()["requests"]
 
 
-def list_approved_equipment_requests(event_ids: list, viewer_id: str) -> list:
+def list_approved_equipment_requests(event_ids: list) -> list:
     response = _ok(
         _send(
             "GET",
             f"{EQUIPMENT_REQUEST_SERVICE_URL}/equipment-requests",
             params={"status": "Approved", "eventIds": ",".join(event_ids)},
-            headers=_identity(viewer_id),
         )
     )
     return response.json()["requests"]

@@ -1,25 +1,17 @@
 import os
-import uuid
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 load_dotenv()
 
 from app.equipment import EQUIPMENT_TYPES, STATUSES
 from app.models import create_equipment, list_equipment
+from app.auth import authenticate
 
 MAX_TYPE_LENGTH = 100  # equipment_type is varchar(100)
 ALLOWED_ROLES = {"Technical Support", "Technical Support Staff"}
-
-
-def _is_uuid(value):
-    try:
-        uuid.UUID(value or "")
-    except ValueError:
-        return False
-    return True
 
 
 def _validate(payload):
@@ -51,6 +43,7 @@ def _validate(payload):
 
 def create_app(config=None):
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5173"),
@@ -69,7 +62,7 @@ def create_app(config=None):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
             response.headers["Access-Control-Allow-Headers"] = (
-                "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
+                "Content-Type, Accept, Authorization"
             )
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         if request.method == "OPTIONS":
@@ -96,12 +89,7 @@ def create_app(config=None):
 
     @app.post("/equipment")
     def equipment_create():
-        # DEV-only role check, same headers as Venue Availability Service.
-        # Replace with Supabase JWT verification when real auth lands.
-        role = request.headers.get("X-Dev-Role")
-        if not _is_uuid(request.headers.get("X-Dev-User-Id")) or not role:
-            return jsonify(message="DEV user UUID and role headers are required."), 401
-        if role not in ALLOWED_ROLES:
+        if g.role not in ALLOWED_ROLES:
             return jsonify(message="Only Technical Support can add equipment."), 403
         values, error = _validate(request.get_json(silent=True))
         if error:

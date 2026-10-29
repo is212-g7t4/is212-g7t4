@@ -24,7 +24,7 @@ export function HoldReminderAlert({ user }: { user?: Pick<User, 'id' | 'role'> }
     if (!isCoordinator || !userId || !userRole) return
     let active = true
     const load = () => {
-      fetchHoldReminders({ id: userId, role: userRole }).then(async (items) => {
+      fetchHoldReminders().then(async (items) => {
         if (!active) return
         setReminders(items)
         if (items.length === 0) return

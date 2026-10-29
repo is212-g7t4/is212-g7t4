@@ -49,7 +49,6 @@ test('edit uses the composite workflow so legacy conflicts are refreshed automat
 
 // SCRUM-167 Record Venue Safety Information ------------------------------------
 
-const staff = { id: 'staff-1', role: 'Venue Staff' as const }
 
 test('SCRUM-167 AC1: safety texts of 2000 characters pass and 2001 are refused', () => {
   expect(validateVenueForm({ ...completeForm, emergencyAccessDetails: 'x'.repeat(2000), knownRestrictions: 'y'.repeat(2000) }).errors).toEqual([])
@@ -61,16 +60,16 @@ test('SCRUM-167 AC1: safety texts of 2000 characters pass and 2001 are refused',
   ])
 })
 
-test('SCRUM-167 AC1/AC4: safety info goes straight to Venue Service with the Venue Staff identity', async () => {
+test('SCRUM-167 AC1/AC4: safety info goes straight to Venue Service', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ venue: { id: 'venue-1' } })))
   vi.stubGlobal('fetch', fetcher)
 
-  await updateVenueSafetyInfo('venue-1', { emergencyAccessDetails: '  North exits  ', knownRestrictions: '   ' }, staff)
+  await updateVenueSafetyInfo('venue-1', { emergencyAccessDetails: '  North exits  ', knownRestrictions: '   ' })
 
   expect(fetcher.mock.calls[0][0]).toBe('http://localhost:5006/venues/venue-1/safety-info')
   const request = fetcher.mock.calls[0][1] as RequestInit
   expect(request.method).toBe('PUT')
-  expect(request.headers).toEqual({ 'Content-Type': 'application/json', 'X-Dev-User-Id': 'staff-1', 'X-Dev-Role': 'Venue Staff' })
+  expect(request.headers).toEqual({ 'Content-Type': 'application/json' })
   // AC2: a cleared field is sent as null so the venue reads "Not provided".
   expect(JSON.parse(request.body as string)).toEqual({ emergencyAccessDetails: 'North exits', knownRestrictions: null })
 })
@@ -80,7 +79,7 @@ test('SCRUM-167 AC4: a refused safety save surfaces the server message and error
     code: 'VENUE_STAFF_ONLY', message: 'Only Venue Staff can edit venue safety information.',
   }), { status: 403 })))
 
-  const failure = updateVenueSafetyInfo('venue-1', { emergencyAccessDetails: 'a', knownRestrictions: 'b' }, staff)
+  const failure = updateVenueSafetyInfo('venue-1', { emergencyAccessDetails: 'a', knownRestrictions: 'b' })
 
   await expect(failure).rejects.toBeInstanceOf(VenueSubmissionError)
   await expect(failure).rejects.toMatchObject({ message: 'Only Venue Staff can edit venue safety information.', errors: [] })
@@ -89,7 +88,7 @@ test('SCRUM-167 AC4: a refused safety save surfaces the server message and error
 test('SCRUM-167 AC4: an unreadable error body falls back to a generic message', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not json', { status: 503 })))
 
-  await expect(updateVenueSafetyInfo('venue-1', { emergencyAccessDetails: '', knownRestrictions: '' }, staff))
+  await expect(updateVenueSafetyInfo('venue-1', { emergencyAccessDetails: '', knownRestrictions: '' }))
     .rejects.toMatchObject({ message: 'Unable to save the safety information.' })
 })
 

@@ -8,16 +8,10 @@ def validate_registration(data):
     if not isinstance(data, dict):
         return {}, ["Send a JSON object."], []
 
-    # The attendee's name, email and organisation come from their User record,
-    # so only the event and attendee are needed.
-    cleaned = {
-        "eventId": str(data.get("eventId") or "").strip(),
-        "attendeeId": str(data.get("attendeeId") or "").strip(),
-    }
-    missing = [
-        label for key, label in (("eventId", "Event"), ("attendeeId", "Attendee"))
-        if not cleaned[key]
-    ]
+    # The attendee is the signed-in user (SCRUM-8) and their name, email and
+    # organisation come from their User record, so only the event is needed.
+    cleaned = {"eventId": str(data.get("eventId") or "").strip()}
+    missing = ["Event"] if not cleaned["eventId"] else []
     return cleaned, [], missing
 
 

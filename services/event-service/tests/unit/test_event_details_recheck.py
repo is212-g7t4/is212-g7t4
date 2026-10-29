@@ -32,6 +32,7 @@ from app.models import (
     LOW_IMPACT_FIELDS,
     SAFETY_TRANSITIONS,
 )
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -94,7 +95,7 @@ def setup(monkeypatch):
             "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN,
         }
     )
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 @pytest.fixture
@@ -112,13 +113,13 @@ def no_token(monkeypatch):
             "INTERNAL_SERVICE_TOKEN": None,
         }
     )
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 @pytest.fixture
 def no_database():
     app = create_app({"TESTING": True, "DATABASE_URL": None})
-    return app.test_client()
+    return signed_in(app.test_client())
 
 
 def event_row(
@@ -752,16 +753,17 @@ def test_a_missing_event_is_404(setup):
     assert response.json["message"] == "Event request not found."
 
 
-@pytest.mark.parametrize("coordinator_id", ["not-a-uuid", "", None])
-def test_a_valid_coordinator_id_is_required(coordinator_id, setup):
-    client, _, cursor = setup
+def test_a_signed_in_coordinator_is_required(setup):
+    """SCRUM-8: the editor is the signed-in user, never a coordinatorId in the body."""
+    _, _, cursor = setup
+    client = setup[0].application.test_client()
 
     response = client.patch(
         f"/events/{EVENT_ID}/details",
-        json={"coordinatorId": coordinator_id, "changes": {"eventName": "Renamed"}},
+        json={"coordinatorId": COORDINATOR_ID, "changes": {"eventName": "Renamed"}},
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 

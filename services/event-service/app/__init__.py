@@ -5,7 +5,7 @@ from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 load_dotenv()
 
@@ -79,10 +79,10 @@ from app.models import (
     update_draft,
 )
 from app.validation import validate, validate_draft
+from app.auth import authenticate
 
 # Roles that see every event rather than only the ones assigned to them,
-# passed as ?viewerRole=. Until services verify a JWT (AGENTS.md) the role is
-# whatever the caller sends, like coordinatorId.
+# asked for with ?viewerRole=. The role itself is the signed-in caller's (SCRUM-8).
 LEAD_ROLE = "Event Coordinator Lead"
 ALL_EVENTS_ROLES = (LEAD_ROLE, "Venue Staff", "Technical Support", "Safety Officer")
 
@@ -163,18 +163,18 @@ def _safety_recheck(data):
     return cleaned, None
 
 
-def _organiser_id(raw):
-    try:
-        return str(UUID(raw)), None
-    except (ValueError, TypeError, AttributeError):
-        return None, (jsonify(message="A valid current organiser ID is required."), 400)
+def _current_user():
+    """The signed-in caller (SCRUM-8); never an id from the request body or query."""
+    if g.user_id:
+        return g.user_id, None
+    return None, (jsonify(message="Sign in to continue."), 401)
 
 
 def _draft_details(data, validator):
     """The organiser and event details from a draft request body, or the 400 to send."""
     if not isinstance(data, dict):
         return None, None, (jsonify(message="Send a JSON object."), 400)
-    organiser_id, failure = _organiser_id(data.get("organiserId", ""))
+    organiser_id, failure = _current_user()
     if failure:
         return None, None, failure
     missing, errors = validator(data)
@@ -205,6 +205,7 @@ def _draft_not_writable(error):
 
 def create_app(config=None):
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         # The Vite dev server is pinned to 5174 (strictPort in
@@ -291,12 +292,8 @@ def create_app(config=None):
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
         details = {key: data.get(key, "").strip() for key in (*FIELDS, "purpose")}
-        organiser_id = data.get("organiserId")
-        if organiser_id not in (None, ""):
-            try:
-                details["organiserId"] = str(UUID(organiser_id))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid organiser ID is required."), 400
+        if g.user_id:
+            details["organiserId"] = g.user_id
         return jsonify(submit_event(app.config["DATABASE_URL"], details)), 201
 
     @app.post("/events/drafts")
@@ -312,7 +309,7 @@ def create_app(config=None):
 
     @app.get("/events/drafts")
     def drafts():
-        organiser_id, failure = _organiser_id(request.args.get("organiserId", ""))
+        organiser_id, failure = _current_user()
         if failure:
             return failure
         if not app.config["DATABASE_URL"]:
@@ -356,7 +353,7 @@ def create_app(config=None):
 
     @app.delete("/events/drafts/<uuid:event_id>")
     def remove_draft(event_id):
-        organiser_id, failure = _organiser_id(request.args.get("organiserId", ""))
+        organiser_id, failure = _current_user()
         if failure:
             return failure
         if not app.config["DATABASE_URL"]:
@@ -369,11 +366,10 @@ def create_app(config=None):
 
     @app.get("/events/submitted")
     def submitted():
-        try:
-            coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
-        viewer_role = request.args.get("viewerRole") or None
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
+        viewer_role = g.role if request.args.get("viewerRole") else None
         if viewer_role and viewer_role != LEAD_ROLE:
             return jsonify(
                 message="Only the Event Coordinator Lead can view every submitted request."
@@ -406,11 +402,11 @@ def create_app(config=None):
 
     @app.get("/events")
     def list_events_route():
+        # ?organiserId= asks for the organiser's own view; who they are comes from the token.
         if request.args.get("organiserId") and not request.args.get("coordinatorId"):
-            try:
-                organiser_id = str(UUID(request.args["organiserId"]))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid current organiser ID is required."), 400
+            organiser_id, failure = _current_user()
+            if failure:
+                return failure
             if not app.config["DATABASE_URL"]:
                 return jsonify(
                     message="DATABASE_URL is not configured for Event Service."
@@ -418,12 +414,11 @@ def create_app(config=None):
             return jsonify(
                 events=list_organiser_events(app.config["DATABASE_URL"], organiser_id)
             )
-        try:
-            coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
 
-        viewer_role = request.args.get("viewerRole") or None
+        viewer_role = g.role if request.args.get("viewerRole") else None
         if viewer_role and viewer_role not in ALL_EVENTS_ROLES:
             return jsonify(message="This role cannot view all internal events."), 403
         status = request.args.get("status") or None
@@ -513,11 +508,11 @@ def create_app(config=None):
 
     @app.get("/events/<uuid:event_id>")
     def get_event_details(event_id):
+        # ?organiserId= asks for the organiser's own view; who they are comes from the token.
         if request.args.get("organiserId") and not request.args.get("coordinatorId"):
-            try:
-                organiser_id = str(UUID(request.args["organiserId"]))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid current organiser ID is required."), 400
+            organiser_id, failure = _current_user()
+            if failure:
+                return failure
             if not app.config["DATABASE_URL"]:
                 return jsonify(
                     message="DATABASE_URL is not configured for Event Service."
@@ -533,11 +528,10 @@ def create_app(config=None):
                     message="You can only view registrations for events you created."
                 ), 403
             return jsonify(event), 200
-        try:
-            coordinator_id = str(UUID(request.args.get("coordinatorId", "")))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
-        viewer_role = request.args.get("viewerRole") or None
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
+        viewer_role = g.role if request.args.get("viewerRole") else None
         if viewer_role and viewer_role not in ALL_EVENTS_ROLES:
             return jsonify(message="This role cannot view all internal events."), 403
         if not app.config["DATABASE_URL"]:
@@ -564,7 +558,7 @@ def create_app(config=None):
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
-        organiser_id, failure = _organiser_id(data.get("organiserId", ""))
+        organiser_id, failure = _current_user()
         if failure:
             return failure
         changes = data.get("changes")
@@ -625,18 +619,12 @@ def create_app(config=None):
             request.headers.get("X-Internal-Service-Token", ""), configured_token
         )
 
-    def _coordinator_id(value):
-        try:
-            return str(UUID(value)), None
-        except (ValueError, TypeError, AttributeError):
-            return None, (jsonify(message="A valid current coordinator ID is required."), 400)
-
     @app.get("/change-requests")
     def pending_change_requests():
         """Atomic read used by Event Workflow Service (SCRUM-43 AC1/AC2)."""
         if not _change_workflow_is_internal():
             return jsonify(code="INTERNAL_ONLY", message="Internal workflow access required."), 403
-        coordinator_id, failure = _coordinator_id(request.args.get("coordinatorId", ""))
+        coordinator_id, failure = _current_user()
         if failure:
             return failure
         if not app.config["DATABASE_URL"]:
@@ -651,7 +639,7 @@ def create_app(config=None):
     def change_request_details(change_request_id):
         if not _change_workflow_is_internal():
             return jsonify(code="INTERNAL_ONLY", message="Internal workflow access required."), 403
-        coordinator_id, failure = _coordinator_id(request.args.get("coordinatorId", ""))
+        coordinator_id, failure = _current_user()
         if failure:
             return failure
         if not app.config["DATABASE_URL"]:
@@ -674,7 +662,7 @@ def create_app(config=None):
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
-        coordinator_id, failure = _coordinator_id(data.get("coordinatorId", ""))
+        coordinator_id, failure = _current_user()
         if failure:
             return failure
         decision = data.get("decision")
@@ -728,17 +716,15 @@ def create_app(config=None):
     def assign_coordinator(event_id):
         data = request.get_json(silent=True)
         coordinator_id = data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
-        assigned_by = data.get("assignedBy", "") if isinstance(data, dict) else ""
         try:
             coordinator_id = str(UUID(coordinator_id))
         except (ValueError, TypeError, AttributeError):
             return jsonify(message="A valid coordinator ID is required."), 400
         # Who made the assignment is shown on the event's detail page, so it
         # is required rather than left blank.
-        try:
-            assigned_by = str(UUID(assigned_by))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid assigning user ID is required."), 400
+        assigned_by, failure = _current_user()
+        if failure:
+            return failure
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         try:
@@ -760,13 +746,11 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/progress")
     def update_progress(event_id):
         data = request.get_json(silent=True)
-        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
         status = data.get("status", "") if isinstance(data, dict) else ""
         action_details = data.get("actionDetails", "") if isinstance(data, dict) else ""
-        try:
-            coordinator_id = str(UUID(coordinator_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
         if status not in ALL_STATUSES:
             return jsonify(
                 message=f"Status must be one of: {', '.join(ALL_STATUSES)}."
@@ -811,7 +795,7 @@ def create_app(config=None):
     def update_details(event_id):
         """Edit an event's details (SCRUM-153 AC1, AC2; the write SCRUM-20 reuses).
 
-        Body: `{coordinatorId, changes: {<EDITABLE_FIELDS>: text},
+        Body: `{changes: {<EDITABLE_FIELDS>: text}, actorRole?, dryRun?,
         safetyRecheck?: {withdrawnSafetyCheckId, safetyCheckId, roundNumber}}`.
 
         This is the only endpoint that classifies a change as low- or
@@ -826,10 +810,9 @@ def create_app(config=None):
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
-        try:
-            coordinator_id = str(UUID(data.get("coordinatorId", "")))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
 
         changes = data.get("changes")
         if not isinstance(changes, dict) or not changes:
@@ -846,9 +829,8 @@ def create_app(config=None):
             ), 400
         if any(not isinstance(value, str) for value in changes.values()):
             return jsonify(message="Every value in changes must be text."), 400
-        actor_role = data.get("actorRole")
-        if actor_role is not None and not isinstance(actor_role, str):
-            return jsonify(message="actorRole must be text."), 400
+        # Asking to act in one's role (the Lead, SCRUM-20); the role itself comes from the token.
+        actor_role = g.role if data.get("actorRole") is not None else None
         dry_run = data.get("dryRun", False)
         if not isinstance(dry_run, bool):
             return jsonify(message="dryRun must be true or false."), 400
@@ -994,17 +976,15 @@ def create_app(config=None):
         remarks = None
         areas = None
         if status == "Pending Safety Check" or venue_change:
-            try:
-                coordinator_id = str(UUID(data.get("coordinatorId", "")))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid coordinator ID is required."), 400
+            coordinator_id, failure = _current_user()
+            if failure:
+                return failure
         if venue_change:
             pass
         elif status in ("Confirmed", "Safety Changes Requested", "Cancelled"):
-            try:
-                decided_by = str(UUID(data.get("decidedBy", "")))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid decidedBy ID is required."), 400
+            decided_by, failure = _current_user()
+            if failure:
+                return failure
             remarks = data.get("remarks")
             if remarks is not None and not isinstance(remarks, str):
                 return jsonify(message="remarks must be text."), 400
@@ -1083,12 +1063,9 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/approve")
     def approve(event_id):
-        data = request.get_json(silent=True)
-        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
-        try:
-            coordinator_id = str(UUID(coordinator_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
@@ -1112,12 +1089,10 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/clarification-request")
     def request_clarification(event_id):
         data = request.get_json(silent=True)
-        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
         message = data.get("message") if isinstance(data, dict) else None
-        try:
-            coordinator_id = str(UUID(coordinator_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
         if not isinstance(message, str) or not message.strip():
             return jsonify(message="A clarification question is required."), 400
         message = message.strip()
@@ -1149,12 +1124,10 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/clarification-response")
     def respond_to_clarification(event_id):
         data = request.get_json(silent=True)
-        organiser_id = data.get("organiserId", "") if isinstance(data, dict) else ""
         response = data.get("response") if isinstance(data, dict) else None
-        try:
-            organiser_id = str(UUID(organiser_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current organiser ID is required."), 400
+        organiser_id, failure = _current_user()
+        if failure:
+            return failure
         if not isinstance(response, str) or not response.strip():
             return jsonify(message="A clarification response is required."), 400
         response = response.strip()
@@ -1183,13 +1156,11 @@ def create_app(config=None):
     def request_amendment(event_id):
         """SCRUM-16 AC1/AC2/AC5: the assigned coordinator flags fields for the organiser to amend."""
         data = request.get_json(silent=True)
-        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
         fields = data.get("fields") if isinstance(data, dict) else None
         reason = data.get("reason") if isinstance(data, dict) else None
-        try:
-            coordinator_id = str(UUID(coordinator_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
         if (
             not isinstance(fields, list)
             or not fields
@@ -1234,13 +1205,11 @@ def create_app(config=None):
     def respond_to_amendment(event_id):
         """SCRUM-16 AC3/AC4: the organiser amends only the flagged fields and resubmits."""
         data = request.get_json(silent=True)
-        organiser_id = data.get("organiserId", "") if isinstance(data, dict) else ""
         changes = data.get("changes") if isinstance(data, dict) else None
         note = data.get("note") if isinstance(data, dict) else None
-        try:
-            organiser_id = str(UUID(organiser_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current organiser ID is required."), 400
+        organiser_id, failure = _current_user()
+        if failure:
+            return failure
         if not isinstance(changes, dict) or not changes:
             return jsonify(message="Send the amended values for the flagged fields."), 400
         if any(not isinstance(value, str) for value in changes.values()):
@@ -1285,12 +1254,10 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/reject")
     def reject(event_id):
         data = request.get_json(silent=True)
-        coordinator_id = data.get("coordinatorId", "") if isinstance(data, dict) else ""
         reason = data.get("reason") if isinstance(data, dict) else None
-        try:
-            coordinator_id = str(UUID(coordinator_id))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid current coordinator ID is required."), 400
+        coordinator_id, failure = _current_user()
+        if failure:
+            return failure
         if not isinstance(reason, str) or not reason.strip():
             return jsonify(
                 message="A reason is required when rejecting an event request."

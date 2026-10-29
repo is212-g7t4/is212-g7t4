@@ -2,6 +2,7 @@ import type { SubmittedEvent } from '../event/submission'
 import type { Venue } from '../venue/venues'
 import { fetchApprovedVenueId } from '../venue/eventVenue'
 import { fetchVenue } from '../venue/venues'
+import { authFetch } from '../auth/session'
 
 interface ApiRegistration {
   registration_id: string
@@ -40,7 +41,7 @@ export interface AttendeeRegistration {
 
 export async function loadAttendeeRegistrations(attendeeId: string): Promise<AttendeeRegistration[]> {
   const serviceUrl = import.meta.env.VITE_ATTENDEE_REGISTRATION_SERVICE_URL || 'http://localhost:5009'
-  const response = await fetch(`${serviceUrl}/registrations?attendeeId=${encodeURIComponent(attendeeId)}`)
+  const response = await authFetch(`${serviceUrl}/registrations?attendeeId=${encodeURIComponent(attendeeId)}`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load your registrations.')
 
@@ -72,7 +73,7 @@ export async function loadAttendeeRegistrations(attendeeId: string): Promise<Att
 
 export async function withdrawRegistration(registrationId: string, attendeeId: string) {
   const serviceUrl = import.meta.env.VITE_ATTENDEE_REGISTRATION_SERVICE_URL || 'http://localhost:5009'
-  const response = await fetch(`${serviceUrl}/registrations/${encodeURIComponent(registrationId)}/withdraw`, {
+  const response = await authFetch(`${serviceUrl}/registrations/${encodeURIComponent(registrationId)}/withdraw`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ attendeeId }),

@@ -6,6 +6,7 @@ import pytest
 
 from app import create_app
 from app.models import SINGAPORE
+from tests.unit.factories import signed_in
 
 ID_A = "00000000-0000-4000-8000-000000000001"
 ID_B = "00000000-0000-4000-8000-000000000002"
@@ -18,7 +19,7 @@ def setup(monkeypatch):
     connect = MagicMock(return_value=connection)
     monkeypatch.setattr("app.models.psycopg2.connect", connect)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), cursor, connect
+    return signed_in(app.test_client()), cursor, connect
 
 
 def test_returns_name_status_coordinator_and_window_for_requested_ids(setup):
@@ -50,7 +51,7 @@ def test_rejects_missing_or_invalid_ids(setup, query):
 
 
 def test_missing_database_url_is_503():
-    client = create_app({"DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"DATABASE_URL": None}).test_client())
     assert client.get(f"/events/summaries?ids={ID_A}").status_code == 503
 
 
@@ -99,7 +100,7 @@ def test_overlapping_events_reject_bad_input(setup, query):
 
 
 def test_overlapping_events_missing_database_url_is_503():
-    client = create_app({"DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"DATABASE_URL": None}).test_client())
     assert client.get(f"/events/overlapping?{WINDOW}").status_code == 503
 
 

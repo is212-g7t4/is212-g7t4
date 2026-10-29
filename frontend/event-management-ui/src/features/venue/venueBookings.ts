@@ -1,4 +1,4 @@
-import type { User } from '../../types'
+import { authFetch } from '../auth/session'
 
 export interface VenueBooking {
   id: string
@@ -56,7 +56,7 @@ async function request(path: string, init?: RequestInit) {
   const uncertainMessage = init?.method
     ? 'Unable to confirm whether the booking request was saved. Check existing bookings before trying again.'
     : 'Unable to load venue bookings.'
-  const response = await fetch(`${serviceUrl()}${path}`, init).catch(() => {
+  const response = await authFetch(`${serviceUrl()}${path}`, init).catch(() => {
     throw new Error(uncertainMessage)
   })
   const body = await response.json().catch(() => {
@@ -114,24 +114,21 @@ export interface VenueRequestEvent {
   bookings: VenueBooking[]
 }
 
-export async function fetchVenueRequests(user: Pick<User, 'id' | 'role'>, status?: string): Promise<VenueRequestEvent[]> {
-  const body = await request(`/booking-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`, {
-    headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
-  })
+export async function fetchVenueRequests(status?: string): Promise<VenueRequestEvent[]> {
+  const body = await request(`/booking-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`)
   return body.events as VenueRequestEvent[]
 }
 
 export async function reviewVenueRequest(
   bookingId: string,
   status: 'Approved' | 'Rejected',
-  user: Pick<User, 'id' | 'role'>,
   rejectionReason?: string,
 ): Promise<VenueBooking> {
   return request(`/booking-requests/${encodeURIComponent(bookingId)}/review`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
-    // SCRUM-29 AC4: only a rejection carries a reason.
-    body: JSON.stringify(status === 'Rejected' ? { status, reviewedBy: user.id, rejectionReason } : { status, reviewedBy: user.id }),
+    headers: { 'Content-Type': 'application/json' },
+    // SCRUM-29 AC4: only a rejection carries a reason. The reviewer is the signed-in user (SCRUM-8).
+    body: JSON.stringify(status === 'Rejected' ? { status, rejectionReason } : { status }),
   })
 }
 
@@ -161,8 +158,6 @@ export interface VenueRequestDetail {
   decisionBlockedReason: string | null
 }
 
-export async function fetchVenueRequestDetail(bookingId: string, user: Pick<User, 'id' | 'role'>): Promise<VenueRequestDetail> {
-  return request(`/booking-requests/${encodeURIComponent(bookingId)}`, {
-    headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
-  })
+export async function fetchVenueRequestDetail(bookingId: string): Promise<VenueRequestDetail> {
+  return request(`/booking-requests/${encodeURIComponent(bookingId)}`)
 }

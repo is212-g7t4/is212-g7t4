@@ -1,3 +1,4 @@
+import { authFetch } from '../auth/session'
 export interface Registration {
   id: string
   attendeeName: string
@@ -38,7 +39,7 @@ const registrationApi = () => import.meta.env.VITE_REGISTRATION_SERVICE_URL || '
 
 export async function fetchRegistrationCounts(eventIds: string[]): Promise<Record<string, RegistrationCount>> {
   if (eventIds.length === 0) return {}
-  const response = await fetch(`${registrationApi()}/registrations/counts?eventIds=${eventIds.join(',')}`)
+  const response = await authFetch(`${registrationApi()}/registrations/counts?eventIds=${eventIds.join(',')}`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load registration counts.')
   return body.counts as Record<string, RegistrationCount>
@@ -50,7 +51,7 @@ const attendeeRegistrationApi = () =>
   import.meta.env.VITE_ATTENDEE_REGISTRATION_SERVICE_URL || 'http://localhost:5009'
 
 export async function fetchRegistrations(eventId: string): Promise<Registration[]> {
-  const response = await fetch(
+  const response = await authFetch(
     `${attendeeRegistrationApi()}/events/${encodeURIComponent(eventId)}/registrations`,
   )
   const body = await response.json().catch(() => ({}))

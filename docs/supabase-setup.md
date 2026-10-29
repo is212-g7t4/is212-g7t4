@@ -45,13 +45,24 @@ requests made through a privileged backend connection.
 
 The existing backend pattern is `DATABASE_URL` with a Postgres driver.
 Keep that connection server-side. A privileged `postgres` connection can
-bypass RLS, so production availability access must independently verify identity
-and allow only Event Coordinators, Venue Staff and Technical Support Staff.
-SCRUM-25 explicitly defers real authentication: its calendar GET is disabled by
-default and offers an opt-in `CALENDAR_DEV_MODE=true` user-switcher simulation
-using spoofable `X-Dev-User-Id` / `X-Dev-Role` headers. This is **not secure auth**;
-see the Venue Availability README for the exact development-only contract.
+bypass RLS, so each service verifies the caller's Supabase Auth token itself
+(see below) before applying its own role rules.
 Inspect live policies and grants before enabling direct browser data access.
+
+### Supabase Auth (SCRUM-8)
+
+Sign-in uses Supabase Auth's email + password grant, called only by User
+Service's `POST /auth/login` with `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+Every `auth.users` row has the same id and email as its `public."User"` row;
+accounts are created in Supabase (there is no sign-up).
+
+Each service verifies access tokens against the project's JWKS
+(`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, ES256, audience
+`authenticated`). The caller's role is read from the **`user_role`** claim,
+which `public.custom_access_token_hook` copies from `public."User".role`. That
+hook must be enabled under **Authentication → Hooks → Customize Access Token
+(JWT) Claims**; without it tokens carry no role and every role check answers
+`403`.
 
 ## 4. Add a Postgres driver to your service
 
@@ -145,7 +156,7 @@ do not claim the full Week 4 unavailability requirement is complete.
 | Status | Unconstrained nullable varchar | Inspect distinct live values and agree one canonical enum/check before mapping approved/pending states. |
 | Concurrent approvals | No overlap exclusion constraint shown | Recheck and save under a transaction-safe per-venue lock or equivalent DB enforcement. Every blocking write must follow the same rule. |
 | Query performance | PKs shown; secondary indexes not supplied | Inspect live indexes; add a venue/time-range index if needed. |
-| Internal-only access | User role field exists; JWT linkage/policies not established by this export | Production auth remains deferred. SCRUM-25 tests direct external-role denial only in opt-in, spoofable DEV header simulation; never claim real identity enforcement. |
+| Internal-only access | User role field exists; RLS policies not established by this export | Services verify the Supabase Auth token (SCRUM-8) and apply their own role rules over the privileged connection. |
 
 Conflict computation itself needs no additional booking columns. The
 `required_capacity` and `venue_requirements` columns are instead required for

@@ -78,7 +78,6 @@ test('SCRUM-167 AC1: changed safety values are saved after the profile', async (
   expect(updateVenueSafetyInfo).toHaveBeenCalledWith(
     'venue-1',
     { emergencyAccessDetails: 'North and south exits', knownRestrictions: 'Noise curfew 10pm' },
-    staff,
   )
   expect(vi.mocked(updateVenue).mock.invocationCallOrder[0])
     .toBeLessThan(vi.mocked(updateVenueSafetyInfo).mock.invocationCallOrder[0])

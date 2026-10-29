@@ -1,5 +1,5 @@
-import type { User } from '../../types'
 import type { Venue } from './venues'
+import { authFetch } from '../auth/session'
 
 export interface VenueFormData {
   name: string
@@ -116,7 +116,7 @@ async function saveVenue(path: string, method: 'POST' | 'PUT', form: VenueFormDa
   // Editing a venue changes both its catalogue profile and the scheduling
   // rules applied to existing bookings, so the composite owns that workflow.
   const serviceUrl = method === 'PUT' ? venueBookingServiceUrl() : venueServiceUrl()
-  const response = await fetch(`${serviceUrl}${path}`, {
+  const response = await authFetch(`${serviceUrl}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -134,11 +134,10 @@ export type VenueSafetyInfo = Pick<VenueFormData, 'emergencyAccessDetails' | 'kn
 export async function updateVenueSafetyInfo(
   venueId: string,
   safety: VenueSafetyInfo,
-  user: Pick<User, 'id' | 'role'>,
 ): Promise<Venue> {
-  const response = await fetch(`${venueServiceUrl()}/venues/${encodeURIComponent(venueId)}/safety-info`, {
+  const response = await authFetch(`${venueServiceUrl()}/venues/${encodeURIComponent(venueId)}/safety-info`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       emergencyAccessDetails: safety.emergencyAccessDetails.trim() || null,
       knownRestrictions: safety.knownRestrictions.trim() || null,

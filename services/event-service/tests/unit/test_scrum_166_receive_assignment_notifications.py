@@ -25,6 +25,7 @@ from app import create_app
 from unittest.mock import MagicMock, patch
 import pytest
 from app.models import FIELDS, update_event_coordinator, NoCoordinatorChangeError
+from tests.unit.factories import signed_in
 
 
 EVENT = "30000000-0000-4000-8000-000000000001"
@@ -97,7 +98,7 @@ def request_freeze(row, envelope):
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchone.side_effect = [row, {**row, "envelope": envelope}]
     with patch("psycopg2.connect", return_value=connection):
-        client = create_app(dict(TESTING=True, DATABASE_URL="synthetic", INTERNAL_SERVICE_TOKEN="test-token")).test_client()
+        client = signed_in(create_app(dict(TESTING=True, DATABASE_URL="synthetic", INTERNAL_SERVICE_TOKEN="test-token")).test_client())
         response = client.post(f"/internal/notification-outbox/{JOB}/freeze",
                                headers={"X-Internal-Token": "test-token"},
                                json=dict(leaseToken=LEASE, envelope=envelope))

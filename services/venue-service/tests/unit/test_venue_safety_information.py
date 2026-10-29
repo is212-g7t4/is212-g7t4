@@ -17,6 +17,7 @@ import pytest
 
 from app import create_app
 from tests.unit.factories import (
+    signed_in,
     SAFETY_PAYLOAD,
     STAFF_ID,
     VALID_PAYLOAD,
@@ -55,7 +56,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return app.test_client(), cursor, connect
+    return signed_in(app.test_client()), cursor, connect
 
 
 def put_safety(client, body=SAFETY_PAYLOAD, headers=None):
@@ -283,15 +284,16 @@ def test_ac4_non_venue_staff_role_is_refused_before_any_db_call(role, setup):
 @pytest.mark.parametrize(
     ("headers", "message"),
     [
-        ({}, "A valid DEV user UUID is required."),
-        ({"X-Dev-User-Id": "not-a-uuid", "X-Dev-Role": "Venue Staff"}, "A valid DEV user UUID is required."),
-        ({"X-Dev-User-Id": STAFF_ID}, "A DEV role header is required."),
+        ({}, "Sign in to continue."),
+        ({"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}, "Sign in to continue."),
+        ({"Authorization": "Bearer not-a-jwt"}, "Your session is invalid or has expired. Sign in again."),
     ],
-    ids=["no-headers", "bad-uuid", "no-role"],
+    ids=["no-token", "dev-headers-only", "invalid-token"],
 )
 def test_ac4_missing_or_invalid_identity_is_refused(headers, message, setup):
-    """Failure: a request without a usable identity never reaches the database."""
-    client, _, connect = setup
+    """Failure (SCRUM-8): a request without a valid sign-in never reaches the database."""
+    _, _, connect = setup
+    client = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"}).test_client()
 
     response = put_safety(client, headers=headers)
 
@@ -344,8 +346,8 @@ def test_ac4_profile_edit_does_not_write_safety_fields(method, path, fetches, se
     assert STAFF_ID not in write_params
 
 
-def test_cors_allows_dev_identity_headers(setup):
-    """Normal: the browser preflight for the safety save is allowed to send X-Dev-*."""
+def test_cors_allows_the_authorization_header(setup):
+    """Normal: the browser preflight for the safety save is allowed to send the sign-in token."""
     client, _, _ = setup
 
     response = client.options(
@@ -353,14 +355,14 @@ def test_cors_allows_dev_identity_headers(setup):
         headers={
             "Origin": "http://localhost:5174",
             "Access-Control-Request-Method": "PUT",
-            "Access-Control-Request-Headers": "content-type, x-dev-user-id, x-dev-role",
+            "Access-Control-Request-Headers": "content-type, authorization",
         },
     )
 
     assert response.status_code == 200
     allowed = response.headers["Access-Control-Allow-Headers"]
-    assert "X-Dev-User-Id" in allowed
-    assert "X-Dev-Role" in allowed
+    assert "Authorization" in allowed
+    assert "X-Dev-Role" not in allowed
     assert "PUT" in response.headers["Access-Control-Allow-Methods"]
 
 
@@ -395,7 +397,7 @@ def test_database_error_is_503(setup, monkeypatch):
 
 def test_database_not_configured_is_503():
     """Failure: no DATABASE_URL means the save cannot run."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     response = put_safety(client)
 

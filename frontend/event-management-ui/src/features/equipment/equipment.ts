@@ -1,3 +1,4 @@
+import { authFetch } from '../auth/session'
 export const EQUIPMENT_TYPES = ['Microphone', 'LightingKit', 'Projector', 'Laptop', 'Furniture', 'Table', 'Chair', 'Speaker'] as const
 export const EQUIPMENT_STATUSES = ['Available', 'Unavailable'] as const
 
@@ -26,17 +27,16 @@ const equipmentServiceUrl = () => import.meta.env.VITE_EQUIPMENT_SERVICE_URL || 
 
 export async function fetchEquipment(status?: EquipmentStatus): Promise<Equipment[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : ''
-  const response = await fetch(`${equipmentServiceUrl()}/equipment${query}`)
+  const response = await authFetch(`${equipmentServiceUrl()}/equipment${query}`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load the equipment catalogue.')
   return body.equipment as Equipment[]
 }
 
-/** DEV headers identify the switcher user; they are spoofable until real auth lands. */
-export async function createEquipment(payload: NewEquipment, user: { id: string; role: string }): Promise<Equipment> {
-  const response = await fetch(`${equipmentServiceUrl()}/equipment`, {
+export async function createEquipment(payload: NewEquipment): Promise<Equipment> {
+  const response = await authFetch(`${equipmentServiceUrl()}/equipment`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   const body = await response.json().catch(() => ({}))

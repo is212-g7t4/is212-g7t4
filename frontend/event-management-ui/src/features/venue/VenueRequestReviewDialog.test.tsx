@@ -42,7 +42,7 @@ const show = async () => {
 
 test('AC1: opening a request shows the event timing, attendance and requirements beside the booking', async () => {
   const dialog = await show()
-  expect(fetchVenueRequestDetail).toHaveBeenCalledWith('b1', user)
+  expect(fetchVenueRequestDetail).toHaveBeenCalledWith('b1')
   expect(dialog.getByText('Fri, 1 Mar · 9:00 am – 5:00 pm')).toBeInTheDocument()
   expect(dialog.getByText('Stage')).toBeInTheDocument()
   expect(dialog.getByText('Wheelchair ramp')).toBeInTheDocument()
@@ -85,7 +85,7 @@ test('AC2: Approve records the decision and hands the booking back', async () =>
   const dialog = await show()
   fireEvent.click(dialog.getByRole('button', { name: 'Approve' }))
   await waitFor(() => expect(onDecided).toHaveBeenCalledWith(expect.objectContaining({ status: 'Approved' }), 'Venue request approved.'))
-  expect(reviewVenueRequest).toHaveBeenCalledWith('b1', 'Approved', user, undefined)
+  expect(reviewVenueRequest).toHaveBeenCalledWith('b1', 'Approved', undefined)
 })
 
 test('AC3/AC4: Reject asks for a reason, keeps Confirm disabled while blank, and sends it trimmed', async () => {
@@ -101,7 +101,7 @@ test('AC3/AC4: Reject asks for a reason, keeps Confirm disabled while blank, and
   expect(reject.getByLabelText(/Reason for rejection/)).toHaveAttribute('maxLength', '500')
   fireEvent.change(reject.getByLabelText(/Reason for rejection/), { target: { value: '  Hall is too small.  ' } })
   fireEvent.click(confirm)
-  await waitFor(() => expect(reviewVenueRequest).toHaveBeenCalledWith('b1', 'Rejected', user, 'Hall is too small.'))
+  await waitFor(() => expect(reviewVenueRequest).toHaveBeenCalledWith('b1', 'Rejected', 'Hall is too small.'))
   expect(onDecided).toHaveBeenCalledWith(expect.objectContaining({ status: 'Rejected' }), 'Venue request rejected.')
 })
 

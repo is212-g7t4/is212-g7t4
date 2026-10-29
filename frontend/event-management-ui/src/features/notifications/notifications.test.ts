@@ -21,16 +21,18 @@
  */
 import { afterEach, expect, test, vi } from 'vitest'
 import { notificationApi, notificationDate, notificationPath } from './notifications'
+import { signInAs, tokenOf } from '../../test/session'
 const user = { id: '10000000-0000-0000-0000-000000000001', role: 'Attendee' as const, username: 'A', email: '', organization: '' }
 afterEach(() => vi.unstubAllGlobals())
 test('own list/count/read use caller identity and opaque pagination, not recipient query', async () => {
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ notifications: [], nextCursor: null }) })
   vi.stubGlobal('fetch', fetch)
-  await notificationApi(user, '/notifications?'+new URLSearchParams({ limit: '20', unread: 'true', cursor: 'opaque+/=' }))
+  signInAs(user)
+  await notificationApi('/notifications?'+new URLSearchParams({ limit: '20', unread: 'true', cursor: 'opaque+/=' }))
   // Integration regression: 5014 belongs to SCRUM-20 Event Workflow, not inbox.
   expect(fetch.mock.calls[0][0]).toBe('http://localhost:5015/notifications?limit=20&unread=true&cursor=opaque%2B%2F%3D')
-  expect(fetch).toHaveBeenCalledWith(expect.stringContaining('cursor=opaque%2B%2F%3D'), expect.objectContaining({ headers: expect.objectContaining({ 'X-Dev-User-Id': user.id, 'X-Dev-Role': 'Attendee' }) }))
-  await notificationApi(user, '/notifications/item', { method: 'PATCH', body: JSON.stringify({ read: false }) })
+  expect(tokenOf(fetch.mock.calls[0][1])).toBe(`Bearer ${user.id} Attendee`)
+  await notificationApi('/notifications/item', { method: 'PATCH', body: JSON.stringify({ read: false }) })
   expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('/notifications/item'), expect.objectContaining({ method: 'PATCH', body: '{"read":false}' }))
 })
 test('structured destinations are independent of future type and never arbitrary URLs', () => {
@@ -43,7 +45,7 @@ test.each([
  [{}, 'Unable to load notifications.'],
 ])('failed API reads are errors, not empty successful inboxes: %j', async (body, expected) => {
  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => body }))
- await expect(notificationApi(user, '/notifications')).rejects.toThrow(expected)
+ await expect(notificationApi('/notifications')).rejects.toThrow(expected)
 })
 
 /** Review P3 public formatter: never coerce absent/malformed JSON timestamps into dates. */

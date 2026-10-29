@@ -1,6 +1,7 @@
 import os
 
 import httpx
+from flask import has_request_context, request
 
 # Composites are the only services allowed to call other services (see
 # AGENTS.md). Each downstream service gets its own base-URL env var and a
@@ -23,6 +24,13 @@ SAFETY_CHECK_SERVICE_URL = (
 # SCRUM-26 AC3 gives the whole search a 3-second budget. The two downstream
 # calls run in parallel, so each gets most of it rather than half.
 SEARCH_TIMEOUT = 2.5
+
+
+def _forwarded_auth():
+    """The caller's Supabase token, so downstream services see the same signed-in user (SCRUM-8)."""
+    if has_request_context() and request.headers.get("Authorization"):
+        return {"Authorization": request.headers["Authorization"]}
+    return {}
 
 
 class EventNotFoundError(Exception):
@@ -75,12 +83,9 @@ class RejectionReasonRequiredError(Exception):
     """SCRUM-29 AC4: Venue Availability refused a reject with no usable reason."""
 
 
-def get_event(event_id: str, coordinator_id: str) -> dict:
-    """Fetch an event from Event Service, scoped to the requesting coordinator."""
-    response = httpx.get(
-        f"{EVENT_SERVICE_URL}/events/{event_id}",
-        params={"coordinatorId": coordinator_id},
-    )
+def get_event(event_id: str) -> dict:
+    """Fetch an event from Event Service, scoped to the signed-in coordinator."""
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events/{event_id}", headers=_forwarded_auth())
     if response.status_code == 404:
         raise EventNotFoundError
     if response.status_code == 403:
@@ -89,11 +94,12 @@ def get_event(event_id: str, coordinator_id: str) -> dict:
     return response.json()
 
 
-def get_event_for_internal_viewer(event_id: str, viewer_id: str, viewer_role: str) -> dict:
+def get_event_for_internal_viewer(event_id: str, viewer_role: str) -> dict:
     """Resolve event display details for an authorised internal venue workflow."""
     response = httpx.get(
         f"{EVENT_SERVICE_URL}/events/{event_id}",
-        params={"coordinatorId": viewer_id, "viewerRole": viewer_role},
+        params={"viewerRole": viewer_role},
+        headers=_forwarded_auth(),
     )
     response.raise_for_status()
     return response.json()
@@ -101,32 +107,32 @@ def get_event_for_internal_viewer(event_id: str, viewer_id: str, viewer_role: st
 
 def get_venues() -> list:
     """Return the venue catalogue from Venue Service."""
-    response = httpx.get(f"{VENUE_SERVICE_URL}/venues")
+    response = httpx.get(f"{VENUE_SERVICE_URL}/venues", headers=_forwarded_auth())
     response.raise_for_status()
     return response.json()["venues"]
 
 
-def get_staff_events(viewer_id):
-    response = httpx.get(f"{EVENT_SERVICE_URL}/events", params={"coordinatorId": viewer_id, "viewerRole": "Venue Staff"})
+def get_staff_events():
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events", params={"viewerRole": "Venue Staff"}, headers=_forwarded_auth())
     response.raise_for_status()
     return response.json()["events"]
 
 
 def get_safety_records(event_id):
     base = os.environ.get("SAFETY_CHECK_RECORD_SERVICE_URL") or "http://localhost:5013"
-    response = httpx.get(f"{base}/safety-check-records", params={"eventId": event_id})
+    response = httpx.get(f"{base}/safety-check-records", params={"eventId": event_id}, headers=_forwarded_auth())
     response.raise_for_status()
     return response.json()["safetyChecks"]
 
 
 def get_venue(venue_id: str) -> dict:
-    response = httpx.get(f"{VENUE_SERVICE_URL}/venues/{venue_id}")
+    response = httpx.get(f"{VENUE_SERVICE_URL}/venues/{venue_id}", headers=_forwarded_auth())
     response.raise_for_status()
     return response.json()["venue"]
 
 
 def update_venue_profile(venue_id: str, details: dict) -> dict:
-    response = httpx.put(f"{VENUE_SERVICE_URL}/venues/{venue_id}", json=details)
+    response = httpx.put(f"{VENUE_SERVICE_URL}/venues/{venue_id}", json=details, headers=_forwarded_auth())
     response.raise_for_status()
     return response.json()["venue"]
 
@@ -138,6 +144,7 @@ def reconcile_legacy_conflicts(venue: dict) -> dict:
             "setupTimeMinutes": venue.get("setupTimeMinutes", 0),
             "turnaroundTimeMinutes": venue.get("turnaroundTimeMinutes", 0),
         },
+        headers=_forwarded_auth(),
     )
     response.raise_for_status()
     return response.json()
@@ -150,7 +157,8 @@ def search_venues(filters: list) -> list:
     (facility, accessibility) survive the trip.
     """
     response = httpx.get(
-        f"{VENUE_SERVICE_URL}/venues", params=filters, timeout=SEARCH_TIMEOUT
+        f"{VENUE_SERVICE_URL}/venues", params=filters, timeout=SEARCH_TIMEOUT,
+        headers=_forwarded_auth(),
     )
     response.raise_for_status()
     return response.json()["venues"]
@@ -160,15 +168,15 @@ def get_bookings_between(start: str, end: str, padding_minutes: int = 0) -> dict
     """Bookings and distinct closures overlapping [start, end) for every venue.
 
     Uses the window read, not `GET /venue-bookings`: that one answers for a
-    single venue (what SCRUM-25's calendar grid needs) and is behind the
-    calendar's DEV-mode/user-switcher simulation, which a composite has no
-    business impersonating.
+    single venue (what SCRUM-25's calendar grid needs) and is role-gated
+    for the calendar's viewers.
     """
     response = httpx.get(
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/window",
         params={"dateFrom": start, "dateTo": end}
         | ({"paddingMinutes": padding_minutes} if padding_minutes else {}),
         timeout=SEARCH_TIMEOUT,
+        headers=_forwarded_auth(),
     )
     response.raise_for_status()
     payload = response.json()
@@ -184,7 +192,6 @@ def create_booking(
     end: str,
     required_capacity: int,
     venue_requirements: str,
-    requested_by: str,
     setup_time_minutes: int | None = None,
     turnaround_time_minutes: int | None = None,
 ) -> dict:
@@ -198,7 +205,6 @@ def create_booking(
             "requestedEndTime": end,
             "requiredCapacity": required_capacity,
             "venueRequirements": venue_requirements,
-            "requestedBy": requested_by,
         }
         | (
             {
@@ -208,6 +214,7 @@ def create_booking(
             if setup_time_minutes is not None and turnaround_time_minutes is not None
             else {}
         ),
+        headers=_forwarded_auth(),
     )
     if response.status_code == 409:
         raise BookingConflictError(_conflict_types(response))
@@ -218,7 +225,8 @@ def create_booking(
 def get_event_bookings(event_id: str) -> list:
     """Load all independently managed venue bookings linked to an event."""
     response = httpx.get(
-        f"{VENUE_AVAILABILITY_SERVICE_URL}/events/{event_id}/venue-bookings"
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/events/{event_id}/venue-bookings",
+        headers=_forwarded_auth(),
     )
     response.raise_for_status()
     return response.json()["bookings"]
@@ -226,7 +234,8 @@ def get_event_bookings(event_id: str) -> list:
 
 def get_booking(booking_id: str) -> dict:
     response = httpx.get(
-        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}"
+        f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}",
+        headers=_forwarded_auth(),
     )
     if response.status_code == 404:
         raise BookingNotFoundError
@@ -264,6 +273,7 @@ def update_booking(
             if setup_time_minutes is not None and turnaround_time_minutes is not None
             else {}
         ),
+        headers=_forwarded_auth(),
     )
     if response.status_code == 404:
         raise BookingNotFoundError
@@ -282,6 +292,7 @@ def cancel_booking(booking_id: str, event_id: str) -> dict:
     response = httpx.patch(
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/cancel",
         json={"eventId": event_id},
+        headers=_forwarded_auth(),
     )
     if response.status_code == 404:
         raise BookingNotFoundError
@@ -296,7 +307,6 @@ def cancel_booking(booking_id: str, event_id: str) -> dict:
 
 def decide_booking(
     booking_id: str,
-    reviewed_by: str,
     status: str,
     setup_time_minutes: int = 0,
     turnaround_time_minutes: int = 0,
@@ -305,7 +315,6 @@ def decide_booking(
     """Approve or reject a booking via Venue Availability Service."""
     action = "approve" if status == "Approved" else "reject"
     body = {
-        "reviewedBy": reviewed_by,
         "setupTimeMinutes": setup_time_minutes,
         "turnaroundTimeMinutes": turnaround_time_minutes,
     }
@@ -315,6 +324,7 @@ def decide_booking(
     response = httpx.patch(
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/{action}",
         json=body,
+        headers=_forwarded_auth(),
     )
     if response.status_code == 404:
         raise BookingNotFoundError
@@ -335,18 +345,16 @@ def decide_booking(
     return response.json()
 
 
-def withdraw_safety_for_venue_change(
-    event_id: str, coordinator_id: str, booking_id: str, reason: str
-) -> dict:
+def withdraw_safety_for_venue_change(event_id: str, booking_id: str, reason: str) -> dict:
     """SCRUM-28 Part B: withdraw a Confirmed event's approval before its booking changes."""
     response = httpx.post(
         f"{SAFETY_CHECK_SERVICE_URL}/safety-checks/withdraw-for-venue-change",
         json={
             "eventId": event_id,
-            "coordinatorId": coordinator_id,
             "bookingId": booking_id,
             "reason": reason,
         },
+        headers=_forwarded_auth(),
     )
     if not response.is_success:
         try:
@@ -357,17 +365,15 @@ def withdraw_safety_for_venue_change(
     return response.json()
 
 
-def restore_safety_after_venue_change(
-    event_id: str, coordinator_id: str, withdrawn_safety_check_id: str
-) -> dict:
+def restore_safety_after_venue_change(event_id: str, withdrawn_safety_check_id: str) -> dict:
     """Undo `withdraw_safety_for_venue_change` when the booking change then failed."""
     response = httpx.post(
         f"{SAFETY_CHECK_SERVICE_URL}/safety-checks/restore-after-venue-change",
         json={
             "eventId": event_id,
-            "coordinatorId": coordinator_id,
             "withdrawnSafetyCheckId": withdrawn_safety_check_id,
         },
+        headers=_forwarded_auth(),
     )
     response.raise_for_status()
     return response.json()

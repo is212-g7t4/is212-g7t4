@@ -21,6 +21,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { NotificationProvider, NotificationBell, NotificationsPage } from './NotificationCenter'
+import { signInAs, tokenOf } from '../../test/session'
 const A = { id: '10000000-0000-0000-0000-000000000001', role: 'Event Coordinator' as const, username: 'A', email: '', organization: '' }
 const B = { ...A, id: '10000000-0000-0000-0000-000000000002', username: 'B' }
 const destination = { kind: 'event-venue-request', eventId: '30000000-0000-0000-0000-000000000001', bookingId: '40000000-0000-0000-0000-000000000001' }
@@ -32,7 +33,7 @@ beforeEach(() => {
  vi.stubGlobal('fetch', fetcher)
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
-const view = (user = A, full = false, navigate = vi.fn()) => <NotificationProvider user={user} onNavigate={navigate}><NotificationBell onViewAll={() => {}} />{full && <NotificationsPage />}</NotificationProvider>
+const view = (user = A, full = false, navigate = vi.fn()) => (signInAs(user), <NotificationProvider user={user} onNavigate={navigate}><NotificationBell onViewAll={() => {}} />{full && <NotificationsPage />}</NotificationProvider>)
 test('opening bell never reads and renders full frozen SGT content as text', async () => {
  render(view()); await screen.findByLabelText('Notifications, 1 unread')
  fireEvent.click(screen.getByLabelText('Notifications, 1 unread'))
@@ -96,7 +97,7 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: Erro
 /** Identity isolation: synchronous unmount and late old-user read/write outcomes. */
 test('switching identities immediately clears data and ignores pending old-user read', async () => {
  const old = deferred<ReturnType<typeof response>>()
- fetcher.mockImplementation((_: string, init: RequestInit) => (init.headers as Record<string,string>)['X-Dev-User-Id'] === A.id ? old.promise : Promise.resolve(response(_.includes('unread-count') ? { unreadCount: 0 } : { notifications: [], nextCursor: null })))
+ fetcher.mockImplementation((_: string, init: RequestInit) => tokenOf(init).includes(A.id) ? old.promise : Promise.resolve(response(_.includes('unread-count') ? { unreadCount: 0 } : { notifications: [], nextCursor: null })))
  const ui = render(view(A, true)); ui.rerender(view(B, true))
  expect(screen.queryByText('Historic event')).not.toBeInTheDocument()
  await screen.findByText('No notifications yet.')
@@ -286,7 +287,7 @@ test('late old-user refresh and click failures cannot warn, navigate or repopula
  const navigate = vi.fn(), read = deferred<ReturnType<typeof response>>(), write = deferred<ReturnType<typeof response>>()
  const ui = render(view(A, true, navigate)); await screen.findByText('Historic event')
  fetcher.mockImplementation((url: string, init: RequestInit) => {
-  if ((init.headers as Record<string, string>)['X-Dev-User-Id'] === B.id)
+  if (tokenOf(init).includes(B.id))
    return Promise.resolve(response(url.includes('unread-count') ? { unreadCount: 0 } : { notifications: [], nextCursor: null }))
   return init.method === 'PATCH' ? write.promise : read.promise
  })
@@ -304,7 +305,7 @@ test('late old-user refresh and click failures cannot warn, navigate or repopula
 test.each(['success', 'failure'])('identity switch fences a pending old page %s', async outcome => {
  const page = deferred<ReturnType<typeof response>>()
  fetcher.mockImplementation((url: string, init: RequestInit) => {
-  const isB = (init.headers as Record<string, string>)['X-Dev-User-Id'] === B.id
+  const isB = tokenOf(init).includes(B.id)
   if (isB) return Promise.resolve(response(url.includes('unread-count') ? { unreadCount: 0 } : { notifications: [], nextCursor: null }))
   if (url.includes('cursor=')) return page.promise
   return Promise.resolve(response(url.includes('unread-count') ? { unreadCount: 1 } : { notifications: [item], nextCursor: 'next' }))

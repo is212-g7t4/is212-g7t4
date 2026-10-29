@@ -169,7 +169,7 @@ test('submitting sends the event and every added item, then reports success', as
   expect(createEquipmentRequests).toHaveBeenCalledWith('ev2', [
     { equipmentId: 'eq-mic', quantityRequested: 4, technicalRequirements: '2 lapel' },
     { equipmentId: 'eq-chair', quantityRequested: 60, technicalRequirements: '' },
-  ], expect.objectContaining({ id: 'coord-1' }))
+  ])
 })
 
 // Create request AC1/AC2 (validation): recording requires equipment needs and a corresponding event.
