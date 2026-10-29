@@ -30,7 +30,7 @@ addopts = [
     "--disable-socket",
 ]
 markers = [
-    "integration: needs a real external system (database, another service); opt-in, never run in CI",
+    "integration: needs a real external system (throwaway Postgres in Docker); deselected by default, run by CI's integration-tests job",
 ]
 xfail_strict = true
 

@@ -11,7 +11,7 @@ dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 addopts = "-m 'not integration' --cov=app --cov-branch --cov-report=term-missing --cov-report=xml"
-markers = ["integration: requires explicitly owned external systems; opt-in only"]
+markers = ["integration: needs a real external system (throwaway Postgres in Docker); deselected by default, run by CI's integration-tests job"]
 
 [tool.coverage.run]
 source = ["app"]
