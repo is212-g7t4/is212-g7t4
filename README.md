@@ -54,7 +54,9 @@ npm run test:e2e          # Playwright smoke tests (backend APIs are mocked)
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request, on
 pushes to `main`, nightly, and on demand: backend unit tests per service with an
-enforced coverage floor, frontend lint/tests/build, Playwright e2e, dependency
+enforced coverage floor, backend integration tests and repo-root e2e harnesses
+against throwaway Postgres/RabbitMQ containers, frontend lint/tests/build,
+Playwright e2e, dependency
 audits (`npm audit`, `pip-audit`), a Docker build check and a Gitleaks secret
 scan. Every run runs every test — nothing is skipped because a PR "didn't touch
 it" — and services are discovered automatically from `services/*/pyproject.toml`.

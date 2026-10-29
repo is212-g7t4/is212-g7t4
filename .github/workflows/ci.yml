@@ -79,6 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.list.outputs.services }}
+      integration: ${{ steps.list.outputs.integration }}
     steps:
       - uses: actions/checkout@v4
       - id: list
@@ -88,9 +89,18 @@ jobs:
           services=$(find services -mindepth 2 -maxdepth 2 -name pyproject.toml | cut -d/ -f2 | sort | jq -Rnc '[inputs]')
           echo "services=$services" >> "$GITHUB_OUTPUT"
           echo "Testing: $services"
+          # Likewise, a service joins the integration matrix once it has a
+          # tests/integration/ folder.
+          integration=$(find services -mindepth 3 -maxdepth 3 -type d -path 'services/*/tests/integration' | cut -d/ -f2 | sort | jq -Rnc '[inputs]')
+          echo "integration=$integration" >> "$GITHUB_OUTPUT"
+          echo "Integration: $integration"
           # A broken `find` must never turn into "no tests ran, all green".
           if [ "$services" = "[]" ]; then
             echo "::error::No services discovered under services/*/pyproject.toml"
+            exit 1
+          fi
+          if [ "$integration" = "[]" ]; then
+            echo "::error::No services discovered under services/*/tests/integration"
             exit 1
           fi
 
@@ -131,6 +141,103 @@ jobs:
         with:
           name: test-reports-${{ matrix.service }}
           path: services/${{ matrix.service }}/reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Each service's tests/integration/ against real infrastructure. Database
+  # tests start their own throwaway postgres:17.6 container (testcontainers or
+  # `docker run`) loaded with database/supabase/migrations, so no secrets are
+  # needed and the shared Supabase project is never touched. Composites stub
+  # their downstream services over HTTP with respx.
+  integration-tests:
+    name: integration-tests (${{ matrix.service }})
+    needs: discover-services
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover-services.outputs.integration) }}
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    env:
+      # There is no .env in CI, but some fixtures assert dotenv is off so a
+      # stray .env can never point them at the shared database.
+      PYTHON_DOTENV_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: services/${{ matrix.service }}/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      # Some fixtures run with --pull=never against a digest-pinned image.
+      - name: Pull test database images
+        run: |
+          docker pull -q postgres:17.6
+          grep -rhoE 'postgres@sha256:[0-9a-f]{64}' tests/integration | sort -u | xargs -r -n1 docker pull -q
+      # -m integration replaces pyproject's default "not integration" filter.
+      # --no-cov: the coverage floor is a unit-test measure.
+      - name: Run integration tests
+        env:
+          TMPDIR: ${{ runner.temp }} # equipment-request's fixture requires it
+        run: uv run pytest -m integration --no-cov --junitxml=reports/integration-junit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-reports-${{ matrix.service }}
+          path: services/${{ matrix.service }}/reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The repo e2e tier (docs/testing/integration-testing.md §2): the
+  # cross-service harnesses in the repo-root e2e/ folder, with real Flask
+  # processes for several services and their own throwaway PostgreSQL and
+  # RabbitMQ containers. The browser-driven checks (e2e/journeys/,
+  # e2e/verify_scrum171_frontend.py) are deliberately not run here.
+  repo-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+      REPORTS: ${{ github.workspace }}/reports/repo-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: services/*/uv.lock
+      # The harnesses start each service from its own .venv.
+      - name: Install every service's dependencies
+        run: |
+          for dir in services/*/; do
+            case "$dir" in services/_template-*) continue ;; esac
+            (cd "$dir" && uv sync --locked)
+          done
+      - name: Pull infrastructure images
+        run: |
+          for image in postgres:17.6 postgres:17 postgres:16 rabbitmq:4-management; do
+            docker pull -q "$image"
+          done
+      - name: SCRUM-46 attendee notifications + SCRUM-173 venue disruption notifications
+        env:
+          SCRUM173_INTEGRATION_EVIDENCE: ${{ env.REPORTS }}/scrum173
+        run: |
+          uv run --no-project --no-env-file --with pytest --with psycopg2-binary --with httpx \
+            python -m pytest e2e/test_attendee_notifications.py e2e/test_scrum173_real.py \
+            --junitxml="$REPORTS/junit.xml"
+      - name: SCRUM-171 venue closure (HTTP + PostgreSQL)
+        if: success() || failure()
+        run: |
+          uv run --no-project --no-env-file --with psycopg2-binary \
+            python e2e/verify_scrum171_postgres.py --output "$REPORTS/scrum171"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repo-e2e-reports
+          path: reports/repo-e2e/
           retention-days: 14
           if-no-files-found: ignore
 
@@ -237,6 +344,8 @@ jobs:
         changes,
         discover-services,
         unit-tests,
+        integration-tests,
+        repo-e2e,
         dependency-audit,
         frontend,
         e2e,
@@ -251,21 +360,22 @@ jobs:
           if echo '${{ join(needs.*.result, ' ') }}' | grep -qE 'failure|cancelled'; then
             exit 1
           fi
-      # These two must actually have run. A skipped job reports neither failure
+      # These must actually have run. A skipped job reports neither failure
       # nor cancellation, so without this a matrix that produced no jobs would
       # count as a pass.
       - name: Fail unless the backend jobs succeeded
         env:
-          UNIT_TESTS: ${{ needs.unit-tests.result }}
-          DEPENDENCY_AUDIT: ${{ needs.dependency-audit.result }}
+          RESULTS: >-
+            unit-tests=${{ needs.unit-tests.result }}
+            integration-tests=${{ needs.integration-tests.result }}
+            repo-e2e=${{ needs.repo-e2e.result }}
+            dependency-audit=${{ needs.dependency-audit.result }}
         run: |
           status=0
-          if [ "$UNIT_TESTS" != "success" ]; then
-            echo "::error::unit-tests did not succeed (result: $UNIT_TESTS)"
-            status=1
-          fi
-          if [ "$DEPENDENCY_AUDIT" != "success" ]; then
-            echo "::error::dependency-audit did not succeed (result: $DEPENDENCY_AUDIT)"
-            status=1
-          fi
+          for entry in $RESULTS; do
+            if [ "${entry#*=}" != "success" ]; then
+              echo "::error::${entry%%=*} did not succeed (result: ${entry#*=})"
+              status=1
+            fi
+          done
           exit $status
