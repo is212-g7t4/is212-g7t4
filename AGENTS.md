@@ -23,7 +23,7 @@ below for how this should shape commits.
 
 ```
 is212-g7t4/
-├── e2e/                             # cross-service end-to-end harnesses (real services); opt-in
+├── e2e/                             # cross-service end-to-end harnesses (real services); CI `repo-e2e` job
 │   └── journeys/                    # Playwright user journeys on the real stack; manual, see TRACEABILITY.md
 ├── frontend/                        # React SPA (Event Management System UI)
 ├── services/
@@ -31,7 +31,7 @@ is212-g7t4/
 │   │   ├── app/                     # Flask app factory + routes/models
 │   │   ├── tests/
 │   │   │   ├── unit/                # mocked; always run in CI
-│   │   │   └── integration/         # needs a real system; opt-in, never in CI
+│   │   │   └── integration/         # throwaway Postgres in Docker; CI `integration-tests` job
 │   │   ├── pyproject.toml           # also holds all pytest/coverage settings
 │   │   ├── uv.lock
 │   │   ├── .python-version          # 3.12, shared by local, CI and Docker
@@ -206,9 +206,13 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   - `tests/unit/` — fast, fully mocked tests. CI always runs these.
   - `tests/integration/` — anything needing a real external system (a database,
     another service). Marked `@pytest.mark.integration` (or a module-level
-    `pytestmark`), **deselected by default** and never run in CI, which has no
-    secrets. Run them deliberately:
-    `uv run pytest -m integration --no-cov`.
+    `pytestmark`), **deselected by default** so a plain `uv run pytest` stays
+    fast. Databases are throwaway `postgres:17.6` containers loaded with
+    `database/supabase/migrations` (never SQLite, never the shared Supabase),
+    so CI runs them in its own `integration-tests` job with no secrets. Run
+    them locally with Docker running:
+    `PYTHON_DOTENV_DISABLED=1 uv run pytest -m integration --no-cov`.
+    See [docs/testing/integration-testing.md](docs/testing/integration-testing.md).
 - Both folders, and `tests/` itself, are packages (`__init__.py`). Shared
   helpers go in `tests/unit/factories.py` and are imported as
   `from tests.unit.factories import ...`. **A test module must never import
@@ -287,16 +291,18 @@ A single workflow, `.github/workflows/ci.yml`, runs on every pull request, on
 pushes to `main`, nightly at 02:00 Singapore time, and on demand via the
 **Run workflow** button. No secrets are needed.
 
-**Every run runs every test.** Backend unit tests, the frontend suite and the
-e2e suite are not path-filtered: a change in one service can break another
+**Every run runs every test.** Backend unit and integration tests, the repo
+e2e harnesses, the frontend suite and the e2e suite are not path-filtered: a change in one service can break another
 through a shared contract, so nothing is skipped on the grounds that a PR
 "didn't touch it". A skipped job that reports green is worse than a slow one.
 Only `docker-build` still consults the `changes` job.
 
 | Job | What it checks |
 |---|---|
-| `discover-services` | Lists `services/*/pyproject.toml` to build the test matrix; fails if the list is empty |
+| `discover-services` | Lists `services/*/pyproject.toml` (unit/audit matrix) and `services/*/tests/integration/` (integration matrix); fails if either list is empty |
 | `unit-tests` (matrix, one per service) | `uv sync --locked`, then `uv run pytest` — flags come from `pyproject.toml`. Enforces the coverage floor, writes `junit.xml` + `coverage.xml` as artifacts, and adds a coverage table to the run summary |
+| `integration-tests` (matrix, one per service with `tests/integration/`) | `uv run pytest -m integration --no-cov` against throwaway `postgres:17.6` containers (composites stub their callees with `respx`); uploads `integration-junit.xml` |
+| `repo-e2e` | The repo-root `e2e/` harnesses (SCRUM-46, SCRUM-171 backend, SCRUM-173) with real service processes and their own throwaway Postgres/RabbitMQ containers; uploads their evidence |
 | `dependency-audit` (matrix, one per service) | `pip-audit` on the locked deps, so a vulnerable dependency reports as an audit failure rather than a test failure |
 | `frontend` | `npm audit --audit-level=high`, oxlint, Vitest with coverage, `tsc -b` + Vite build |
 | `e2e` | Playwright smoke tests (mocked APIs); uploads the report if it fails |
@@ -305,8 +311,8 @@ Only `docker-build` still consults the `changes` job.
 | `ci-passed` | Summary check — require this one in branch protection |
 
 - **`ci-passed` is the only required check.** It fails if any job failed or was
-  cancelled, *and* separately if `unit-tests` or `dependency-audit` is anything
-  other than `success` — a skipped backend job must never count as a pass.
+  cancelled, *and* separately if `unit-tests`, `integration-tests`, `repo-e2e`
+  or `dependency-audit` is anything other than `success` — a skipped backend job must never count as a pass.
   Renaming or adding jobs therefore never touches the branch protection rules.
 - **Adding a service:** CI discovers services automatically — any folder under
   `services/` with a `pyproject.toml` joins both matrices on its first PR, with
@@ -320,9 +326,9 @@ Only `docker-build` still consults the `changes` job.
 - **Gitleaks:** known false positives (the public Supabase key in the root
   `.env.example`) are listed in `.github/.gitleaksignore`. Run it locally with
   `gitleaks detect --gitleaks-ignore-path .github/.gitleaksignore`.
-- **Not covered:** Python lint/format, frontend formatting, real-database or
-  full-stack e2e (the repo-root `e2e/` harnesses are opt-in; SCRUM-173's has
-  its own manual workflow), and the opt-in live Supabase test
+- **Not covered:** Python lint/format, frontend formatting, browser tests
+  against the real stack (the `e2e/journeys/` Playwright journeys and
+  `e2e/verify_scrum171_frontend.py` stay manual), and the opt-in live Supabase test
   (`venue-availability-service/tests/live/test_calendar.py`, `live` marker) — it
   needs Supabase credentials, which CI deliberately does not have.
 
