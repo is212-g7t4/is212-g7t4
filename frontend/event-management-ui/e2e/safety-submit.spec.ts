@@ -55,6 +55,23 @@ test('AC2: outstanding arrangements are listed and the submit button is disabled
   await expect(page.getByRole('button', { name: 'Submit for safety check' })).toBeDisabled()
 })
 
+// SCRUM-149 fix (29 Oct 2026): rejected requests don't block. The mock only
+// replays the server's answer, so this proves the panel's rendering; the rule
+// itself is proven in the Safety Check Service's unit and integration tests.
+test('AC1: a ready event explains that rejected requests do not block, and can be submitted', async ({ page, mockApi }) => {
+  await openEvent(page, mockApi, approved)
+  await mockSafetyReadiness(page, { ready: true, outstanding: [] })
+  await page.goto('/my-events')
+
+  await page.getByRole('button', { name: /Safety Submit Expo/ }).click()
+  await expect(page.getByRole('heading', { name: 'Submit for safety check' })).toBeVisible()
+
+  await expect(page.getByText(
+    "Rejected venue bookings and equipment requests don't block a safety check. The Safety Officer still sees them in the review.",
+  )).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Submit for safety check' })).toBeEnabled()
+})
+
 test('AC1, AC3: a ready event is submitted with notes and becomes Pending Safety Check', async ({ page, mockApi }) => {
   const submitted: Record<string, unknown>[] = []
   await openEvent(page, mockApi, approved)
