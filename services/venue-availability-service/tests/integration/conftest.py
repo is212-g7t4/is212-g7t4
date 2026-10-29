@@ -88,6 +88,9 @@ def database_url():
                     # Migrations carrying BEGIN/COMMIT run exactly as written.
                     connection.autocommit = True
                     with connection.cursor() as cursor:
+                        # Supabase predefines these; later migrations grant/revoke on them.
+                        cursor.execute("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; "
+                                       "CREATE ROLE service_role NOLOGIN BYPASSRLS;")
                         for migration in sorted(MIGRATIONS.glob("*.sql")):
                             payload = migration.read_bytes()
                             digest = hashlib.sha256(payload).hexdigest()

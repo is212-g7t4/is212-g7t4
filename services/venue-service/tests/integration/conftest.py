@@ -43,6 +43,9 @@ def database_url():
         with closing(psycopg2.connect(url)) as connection:
             connection.autocommit = True
             with connection.cursor() as cursor:
+                # Supabase predefines these; later migrations grant/revoke on them.
+                cursor.execute("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; "
+                               "CREATE ROLE service_role NOLOGIN BYPASSRLS;")
                 for migration in sorted(MIGRATIONS.glob("*.sql")):
                     cursor.execute(migration.read_text(encoding="utf-8"))
         yield url

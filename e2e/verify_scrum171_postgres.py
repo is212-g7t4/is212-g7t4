@@ -155,6 +155,11 @@ class Harness:
             name=self.name,
             version=self.sql("SELECT version() AS v")[0]["v"],
         )
+        # Supabase predefines these; later migrations grant/revoke on them.
+        self.sql(
+            "CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; "
+            "CREATE ROLE service_role NOLOGIN BYPASSRLS;"
+        )
         for p in sorted((ROOT / "database/supabase/migrations").glob("*.sql")):
             if p != MIGRATION:
                 self.sql(p.read_text())
@@ -460,6 +465,9 @@ def cases(h):
         requestedEndTime=h.stamp(81).replace(tzinfo=None).isoformat(),
         requiredCapacity=20,
         venueRequirements="replacement",
+        # SCRUM-29 AC4: /reject validates its reason first; supply one so
+        # immutability is what is tested.
+        rejectionReason="replacement",
     )
     for service, prefix in [
         ("venue-availability", "/venue-bookings/"),
@@ -468,13 +476,22 @@ def cases(h):
         for bid in [h.legacy, affected[0]]:
             for action in ["", "/cancel", "/approve", "/reject"]:
                 before = h.snapshot()
+                # SCRUM-47: Venue Booking's decisions require a Venue Staff identity.
                 status, result = http(
-                    h.url(service, prefix + bid + action), mutation, method="PATCH"
+                    h.url(service, prefix + bid + action),
+                    mutation,
+                    headers=h.headers,
+                    method="PATCH",
                 )
+                # SCRUM-47: the composite's own "already decided" guard can
+                # answer a staff decision first; still a 409 with no write.
+                codes = {"BOOKING_IMMUTABLE"}
+                if service == "venue-booking" and action in ("/approve", "/reject"):
+                    codes.add("BOOKING_ALREADY_DECIDED")
                 h.check(
                     "immutable_" + service + "_" + bid + action,
                     status == 409
-                    and result.get("code") == "BOOKING_IMMUTABLE"
+                    and result.get("code") in codes
                     and h.snapshot() == before,
                     status=status,
                     response=result,

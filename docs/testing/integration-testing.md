@@ -96,11 +96,11 @@ continuous delivery.
 | Unit | `tests/unit/` | none | mocked | Every CI run; enforces the coverage floor |
 | Integration | `tests/integration/` | `integration` | `postgres:17.6` via Testcontainers | Every CI run (separate job); needs Docker, no secrets |
 | Live | `tests/live/` | `live` | The real Supabase project | Opt-in, locally only, **never in CI** |
-| Repo e2e | `e2e/` (repo root) | none | Its own containers (Postgres, RabbitMQ), several real services | Opt-in, dedicated workflow or by hand; never in the CI matrix |
+| Repo e2e | `e2e/` (repo root) | none | Its own containers (Postgres, RabbitMQ), several real services | Every CI run (`repo-e2e` job) except the browser-driven `verify_scrum171_frontend.py` and `e2e/journeys/`, which stay manual |
 
 ```
 uv run pytest                            # unit only (the default selection)
-uv run pytest -m integration --no-cov    # integration tier (Docker must be running)
+PYTHON_DOTENV_DISABLED=1 uv run pytest -m integration --no-cov    # integration tier (Docker must be running)
 uv run pytest -m live --no-cov           # live tier, needs real credentials in .env
 python3 scripts/verify_scrum173.py --integration-only   # repo e2e, SCRUM-173; Docker, takes minutes
 ```
@@ -140,6 +140,9 @@ Already done:
     collect. `e2e/` allows that; §6.1's rule covers `tests/integration/` only.
 - Venue Availability registers the `live` marker and deselects it by default.
   Venue Booking's `integration` marker description now matches the others.
+- `.github/workflows/ci.yml` has an `integration-tests` matrix job (one per
+  service with `tests/integration/`) and a `repo-e2e` job, both required by
+  `ci-passed`. AGENTS.md's *Testing expectations* and *CI* sections match.
 
 Still to do:
 
@@ -148,9 +151,6 @@ Still to do:
 - **Make Equipment Request and Equipment Reservation tier-ready.** They need
   `pytest-socket`, a registered `integration` marker, `-m "not integration"`,
   `fail_under`, and their tests moved under `tests/unit/`.
-- **Add an `integration-tests` matrix job to `.github/workflows/ci.yml`** and
-  wire it into `ci-passed`.
-- **Update AGENTS.md's *Testing expectations* and *CI* sections** to match.
 
 If a task depends on any of these and they're not in place yet, **stop and
 say so**. Don't work around it.
