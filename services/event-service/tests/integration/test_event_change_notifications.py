@@ -187,7 +187,9 @@ def test_ac3_actual_cancellation_saves_independent_coordinator_and_organiser_int
     # Existing SCRUM-168 safety decision still coexists.
     assert db.query('SELECT count(*) FROM public."EventNotificationOutbox" WHERE type=%s', ["safety.review-decision"]) == [(1,)]
     frozen_ids = set()
-    for _ in range(4):
+    # SCRUM-46 adds one attendee fanout sibling. Keep the bounded search large
+    # enough for all coexisting jobs without weakening the exact alerts below.
+    for _ in range(5):
         claimed = client.post("/internal/notification-outbox/claim", headers=HEADERS, json={}).json["jobs"][0]
         if claimed["type"] != "event.cancelled":
             assert client.post(f"/internal/notification-outbox/{claimed['id']}/hold", headers=HEADERS,

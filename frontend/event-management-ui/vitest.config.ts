@@ -14,6 +14,9 @@ export default defineConfig({
         // including App's legacy gaps; a feature-only percentage is not a module gate.
         'src/App.tsx',
         'src/features/notifications/notifications.ts',
+        'src/features/notifications/NotificationCenter.tsx',
+        'src/features/registration/attendeeRegistrations.ts',
+        'src/pages/AttendeeRegistrationsPage.tsx',
         'src/pages/EquipmentRequestsPage.tsx',
         'src/features/calendar/**.{ts,tsx}',
         'src/pages/VenueCalendarPage.tsx',

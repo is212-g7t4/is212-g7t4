@@ -66,6 +66,8 @@ def withdraw(client, event_id, **overrides):
         "roundNumber": 1,
         "coordinatorId": COORDINATOR_ID,
         "withdrawnSafetyCheckId": ROUND_ID,
+        # SCRUM-46: caller supplies the original actual venue before booking edits.
+        "venueBefore": "Grand Hall",
         "reason": "The Grand Hall booking changed after safety approval.",
         **overrides,
     }
@@ -123,6 +125,8 @@ def test_restore_returns_the_event_to_confirmed_only_through_safety_status(clien
             "roundNumber": 1,
             "coordinatorId": COORDINATOR_ID,
             "restoredSafetyCheckId": ROUND_ID,
+            # Restoration supplies final venue facts for the saved comparison baseline.
+            "attendeeVenue": "Grand Hall",
         },
     )
 

@@ -770,6 +770,18 @@ def _decide(
             409,
         )
 
+    attendee_venue = None
+    if event_status == CONFIRMED:
+        for entry in reversed(event.get("actionHistory", [])):
+            if entry.get("status") == CONFIRMED:
+                break
+            if "venueName" in entry.get("attendeeBaseline", {}):
+                try:
+                    attendee_venue = clients.attendee_venue_name(event_id)
+                except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+                    return None, None, _decide_failure(error, verb)
+                break
+
     booking_ids = []
     venue_flags = [flag for flag in flags or [] if flag["area"] == "venue arrangement"]
     if venue_flags:
@@ -854,6 +866,7 @@ def _decide(
             decided_by=safety_officer_id,
             remarks=remarks,
             areas=areas,
+            **({"attendee_venue": attendee_venue} if attendee_venue is not None else {}),
         )
     except (clients.DownstreamTimeout, clients.DownstreamError) as error:
         # Same reconciliation as above, one step later: Event Service may

@@ -43,6 +43,7 @@ services:
       - ./services/registration-service/.env
     environment:
       <<: *frontend-environment
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
     ports:
       - "5005:5000"
 
@@ -50,6 +51,8 @@ services:
     build: ./services/attendee-registration-service
     environment:
       <<: *frontend-environment
+      VENUE_AVAILABILITY_SERVICE_URL: "http://venue-availability-service:5000"
+      VENUE_SERVICE_URL: "http://venue-service:5000"
       EVENT_SERVICE_URL: "http://event-service:5000"
       REGISTRATION_SERVICE_URL: "http://registration-service:5000"
       USER_SERVICE_URL: "http://user-service:5000"
@@ -238,11 +241,31 @@ services:
     ports:
       - "5012:5000"
 
+  registration-notification-dispatcher:
+    build: ./services/event-workflow-service
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
+    restart: unless-stopped
+    environment:
+      OUTBOX_OWNER: "registration"
+      REGISTRATION_SERVICE_URL: "http://registration-service:5000"
+      EVENT_SERVICE_URL: "http://event-service:5000"
+      VENUE_AVAILABILITY_SERVICE_URL: "http://venue-availability-service:5000"
+      VENUE_SERVICE_URL: "http://venue-service:5000"
+      INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in the root .env}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-notification}:${RABBITMQ_PASSWORD:-local-development-only}@rabbitmq:5672/%2F"
+    depends_on:
+      - registration-service
+      - event-service
+      - venue-availability-service
+      - venue-service
+      - rabbitmq
+
   event-notification-dispatcher:
     build: ./services/event-workflow-service
     command: ["uv", "run", "--no-dev", "python", "-m", "app.dispatcher"]
     restart: unless-stopped
     environment:
+      REGISTRATION_SERVICE_URL: "http://registration-service:5000"
       EVENT_SERVICE_URL: "http://event-service:5000"
       USER_SERVICE_URL: "http://user-service:5000"
       INTERNAL_SERVICE_TOKEN: "${INTERNAL_SERVICE_TOKEN}"

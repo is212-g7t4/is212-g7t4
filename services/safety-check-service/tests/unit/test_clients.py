@@ -47,6 +47,9 @@ class Response:
 
 @pytest.fixture
 def sent(monkeypatch):
+    # SCRUM-46: these legacy wrapper cases isolate request/error mapping. The
+    # actual venue HTTP lookup is exercised in test_attendee_notifications.py.
+    monkeypatch.setattr(clients, "attendee_venue_name", lambda event_id: "Hall A")
     """Record every httpx call and hand back a queued response."""
     calls = []
     queue = []
@@ -704,7 +707,8 @@ def test_update_event_details_sends_the_edit_and_both_round_ids(sent, monkeypatc
     assert calls[0]["json"] == {
         "coordinatorId": COORDINATOR_ID,
         "changes": changes,
-        "safetyRecheck": safety_recheck,
+        # SCRUM-46 forwards the doubled pre-edit venue alongside unchanged round IDs.
+        "safetyRecheck": {**safety_recheck, "venueBefore": "Hall A"},
     }
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "shared-secret"}
 

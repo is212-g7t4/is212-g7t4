@@ -334,6 +334,9 @@ class Response:
 
 @pytest.fixture
 def sent(monkeypatch):
+    # SCRUM-46: these legacy wrapper cases isolate request/error mapping. The
+    # actual venue HTTP lookup is exercised in test_attendee_notifications.py.
+    monkeypatch.setattr(clients, "attendee_venue_name", lambda event_id: "Hall A")
     calls, queue = [], []
 
     def fake_request(method, url, **kwargs):
@@ -390,8 +393,10 @@ def test_event_wrapper_sends_the_marker_for_each_direction(sent, monkeypatch, wi
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/safety-status")
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "secret"}
     expected = {"safetyCheckId": RECORD_ID, "roundNumber": 2, "coordinatorId": COORDINATOR_ID}
+    # SCRUM-46 adds the mocked actual venue only to withdrawal; restoration
+    # continues to follow the existing wrapper contract in these inherited cases.
     if withdraw_move:
-        expected |= {"status": "Approved", "withdrawnSafetyCheckId": RECORD_ID, "reason": REASON}
+        expected |= {"status": "Approved", "withdrawnSafetyCheckId": RECORD_ID, "reason": REASON, "venueBefore": "Hall A"}
     else:
         expected |= {"status": "Confirmed", "restoredSafetyCheckId": RECORD_ID}
     assert calls[0]["json"] == expected

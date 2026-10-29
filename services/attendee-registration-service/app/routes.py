@@ -8,6 +8,7 @@ from app.clients import (
     get_confirmed_event,
     get_confirmed_events,
     get_event_registrations,
+    get_historical_events,
     get_user,
     save_registration,
     withdraw_saved_registration,
@@ -64,6 +65,9 @@ def attendee_registrations():
     try:
         registrations = with_attendee_details(get_attendee_registrations(attendee_id))
         events = {event["id"]: event for event in get_confirmed_events()}
+        missing_ids = {row["event_id"] for row in registrations if row.get("event_id") and row["event_id"] not in events}
+        if missing_ids:
+            events.update({event["id"]: event for event in get_historical_events(missing_ids)})
     except Exception:
         return jsonify(message="Unable to load your registrations right now."), 502
 
@@ -112,7 +116,8 @@ def register_for_event():
         return jsonify(message="The event registration capacity is unavailable."), 422
 
     try:
-        registration = save_registration({**cleaned, "capacity": capacity})
+        registration = save_registration({**cleaned, "capacity": capacity, "notificationContext": dict(
+            eventName=event["eventName"], startDateTime=event["preferredStartDate"], endDateTime=event["preferredEndDate"])})
     except RegistrationConflictError as error:
         return jsonify(code=error.code, message=error.message), 409
     except Exception:
@@ -181,7 +186,7 @@ def withdraw_from_event(registration_id):
         return jsonify(message="The withdrawal deadline is unavailable."), 502
 
     try:
-        withdrawn = withdraw_saved_registration(str(registration_id), attendee_id)
+        withdrawn = withdraw_saved_registration(str(registration_id), attendee_id, event["eventName"])
     except RegistrationConflictError as error:
         return jsonify(code=error.code, message=error.message), 409
     except Exception:

@@ -48,7 +48,10 @@ def test_successful_registration_returns_confirmation(client, monkeypatch):
     assert response.status_code == 201
     assert response.json["message"] == "Registration confirmed for Community Workshop."
     assert response.json["registration"] == saved
-    assert save.call_args.args[0] == {**payload(), "capacity": 30}
+    # SCRUM-46: the route captures name/schedule now; the save adapter (doubled
+    # here) separately adds the actual Approved venue before writing the action.
+    assert save.call_args.args[0] == {**payload(), "capacity": 30, "notificationContext": dict(
+        eventName="Community Workshop", startDateTime=confirmed_event()["preferredStartDate"], endDateTime=confirmed_event()["preferredEndDate"])}
 
 
 def test_registration_ignores_profile_fields(client, monkeypatch):
@@ -63,7 +66,10 @@ def test_registration_ignores_profile_fields(client, monkeypatch):
     )
 
     assert response.status_code == 201
-    assert save.call_args.args[0] == {**payload(), "capacity": 30}
+    # SCRUM-46: the route captures name/schedule now; the save adapter (doubled
+    # here) separately adds the actual Approved venue before writing the action.
+    assert save.call_args.args[0] == {**payload(), "capacity": 30, "notificationContext": dict(
+        eventName="Community Workshop", startDateTime=confirmed_event()["preferredStartDate"], endDateTime=confirmed_event()["preferredEndDate"])}
 
 
 USER = {
@@ -267,7 +273,9 @@ def test_attendee_confirms_withdrawal_before_explicit_deadline(client, monkeypat
     assert response.status_code == 200
     assert response.json["message"] == "Registration withdrawn for Community Workshop."
     assert response.json["registration"]["withdrawn_at"] == "2026-10-24T02:30:00+00:00"
-    withdraw.assert_called_once_with("11111111-1111-4111-8111-111111111111", ATTENDEE_ID)
+    # SCRUM-46: withdrawal carries the event name to the doubled owner adapter,
+    # keeping the notification snapshot independent of later Event edits.
+    withdraw.assert_called_once_with("11111111-1111-4111-8111-111111111111", ATTENDEE_ID, "Community Workshop")
 
 
 def test_explicit_withdrawal_deadline_takes_precedence(client, monkeypatch):

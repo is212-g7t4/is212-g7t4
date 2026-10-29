@@ -16,29 +16,57 @@ from app import create_app  # noqa: E402
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
+OWNED = {}
 
 
 def assert_local(url):
     """Refuse to read from or truncate a configured shared database."""
     host = urlparse(url).hostname
     assert host in LOCAL_HOSTS, f"Integration tests only run against a local database, not {host!r}."
+    assert url in OWNED, "Only this session fixture's exact database is permitted"
+    identifier, name, port = OWNED[url]
+    import docker
+    container = docker.from_env().containers.get(identifier)
+    container.reload()
+    assert container.id == identifier and container.name == name
+    assert container.labels.get("connectsphere.test") == "scrum46-registration"
+    assert container.attrs["NetworkSettings"]["Ports"]["5432/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": port}]
 
 
 @pytest.fixture(scope="session")
 def database_url():
-    with PostgresContainer("postgres:17.6", driver=None) as postgres:
+    """Yield one session-owned PostgreSQL 17.6 URL after loading every migration unmodified.
+    Create only synthetic API roles, register exact loopback container ownership, and
+    verify it before bootstrap/teardown. The container context removes owned resources.
+    """
+    from uuid import uuid4
+    name = "scrum46-registration-" + uuid4().hex
+    postgres = PostgresContainer("postgres:17.6", driver=None, name=name,
+                                 labels={"connectsphere.test": "scrum46-registration"})
+    postgres.ports = {"5432/tcp": ("127.0.0.1", None)}  # type: ignore  # Docker SDK binding; Testcontainers annotates only integer ports.
+    with postgres:
         url = postgres.get_connection_url()
+        identifier = postgres.get_wrapped_container().id
+        OWNED[url] = (identifier, name, str(urlparse(url).port))
         assert_local(url)
         with closing(psycopg2.connect(url)) as connection:
             connection.autocommit = True
             with connection.cursor() as cursor:
+                cursor.execute("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;")
                 for migration in sorted(MIGRATIONS.glob("*.sql")):
                     cursor.execute(migration.read_text())
-        yield url
+        try:
+            yield url
+        finally:
+            assert_local(url)
+            del OWNED[url]
 
 
 @pytest.fixture(autouse=True)
 def empty_tables(database_url):
+    """Reset every public table after each case, not just the rows it happened to assert.
+    Verify exact live fixture ownership before truncation to prevent shared-data loss.
+    """
     yield
     assert_local(database_url)
     with closing(psycopg2.connect(database_url)) as connection:
@@ -50,15 +78,26 @@ def empty_tables(database_url):
 
 @pytest.fixture
 def client(database_url, monkeypatch):
+    """Return the real Registration Flask test client pointed only at the owned database.
+    Set both app config and the fixture-restored environment for consistent SQL routing.
+    """
+    assert_local(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
     return create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client()
 
 
 class Database:
+    """Independent arrange/assert SQL reader for fixture-owned Registration data.
+    It does not replace application SQL; each operation opens its own real connection.
+    """
     def __init__(self, url):
         self.url = url
 
     def execute(self, sql, params=()):
+        """Execute parameterized arrange/assert SQL after an exact live ownership check.
+        Commit successful work and return dictionary rows, or None for statements without rows.
+        """
+        assert_local(self.url)
         with closing(psycopg2.connect(self.url)) as connection:
             with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(sql, params)
@@ -82,5 +121,8 @@ class Database:
 
 @pytest.fixture
 def db(database_url):
+    """Return an independently connecting SQL helper for the owned PostgreSQL URL.
+    Ownership is checked now and again on each use, not inferred from loopback alone.
+    """
     assert_local(database_url)
     return Database(database_url)

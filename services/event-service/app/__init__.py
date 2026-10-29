@@ -120,7 +120,7 @@ def _venue_change(data, status, safety_check_id):
         return None, (jsonify(message="reason is required."), 400)
     if len(reason) > 2000:
         return None, (jsonify(message="reason must be 2000 characters or fewer."), 400)
-    return {"move": VENUE_CHANGE_WITHDRAW, "reason": reason.strip()}, None
+    return {"move": VENUE_CHANGE_WITHDRAW, "reason": reason.strip(), **({"venueBefore": data["venueBefore"]} if data.get("venueBefore") else {})}, None
 
 
 def _safety_recheck(data):
@@ -156,6 +156,8 @@ def _safety_recheck(data):
             ),
             400,
         )
+    if raw.get("venueBefore"):
+        cleaned["venueBefore"] = raw["venueBefore"]
     cleaned["roundNumber"] = round_number
     return cleaned, None
 
@@ -265,6 +267,8 @@ def create_app(config=None):
         except EventNotFoundError:
             return jsonify(message="Event not found."), 404
         context = dict(id=event["id"], eventName=event["eventName"], coordinatorId=event["coordinatorId"])
+        if request.args.get("includeSchedule") == "true":
+            context.update(startDateTime=event["preferredStartDate"], endDateTime=event["preferredEndDate"])
         if request.args.get("includeOrganiser") == "true":
             context["organiserId"] = event["organiserId"]
         return jsonify(context)
@@ -1035,6 +1039,7 @@ def create_app(config=None):
                 remarks=remarks,
                 areas=areas,
                 venue_change=venue_change,
+                attendee_venue=data.get("attendeeVenue"),
             )
         except EventNotFoundError:
             return jsonify(message="Event request not found."), 404
@@ -1062,6 +1067,8 @@ def create_app(config=None):
                 ),
                 currentStatus=blocked.current_status,
             ), 409
+        except ValueError:
+            return jsonify(message="A complete approved attendee schedule is required."), 400
         return jsonify(updated), 200
 
     @app.patch("/events/<uuid:event_id>/approve")

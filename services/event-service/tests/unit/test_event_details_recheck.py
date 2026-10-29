@@ -47,6 +47,8 @@ RECHECK = {
     "withdrawnSafetyCheckId": ROUND_TWO_ID,
     "safetyCheckId": ROUND_THREE_ID,
     "roundNumber": 3,
+    # SCRUM-46: rechecks preserve the last effective actual venue before edits.
+    "venueBefore": "Grand Hall",
 }
 
 # The coordinator's approve decision, which an edit must never erase.
@@ -359,6 +361,8 @@ def test_the_new_round_is_what_the_safety_officer_decides(setup):
         3,
         decided_by=OFFICER_ID,
         remarks="Re-reviewed and safe.",
+        # The final direct owner call supplies the corresponding approved venue.
+        attendee_venue="Grand Hall",
     )
 
     assert updated["status"] == "Confirmed"

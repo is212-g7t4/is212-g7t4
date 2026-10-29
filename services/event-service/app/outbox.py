@@ -9,6 +9,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from flask import Blueprint, current_app, request, jsonify
 from app.event_changes import change_message
+from app.attendee_notifications import attendee_message
 
 bp = Blueprint("notification_outbox", __name__)
 
@@ -64,6 +65,24 @@ def mutate(dsn, identifier, token, action, data):
         if action == "expand":
             # One fenced transaction freezes the lookup result and all recipients.
             # A lost HTTP response cannot create duplicate children on lease recovery.
+            if row["type"] in ("attendee.cancelled-fanout", "attendee.updated-fanout"):
+                recipients = data.get("recipients")
+                if not isinstance(recipients, list):
+                    raise ValueError("Invalid attendee recipients")
+                validated = {}
+                for item in recipients:
+                    recipient = str(UUID(item["recipientId"]))
+                    registration = str(UUID(item["registrationId"]))
+                    if recipient in validated and validated[recipient] != registration:
+                        raise ValueError("Conflicting registration target")
+                    validated[recipient] = registration
+                for recipient, registration in sorted(validated.items()):
+                    source = {**row["source"], "recipientId": recipient, "registrationId": registration}
+                    kind = "attendee.event-cancelled" if row["type"] == "attendee.cancelled-fanout" else "attendee.event-updated"
+                    cursor.execute('INSERT INTO public."EventNotificationOutbox" (source_id,type,source,created_at) VALUES (%s,%s,%s,%s)',
+                        (str(uuid5(UUID(identifier), recipient)), kind, Json(source), row["created_at"]))
+                cursor.execute('UPDATE public."EventNotificationOutbox" SET published_at=now(),lease_token=NULL,lease_until=NULL,last_error=NULL WHERE source_id=%s', (identifier,))
+                return {"id": identifier, "status": "expanded", "recipients": len(validated)}
             safety = row["type"] == "safety.review-fanout"
             if row["type"] != "event.submission-fanout" and not safety:
                 raise ValueError("Only submission intents can expand")
@@ -175,13 +194,18 @@ def validate_envelope(value, row):
         raise ValueError("Invalid creation instant")
     expected_destination = (None if row["type"] == "event.coordinator-removed"
                             else dict(kind="event-details", eventId=source["eventId"]))
+    if row["type"] in ("attendee.event-cancelled", "attendee.event-updated"):
+        expected_destination = dict(kind="attendee-registration", registrationId=source["registrationId"])
     if row["type"] == "event.change-request-submitted":
         expected_destination = dict(kind="change-request-review", eventId=source["eventId"],
                                     changeRequestId=source["changeRequestId"])
     if "destination" not in value or destination != expected_destination:
         raise ValueError("Invalid destination")
     details = value.get("details")
-    if change:
+    if row["type"] in ("attendee.event-cancelled", "attendee.event-updated"):
+        expected_details = source
+        message = attendee_message(row["type"], source)
+    elif change:
         expected_details = {**source, "recipientId": value["recipientId"]}
         message = change_message(row["type"], source)
     elif row["type"] == "safety.review-submitted":
@@ -274,7 +298,7 @@ def operate(identifier=None, action=None):
         return (
             (jsonify(result), 200) if result else (jsonify(message="Lease lost."), 409)
         )
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, KeyError):
         return jsonify(message="Invalid outbox input."), 400
     except psycopg2.Error:
         return jsonify(message="Outbox storage unavailable."), 503

@@ -1,0 +1,70 @@
+"""Synthetic row/envelope builders for SCRUM-46 owner unit boundaries."""
+
+from datetime import datetime, UTC
+
+EVENT = "11111111-1111-4111-8111-111111111111"
+USER = "22222222-2222-4222-8222-222222222222"
+REF = "33333333-3333-4333-8333-333333333333"
+JOB = "44444444-4444-4444-8444-444444444444"
+LEASE = "55555555-5555-4555-8555-555555555555"
+
+
+def row(status="Confirmed"):
+    """Return a fresh synthetic Registration row with the requested status.
+    Stable event, attendee and full reference IDs make owner identity assertions readable.
+    """
+    return dict(
+        registration_id=REF,
+        event_id=EVENT,
+        attendee_id=USER,
+        registration_date=datetime(2030, 1, 1, tzinfo=UTC),
+        status=status,
+        withdrawn_at=None,
+    )
+
+
+def outbox_row(kind="registration.confirmed"):
+    """Return a fresh claimed, unfrozen owner row for the chosen action type.
+    The valid lease is a supplied SQL result, not elapsed PostgreSQL time.
+    """
+    return dict(
+        source_id=JOB,
+        type=kind,
+        source=dict(eventId=EVENT, recipientId=USER, registrationId=REF),
+        envelope=None,
+        lease_token=LEASE,
+        lease_valid=True,
+        attempts=1,
+        created_at=datetime(2030, 1, 1, tzinfo=UTC),
+    )
+
+
+def envelope(kind="registration.confirmed", naive=False):
+    """Build independent expected action content for one registration reference.
+    Confirmation includes the full period and Hall A; withdrawal needs the name.
+    naive=True expresses the same Singapore-local period without an offset, while
+    False uses UTC. Literals do not call production formatters.
+    """
+    source = {**outbox_row()["source"], "eventName": "Workshop"}
+    if kind == "registration.confirmed":
+        source.update(
+            startDateTime="2030-03-01T09:00:00"
+            if naive
+            else "2030-03-01T01:00:00+00:00",
+            endDateTime="2030-03-01T17:00:00" if naive else "2030-03-01T09:00:00+00:00",
+            venueName="Hall A",
+        )
+    return dict(
+        version=1,
+        id=JOB,
+        type=kind,
+        recipientId=USER,
+        createdAt="2030-01-01T00:00:00+00:00",
+        destination=dict(kind="attendee-registration", registrationId=REF),
+        details=source,
+        message=(
+            f"Registration confirmed for Workshop. Date/time: 01 Mar 2030, 09:00 SGT – 01 Mar 2030, 17:00 SGT. Venue: Hall A. Registration reference: {REF}."
+            if kind == "registration.confirmed"
+            else "Registration withdrawn for Workshop."
+        ),
+    )
