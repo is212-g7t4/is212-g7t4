@@ -17,7 +17,7 @@ function formatRegistrationDate(value: string | null) {
   })
 }
 
-export function AttendeeRegistrationsPage({ role, attendeeId }: { role: Role; attendeeId?: string }) {
+export function AttendeeRegistrationsPage({ role, attendeeId, targetRegistrationId }: { role: Role; attendeeId?: string; targetRegistrationId?: string | null }) {
   const [registrations, setRegistrations] = useState<AttendeeRegistration[]>([])
   const [selected, setSelected] = useState<AttendeeRegistration | null>(null)
   const [loading, setLoading] = useState(true)
@@ -28,18 +28,22 @@ export function AttendeeRegistrationsPage({ role, attendeeId }: { role: Role; at
     if (role !== 'Attendee' || !attendeeId) return
     let active = true
     loadAttendeeRegistrations(attendeeId).then((items) => {
-      if (active) setRegistrations(items)
+      if (active) {
+        setRegistrations(items)
+        if (targetRegistrationId) setSelected(items.find(item => item.id === targetRegistrationId && item.attendeeId === attendeeId) ?? null)
+      }
     }).catch((cause: Error) => {
       if (active) setError(cause.message)
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [role, attendeeId, revision])
+  }, [role, attendeeId, revision, targetRegistrationId])
 
   if (role !== 'Attendee') return <RoleWarning>Registration status is visible only to Attendees.</RoleWarning>
   if (!attendeeId) return <p className="field-error" role="alert">Select an attendee to view registrations.</p>
-  if (selected) return <RegistrationDetail
+  if (selected && selected.attendeeId === attendeeId) return <RegistrationDetail
+    key={selected.id}
     registration={selected}
     onBack={() => setSelected(null)}
     onWithdrawn={(updated) => setRegistrations((items) => items.map((item) => item.id === updated.id ? updated : item))}
@@ -57,12 +61,12 @@ export function AttendeeRegistrationsPage({ role, attendeeId }: { role: Role; at
     {loading ? <EventCardSkeletonList /> : error ? <p className="field-error" role="alert">{error}</p> :
       registrations.length === 0 ? <section className="panel"><p>You have not registered for any events.</p></section> :
       <section className="page-stack" aria-label="My registered events">
-        {registrations.map((registration) => {
+        {registrations.filter(registration => registration.attendeeId === attendeeId).map((registration) => {
           const tile = getDateTile(registration.event.preferredStartDate)
           return <button key={registration.id} type="button" className="panel event-row-card" onClick={() => setSelected(registration)}>
             <span className="event-row-date"><span className="event-row-date-month">{tile.month}</span><span className="event-row-date-day">{tile.day}</span></span>
             <span className="event-row-body">
-              <span className="event-row-heading"><strong>{registration.event.eventName}</strong><StatusBadge status={registration.status} /></span>
+              <span className="event-row-heading"><strong>{registration.event.eventName}</strong><StatusBadge status={registration.status} />{registration.event.status === 'Cancelled' && <span>Event Cancelled</span>}</span>
               <span className="event-row-schedule muted">{formatSchedule(registration.event.preferredStartDate, registration.event.preferredEndDate)}</span>
               {registration.venue && <span className="event-row-venue muted">{registration.venue.name} · {registration.venue.location}</span>}
               <span className="muted">Registered: {formatRegistrationDate(registration.registrationDate)}</span>
@@ -108,11 +112,13 @@ function RegistrationDetail({ registration, onBack, onWithdrawn }: {
     <article className="panel event-card">
       <header className="event-card-header"><h2>{current.event.eventName}</h2><StatusBadge status={current.status} /></header>
 
+      {current.event.status === 'Cancelled' && <p className="notice">Event Cancelled</p>}
       {message && <p className="notice success" role="status">{message}</p>}
 
       <section className="event-card-section">
         <h3>Registration details</h3>
         <dl className="event-details">
+          <div className="event-detail full"><dt>Registration reference</dt><dd>{current.id}</dd></div>
           <div className="event-detail"><dt>Status</dt><dd>{current.status}</dd></div>
           <div className="event-detail"><dt>Registration date</dt><dd>{formatRegistrationDate(current.registrationDate)}</dd></div>
           {current.withdrawnAt && <div className="event-detail"><dt>Withdrawn at</dt><dd>{formatRegistrationDate(current.withdrawnAt)}</dd></div>}
@@ -120,7 +126,7 @@ function RegistrationDetail({ registration, onBack, onWithdrawn }: {
           <div className="event-detail"><dt>Email</dt><dd>{current.attendeeEmail}</dd></div>
           <div className="event-detail full"><dt>Organisation</dt><dd>{current.attendeeOrganization || '—'}</dd></div>
         </dl>
-        {current.status === 'Confirmed' && !confirming && <button className="button primary" type="button" onClick={() => { setConfirming(true); setWithdrawalError('') }}>Withdraw registration</button>}
+        {current.status === 'Confirmed' && current.event.status === 'Confirmed' && !confirming && <button className="button primary" type="button" onClick={() => { setConfirming(true); setWithdrawalError('') }}>Withdraw registration</button>}
         {confirming && <div className="panel" role="dialog" aria-label="Confirm withdrawal">
           <h4>Withdraw registration?</h4>
           <p>Your place will be released for another attendee.</p>

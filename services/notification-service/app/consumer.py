@@ -64,10 +64,11 @@ def validate(value):
     else:
         if (
             not isinstance(destination, dict)
-            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests", "equipment-requests", "change-request-review")
+            or destination.get("kind") not in ("event-venue-request", "event-details", "venue-requests", "equipment-requests", "change-request-review", "attendee-registration")
         ):
             raise ValueError("Unknown destination")
         reference_keys = {
+            "attendee-registration": ("registrationId",),
             "venue-requests": (),
             "equipment-requests": ("eventId",),
             "change-request-review": ("eventId", "changeRequestId"),
@@ -76,6 +77,27 @@ def validate(value):
         }
         for key in reference_keys[destination["kind"]]:
             UUID(destination[key])
+    if value["type"] in ("registration.confirmed", "registration.withdrawn", "attendee.event-cancelled", "attendee.event-updated"):
+        details = value["details"]
+        if not isinstance(details, dict) or not isinstance(details.get("eventName"), str) or not details["eventName"].strip():
+            raise ValueError("Missing attendee display content")
+        UUID(details["eventId"])
+        UUID(details["registrationId"])
+        if destination != dict(kind="attendee-registration", registrationId=details["registrationId"]):
+            raise ValueError("Attendee notification requires matching registration")
+        if "recipientId" in details and details["recipientId"] != value["recipientId"]:
+            raise ValueError("Inconsistent attendee recipient")
+        if value["type"] == "registration.confirmed":
+            for key in ("startDateTime", "endDateTime", "venueName"):
+                if not isinstance(details.get(key), str) or not details[key].strip():
+                    raise ValueError("Missing registration content")
+        if value["type"] == "attendee.event-updated":
+            changes = details.get("changes")
+            if not isinstance(changes, dict) or not changes or set(changes) - {"startDateTime", "endDateTime", "venueName"}:
+                raise ValueError("Missing effective changes")
+            for pair in changes.values():
+                if not isinstance(pair, list) or len(pair) != 2 or any(not isinstance(v, str) or not v.strip() for v in pair) or pair[0] == pair[1]:
+                    raise ValueError("Invalid effective change")
     if value["type"] in ("event.change-request-approved", "event.change-request-rejected", "event.cancelled"):
         details = value["details"]
         if not isinstance(details, dict) or not isinstance(details.get("eventName"), str) or not details["eventName"].strip():

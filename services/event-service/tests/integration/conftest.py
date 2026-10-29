@@ -29,6 +29,7 @@ TOKEN = SAFETY_TOKEN
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
 OWNED_URLS = set()
+OWNED_IDENTITIES = {}
 
 
 def assert_local(url):
@@ -39,6 +40,14 @@ def assert_local(url):
     """
     host = urlparse(url).hostname
     assert host in LOCAL_HOSTS, f"Integration tests only run against a local database, not {host!r}."
+    assert url in OWNED_IDENTITIES, "This session fixture must own the exact database"
+    import docker
+    identifier, name, port = OWNED_IDENTITIES[url]
+    container = docker.from_env().containers.get(identifier)
+    container.reload()
+    assert container.id == identifier and container.name == name
+    assert container.labels.get("connectsphere.test") == "scrum45-event-integration"
+    assert container.attrs["NetworkSettings"]["Ports"]["5432/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": port}]
 
 
 @pytest.fixture(scope="session")
@@ -49,9 +58,12 @@ def database_url():
     name = 'scrum45-event-integration' + "-" + uuid4().hex
     volumes = []
     try:
-        with PostgresContainer("postgres:17.6", driver=None, name=name,
-                               labels={"connectsphere.test": 'scrum45-event-integration'}) as postgres:
+        postgres = PostgresContainer("postgres:17.6", driver=None, name=name,
+                                     labels={"connectsphere.test": "scrum45-event-integration"})
+        postgres.ports = {"5432/tcp": ("127.0.0.1", None)}  # type: ignore  # Docker SDK binding; Testcontainers annotates only integer ports.
+        with postgres:
             url = postgres.get_connection_url()
+            OWNED_IDENTITIES[url] = (postgres.get_wrapped_container().id, name, str(urlparse(url).port))
             assert_local(url)
             inspected = subprocess.run(["docker", "inspect", "--format", "{{json .Mounts}}", name],
                                        capture_output=True, text=True, timeout=30)
@@ -76,7 +88,9 @@ def database_url():
                             print(f"APPLY {migration.name} sha256={digest}", flush=True)
                 yield url
             finally:
+                assert_local(url)
                 OWNED_URLS.remove(url)
+                del OWNED_IDENTITIES[url]
     finally:
         # The context removes the container/anonymous volumes; verify only exact owned resources.
         remaining = subprocess.run(["docker", "container", "ls", "-a", "--filter", f"name=^/{name}$",
@@ -314,3 +328,38 @@ def safety_notification_owner(migration_database, monkeypatch):
             yield client, db
         finally:
             assert_owned()
+
+
+@pytest.fixture
+def attendee_notification_owner(event_change_notification_owner, database_url):
+    """Yield the real Event client and independent SQL helper over the session-owned PostgreSQL.
+    Add an exact live container/name/label/binding guard to every HTTP request and SQL
+    access, including final teardown. Reuse the existing per-test reset, full migration
+    chain and synthetic role bootstrap; never connect to a configured shared database.
+    """
+    import docker
+    client, db = event_change_notification_owner
+    port = str(urlparse(database_url).port)
+    candidates = docker.from_env().containers.list(filters={"label": "connectsphere.test=scrum45-event-integration"})
+    matches = [c for c in candidates if any(b["HostPort"] == port for b in c.attrs["NetworkSettings"]["Ports"]["5432/tcp"])]
+    assert len(matches) == 1
+    owner = matches[0]
+    identifier, name = owner.id, owner.name
+    original_query = db.query
+    def guard():
+        current = docker.from_env().containers.get(identifier)
+        current.reload()
+        assert current.id == identifier and current.name == name
+        assert current.labels.get("connectsphere.test") == "scrum45-event-integration"
+        assert any(b["HostPort"] == port for b in current.attrs["NetworkSettings"]["Ports"]["5432/tcp"])
+        assert database_url in OWNED_URLS
+    def query(*args, **kwargs):
+        guard()
+        return original_query(*args, **kwargs)
+    db.query = query
+    client.application.before_request(guard)
+    try:
+        guard()
+        yield client, db
+    finally:
+        guard()

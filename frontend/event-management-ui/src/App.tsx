@@ -107,6 +107,7 @@ function getVenueId(): string | null {
 }
 
 function App() {
+  const [registrationTargetSearch, setRegistrationTargetSearch] = useState(() => window.location.search)
   const [equipmentTargetSearch, setEquipmentTargetSearch] = useState(() => window.location.search)
   const [changeRequestTargetSearch, setChangeRequestTargetSearch] = useState(() => window.location.search)
   const [targetBookingId, setTargetBookingId] = useState(() => new URLSearchParams(window.location.search).get('booking'))
@@ -151,6 +152,7 @@ function App() {
       setVenueId(getVenueId())
       setDraftId(getDraftId())
       setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
+      setRegistrationTargetSearch(window.location.search)
       setEquipmentTargetSearch(window.location.search)
       setChangeRequestTargetSearch(window.location.search)
     }
@@ -182,6 +184,7 @@ function App() {
     setNotice(null)
     window.history.pushState({}, '', paths[nextRoute])
     setRoute(nextRoute)
+    setRegistrationTargetSearch('')
     setEquipmentTargetSearch('')
     setChangeRequestTargetSearch('')
   }
@@ -230,6 +233,7 @@ function App() {
     setDetailOrigin('notifications')
     window.history.pushState({}, '', path)
     setRoute(getRoute()); setEventId(getEventId())
+    setRegistrationTargetSearch(window.location.search)
     setTargetBookingId(new URLSearchParams(window.location.search).get('booking'))
     setEquipmentTargetSearch(window.location.search)
     setChangeRequestTargetSearch(window.location.search)
@@ -252,7 +256,7 @@ function App() {
       {route === 'workload' && <CoordinatorWorkloadPage key={activeUser?.id} role={role} currentUserId={activeUser?.id} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'myEvents' && <MyEventsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} onViewDetails={navigateToEvent} onOpenDraft={navigateToDraft} />}
       {route === 'browseEvents' && <AttendeeEventsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
-      {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} />}
+      {route === 'myRegistrations' && <AttendeeRegistrationsPage key={activeUser?.id} role={role} attendeeId={activeUser?.id} targetRegistrationId={new URLSearchParams(registrationTargetSearch).get('registration')} />}
       {route === 'venueCalendar' && <VenueCalendarPage user={activeUser} />}
       {route === 'venueRequests' && <VenueRequestsPage key={activeUser?.id} role={role} user={activeUser ?? null} resolveUserName={resolveUserName} />}
       {route === 'equipment' && <EquipmentPage key={activeUser?.id} role={role} user={activeUser ?? null} />}

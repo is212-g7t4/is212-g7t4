@@ -25,6 +25,7 @@ def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
+        INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
         # The Vite dev server is pinned to 5174 (strictPort in
         # vite.config.ts), so that is the origin the browser sends.
         FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"),
@@ -113,8 +114,11 @@ def create_app(config=None):
 
         try:
             registration = create_registration(
-                app.config["DATABASE_URL"], event_id, attendee_id, capacity
+                app.config["DATABASE_URL"], event_id, attendee_id, capacity,
+                **({"notification_context": data["notificationContext"]} if "notificationContext" in data else {})
             )
+        except ValueError:
+            return jsonify(message="Complete notification snapshot required."), 400
         except DuplicateRegistrationError:
             return jsonify(code="DUPLICATE_REGISTRATION", message="You are already registered for this event."), 409
         except CapacityReachedError:
@@ -134,8 +138,11 @@ def create_app(config=None):
             return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
         try:
             registration = withdraw_registration(
-                app.config["DATABASE_URL"], str(registration_id), attendee_id
+                app.config["DATABASE_URL"], str(registration_id), attendee_id,
+                **({"notification_context": data["notificationContext"]} if "notificationContext" in data else {})
             )
+        except ValueError:
+            return jsonify(message="Complete notification snapshot required."), 400
         except RegistrationNotFoundError:
             return jsonify(code="REGISTRATION_NOT_FOUND", message="Registration not found."), 404
         except RegistrationOwnershipError:
@@ -150,4 +157,6 @@ def create_app(config=None):
             ), 409
         return jsonify(registration=registration), 200
 
+    from app.outbox import bp
+    app.register_blueprint(bp)
     return app

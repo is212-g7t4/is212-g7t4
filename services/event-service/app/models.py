@@ -1242,6 +1242,7 @@ def update_event_safety_status(
     remarks=None,
     areas=None,
     venue_change=None,
+    attendee_venue=None,
 ):
     """Move an event along the safety-check workflow (SCRUM-149 AC1, SCRUM-150 AC1).
 
@@ -1387,7 +1388,10 @@ def update_event_safety_status(
                 _record_safety_review(cursor, updated, round_number)
             else:
                 _record_safety_decision(cursor, event, round_number, status, remarks, areas)
+            if status == "Confirmed":
+                _record_attendee_update(cursor, event, attendee_venue)
             if status == "Cancelled" and event["status"] != "Cancelled":
+                _record_attendee_fanout(cursor, updated, "attendee.cancelled-fanout")
                 for recipient_role in ("coordinator", "organiser"):
                     _record_event_change(cursor, updated, "event.cancelled", recipient_role)
     return serialize(updated)
@@ -1487,6 +1491,9 @@ def _venue_change_safety_status(cursor, event, safety_check_id, round_number, co
     ) = unpack_metadata(event["description"])
     recorded_at = datetime.now(UTC).isoformat()
     if move == VENUE_CHANGE_WITHDRAW:
+        venue_before = venue_change.get("venueBefore")
+        if not isinstance(venue_before, str) or not venue_before.strip():
+            raise ValueError("Original approved venue snapshot required")
         approval = _latest_approval_entry(action_history)
         if not approval or approval["safetyCheckId"] != safety_check_id:
             raise StaleSafetyCheckError
@@ -1517,6 +1524,13 @@ def _venue_change_safety_status(cursor, event, safety_check_id, round_number, co
             "restoredSafetyCheckId": safety_check_id,
             "recordedAt": recorded_at,
         }
+    if move == VENUE_CHANGE_WITHDRAW:
+        action["attendeeBaseline"] = {
+            target: _aware(event[column]).astimezone(SINGAPORE).isoformat()
+            for target, column in (("startDateTime", "preferred_start_date"), ("endDateTime", "preferred_end_date"))
+            if event[column] is not None
+        }
+        action["attendeeBaseline"]["venueName"] = venue_before
     metadata = {
         "_connectsphere": "event-submission-v1",
         "description": description,
@@ -1649,6 +1663,11 @@ def update_event_details(
                     != safety_recheck["withdrawnSafetyCheckId"]
                 ):
                     raise StaleSafetyCheckError
+                venue_before = safety_recheck.get("venueBefore")
+                if not isinstance(venue_before, str) or not venue_before.strip():
+                    raise ValueError({"missingFields": ["venueBefore"], "errors": [
+                        "Original approved venue snapshot required."
+                    ]})
                 recheck = True
             elif high and status == "Pending Safety Check":
                 # Q3: the Safety Officer is mid-review; don't move the
@@ -1701,6 +1720,14 @@ def update_event_details(
                     "coordinatorId": coordinator_id,
                     "recordedAt": recorded_at,
                 }
+
+            if recheck:
+                action["attendeeBaseline"] = {
+                    target: _aware(event[column]).astimezone(SINGAPORE).isoformat()
+                    for target, column in (("startDateTime", "preferred_start_date"), ("endDateTime", "preferred_end_date"))
+                    if event[column] is not None
+                }
+                action["attendeeBaseline"]["venueName"] = safety_recheck["venueBefore"]
 
             # `decision`, `decisionHistory` and `actionDetails` are carried
             # through untouched: an edit is not a coordinator decision, and
@@ -2209,6 +2236,46 @@ def decide_event(database_url, event_id, coordinator_id, status, reason=None):
 
 def approve_event(database_url, event_id, coordinator_id):
     return decide_event(database_url, event_id, coordinator_id, "Approved")
+
+
+def attendee_baseline(history):
+    """First pre-edit facts since the last effective approval; later edits cannot replace them."""
+    pending = []
+    for action in reversed(history):
+        if action.get("status") == "Confirmed":
+            break
+        if isinstance(action.get("attendeeBaseline"), dict):
+            pending.append(action["attendeeBaseline"])
+    return pending[-1] if pending else None
+
+
+def _record_attendee_update(cursor, event, venue_name=None):
+    baseline = attendee_baseline(unpack_metadata(event["description"])[5])
+    if baseline is None:
+        return
+    current = serialize(event)
+    final = {"venueName": venue_name}
+    for key, column in (("startDateTime", "preferredStartDate"), ("endDateTime", "preferredEndDate")):
+        if key in baseline:
+            final[key] = _aware(current[column]).astimezone(SINGAPORE).isoformat()
+    changes = {}
+    for key, old in baseline.items():
+        new = final[key]
+        if key != "venueName":
+            if _aware(old) == _aware(new):
+                continue
+        elif not isinstance(new, str) or not new.strip():
+            raise ValueError("Final approved venue snapshot required")
+        if old != new:
+            changes[key] = [old, new]
+    if changes:
+        _record_attendee_fanout(cursor, event, "attendee.updated-fanout", changes=changes)
+
+
+def _record_attendee_fanout(cursor, event, kind, **facts):
+    source = dict(eventId=str(event["event_id"]), eventName=event["event_name"], **facts)
+    cursor.execute('INSERT INTO public."EventNotificationOutbox" (source_id,type,source) VALUES (%s,%s,%s)',
+                   (str(uuid4()), kind, Json(source)))
 
 
 def _record_event_change(cursor, event, kind, recipient_role, **facts):

@@ -226,7 +226,9 @@ def test_withdrawal_records_status_and_timestamp(setup):
 
     assert result["status"] == "Withdrawn"
     assert result["withdrawn_at"] == "2026-10-24T02:30:00+00:00"
-    update_query, update_params = cursor.execute.call_args.args
+    # SCRUM-46 appends an outbox insert after the business UPDATE. Inspect the
+    # same withdrawal SQL as before rather than mistaking that final insert for it.
+    update_query, update_params = cursor.execute.call_args_list[1].args
     assert "SET status = 'Withdrawn', withdrawn_at = %s" in update_query
     assert update_params[1] == registration_row()["registration_id"]
 
@@ -378,7 +380,9 @@ def test_create_registration_locks_checks_capacity_and_inserts(setup):
     result = create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
 
     assert result["status"] == "Confirmed"
-    assert cursor.execute.call_count == 4
+    # One additional statement records the notification intent on this cursor;
+    # the existing capacity/identity assertions below still check registration SQL.
+    assert cursor.execute.call_count == 5
     assert "pg_advisory_xact_lock" in cursor.execute.call_args_list[0].args[0]
     lookup, params = cursor.execute.call_args_list[1].args
     assert "event_id = %s AND attendee_id = %s" in lookup
