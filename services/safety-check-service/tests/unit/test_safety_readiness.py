@@ -1,7 +1,8 @@
 """# Test scope and acceptance mapping — SCRUM-171 integration
 
-- **SCRUM-149 readiness regression; no direct SCRUM-171 AC:** approved arrangements pass; pending/unknown/missing venue and unapproved equipment block with readable outstanding items.
-- **Separately approved venue-only compatibility:** rejected venue history is ignored when a live approved booking exists; rejected-only remains missing a live venue. Cancelled/expired handling and equipment rejection rules are unchanged.
+- **SCRUM-149 readiness regression; no direct SCRUM-171 AC:** approved arrangements pass; pending/unknown/missing venue and pending/unknown equipment block with readable outstanding items.
+- **Separately approved venue-only compatibility:** rejected venue history is ignored when a live approved booking exists; rejected-only remains missing a live venue. Cancelled/expired handling is unchanged.
+- **SCRUM-149 dead-end fix (29 Oct 2026):** rejected equipment requests are ignored like rejected venue bookings; a pending one beside them still blocks.
 
 ## Case/group traceability
 
@@ -12,15 +13,21 @@ names and assertions specify the scenario. No group is credited with all five AC
 
 SCRUM-149 AC1/AC2: the rule for whether an event's arrangements are approved.
 
-AC1 Given an event ... has every venue booking approved and every equipment
-    request approved/reserved (or no equipment requested), when the Event
+AC1 Given an event ... has at least one approved venue booking, and none of
+    its venue bookings or equipment requests is still pending, when the Event
     Coordinator submits it for a safety check, then its status changes ...
+    Rejected, cancelled or expired venue bookings and rejected equipment
+    requests are no longer part of the event's arrangements and do not block
+    submission.
 AC2 Given any venue booking or equipment request for the event is still
-    pending or rejected, when the Event Coordinator tries to submit, then
-    submission is blocked and the outstanding arrangements are listed.
+    pending, or the event has no approved venue booking, when the Event
+    Coordinator tries to submit, then submission is blocked and the outstanding
+    arrangements are listed.
+
+Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end fix).
 
 SCRUM-171 authorised compatibility exception: rejected VENUE requests are
-immutable history; require a live approved replacement. Equipment is unchanged.
+immutable history; require a live approved replacement.
 
 A pure function, so these tests need no HTTP and no app. The rule fails closed:
 anything it can't read as approved counts as outstanding.
@@ -107,32 +114,80 @@ def test_unapproved_booking_is_listed_with_its_reason(status, reason):
     ]
 
 
-@pytest.mark.parametrize(
-    ("status", "reason"),
-    [
-        ("Pending", "Waiting for Technical Support approval."),
-        ("Rejected", "Rejected by Technical Support."),
-    ],
-)
-def test_unapproved_equipment_request_is_listed_with_its_reason(status, reason):
-    """AC2: a pending or rejected equipment request blocks, and says why.
-
-    A rejected request keeps blocking: equipment requests have no withdraw
-    path today, unlike venue bookings.
-    """
+def test_pending_equipment_request_is_listed_with_its_reason():
+    """AC2: a pending equipment request blocks, and says why."""
     outstanding = outstanding_arrangements(
-        [booking("Approved")], [equipment_request(status)]
+        [booking("Approved")], [equipment_request("Pending")]
     )
 
     assert outstanding == [
         {
             "type": "equipment",
             "id": REQUEST_ID,
-            "status": status,
+            "status": "Pending",
             "label": "Equipment request × 2",
-            "reason": reason,
+            "reason": "Waiting for Technical Support approval.",
         }
     ]
+
+
+def test_rejected_equipment_request_is_ignored():
+    """AC1: the dead end from the 28 Oct bug report.
+
+    Equipment decisions are final (SCRUM-33) and a request can't be withdrawn,
+    so a rejected one used to keep an Approved event from ever being
+    submitted. It is no longer part of the event's arrangements.
+    """
+    assert (
+        outstanding_arrangements(
+            [booking("Approved")], [equipment_request("Rejected")]
+        )
+        == []
+    )
+
+
+def test_rejected_equipment_beside_approved_equipment_is_ready():
+    """AC1: the approved request counts; the rejected one is ignored."""
+    assert (
+        outstanding_arrangements(
+            [booking("Approved")],
+            [
+                equipment_request("Approved"),
+                equipment_request("Rejected", OTHER_REQUEST_ID),
+            ],
+        )
+        == []
+    )
+
+
+def test_pending_equipment_still_blocks_beside_a_rejected_one():
+    """AC2: only rejections stop blocking; a pending request still waits."""
+    outstanding = outstanding_arrangements(
+        [booking("Approved")],
+        [
+            equipment_request("Rejected"),
+            equipment_request("Pending", OTHER_REQUEST_ID),
+        ],
+    )
+
+    assert outstanding == [
+        {
+            "type": "equipment",
+            "id": OTHER_REQUEST_ID,
+            "status": "Pending",
+            "label": "Equipment request × 2",
+            "reason": "Waiting for Technical Support approval.",
+        }
+    ]
+
+
+def test_rejected_equipment_does_not_count_as_a_venue():
+    """AC2: with no live venue left, only "No venue booking" is listed."""
+    outstanding = outstanding_arrangements(
+        [booking("Rejected")], [equipment_request("Rejected")]
+    )
+
+    assert [item["label"] for item in outstanding] == ["No venue booking"]
 
 
 def test_one_unapproved_booking_among_several_blocks():
@@ -147,7 +202,7 @@ def test_one_unapproved_booking_among_several_blocks():
 def test_venue_items_come_before_equipment_items():
     """AC2's list is stable: venues first, then equipment, in service order."""
     outstanding = outstanding_arrangements(
-        [booking("Pending Review")], [equipment_request("Rejected")]
+        [booking("Pending Review")], [equipment_request("Pending")]
     )
 
     assert [item["type"] for item in outstanding] == ["venue", "equipment"]
@@ -159,7 +214,7 @@ def test_every_unapproved_arrangement_is_listed():
         [booking("Pending Review"), booking("Pending", OTHER_BOOKING_ID)],
         [
             equipment_request("Pending"),
-            equipment_request("Rejected", OTHER_REQUEST_ID),
+            equipment_request("Pending", OTHER_REQUEST_ID),
         ],
     )
 

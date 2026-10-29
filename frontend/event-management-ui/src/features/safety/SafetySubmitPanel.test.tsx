@@ -6,6 +6,10 @@
  * AC2 outstanding arrangements are listed and submit is disabled.
  * AC3 both notes are optional, limited to 2000 characters, and sent.
  * AC4 the button can't be clicked twice, and a 409 is explained.
+ *
+ * Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end
+ * fix). The server drops rejected items from `outstanding`; the panel only
+ * adds a hint saying so.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
@@ -29,9 +33,9 @@ const outstanding = [
     reason: 'Waiting for Venue Staff approval.',
   },
   {
-    type: 'equipment' as const, id: 'request-a', status: 'Rejected',
+    type: 'equipment' as const, id: 'request-a', status: 'Pending',
     label: 'Equipment request × 2',
-    reason: 'Rejected by Technical Support.',
+    reason: 'Waiting for Technical Support approval.',
   },
 ]
 
@@ -62,7 +66,7 @@ test('AC2: outstanding arrangements are listed and submit stays disabled', async
   expect(screen.getByText('Booking 12 Nov 2026 09:00–17:00 (120 people)')).toBeInTheDocument()
   expect(screen.getByText('Waiting for Venue Staff approval.')).toBeInTheDocument()
   expect(screen.getByText('Equipment request × 2')).toBeInTheDocument()
-  expect(screen.getByText('Rejected by Technical Support.')).toBeInTheDocument()
+  expect(screen.getByText('Waiting for Technical Support approval.')).toBeInTheDocument()
   expect(screen.getByText('Pending Review')).toBeInTheDocument()
   expect(submitButton()).toBeDisabled()
 })
@@ -73,6 +77,25 @@ test('AC2: a ready event shows no blocked list and an enabled button', async () 
   await waitFor(() => expect(submitButton()).toBeEnabled())
   expect(screen.queryByText('Before you can submit for a safety check')).not.toBeInTheDocument()
   expect(fetchSafetyReadiness).toHaveBeenCalledWith(eventId, coordinatorId)
+})
+
+const rejectedHint = "Rejected venue bookings and equipment requests don't block a safety check. The Safety Officer still sees them in the review."
+
+test('shows the rejected-requests hint once readiness has loaded (ready)', async () => {
+  renderPanel()
+
+  expect(await screen.findByText(rejectedHint)).toBeInTheDocument()
+  expect(submitButton()).toBeEnabled()
+})
+
+test('shows the rejected-requests hint once readiness has loaded (not ready)', async () => {
+  vi.mocked(fetchSafetyReadiness).mockResolvedValue({
+    ready: false, eventStatus: 'Approved', outstanding, openSafetyCheck: null,
+  })
+  renderPanel()
+
+  expect(await screen.findByText(rejectedHint)).toBeInTheDocument()
+  expect(submitButton()).toBeDisabled()
 })
 
 test('AC1, AC3: submitting sends both notes and reloads the page', async () => {
@@ -158,7 +181,7 @@ test('AC4: a 409 explains that the event is already waiting, and reloads', async
 
 test('AC2: a 422 at submit time replaces the list with the server\'s', async () => {
   vi.mocked(submitSafetyCheck).mockRejectedValue(new SafetySubmitError(
-    "This event can't be submitted for a safety check until every venue booking and equipment request is approved.",
+    "This event can't be submitted for a safety check until it has an approved venue booking and no venue booking or equipment request is still waiting for a decision.",
     { code: 'ARRANGEMENTS_OUTSTANDING', outstanding },
   ))
   renderPanel()

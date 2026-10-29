@@ -28,6 +28,9 @@ beforeEach(() => {
 })
 
 const onResubmitted = vi.fn()
+// SCRUM-149 fix (29 Oct 2026): the server ignores rejected requests; the panel says so.
+const rejectedHint = "Rejected venue bookings and equipment requests don't block a safety check. The Safety Officer still sees them in the review."
+
 const renderPanel = () => render(<SafetyFeedbackPanel eventId="event-1" coordinatorId="coordinator-1" onResubmitted={onResubmitted} />)
 
 test('resubmit stays disabled while equipment readiness is loading', async () => {
@@ -35,6 +38,7 @@ test('resubmit stays disabled while equipment readiness is loading', async () =>
   renderPanel()
   await screen.findByText('Changes Requested')
   expect(screen.getByRole('button', { name: 'Resubmit Safety Check' })).toBeDisabled()
+  expect(screen.queryByText(rejectedHint)).not.toBeInTheDocument()
 })
 
 // Safety revision AC3: the coordinator cannot resubmit while equipment still awaits Technical Support review.
@@ -45,6 +49,7 @@ test('pending equipment disables resubmission even when venue feedback is presen
   renderPanel()
   expect(await screen.findByText(/Outstanding equipment requests: 1/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Resubmit Safety Check' })).toBeDisabled()
+  expect(screen.getByText(rejectedHint)).toBeInTheDocument()
 })
 
 // Safety revision AC5 (UI): ready arrangements enable resubmission and preserve planning notes in the request.
@@ -54,6 +59,7 @@ test('no pending equipment enables resubmission and carries previous planning no
   renderPanel()
   const button = screen.getByRole('button', { name: 'Resubmit Safety Check' })
   await waitFor(() => expect(button).toBeEnabled())
+  expect(screen.getByText(rejectedHint)).toBeInTheDocument()
   fireEvent.click(button)
   await waitFor(() => expect(onResubmitted).toHaveBeenCalledOnce())
   expect(resubmitSafetyCheck).toHaveBeenCalledWith({ eventId: 'event-1', coordinatorId: 'coordinator-1',

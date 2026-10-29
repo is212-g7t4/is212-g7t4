@@ -1,7 +1,8 @@
 """# Test scope and acceptance mapping — SCRUM-171 integration
 
 - **SCRUM-149 submission/readiness regression; no direct SCRUM-171 AC:** original numbered criteria below belong to SCRUM-149, not SCRUM-171.
-- **Separately approved venue-only compatibility:** `test_rejected_venue_history_uses_live_replacement_readiness` checks GET readiness and POST with approved replacement (allowed), no replacement (blocked), and pending replacement (blocked). Mocked downstreams do not prove real safety/database integration; equipment still blocks.
+- **Separately approved venue-only compatibility:** `test_rejected_venue_history_uses_live_replacement_readiness` checks GET readiness and POST with approved replacement (allowed), no replacement (blocked), and pending replacement (blocked). Mocked downstreams do not prove real safety/database integration.
+- **SCRUM-149 dead-end fix (29 Oct 2026):** rejected equipment no longer blocks submit, readiness or resubmit; pending equipment beside it still does.
 
 ## Case/group traceability
 
@@ -12,17 +13,22 @@ names and assertions specify the scenario. No group is credited with all five AC
 
 SCRUM-149: POST /safety-checks and GET /safety-checks/readiness.
 
-AC1 Given an event assigned to the Event Coordinator has every venue booking
-    approved and every equipment request approved/reserved (or no equipment
-    requested), when the Event Coordinator submits it for a safety check, then
-    its status changes to 'Pending Safety Check' and the submission time is
-    recorded.
+AC1 Given an event assigned to the Event Coordinator has at least one
+    approved venue booking, and none of its venue bookings or equipment
+    requests is still pending, when the Event Coordinator submits it for a
+    safety check, then its status changes to 'Pending Safety Check' and the
+    submission time is recorded. Rejected, cancelled or expired venue bookings
+    and rejected equipment requests are no longer part of the event's
+    arrangements and do not block submission.
 AC2 Given any venue booking or equipment request for the event is still
-    pending or rejected, when the Event Coordinator tries to submit, then
-    submission is blocked and the outstanding arrangements are listed.
+    pending, or the event has no approved venue booking, when the Event
+    Coordinator tries to submit, then submission is blocked and the
+    outstanding arrangements are listed.
+
+Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end fix).
 
 SCRUM-171 authorised compatibility exception: rejected VENUE requests are
-immutable history; require a live approved replacement. Equipment is unchanged.
+immutable history; require a live approved replacement.
 AC3 Given the Event Coordinator is submitting, when they enter equipment
     placement and expected crowd movement notes, then the notes are saved with
     the safety check.
@@ -196,7 +202,7 @@ def test_resubmission_readiness_requires_both_approved_arrangements(client, down
 
 
 # Safety revision AC2/AC3: unresolved venue or equipment arrangements block both readiness and submission.
-@pytest.mark.parametrize("venue_status,equipment_status", [("Pending Review", "Approved"), ("Approved", "Rejected"), ("Rejected", "Approved")])
+@pytest.mark.parametrize("venue_status,equipment_status", [("Pending Review", "Approved"), ("Rejected", "Approved")])
 def test_resubmission_blocks_unready_venue_or_equipment(client, downstream, venue_status, equipment_status):
     downstream.event = event("Safety Changes Requested")
     downstream.bookings = [booking(venue_status)]
@@ -205,6 +211,22 @@ def test_resubmission_blocks_unready_venue_or_equipment(client, downstream, venu
     response = client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}")
     assert response.json["ready"] is False
     assert "create" not in downstream.names()
+
+
+# Safety revision AC3: "reviewed again" is satisfied by a rejection as much as an
+# approval, so a rejected request no longer blocks resubmission (dead-end fix).
+def test_resubmission_ignores_rejected_equipment(client, downstream):
+    downstream.event = event("Safety Changes Requested")
+    downstream.rounds = [record(1, "Changes Requested")]
+    downstream.created = record(2)
+    downstream.requests = [equipment_request("Rejected")]
+    response = client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}")
+    assert response.json == {"ready": True, "eventStatus": "Safety Changes Requested", "outstanding": []}
+    assert "create" not in downstream.names()
+    response = resubmit(client)
+    assert response.status_code == 201
+    assert response.json["safetyCheck"]["roundNumber"] == 2
+    assert "patch_event" in downstream.names()
 
 
 def test_resubmission_readiness_blocks_pending_equipment_and_other_event_stages(client, downstream):
@@ -407,15 +429,39 @@ def test_pending_booking_blocks_the_submission(client, downstream):
     assert "patch_event" not in downstream.names()
 
 
-def test_rejected_equipment_request_blocks_the_submission(client, downstream):
-    """AC2: a rejected equipment request keeps blocking — there's no withdraw path."""
+def test_rejected_equipment_request_does_not_block_the_submission(client, downstream):
+    """AC1: a rejected equipment request is no longer an arrangement.
+
+    Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end fix).
+    """
     downstream.requests = [equipment_request("Rejected")]
 
     response = submit(client)
 
+    assert response.status_code == 201
+    assert response.json["event"]["status"] == "Pending Safety Check"
+    assert "create" in downstream.names()
+    assert "patch_event" in downstream.names()
+
+
+def test_pending_equipment_beside_rejected_still_blocks_submission(client, downstream):
+    """AC2: only rejections stop blocking; the pending request is still listed."""
+    downstream.requests = [
+        equipment_request("Rejected"),
+        equipment_request("Pending", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+    ]
+
+    response = submit(client)
+
     assert response.status_code == 422
-    assert response.json["outstanding"][0]["type"] == "equipment"
+    assert response.json["message"] == (
+        "This event can't be submitted for a safety check until it has an "
+        "approved venue booking and no venue booking or equipment request is "
+        "still waiting for a decision."
+    )
+    assert [item["status"] for item in response.json["outstanding"]] == ["Pending"]
     assert "create" not in downstream.names()
+    assert "patch_event" not in downstream.names()
 
 
 def test_event_with_no_booking_blocks_the_submission(client, downstream):
@@ -806,6 +852,23 @@ def test_readiness_lists_what_is_outstanding(client, downstream):
         "equipment",
     ]
     assert "create" not in downstream.names()
+
+
+def test_readiness_ignores_rejected_equipment(client, downstream):
+    """AC1 ahead of the click: a rejected request doesn't disable the button."""
+    downstream.requests = [equipment_request("Rejected")]
+
+    response = readiness(client)
+
+    assert response.status_code == 200
+    assert response.json == {
+        "ready": True,
+        "eventStatus": "Approved",
+        "outstanding": [],
+        "openSafetyCheck": None,
+    }
+    assert "create" not in downstream.names()
+    assert "patch_event" not in downstream.names()
 
 
 def test_readiness_on_a_pending_event_returns_the_open_round(client, downstream):
