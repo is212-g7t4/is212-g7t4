@@ -89,6 +89,7 @@ def test_dr_history_adapter_maps_public_summaries_and_batches_only_owned_registr
                 status="Cancelled",
                 startTime="2030-03-01T09:00:00",
                 endTime="2030-03-01T17:00:00",
+                attendeeVenueName=None,
             )
         ]
     }
@@ -103,12 +104,14 @@ def test_dr_history_adapter_maps_public_summaries_and_batches_only_owned_registr
             status="Cancelled",
             startTime="2030-03-01T09:00:00",
             endTime="2030-03-01T17:00:00",
+            attendeeVenueName=None,
             preferredStartDate="2030-03-01T09:00:00",
             preferredEndDate="2030-03-01T17:00:00",
             description="",
             purpose="",
         )
     ]
+    assert get.call_args.args == (f"{clients.EVENT_SERVICE_URL}/events/attendee-summaries",)
     assert get.call_args.kwargs == dict(params={"ids": "event"}, timeout=5)
     response.raise_for_status.assert_called_once()
 

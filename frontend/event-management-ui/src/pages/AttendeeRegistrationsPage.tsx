@@ -68,7 +68,8 @@ export function AttendeeRegistrationsPage({ role, attendeeId, targetRegistration
             <span className="event-row-body">
               <span className="event-row-heading"><strong>{registration.event.eventName}</strong><StatusBadge status={registration.status} />{registration.event.status === 'Cancelled' && <span>Event Cancelled</span>}</span>
               <span className="event-row-schedule muted">{formatSchedule(registration.event.preferredStartDate, registration.event.preferredEndDate)}</span>
-              {registration.venue && <span className="event-row-venue muted">{registration.venue.name} · {registration.venue.location}</span>}
+              {registration.venue ? <span className="event-row-venue muted">{registration.venue.name} · {registration.venue.location}</span>
+                : registration.approvedVenueName && <span className="event-row-venue muted">{registration.approvedVenueName}</span>}
               <span className="muted">Registered: {formatRegistrationDate(registration.registrationDate)}</span>
             </span>
             <ArrowRightIcon size={16} className="icon" />
@@ -143,10 +144,10 @@ function RegistrationDetail({ registration, onBack, onWithdrawn }: {
         <dl className="event-details">
           <div className="event-detail full"><dt>Date and time</dt><dd>{formatSchedule(current.event.preferredStartDate, current.event.preferredEndDate)}</dd></div>
           <div className="event-detail full"><dt>Withdrawal deadline</dt><dd>{formatRegistrationDate(current.event.withdrawalDeadline || current.event.preferredStartDate)}</dd></div>
-          {current.venue && <>
+          {current.venue ? <>
             <div className="event-detail"><dt>Venue</dt><dd>{current.venue.name}</dd></div>
             <div className="event-detail"><dt>Location</dt><dd>{current.venue.location}</dd></div>
-          </>}
+          </> : current.approvedVenueName && <div className="event-detail"><dt>Venue</dt><dd>{current.approvedVenueName}</dd></div>}
           <div className="event-detail full"><dt>Description</dt><dd>{current.event.description}</dd></div>
           {current.event.purpose && <div className="event-detail full"><dt>Purpose</dt><dd>{current.event.purpose}</dd></div>}
         </dl>

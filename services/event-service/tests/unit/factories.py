@@ -53,3 +53,27 @@ def safety_notification_row() -> dict[str, Any]:
                description=json.dumps({'_connectsphere': 'event-submission-v1',
                                        'description': 'Workshop', 'purpose': 'Learning'}))
     return row
+
+
+def baseline_entry(status='Pending Safety Check', start='2030-03-01T09:00:00+08:00',
+                   end='2030-03-01T17:00:00+08:00', venue='Hall A', **extra):
+    """One actionHistory entry carrying the pre-change attendee facts, as update_event_details writes it."""
+    baseline = {key: value for key, value in (('startDateTime', start), ('endDateTime', end)) if value is not None}
+    baseline['venueName'] = venue
+    return dict(status=status, details='Event details updated.', attendeeBaseline=baseline, **extra)
+
+
+def approval_entry(round_id=ROUND, **extra):
+    """The Safety Officer's approval entry; attendee_baseline stops at it."""
+    return dict(status='Confirmed', safetyCheckId=round_id, details='Safety approved.', **extra)
+
+
+def attendee_summary_row(status, history, start=datetime(2030, 3, 2, 1, tzinfo=UTC),
+                         end=datetime(2030, 3, 2, 10, tzinfo=UTC), description=None, **extra):
+    """A row as list_attendee_event_summaries selects it; the live window defaults to the *new* 2030-03-02 times."""
+    if description is None:
+        description = json.dumps({'_connectsphere': 'event-submission-v1', 'description': 'Workshop',
+                                  'purpose': 'Learning', 'actionHistory': history})
+    row = dict(event_id=EVENT, event_name='Workshop', status=status, coordinator_id=COORDINATOR,
+               preferred_start_date=start, preferred_end_date=end, description=description)
+    return {**row, **extra}

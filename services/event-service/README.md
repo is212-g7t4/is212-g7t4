@@ -484,6 +484,35 @@ paths. `decision`, `decisionHistory`, `actionDetails` and the earlier
 dropping the metadata stored alongside it would erase the approve/reject
 history.
 
+### `GET /events/attendee-summaries` — what registered Attendees see during a re-check
+
+The re-check above writes the new values straight to the Event row, because
+the coordinator and the Safety Officer must review them. Attendees must not
+see them until the new safety check passes (SCRUM-153 AC4/AC5, SCRUM-150 AC4),
+so [`attendee-registration-service`](../attendee-registration-service/) reads
+its non-`Confirmed` registered events through this endpoint instead of
+`/events/summaries`:
+
+```
+GET /events/attendee-summaries?ids=<uuid>,<uuid>
+→ {"events": [{"id", "eventName", "status", "coordinatorId",
+               "startTime", "endTime", "attendeeVenueName"}]}
+```
+
+Validation is the same as `/events/summaries` (1–100 UUIDs, else `400`;
+`503` without `DATABASE_URL`; drafts never returned). The rule lives in
+`attendee_view`: while the event isn't `Confirmed`, the first
+`attendeeBaseline` recorded since its last approval (written by the re-check
+above and by the SCRUM-28 venue-change withdrawal) replaces `startTime`,
+`endTime` and supplies `attendeeVenueName`. Otherwise the live values are
+returned and `attendeeVenueName` is `null`. The overlay ends by itself when
+the Safety Officer approves, because the new `Confirmed` entry closes the
+baseline. Nothing else from the metadata is returned.
+
+`/events/summaries` is unchanged: staff screens keep seeing the live values.
+Events withdrawn before the baseline existed (pre-SCRUM-46) have none, so
+attendees see their live values.
+
 `Confirmed → Pending Safety Check` is in `SAFETY_TRANSITIONS` but listed in
 `RECHECK_ONLY_MOVES`, and `update_event_safety_status` refuses every pair
 there. So `/safety-status` can reach every other safety move but not this

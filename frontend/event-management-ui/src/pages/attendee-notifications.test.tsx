@@ -19,7 +19,7 @@ const user='22222222-2222-4222-8222-222222222222'
 // Synthetic history deliberately separates Event Cancelled from Registration Confirmed.
 // The component receives this through a doubled loader; no backend mutation occurs.
 const registration: AttendeeRegistration={id:ref,attendeeId:user,registrationDate:null,withdrawnAt:null,status:'Confirmed',
- attendeeName:'Synthetic',attendeeEmail:'user@example.com',attendeeOrganization:'',venue:null,
+ attendeeName:'Synthetic',attendeeEmail:'user@example.com',attendeeOrganization:'',venue:null,approvedVenueName:null,
  event:{id:'11111111-1111-4111-8111-111111111111',eventName:'Workshop',status:'Cancelled',
  description:'History',purpose:'',preferredStartDate:'2030-03-01T09:00:00+08:00',preferredEndDate:'2030-03-01T17:00:00+08:00',
  expectedAttendance:'20',venueRequirements:'',accessibilityNeeds:'',equipmentRequirements:'',registrationNeeds:'',
