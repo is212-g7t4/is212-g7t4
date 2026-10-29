@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pika
 from app.event_changes import change_message
+from app.attendee_notifications import attendee_message
 
 QUEUE = "notifications.v1"
 
@@ -28,7 +29,8 @@ class OrganiserNameUnavailable(Exception):
 
 class OutboxAPI:
     def __init__(self):
-        self.base = os.environ["EVENT_SERVICE_URL"].rstrip("/")
+        owner = os.environ.get("OUTBOX_OWNER", "event")
+        self.base = os.environ["REGISTRATION_SERVICE_URL" if owner == "registration" else "EVENT_SERVICE_URL"].rstrip("/")
         self.headers = {"X-Internal-Token": os.environ["INTERNAL_SERVICE_TOKEN"]}
 
     def call(self, method, url, **kwargs):
@@ -93,6 +95,35 @@ class OutboxAPI:
             recipient = leads[0]
         return str(UUID(recipient))
 
+    def registration_details(self, source):
+        event = self.call("GET", os.environ["EVENT_SERVICE_URL"].rstrip("/") +
+                          f"/internal/events/{source['eventId']}/notification-context", params={"includeSchedule": "true"})
+        if source.get("withdrawal"):
+            return {"eventName": event["eventName"]}
+        bookings = self.call("GET", os.environ["VENUE_AVAILABILITY_SERVICE_URL"].rstrip("/") +
+                             f"/events/{source['eventId']}/venue-bookings")["bookings"]
+        approved = [item for item in bookings if item["status"] == "Approved"]
+        if not approved:
+            raise ValueError("Approved venue unavailable")
+        booking = min(approved, key=lambda item: (datetime.fromisoformat(item["requestedStartTime"]), item["id"]))
+        venue = self.call("GET", os.environ["VENUE_SERVICE_URL"].rstrip("/") + f"/venues/{booking['venueId']}")["venue"]
+        return dict(eventName=event["eventName"], startDateTime=event["startDateTime"],
+                    endDateTime=event["endDateTime"], venueName=venue["name"])
+
+    def attendee_recipients(self, event_id):
+        rows = self.call("GET", os.environ["REGISTRATION_SERVICE_URL"].rstrip("/") + "/registrations",
+                         params={"eventId": event_id})["registrations"]
+        if not isinstance(rows, list):
+            raise ValueError("Invalid registration list")
+        recipients = []
+        for row in rows:
+            if row["event_id"] != event_id:
+                raise ValueError("Wrong event in registration list")
+            if row["status"] == "Confirmed":
+                recipients.append(dict(recipientId=str(UUID(row["attendee_id"])),
+                                       registrationId=str(UUID(row["registration_id"]))))
+        return recipients
+
     def claim(self):
         return self.call(
             "POST", self.base + "/internal/notification-outbox/claim", json={}
@@ -153,6 +184,10 @@ def dispatch_once(api, publish):
     jobs = api.claim()
     for job in jobs:
         try:
+            if job.get("type") in ("attendee.cancelled-fanout", "attendee.updated-fanout"):
+                recipients = api.attendee_recipients(job["source"]["eventId"])
+                api.operation(job, "expand", recipients=recipients)
+                continue
             if job.get("type") == "safety.review-fanout":
                 recipients = api.safety_recipients()
                 if not recipients:
@@ -172,7 +207,12 @@ def dispatch_once(api, publish):
                 source = job["source"]
                 kind = job.get("type", "event.approval" if source.get("decision") == "Approved" else "event.rejection")
                 details = source
-                if kind in ("event.change-request-submitted", "event.change-request-approved", "event.change-request-rejected", "event.cancelled"):
+                if kind in ("registration.confirmed", "registration.withdrawn"):
+                    details = source if source.get("eventName") else {**source, **api.registration_details({**source, "withdrawal": kind == "registration.withdrawn"})}
+                    message = attendee_message(kind, details)
+                elif kind in ("attendee.event-cancelled", "attendee.event-updated"):
+                    message = attendee_message(kind, source)
+                elif kind in ("event.change-request-submitted", "event.change-request-approved", "event.change-request-rejected", "event.cancelled"):
                     details = {**source, "recipientId": api.change_recipient(source)}
                     message = change_message(kind, source)
                 elif kind == "safety.review-submitted":
@@ -206,7 +246,9 @@ def dispatch_once(api, publish):
                     version=1, id=job["id"], type=kind,
                     recipientId=details["recipientId"], createdAt=job["createdAt"],
                     message=message,
-                    destination=(dict(kind="change-request-review", eventId=source["eventId"],
+                    destination=(dict(kind="attendee-registration", registrationId=source["registrationId"])
+                                 if kind in ("registration.confirmed", "registration.withdrawn", "attendee.event-cancelled", "attendee.event-updated") else
+                                 dict(kind="change-request-review", eventId=source["eventId"],
                                       changeRequestId=source["changeRequestId"])
                                  if kind == "event.change-request-submitted" else
                                  None if kind == "event.coordinator-removed" else

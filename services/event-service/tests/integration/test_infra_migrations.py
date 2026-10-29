@@ -18,8 +18,8 @@ APPROVAL = "20261021000100_event_approval_notifications.sql"
 PINNED_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql']
 # Exact intermediate inventory after approval/assignment, before later additive migrations.
 HISTORICAL_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox'}
-# Current SCRUM-49 full chain adds Equipment only; no Registration outbox exists here.
-EXPECTED_TABLES = HISTORICAL_TABLES | {'EquipmentNotificationOutbox'}
+# Current combined SCRUM-49/SCRUM-46 chain includes both additive owner outboxes.
+EXPECTED_TABLES = HISTORICAL_TABLES | {'EquipmentNotificationOutbox', 'RegistrationNotificationOutbox'}
 TYPES = ('event.rejection', 'event.approval', 'event.coordinator-assignment')
 # Actual SCRUM-166 target inventory: f0cd2c16ef56b5a4e15bc7d774d1b3ddb6b65f9e.
 SCRUM166_MAIN_MIGRATIONS = ['20261011140000_baseline_schema.sql', '20261012234245_require_venue_closure_metadata.sql', '20261016000000_booking_closure_rejection.sql', '20261016100000_add_hold_coordinator.sql', '20261016120000_validate_venue_buffer_times.sql', '20261016142813_safety_check_withdrawal.sql', '20261017000000_notification_inbox.sql', '20261017000001_venue_notification_outbox.sql', '20261021000000_event_notification_outbox.sql', '20261021000100_event_approval_notifications.sql', '20261021020000_event_notification_assignments.sql', '20261023100000_event_change_requests.sql', '20261024120000_attendee_registration_withdrawal.sql', '20261025000000_event_submission_notifications.sql']

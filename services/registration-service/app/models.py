@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import psycopg2
 import psycopg2.errors
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 
 # Only columns owned by Registration Service. The attendee's name, email and
 # organisation live on User; the Attendee Registration composite adds them.
@@ -66,12 +66,13 @@ def list_attendee_registrations(database_url, attendee_id):
             return [serialize(row) for row in cursor.fetchall()]
 
 
-def create_registration(database_url, event_id, attendee_id, capacity):
+def create_registration(database_url, event_id, attendee_id, capacity, notification_context=None):
     """Confirm one attendee for one event while serializing capacity checks.
 
     One row per (event, attendee), enforced by a UNIQUE constraint. Registering
     again after withdrawing reuses the withdrawn row.
     """
+    notification_context = notification_snapshot("registration.confirmed", notification_context)
     registered_at = datetime.now(timezone.utc)
     try:
         with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
@@ -112,14 +113,17 @@ def create_registration(database_url, event_id, attendee_id, capacity):
                             RETURNING {COLUMNS}""",
                         [str(uuid4()), event_id, attendee_id, registered_at],
                     )
-                return serialize(cursor.fetchone())
+                registration = serialize(cursor.fetchone())
+                record_notification(cursor, registration, "registration.confirmed", notification_context)
+                return registration
     except psycopg2.errors.UniqueViolation as error:
         # Safety net: the advisory lock should already prevent this.
         raise DuplicateRegistrationError from error
 
 
-def withdraw_registration(database_url, registration_id, attendee_id):
+def withdraw_registration(database_url, registration_id, attendee_id, notification_context=None):
     """Withdraw an attendee's own confirmed registration and timestamp it."""
+    notification_context = notification_snapshot("registration.withdrawn", notification_context)
     withdrawn_at = datetime.now(timezone.utc)
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -142,7 +146,39 @@ def withdraw_registration(database_url, registration_id, attendee_id):
                     RETURNING {COLUMNS}''',
                 [withdrawn_at, registration_id],
             )
-            return serialize(cursor.fetchone())
+            registration = serialize(cursor.fetchone())
+            record_notification(cursor, registration, "registration.withdrawn", notification_context)
+            return registration
+
+
+def notification_snapshot(kind, context):
+    """Reject unusable immutable display facts before any registration mutation."""
+    if context is None:
+        return None  # Legacy direct calls are enriched at first preparation.
+    keys = ("eventName", "startDateTime", "endDateTime", "venueName") if kind == "registration.confirmed" else ("eventName",)
+    if not isinstance(context, dict) or any(not isinstance(context.get(key), str) or not context[key].strip() for key in keys):
+        raise ValueError("Complete notification snapshot required")
+    if kind == "registration.confirmed":
+        from app.attendee_notifications import stamp
+
+        try:
+            stamp(context["startDateTime"])
+            stamp(context["endDateTime"])
+        except (ValueError, OverflowError) as invalid:
+            raise ValueError("Renderable notification dates required") from invalid
+    return {key: context[key] for key in keys}
+
+
+def record_notification(cursor, registration, kind, context=None):
+    """A fresh action ID per successful mutation; retries retain this durable ID."""
+    source = dict(eventId=registration["event_id"], recipientId=registration["attendee_id"],
+                  registrationId=registration["registration_id"])
+    if context is not None:
+        source.update(context)
+    cursor.execute(
+        'INSERT INTO public."RegistrationNotificationOutbox" (source_id,type,source) VALUES (%s,%s,%s)',
+        (str(uuid4()), kind, Json(source)),
+    )
 
 
 def count_registrations(database_url, event_ids):

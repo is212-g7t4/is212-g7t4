@@ -47,15 +47,15 @@ def move(client, identifier, round_id, status='Pending Safety Check', number=1, 
 
 
 def claim(client):
-    # Cancellation also creates two independent SCRUM-49 jobs at this timestamp.
+    # Cancellation also creates two SCRUM-49 jobs and one SCRUM-46 attendee fanout.
     # Leave those leased and select this story's work, without assuming UUID order.
-    for _ in range(3):
+    for _ in range(4):
         response = client.post('/internal/notification-outbox/claim', json={}, headers=OUTBOX_HEADERS)
         assert response.status_code == 200
         job = response.json['jobs'][0]
-        if job['type'] != 'event.cancelled':
+        if job['type'] not in {'event.cancelled', 'attendee.cancelled-fanout'}:
             return job
-    pytest.fail("Safety work was not found within its two cancellation siblings")
+    pytest.fail("Safety work was not found within its three cancellation siblings")
 
 
 # AC1 ---- review persistence and new rounds (AC4 metadata)
@@ -145,7 +145,9 @@ def test_ac1_each_new_pending_round_saves_a_new_review_with_current_schedule(saf
                                 json=dict(coordinatorId=COORDINATOR,
                                           changes={'preferredStartDate': '2030-03-01T10:00'},
                                           safetyRecheck=dict(withdrawnSafetyCheckId=previous,
-                                                             safetyCheckId=next_round, roundNumber=2)))
+                                                             safetyCheckId=next_round, roundNumber=2,
+                                                             # SCRUM-46 requires original actual venue at direct recheck entry.
+                                                             venueBefore="Grand Hall")))
     assert response.status_code == 200
     assert response.json['status'] == 'Pending Safety Check'
     after_round = db.query('SELECT clock_timestamp()')[0][0]

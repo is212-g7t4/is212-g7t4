@@ -825,7 +825,9 @@ def _venue_change_safety_status(cursor):
     ]
     update_event_safety_status(
         URL, EVENT_ID, "Approved", ROUND_ID, 1, coordinator_id=COORDINATOR_ID,
-        venue_change={"move": VENUE_CHANGE_WITHDRAW, "reason": "Venue changed."},
+        # SCRUM-46: this successful withdrawal supplies original venue facts;
+        # SQL remains doubled and the inherited amendment assertions stay scoped.
+        venue_change={"move": VENUE_CHANGE_WITHDRAW, "reason": "Venue changed.", "venueBefore": "Grand Hall"},
     )
 
 

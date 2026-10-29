@@ -187,6 +187,7 @@ def set_event_safety_status(
     decided_by: str = None,
     remarks: str = None,
     areas: list = None,
+    attendee_venue: str = None,
 ) -> dict:
     """Move the event along the safety workflow. Event Service re-checks under a row lock.
 
@@ -204,6 +205,8 @@ def set_event_safety_status(
     if decided_by is not None:
         body["decidedBy"] = decided_by
         body["remarks"] = remarks
+    if attendee_venue is not None:
+        body["attendeeVenue"] = attendee_venue
     if areas is not None:
         body["areas"] = areas
     response = _send(
@@ -241,7 +244,7 @@ def update_event_details(
         json={
             "coordinatorId": coordinator_id,
             "changes": changes,
-            "safetyRecheck": safety_recheck,
+            "safetyRecheck": {**safety_recheck, "venueBefore": attendee_venue_name(event_id)},
         },
         headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
     )
@@ -265,6 +268,19 @@ def update_event_details(
 
 
 # --- Venue Availability Service (atomic, 5008) ------------------------------
+
+
+def attendee_venue_name(event_id):
+    """Freeze the actual earliest approved arrangement, never free-text requirements."""
+    from datetime import datetime
+    approved = [b for b in get_event_venue_bookings(event_id) if b["status"] == "Approved"]
+    if not approved:
+        raise DownstreamError("Approved venue unavailable")
+    booking = min(approved, key=lambda b: (datetime.fromisoformat(b["requestedStartTime"]), b["id"]))
+    venue = next((v for v in list_venues() if v["id"] == booking["venueId"]), None)
+    if not venue or not isinstance(venue.get("name"), str) or not venue["name"].strip():
+        raise DownstreamError("Approved venue name unavailable")
+    return venue["name"]
 
 
 def get_event_venue_bookings(event_id: str) -> list:
@@ -487,6 +503,7 @@ def set_event_venue_change_status(
         "coordinatorId": coordinator_id,
     }
     if withdraw:
+        body["venueBefore"] = attendee_venue_name(event_id)
         body["withdrawnSafetyCheckId"] = round_id
         body["reason"] = reason
     else:
