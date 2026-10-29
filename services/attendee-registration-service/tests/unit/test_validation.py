@@ -8,12 +8,12 @@ from app.validation import event_has_started, validate_registration, withdrawal_
 
 def test_validation_trims_ids_and_drops_profile_fields():
     cleaned, errors, missing = validate_registration({
-        "eventId": " event ", "attendeeId": " attendee ",
+        "eventId": " event ",
         "fullName": "Adam Yeo", "email": "adam@example.com",
     })
     assert errors == []
     assert missing == []
-    assert cleaned == {"eventId": "event", "attendeeId": "attendee"}
+    assert cleaned == {"eventId": "event"}
 
 
 def test_event_started_handles_singapore_local_time():

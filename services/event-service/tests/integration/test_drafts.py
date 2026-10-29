@@ -5,8 +5,8 @@ Story:      As an Event Organiser, I want to save an incomplete Event Request as
 Real:       Flask app and routes, validation, app/models.py SQL, postgres:17.6 with the
             full migration chain.
 Doubled:    nothing (Event Service makes no outbound calls).
-Not proven: authentication; identity is the organiserId / coordinatorId the caller sends,
-            so the ownership rules are proven given an asserted ID.
+Not proven: Supabase sign-in itself; the caller is a token signed with a test key
+            (SCRUM-8), so the ownership rules are proven for that signed-in user.
 
 AC1  Saving some (not necessarily all) details stores the request as 'Draft', not visible
      to any Event Coordinator.
@@ -313,7 +313,6 @@ def test_ac4_another_organiser_cannot_touch_someone_elses_draft(client, db, meth
     assert db.event(draft_id) == before
 
 
-@pytest.mark.parametrize("organiser_id", [None, "not-a-uuid"], ids=["missing", "invalid"])
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
@@ -325,19 +324,15 @@ def test_ac4_another_organiser_cannot_touch_someone_elses_draft(client, db, meth
     ],
     ids=["create", "list", "edit", "delete", "submit"],
 )
-def test_ac4_draft_routes_refuse_a_missing_or_invalid_organiser_id(client, db, method, path, body, organiser_id):
-    """Failure: no organiser, no access; nothing is written."""
+def test_ac4_draft_routes_refuse_a_caller_who_is_not_signed_in(client, db, method, path, body):
+    """Failure: no signed-in organiser (SCRUM-8), no access; nothing is written."""
     draft_id = make_event(db, status="Draft")
     before = db.event(draft_id)
-    url = path.format(id=draft_id)
-    if body is None:
-        url += f"?organiserId={organiser_id}" if organiser_id else ""
-    elif organiser_id:
-        body = {**body, "organiserId": organiser_id}
+    unsigned = client.application.test_client()
 
-    response = getattr(client, method)(url, json=body)
+    response = getattr(unsigned, method)(path.format(id=draft_id), json=body)
 
-    assert response.status_code == 400
+    assert response.status_code == 401
     assert db.event_count() == 1
     assert db.event(draft_id) == before
 

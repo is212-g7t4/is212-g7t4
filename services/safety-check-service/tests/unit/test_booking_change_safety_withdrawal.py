@@ -16,9 +16,11 @@ import logging
 
 import httpx
 import pytest
+from flask import g
 
 from app import clients, create_app
 from tests.unit.factories import (
+    signed_in,
     BOOKING_ID,
     COORDINATOR_ID,
     EVENT_ID,
@@ -48,7 +50,8 @@ class Downstream:
         if call[0] in self.fail:
             raise self.fail[call[0]]
 
-    def get_event(self, event_id, viewer_id, viewer_role=None):
+    def get_event(self, event_id, viewer_role=None):
+        viewer_id = g.user_id  # The downstream service reads this from the forwarded token.
         self._record("get_event", event_id, viewer_id)
         return self.event
 
@@ -56,7 +59,8 @@ class Downstream:
         self._record("list_records", event_id)
         return self.rounds
 
-    def withdraw_approval_without_next_round(self, round_id, withdrawn_by, reason):
+    def withdraw_approval_without_next_round(self, round_id, reason):
+        withdrawn_by = g.user_id  # The downstream service reads this from the forwarded token.
         self._record("withdraw", round_id, withdrawn_by, reason)
         return self.withdrawn
 
@@ -64,7 +68,8 @@ class Downstream:
         self._record("restore", round_id)
         return self.restored
 
-    def set_event_venue_change_status(self, event_id, coordinator_id, round_id, round_number, withdraw, reason=None):
+    def set_event_venue_change_status(self, event_id, round_id, round_number, withdraw, reason=None):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
         self._record("move_event", event_id, coordinator_id, round_id, round_number, withdraw, reason)
         return event("Approved" if withdraw else "Confirmed")
 
@@ -88,7 +93,7 @@ def downstream(monkeypatch):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def withdraw(client, **overrides):
@@ -219,8 +224,8 @@ def test_a_failed_compensation_is_logged_for_manual_repair(client, downstream, c
 @pytest.mark.parametrize(
     "overrides, message",
     [
-        ({"eventId": "x"}, "eventId, coordinatorId and bookingId must be valid UUIDs."),
-        ({"bookingId": None}, "eventId, coordinatorId and bookingId must be valid UUIDs."),
+        ({"eventId": "x"}, "eventId and bookingId must be valid UUIDs."),
+        ({"bookingId": None}, "eventId and bookingId must be valid UUIDs."),
         ({"reason": " "}, "reason is required."),
     ],
 )
@@ -351,9 +356,9 @@ def test_withdraw_wrapper_asks_for_no_next_round(sent):
     calls, queue = sent
     queue.append(Response(201, {"withdrawn": record(status="Approval Withdrawn"), "opened": None}))
 
-    assert clients.withdraw_approval_without_next_round(RECORD_ID, COORDINATOR_ID, REASON)["status"] == "Approval Withdrawn"
+    assert clients.withdraw_approval_without_next_round(RECORD_ID, REASON)["status"] == "Approval Withdrawn"
     assert calls[0]["url"].endswith(f"/safety-check-records/{RECORD_ID}/withdraw")
-    assert calls[0]["json"] == {"withdrawnBy": COORDINATOR_ID, "reason": REASON, "openNextRound": False}
+    assert calls[0]["json"] == {"reason": REASON, "openNextRound": False}
 
 
 def test_restore_wrapper_names_no_round(sent):
@@ -376,7 +381,7 @@ def test_record_wrappers_map_failures(sent, wrapper, status_code, error):
 
     with pytest.raises(error):
         if wrapper == "withdraw":
-            clients.withdraw_approval_without_next_round(RECORD_ID, COORDINATOR_ID, REASON)
+            clients.withdraw_approval_without_next_round(RECORD_ID, REASON)
         else:
             clients.restore_approval_without_next_round(RECORD_ID)
 
@@ -387,12 +392,12 @@ def test_event_wrapper_sends_the_marker_for_each_direction(sent, monkeypatch, wi
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "secret")
     queue.append(Response(200, event("Approved" if withdraw_move else "Confirmed")))
 
-    clients.set_event_venue_change_status(EVENT_ID, COORDINATOR_ID, RECORD_ID, 2, withdraw_move, REASON if withdraw_move else None)
+    clients.set_event_venue_change_status(EVENT_ID, RECORD_ID, 2, withdraw_move, REASON if withdraw_move else None)
 
     assert calls[0]["method"] == "PATCH"
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/safety-status")
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "secret"}
-    expected = {"safetyCheckId": RECORD_ID, "roundNumber": 2, "coordinatorId": COORDINATOR_ID}
+    expected = {"safetyCheckId": RECORD_ID, "roundNumber": 2}
     # SCRUM-46 adds the mocked actual venue only to withdrawal; restoration
     # continues to follow the existing wrapper contract in these inherited cases.
     if withdraw_move:
@@ -417,7 +422,7 @@ def test_event_wrapper_maps_failures(sent, status_code, payload, error):
     queue.append(Response(status_code, payload))
 
     with pytest.raises(error):
-        clients.set_event_venue_change_status(EVENT_ID, COORDINATOR_ID, RECORD_ID, 2, True, REASON)
+        clients.set_event_venue_change_status(EVENT_ID, RECORD_ID, 2, True, REASON)
 
 
 def test_wrappers_hide_transport_errors(monkeypatch):
@@ -426,4 +431,4 @@ def test_wrappers_hide_transport_errors(monkeypatch):
 
     monkeypatch.setattr("app.clients.httpx.request", boom)
     with pytest.raises(clients.DownstreamTimeout):
-        clients.set_event_venue_change_status(EVENT_ID, COORDINATOR_ID, RECORD_ID, 2, True, REASON)
+        clients.set_event_venue_change_status(EVENT_ID, RECORD_ID, 2, True, REASON)

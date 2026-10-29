@@ -74,7 +74,7 @@ def test_ac1_ac2_ac3_actions_deliver_through_owned_broker_and_preserve_history(
         kind="attendee-registration", registrationId=ref
     )
     # DR: published replay must not duplicate or erase read state. The following withdrawal is a FIFO sentinel.
-    headers = {"X-Dev-User-Id": first, "X-Dev-Role": "Attendee"}
+    headers = stack.issuer.bearer(first, "Attendee")
     marked = stack.call(
         "notification",
         "PATCH",
@@ -260,7 +260,7 @@ def test_ac1_ac2_ac3_actions_deliver_through_owned_broker_and_preserve_history(
     )
     denied = __import__("httpx").patch(
         stack.urls["notification"] + f"/notifications/{source}",
-        headers={"X-Dev-User-Id": second, "X-Dev-Role": "Attendee"},
+        headers=stack.issuer.bearer(second, "Attendee"),
         json=dict(read=True),
     )
     assert denied.status_code == 404

@@ -10,8 +10,8 @@ Doubled:    Event Service (GET /events/<id>, GET /events), Venue Service (GET /v
             Venue Availability (POST /venue-bookings, GET /events/<id>/venue-bookings) with
             respx, at the URLs frozen in app.clients.
 Not proven: the overlap rule (only Venue Availability's tests prove it); that the real
-            atomics accept these payloads; caller identity (coordinatorId and X-Dev-* headers
-            are whatever the caller sends).
+            atomics accept these payloads; Supabase sign-in itself (callers are tokens signed
+            with a test key, SCRUM-8).
 
 AC1  Given an Event Coordinator is preparing a venue booking request for an event, when they
      enter the booking information, then they can provide the relevant event timing and venue
@@ -47,7 +47,6 @@ from httpx import Response
 import app.clients as service_clients
 from tests.integration.factories import (
     BOOKING_ID,
-    COORDINATOR_ID,
     EVENT_ID,
     OTHER_EVENT_ID,
     STAFF_ID,
@@ -56,6 +55,7 @@ from tests.integration.factories import (
     event,
     venue,
 )
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
@@ -63,20 +63,18 @@ pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 REQUEST = {
     "eventId": EVENT_ID,
     "venueId": VENUE_ID,
-    "coordinatorId": COORDINATOR_ID,
     "requestedStartTime": "2030-03-01T13:00",
     "requestedEndTime": "2030-03-01T15:00",
     "requiredCapacity": 120,
     "venueRequirements": "  Stage and two microphones  ",
 }
-STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 NOT_SUBMITTABLE = ["Clarification Requested", "Rejected", "Pending Safety Check", "Confirmed", "Cancelled"]
 
 
 def stub_event(router, payload=None, status_code=200):
     return router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-        params={"coordinatorId": COORDINATOR_ID},
     ).mock(return_value=Response(status_code, json=payload if payload is not None else event()))
 
 
@@ -95,7 +93,7 @@ def stub_create(router, status_code=201, payload=None):
 def stub_staff_events(router, *events):
     return router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events",
-        params={"coordinatorId": STAFF_ID, "viewerRole": "Venue Staff"},
+        params={"viewerRole": "Venue Staff"},
     ).mock(return_value=Response(200, json={"events": list(events)}))
 
 
@@ -120,7 +118,9 @@ def test_ac2_valid_request_is_forwarded_once_and_returned_as_pending_review(clie
     assert response.status_code == 201
     assert response.json["status"] == "Pending Review"
     assert response.json["requestedAt"] == "2030-02-01T10:00:00+08:00"
-    assert event_stub.calls.last.request.url.params["coordinatorId"] == COORDINATOR_ID
+    # SCRUM-8: the coordinator reaches Event Service as their forwarded token, not an ID.
+    assert event_stub.calls.last.request.headers["Authorization"] == client.environ_base["HTTP_AUTHORIZATION"]
+    assert "coordinatorId" not in event_stub.calls.last.request.url.params
     assert create.call_count == 1
     assert json.loads(create.calls.last.request.content) == {
         "eventId": EVENT_ID,
@@ -129,7 +129,6 @@ def test_ac2_valid_request_is_forwarded_once_and_returned_as_pending_review(clie
         "requestedEndTime": "2030-03-01T15:00",
         "requiredCapacity": 120,
         "venueRequirements": "Stage and two microphones",
-        "requestedBy": COORDINATOR_ID,
         "setupTimeMinutes": 30,
         "turnaroundTimeMinutes": 45,
     }
@@ -226,7 +225,6 @@ def test_ac2_event_service_failure_or_timeout_is_502(client, outcome):
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         route = router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
-            params={"coordinatorId": COORDINATOR_ID},
         )
         if isinstance(outcome, Exception):
             route.mock(side_effect=outcome)
@@ -301,7 +299,7 @@ def test_ac4_staff_queue_requires_venue_staff_role(client):
     with respx.mock(assert_all_mocked=True, assert_all_called=False) as router:
         response = client.get(
             "/booking-requests",
-            headers={"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Event Coordinator"},
+            headers=bearer(STAFF_ID, "Event Coordinator"),
         )
 
     assert response.status_code == 403

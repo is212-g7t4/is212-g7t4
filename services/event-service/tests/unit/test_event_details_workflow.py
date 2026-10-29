@@ -12,6 +12,7 @@ import pytest
 
 from app import create_app
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -28,7 +29,7 @@ def setup(monkeypatch):
     app = create_app(
         {"TESTING": True, "DATABASE_URL": "unused", "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN}
     )
-    return app.test_client(), cursor
+    return signed_in(app.test_client()), cursor
 
 
 def event_row(status="Approved", coordinator_id=COORDINATOR_ID):
@@ -112,15 +113,6 @@ def test_dry_run_must_be_a_boolean(setup):
     client, cursor = setup
 
     response = patch_details(client, {"eventName": "Renamed"}, dryRun="yes")
-
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
-
-
-def test_actor_role_must_be_text(setup):
-    client, cursor = setup
-
-    response = patch_details(client, {"eventName": "Renamed"}, actorRole=5)
 
     assert response.status_code == 400
     cursor.execute.assert_not_called()

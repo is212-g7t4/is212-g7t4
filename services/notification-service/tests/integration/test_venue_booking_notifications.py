@@ -28,6 +28,7 @@ import pytest
 
 from app.consumer import process
 from tests.integration.factories import EVENT, ORGANISER, OTHER, make_parents
+from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 STAFF = "20000000-0000-4000-8000-000000000001"
@@ -57,7 +58,7 @@ def envelope(outcome) -> dict:
 
 
 def identity(user):
-    return {"X-Dev-User-Id": user, "X-Dev-Role": "Venue Staff" if user == STAFF else "Event Coordinator"}
+    return bearer(user, "Venue Staff" if user == STAFF else "Event Coordinator")
 
 
 def source_rows(db, identifier):

@@ -12,6 +12,7 @@ AC = acceptance criterion; DR = supporting design rule.
 
 from app import create_app
 from app import routes
+from tests.unit.factories import signed_in
 
 
 # AC3 ---- a cancellation notification retains a usable history destination
@@ -29,7 +30,7 @@ def test_ac3_cancelled_events_remain_visible_without_changing_registration_statu
     monkeypatch.setattr(
         routes,
         "get_attendee_registrations",
-        lambda attendee: [
+        lambda: [
             dict(
                 registration_id=ref,
                 event_id=event,
@@ -50,7 +51,7 @@ def test_ac3_cancelled_events_remain_visible_without_changing_registration_statu
         lambda ids: [dict(id=event, eventName="Workshop", status="Cancelled")],
         raising=False,
     )
-    response = create_app().test_client().get(f"/registrations?attendeeId={user}")
+    response = signed_in(create_app().test_client()).get(f"/registrations")
     assert response.status_code == 200
     assert response.json["registrations"] == [
         dict(
@@ -112,7 +113,7 @@ def test_dr_history_adapter_maps_public_summaries_and_batches_only_owned_registr
         )
     ]
     assert get.call_args.args == (f"{clients.EVENT_SERVICE_URL}/events/attendee-summaries",)
-    assert get.call_args.kwargs == dict(params={"ids": "event"}, timeout=5)
+    assert get.call_args.kwargs == dict(params={"ids": "event"}, headers={}, timeout=5)
     response.raise_for_status.assert_called_once()
 
 
@@ -144,7 +145,7 @@ def test_ac1_composite_captures_actual_venue_before_saving_the_action(
         endDateTime="2030-03-01T17:00:00",
     )
     data = dict(
-        eventId=event, attendeeId="user", capacity=10, notificationContext=snapshot
+        eventId=event, capacity=10, notificationContext=snapshot
     )
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as http:
         # Venue Availability app/models.py::serialize and Venue app/__init__.py::venue.

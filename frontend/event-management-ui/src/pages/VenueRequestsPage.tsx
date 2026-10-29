@@ -46,7 +46,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
   useEffect(() => {
     if (!allowed || !user) return
     let active = true
-    fetchVenueRequests(user, filter === 'All' ? undefined : filter).then((rows) => {
+    fetchVenueRequests(filter === 'All' ? undefined : filter).then((rows) => {
       if (active) { setEvents(rows); setError('') }
     }).catch((cause: unknown) => {
       if (active) setError(cause instanceof Error ? cause.message : 'Unable to load venue requests.')

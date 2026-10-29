@@ -21,7 +21,7 @@ from app.models import (
     list_bookings,
     reconcile_legacy_conflicts,
 )
-from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
 
 
 SECOND_BOOKING_ID = "00000000-0000-0000-0000-00000000000c"
@@ -224,9 +224,9 @@ def _booking_payload(**overrides):
 
 
 def test_buffer_route_validation_and_internal_lookup_contract(monkeypatch):
-    client = create_app(
-        {"TESTING": True, "DATABASE_URL": "test", "CALENDAR_DEV_MODE": True}
-    ).test_client()
+    client = signed_in(create_app(
+        {"TESTING": True, "DATABASE_URL": "test"}
+    ).test_client())
     booking_id = "00000000-0000-0000-0000-00000000000b"
 
     assert client.post("/venue-bookings", json=_booking_payload(setupTimeMinutes=-1)).status_code == 400
@@ -247,13 +247,13 @@ def test_buffer_route_validation_and_internal_lookup_contract(monkeypatch):
     )
     assert client.get(f"/venue-bookings/{booking_id}").status_code == 404
 
-    no_database = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    no_database = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert no_database.get(f"/venue-bookings/{booking_id}").status_code == 503
 
 
 def test_reconcile_route_validates_configuration_and_returns_result(monkeypatch):
     path = f"/venues/{VENUE_ID}/legacy-conflicts/reconcile"
-    client = create_app({"TESTING": True, "DATABASE_URL": "test"}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": "test"}).test_client())
     assert client.post(path, json=[]).status_code == 400
     assert client.post(path, json={"setupTimeMinutes": -1}).status_code == 400
 
@@ -263,14 +263,14 @@ def test_reconcile_route_validates_configuration_and_returns_result(monkeypatch)
         path, json={"setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
     ).json == expected
 
-    no_database = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    no_database = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert no_database.post(
         path, json={"setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
     ).status_code == 503
 
 
 def test_empty_frontend_origin_skips_cors_alias_expansion():
-    response = create_app({"TESTING": True, "FRONTEND_ORIGIN": ""}).test_client().get(
+    response = signed_in(create_app({"TESTING": True, "FRONTEND_ORIGIN": ""}).test_client()).get(
         "/health", headers={"Origin": "http://localhost:5174"}
     )
     assert "Access-Control-Allow-Origin" not in response.headers

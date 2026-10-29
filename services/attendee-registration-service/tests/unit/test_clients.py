@@ -27,8 +27,8 @@ def test_get_confirmed_event_propagates_service_failure(monkeypatch):
 def test_get_attendee_registrations(monkeypatch):
     get = Mock(return_value=response(200, {"registrations": [{"registration_id": "r1"}]}))
     monkeypatch.setattr(clients.httpx, "get", get)
-    assert clients.get_attendee_registrations("attendee-1") == [{"registration_id": "r1"}]
-    assert get.call_args.kwargs["params"] == {"attendeeId": "attendee-1"}
+    assert clients.get_attendee_registrations() == [{"registration_id": "r1"}]
+    assert "params" not in get.call_args.kwargs
 
 
 def test_save_registration_returns_atomic_record(monkeypatch):
@@ -77,8 +77,8 @@ def test_get_user_propagates_service_failure(monkeypatch):
 def test_withdraw_saved_registration_returns_atomic_record(monkeypatch):
     patch = Mock(return_value=response(200, {"registration": {"status": "Withdrawn"}}))
     monkeypatch.setattr(clients.httpx, "patch", patch)
-    assert clients.withdraw_saved_registration("registration-1", "attendee-1") == {"status": "Withdrawn"}
-    assert patch.call_args.kwargs["json"] == {"attendeeId": "attendee-1"}
+    assert clients.withdraw_saved_registration("registration-1") == {"status": "Withdrawn"}
+    assert patch.call_args.kwargs["json"] == {}
 
 
 def test_withdraw_saved_registration_maps_atomic_conflict(monkeypatch):
@@ -88,11 +88,11 @@ def test_withdraw_saved_registration_maps_atomic_conflict(monkeypatch):
         Mock(return_value=response(403, {"code": "REGISTRATION_NOT_OWNED", "message": "Not yours"})),
     )
     with pytest.raises(clients.RegistrationConflictError) as caught:
-        clients.withdraw_saved_registration("registration-1", "attendee-1")
+        clients.withdraw_saved_registration("registration-1")
     assert caught.value.code == "REGISTRATION_NOT_OWNED"
 
 
 def test_withdraw_saved_registration_propagates_service_failure(monkeypatch):
     monkeypatch.setattr(clients.httpx, "patch", Mock(return_value=response(503, {})))
     with pytest.raises(httpx.HTTPStatusError):
-        clients.withdraw_saved_registration("registration-1", "attendee-1")
+        clients.withdraw_saved_registration("registration-1")

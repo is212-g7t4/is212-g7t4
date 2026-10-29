@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './venueClosures.css'
 import { ChevronDownIcon, RefreshIcon, ListIcon } from '../../components/Icon'
-import type { User } from '../../types'
 import { createClosure, listClosures, previewClosure } from './venueClosures'
 import type { VenueClosure, ClosurePreview } from './venueClosures'
 
@@ -12,7 +11,7 @@ const formatDate = (value: string) => new Intl.DateTimeFormat('en-SG', {
 const message = (cause: unknown, fallback: string) => cause instanceof Error ? cause.message : fallback
 
 // The parent keys this panel by venue and identity, so changes discard all local state.
-export function VenueClosuresPanel({ venueId, venueName, user }: { venueId: string; venueName: string; user: Pick<User, 'id' | 'role'> }) {
+export function VenueClosuresPanel({ venueId, venueName }: { venueId: string; venueName: string }) {
   const [rejectedCount, setRejectedCount] = useState(0)
   const [uncertain, setUncertain] = useState(false)
   const [reconciled, setReconciled] = useState(false)
@@ -24,7 +23,6 @@ export function VenueClosuresPanel({ venueId, venueName, user }: { venueId: stri
   const [rows, setRows] = useState<VenueClosure[]>([])
   const [cursor, setCursor] = useState<string | null>(null), [loading, setLoading] = useState(true)
   const readRequest = useRef<AbortController | null>(null), saveRequest = useRef<AbortController | null>(null)
-  const { id, role } = user
   const load = useCallback(async (next?: string) => {
     readRequest.current?.abort()
     const controller = new AbortController()
@@ -32,7 +30,7 @@ export function VenueClosuresPanel({ venueId, venueName, user }: { venueId: stri
     setLoading(true); setListError(''); setReconciled(false)
     if (!next) { setRows([]); setCursor(null) }
     try {
-      const page = await listClosures(venueId, { id, role }, next, controller.signal)
+      const page = await listClosures(venueId, next, controller.signal)
       if (controller.signal.aborted) return
       setRows(current => next ? [...current, ...page.closures.filter(row => !current.some(old => old.closureId === row.closureId))] : page.closures)
       setCursor(page.nextCursor)
@@ -40,9 +38,9 @@ export function VenueClosuresPanel({ venueId, venueName, user }: { venueId: stri
     } catch (cause) {
       if (!controller.signal.aborted) setListError(message(cause, 'Unable to load recorded closures.'))
     } finally { if (!controller.signal.aborted) setLoading(false) }
-  }, [venueId, id, role])
+  }, [venueId])
   useEffect(() => {
-    // Synchronize the venue/identity-scoped remote list on mount.
+    // Synchronize the venue-scoped remote list on mount.
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
     return () => { readRequest.current?.abort(); saveRequest.current?.abort() }
@@ -55,11 +53,11 @@ export function VenueClosuresPanel({ venueId, venueName, user }: { venueId: stri
     setSaving(true); setSaveError(''); setSuccess(false)
     try {
       if (!preview) {
-        const result = await previewClosure(venueId, start, end, reason, user, controller.signal)
+        const result = await previewClosure(venueId, start, end, reason, controller.signal)
         if (!controller.signal.aborted) setPreview(result)
         return
       }
-      const saved = await createClosure(venueId, start, end, reason, user, preview.confirmationToken, controller.signal)
+      const saved = await createClosure(venueId, start, end, reason, preview.confirmationToken, controller.signal)
       if (controller.signal.aborted) return
       setRejectedCount(saved.rejectedCount); setPreview(null); setSuccess(true); setOpen(false); setStart(''); setEnd(''); setReason('')
       void load()
@@ -69,7 +67,7 @@ export function VenueClosuresPanel({ venueId, venueName, user }: { venueId: stri
       if (cause instanceof Error && 'code' in cause && cause.code === 'CLOSURE_PREVIEW_CHANGED') {
         setSaveError('The affected requests changed. Review the refreshed impact and confirm again.')
         try {
-          const result = await previewClosure(venueId, start, end, reason, user, controller.signal)
+          const result = await previewClosure(venueId, start, end, reason, controller.signal)
           if (!controller.signal.aborted) setPreview(result)
         } catch (refreshError) {
           if (!controller.signal.aborted) setSaveError(`Impact changed. ${message(refreshError, 'Unable to refresh preview.')} Preview again before confirming.`)

@@ -44,9 +44,11 @@ covers that).
 import logging
 
 import pytest
+from flask import g
 
 from app import clients, create_app
 from tests.unit.factories import (
+    signed_in,
     COORDINATOR_ID,
     EVENT_ID,
     RECORD_ID,
@@ -78,7 +80,8 @@ class Downstream:
         if error:
             raise error
 
-    def get_event(self, event_id, coordinator_id):
+    def get_event(self, event_id):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("get_event", event_id, coordinator_id))
         self._maybe_fail("get_event")
         return self.event
@@ -88,7 +91,8 @@ class Downstream:
         self._maybe_fail("bookings")
         return self.bookings
 
-    def get_event_equipment_requests(self, event_id, coordinator_id):
+    def get_event_equipment_requests(self, event_id):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("requests", event_id, coordinator_id))
         self._maybe_fail("requests")
         return self.requests
@@ -98,7 +102,8 @@ class Downstream:
         self._maybe_fail("list_records")
         return self.rounds
 
-    def create_safety_check_record(self, event_id, submitted_by, placement=None, crowd=None):
+    def create_safety_check_record(self, event_id, placement=None, crowd=None):
+        submitted_by = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(("create", event_id, submitted_by, placement, crowd))
         self._maybe_fail("create")
         return self.created
@@ -109,10 +114,9 @@ class Downstream:
         status,
         safety_check_id,
         round_number,
-        coordinator_id=None,
-        decided_by=None,
         remarks=None,
     ):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
         self.calls.append(
             ("patch_event", event_id, status, coordinator_id, safety_check_id, round_number)
         )
@@ -148,7 +152,7 @@ def downstream(monkeypatch):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 def submit(client, **overrides):
@@ -789,8 +793,6 @@ def test_open_round_lookup_timeout_is_504(client, downstream):
     "body",
     [
         {"eventId": "not-a-uuid", "coordinatorId": COORDINATOR_ID},
-        {"eventId": EVENT_ID, "coordinatorId": "nope"},
-        {"eventId": EVENT_ID},
         {"coordinatorId": COORDINATOR_ID},
         {},
     ],
@@ -799,9 +801,7 @@ def test_bad_identifiers_are_rejected(body, client, downstream):
     response = client.post("/safety-checks", json=body)
 
     assert response.status_code == 400
-    assert response.json["message"] == (
-        "eventId and coordinatorId must be valid UUIDs."
-    )
+    assert response.json["message"] == "eventId must be a valid UUID."
     assert downstream.calls == []
 
 
@@ -937,12 +937,10 @@ def test_readiness_open_round_failure_is_reported(error, status, client, downstr
     "query",
     [
         f"?eventId=nope&coordinatorId={COORDINATOR_ID}",
-        f"?eventId={EVENT_ID}&coordinatorId=nope",
-        f"?eventId={EVENT_ID}",
         "",
     ],
 )
-def test_readiness_needs_both_identifiers(query, client, downstream):
+def test_readiness_needs_a_valid_event(query, client, downstream):
     response = client.get(f"/safety-checks/readiness{query}")
 
     assert response.status_code == 400
@@ -974,7 +972,7 @@ def test_cors_rejects_another_origin(client):
 def test_cors_with_no_configured_origin_allows_nothing(monkeypatch):
     """A blank FRONTEND_ORIGIN must not become a wildcard."""
     monkeypatch.setenv("FRONTEND_ORIGIN", "")
-    blank = create_app().test_client()
+    blank = signed_in(create_app().test_client())
 
     response = blank.get("/health", headers={"Origin": "http://localhost:5174"})
 

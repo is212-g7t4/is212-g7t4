@@ -17,9 +17,10 @@ import pytest
 from app import create_app
 from app.clients import BookingConflictError
 from app.routes import REVIEWABLE_EVENT_STATUSES, SUBMITTABLE_EVENT_STATUSES
+from tests.unit.factories import signed_in, bearer
 
 STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
-STAFF_HEADERS = {"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"}
+STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 VENUES = [{"id": "ven-1", "name": "Grand Ballroom", "capacity": 200, "status": "Available"}]
 EVENT = {
     "id": "evt-1",
@@ -64,7 +65,7 @@ def submit(event, create_result=BOOKING):
             create_booking.side_effect = create_result
         else:
             create_booking.return_value = create_result
-        response = create_app().test_client().post("/booking-requests", json=REQUEST)
+        response = signed_in(create_app().test_client()).post("/booking-requests", json=REQUEST)
     return response, get_event, get_venues, create_booking
 
 
@@ -75,7 +76,7 @@ def staff_queue(events, bookings_by_event, query=""):
         patch("app.routes.get_event_bookings", side_effect=lambda event_id: bookings_by_event[event_id]),
         patch("app.routes.get_safety_records", return_value=[]),
     ):
-        return create_app().test_client().get(f"/booking-requests{query}", headers=STAFF_HEADERS)
+        return signed_in(create_app().test_client()).get(f"/booking-requests{query}", headers=STAFF_HEADERS)
 
 
 # AC1 ----
@@ -86,10 +87,10 @@ def test_ac1_submission_forwards_booking_timing_capacity_and_requirements():
     response, get_event, _, create_booking = submit(EVENT)
 
     assert response.status_code == 201
-    get_event.assert_called_once_with("evt-1", "coord-1")
+    get_event.assert_called_once_with("evt-1")
     create_booking.assert_called_once_with(
         "evt-1", "ven-1", "2030-03-01T13:00", "2030-03-01T15:00",
-        120, "Stage and two microphones", "coord-1",
+        120, "Stage and two microphones",
     )
 
 
@@ -297,7 +298,7 @@ def test_staff_review_uses_the_same_reviewable_statuses(event_status, expected):
         patch("app.routes.get_venue", return_value=VENUES[0]),
         patch("app.routes.decide_booking", return_value={**BOOKING, "status": "Approved"}),
     ):
-        response = create_app().test_client().patch(
+        response = signed_in(create_app().test_client()).patch(
             "/booking-requests/booking-1/review",
             headers=STAFF_HEADERS,
             json={"reviewedBy": STAFF_ID, "status": "Approved"},

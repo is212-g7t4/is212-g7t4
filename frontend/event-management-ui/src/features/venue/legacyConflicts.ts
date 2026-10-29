@@ -1,3 +1,4 @@
+import { authFetch } from '../auth/session'
 export interface LegacyConflictBooking {
   id: string
   eventId: string | null
@@ -24,14 +25,8 @@ export interface LegacyConflictResult {
 
 const serviceUrl = () => import.meta.env.VITE_VENUE_BOOKING_SERVICE_URL || 'http://localhost:5007'
 
-export async function fetchLegacyConflicts(
-  venueId: string,
-  viewer?: { id: string; role: string },
-): Promise<LegacyConflictResult> {
-  const url = `${serviceUrl()}/venues/${encodeURIComponent(venueId)}/legacy-conflicts`
-  const response = await (viewer
-    ? fetch(url, { headers: { 'X-Dev-User-Id': viewer.id, 'X-Dev-Role': viewer.role } })
-    : fetch(url))
+export async function fetchLegacyConflicts(venueId: string): Promise<LegacyConflictResult> {
+  const response = await authFetch(`${serviceUrl()}/venues/${encodeURIComponent(venueId)}/legacy-conflicts`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to identify scheduling conflicts.')
   return body as LegacyConflictResult

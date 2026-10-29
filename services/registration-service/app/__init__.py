@@ -3,7 +3,7 @@ from uuid import UUID
 
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 load_dotenv()
 
@@ -19,10 +19,12 @@ from app.models import (
     list_registrations,
     withdraw_registration,
 )
+from app.auth import authenticate
 
 
 def create_app(config=None):
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(
         DATABASE_URL=os.getenv("DATABASE_URL"),
         INTERNAL_SERVICE_TOKEN=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
@@ -43,7 +45,7 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, Authorization"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200
@@ -73,19 +75,13 @@ def create_app(config=None):
 
     @app.get("/registrations")
     def registrations():
-        attendee_id = request.args.get("attendeeId")
         event_id = request.args.get("eventId")
-        if attendee_id is not None and event_id is not None:
-            return jsonify(message="Provide either attendeeId or eventId, not both."), 400
-        if attendee_id is not None:
-            try:
-                attendee_id = str(UUID(attendee_id))
-            except (ValueError, TypeError, AttributeError):
-                return jsonify(message="A valid attendeeId is required."), 400
+        # Without an event, the signed-in attendee's own registrations.
+        if event_id is None and g.user_id:
             if not app.config["DATABASE_URL"]:
                 return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
             return jsonify(
-                registrations=list_attendee_registrations(app.config["DATABASE_URL"], attendee_id)
+                registrations=list_attendee_registrations(app.config["DATABASE_URL"], g.user_id)
             )
         try:
             event_id = str(UUID(event_id or ""))
@@ -101,14 +97,16 @@ def create_app(config=None):
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
 
+        attendee_id = g.user_id
+        if not attendee_id:
+            return jsonify(message="Sign in to continue."), 401
         try:
             event_id = str(UUID(data.get("eventId", "")))
-            attendee_id = str(UUID(data.get("attendeeId", "")))
             capacity = int(data.get("capacity"))
         except (ValueError, TypeError, AttributeError):
-            return jsonify(message="Valid eventId, attendeeId and capacity are required."), 400
+            return jsonify(message="Valid eventId and capacity are required."), 400
         if capacity < 1:
-            return jsonify(message="Valid eventId, attendeeId and capacity are required."), 400
+            return jsonify(message="Valid eventId and capacity are required."), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
 
@@ -130,10 +128,9 @@ def create_app(config=None):
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
-        try:
-            attendee_id = str(UUID(data.get("attendeeId", "")))
-        except (ValueError, TypeError, AttributeError):
-            return jsonify(message="A valid attendeeId is required."), 400
+        attendee_id = g.user_id
+        if not attendee_id:
+            return jsonify(message="Sign in to continue."), 401
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Registration Service."), 503
         try:

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
+from tests.unit.factories import signed_in
 
 CATALOGUE = [
     {
@@ -55,7 +56,7 @@ def client(monkeypatch):
     cursor.fetchall.return_value = CATALOGUE
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client()
+    return signed_in(app.test_client())
 
 
 def names(response):
@@ -164,6 +165,6 @@ def test_unknown_accessibility_key_returns_400(client):
 
 def test_invalid_filter_is_rejected_before_the_database(monkeypatch):
     """Failure: a bad parameter is a 400 even when the service is unconfigured."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     assert client.get("/venues?minCapacity=0").status_code == 400

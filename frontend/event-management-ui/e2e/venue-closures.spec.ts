@@ -9,7 +9,7 @@
  * The named test functions/cases below implement the groups above; their existing
  * names and assertions specify the scenario. No group is credited with all five ACs.
  */
-import { allUsers, asUser, json, mock, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, switchUser, json, mock, test, expect, users, venues } from './fixtures'
 
 test.use({ timezoneId: 'America/Los_Angeles' })
 const closure = { closureId: '00000000-0000-0000-0000-0000000000c1', venueId: venues[0].id, startDateTime: '2020-01-01T09:00:00+08:00', endDateTime: '2099-01-01T10:00:00+08:00', reason: 'Air-conditioning maintenance', createdBy: users.venueStaff.user_id, createdAt: '2026-10-13T09:00:00+08:00' }
@@ -28,8 +28,7 @@ test('SCRUM-170 record inline, read persisted pages, retain SGT in non-Singapore
  const reads: (string | null)[] = []
  await mock(page, 'venueBooking', '/venue-closures', route => {
   const request = route.request()
-  expect(request.headers()['x-dev-user-id']).toBe(users.venueStaff.user_id)
-  expect(request.headers()['x-dev-role']).toBe('Venue Staff')
+  expect(request.headers()['authorization']).toBe(`Bearer e2e-${users.venueStaff.user_id}`)
   if (request.method() === 'POST') {
    posts++
    expect(request.postDataJSON()).toEqual({ venueId: venues[0].id, startDateTime: closure.startDateTime, endDateTime: closure.endDateTime, reason: closure.reason, confirmed: true, confirmationToken: 'signed' })
@@ -64,7 +63,7 @@ test('SCRUM-170 record inline, read persisted pages, retain SGT in non-Singapore
  expect(posts).toBe(1)
  expect(reads.slice(initialReads)).toEqual([null, 'next+/'])
  await page.screenshot({ path: testInfo.outputPath('closure-persisted.png'), fullPage: true })
- await page.getByLabel('Select active user').selectOption(users.coordinator.user_id)
+ await switchUser(page, users.coordinator)
  await expect(page.getByRole('region', { name: 'Temporary venue closures' })).toHaveCount(0)
  expect(reads).toHaveLength(initialReads + 2)
 })

@@ -5,19 +5,27 @@ composite (AGENTS.md; `c4_diagram/export/c4.png`). The records themselves are
 owned by `safety-check-record-service`, and the event's status by
 `event-service`; neither of them knows about the other.
 """
+import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app import clients
 from app.readiness import outstanding_arrangements
 
 bp = Blueprint("safety_check_service", __name__)
 logger = logging.getLogger(__name__)
+
+
+class _RequestPool(ThreadPoolExecutor):
+    """Worker threads run in this request's context, so they forward the caller's token (SCRUM-8)."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        return super().submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
 # Event Service's API works in naive Singapore local time (its `SINGAPORE`),
 # so a date is compared the same way on both sides of the call.
@@ -89,14 +97,14 @@ def health():
 @bp.get("/safety-checks/<uuid:event_id>/review")
 def review_safety_check(event_id):
     """Read the complete safety context for a Safety Officer (SCRUM-163)."""
-    safety_officer_id = _uuid_or_none(request.args.get("safetyOfficerId"))
+    safety_officer_id = g.user_id
     if not safety_officer_id:
-        return jsonify(message="safetyOfficerId must be a valid UUID."), 400
+        return jsonify(message="Sign in to continue."), 401
     failure = _check_safety_officer(safety_officer_id)
     if failure:
         return failure
 
-    event, failure = _load_event_for_officer(str(event_id), safety_officer_id)
+    event, failure = _load_event_for_officer(str(event_id))
     if failure:
         return failure
     if event.get("status") != PENDING_SAFETY_CHECK:
@@ -106,14 +114,9 @@ def review_safety_check(event_id):
         ), 409
 
     try:
-        with ThreadPoolExecutor(max_workers=5) as pool:
+        with _RequestPool(max_workers=5) as pool:
             bookings_call = pool.submit(clients.get_event_venue_bookings, str(event_id))
-            requests_call = pool.submit(
-                clients.get_event_equipment_requests,
-                str(event_id),
-                safety_officer_id,
-                SAFETY_OFFICER,
-            )
+            requests_call = pool.submit(clients.get_event_equipment_requests, str(event_id))
             rounds_call = pool.submit(clients.list_safety_check_records, str(event_id))
             venues_call = pool.submit(clients.list_venues)
             equipment_call = pool.submit(clients.list_equipment)
@@ -209,15 +212,17 @@ def submit_safety_check():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
-    if not event_id or not coordinator_id:
-        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
     notes, failure = _notes(data)
     if failure:
         return failure
 
-    event, failure = _load_event(event_id, coordinator_id)
+    event, failure = _load_event(event_id)
     if failure:
         return failure
     resubmitting = request.path == "/safety-checks/resubmit"
@@ -225,7 +230,7 @@ def submit_safety_check():
     if failure:
         return failure
 
-    outstanding, failure = _outstanding(event_id, coordinator_id)
+    outstanding, failure = _outstanding(event_id)
     if failure:
         return failure
     if outstanding:
@@ -244,7 +249,7 @@ def submit_safety_check():
         ), 422
 
     try:
-        record = clients.create_safety_check_record(event_id, coordinator_id, *notes)
+        record = clients.create_safety_check_record(event_id, *notes)
     except clients.SafetyCheckAlreadyPendingError as open_round:
         # AC4's race: another submit opened the round between our status read
         # and this call.
@@ -260,7 +265,6 @@ def submit_safety_check():
             PENDING_SAFETY_CHECK,
             record["id"],
             record["roundNumber"],
-            coordinator_id=coordinator_id,
         )
     except Exception as error:  # noqa: BLE001 — every failure compensates alike
         _compensate(record["id"])
@@ -285,10 +289,12 @@ def approve_safety_check():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    safety_officer_id = g.user_id
+    if not safety_officer_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    safety_officer_id = _uuid_or_none(data.get("safetyOfficerId"))
-    if not event_id or not safety_officer_id:
-        return jsonify(message="eventId and safetyOfficerId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
     remarks, failure = _approval_remarks(data)
     if failure:
         return failure
@@ -317,10 +323,12 @@ def request_safety_changes():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    safety_officer_id = g.user_id
+    if not safety_officer_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    safety_officer_id = _uuid_or_none(data.get("safetyOfficerId"))
-    if not event_id or not safety_officer_id:
-        return jsonify(message="eventId and safetyOfficerId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
     reason, failure = _required_reason(data)
     if failure:
         return failure
@@ -358,10 +366,12 @@ def reject_safety_check():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    safety_officer_id = g.user_id
+    if not safety_officer_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    safety_officer_id = _uuid_or_none(data.get("safetyOfficerId"))
-    if not event_id or not safety_officer_id:
-        return jsonify(message="eventId and safetyOfficerId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
     reason, failure = _required_reason(data)
     if failure:
         return failure
@@ -414,15 +424,17 @@ def recheck_safety():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
-    if not event_id or not coordinator_id:
-        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
     changes, failure = _changes(data)
     if failure:
         return failure
 
-    event, failure = _load_event(event_id, coordinator_id)
+    event, failure = _load_event(event_id)
     if failure:
         return failure
     if event.get("status") != CONFIRMED:
@@ -462,9 +474,7 @@ def recheck_safety():
         "after safety approval."
     )
     try:
-        withdrawn, opened = clients.withdraw_safety_approval(
-            latest_round["id"], coordinator_id, reason
-        )
+        withdrawn, opened = clients.withdraw_safety_approval(latest_round["id"], reason)
     except clients.RoundNotApprovedError as refused:
         # The race's loser: another re-check withdrew this approval between
         # our read and this call. Nothing has been written by us.
@@ -489,7 +499,6 @@ def recheck_safety():
     try:
         updated = clients.update_event_details(
             event_id,
-            coordinator_id,
             changes,
             {
                 "withdrawnSafetyCheckId": withdrawn["id"],
@@ -583,16 +592,18 @@ def withdraw_for_venue_change():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
     booking_id = _uuid_or_none(data.get("bookingId"))
-    if not event_id or not coordinator_id or not booking_id:
-        return jsonify(message="eventId, coordinatorId and bookingId must be valid UUIDs."), 400
+    if not event_id or not booking_id:
+        return jsonify(message="eventId and bookingId must be valid UUIDs."), 400
     reason, failure = _required_reason(data)
     if failure:
         return failure
 
-    event, failure = _load_event(event_id, coordinator_id)
+    event, failure = _load_event(event_id)
     if failure:
         return failure
     if event.get("status") != CONFIRMED:
@@ -612,9 +623,7 @@ def withdraw_for_venue_change():
         ), 409
 
     try:
-        withdrawn = clients.withdraw_approval_without_next_round(
-            latest_round["id"], coordinator_id, reason
-        )
+        withdrawn = clients.withdraw_approval_without_next_round(latest_round["id"], reason)
     except clients.RoundNotApprovedError as refused:
         return jsonify(
             code=refused.code or "ROUND_NOT_APPROVED",
@@ -635,7 +644,7 @@ def withdraw_for_venue_change():
 
     try:
         updated = clients.set_event_venue_change_status(
-            event_id, coordinator_id, withdrawn["id"], withdrawn["roundNumber"], True, reason
+            event_id, withdrawn["id"], withdrawn["roundNumber"], True, reason
         )
     except Exception as error:  # noqa: BLE001 — every failure compensates alike
         try:
@@ -669,15 +678,15 @@ def restore_after_venue_change():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
-    coordinator_id = _uuid_or_none(data.get("coordinatorId"))
     withdrawn_id = _uuid_or_none(data.get("withdrawnSafetyCheckId"))
-    if not event_id or not coordinator_id or not withdrawn_id:
-        return jsonify(
-            message="eventId, coordinatorId and withdrawnSafetyCheckId must be valid UUIDs."
-        ), 400
+    if not event_id or not withdrawn_id:
+        return jsonify(message="eventId and withdrawnSafetyCheckId must be valid UUIDs."), 400
 
-    event, failure = _load_event(event_id, coordinator_id)
+    event, failure = _load_event(event_id)
     if failure:
         return failure
     if event.get("status") != READY_STATUS:
@@ -703,7 +712,7 @@ def restore_after_venue_change():
 
     try:
         updated = clients.set_event_venue_change_status(
-            event_id, coordinator_id, withdrawn_id, restored["roundNumber"], False
+            event_id, withdrawn_id, restored["roundNumber"], False
         )
     except Exception as error:  # noqa: BLE001 — reported, nothing left to undo
         logger.error(
@@ -754,7 +763,7 @@ def _decide(
     if failure:
         return None, None, failure
 
-    event, failure = _load_event_for_officer(event_id, safety_officer_id)
+    event, failure = _load_event_for_officer(event_id)
     if failure:
         return None, None, failure
     failure = _approve_status_failure(event)
@@ -804,7 +813,7 @@ def _decide(
     technical_flags = [flag for flag in flags or [] if flag["area"] == "technical arrangement"]
     if technical_flags:
         try:
-            equipment = clients.get_event_equipment_requests(event_id, event["coordinatorId"])
+            equipment = clients.get_event_equipment_requests(event_id)
         except (clients.DownstreamTimeout, clients.DownstreamError) as error:
             return None, None, _decide_failure(error, verb)
         available_ids = {item["id"] for item in equipment}
@@ -818,7 +827,7 @@ def _decide(
 
     try:
         decided = clients.decide_safety_check_record(
-            open_round["id"], record_status, safety_officer_id, remarks, flags or []
+            open_round["id"], record_status, remarks, flags or []
         )
     except clients.SafetyCheckAlreadyDecidedError as already:
         return None, None, (
@@ -866,7 +875,6 @@ def _decide(
             event_status,
             decided["id"],
             decided["roundNumber"],
-            decided_by=safety_officer_id,
             remarks=remarks,
             areas=areas,
             **({"attendee_venue": attendee_venue} if attendee_venue is not None else {}),
@@ -875,9 +883,7 @@ def _decide(
         # Same reconciliation as above, one step later: Event Service may
         # have actually moved the event and only the response was lost.
         # Don't undo a decision that already succeeded end to end.
-        event_after, _lookup_failure = _load_event_for_officer(
-            event_id, safety_officer_id
-        )
+        event_after, _lookup_failure = _load_event_for_officer(event_id)
         if event_after and event_after.get("status") == event_status:
             return decided, event_after, None
         _compensate_decision(decided["id"], decided["decidedAt"])
@@ -930,14 +936,16 @@ def _release_venue_bookings(event_id):
 
 @bp.get("/safety-checks/resubmit/readiness")
 def safety_resubmission_readiness():
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
-    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
-    if not event_id or not coordinator_id:
-        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
-    event, failure = _load_event(event_id, coordinator_id)
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
+    event, failure = _load_event(event_id)
     if failure:
         return failure
-    outstanding, failure = _outstanding(event_id, coordinator_id)
+    outstanding, failure = _outstanding(event_id)
     if failure:
         return failure
     return jsonify(
@@ -949,12 +957,14 @@ def safety_resubmission_readiness():
 
 @bp.get("/safety-checks/feedback")
 def safety_check_feedback():
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
-    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
-    if not event_id or not coordinator_id:
-        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
 
-    _, failure = _load_event(event_id, coordinator_id)
+    _, failure = _load_event(event_id)
     if failure:
         return failure
 
@@ -975,12 +985,14 @@ def safety_check_readiness():
     readiness rule, no writes. The panel calls this on mount so a coordinator
     sees what is missing before clicking rather than after.
     """
+    coordinator_id = g.user_id
+    if not coordinator_id:
+        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
-    coordinator_id = _uuid_or_none(request.args.get("coordinatorId"))
-    if not event_id or not coordinator_id:
-        return jsonify(message="eventId and coordinatorId must be valid UUIDs."), 400
+    if not event_id:
+        return jsonify(message="eventId must be a valid UUID."), 400
 
-    event, failure = _load_event(event_id, coordinator_id)
+    event, failure = _load_event(event_id)
     if failure:
         return failure
 
@@ -990,7 +1002,7 @@ def safety_check_readiness():
         if failure:
             return failure
 
-    outstanding, failure = _outstanding(event_id, coordinator_id)
+    outstanding, failure = _outstanding(event_id)
     if failure:
         return failure
 
@@ -1016,19 +1028,18 @@ def safety_check_queue():
     can't be read the whole queue is a 502/504, never a partial list that
     silently omits an event.
     """
-    safety_officer_id = _uuid_or_none(request.args.get("safetyOfficerId"))
+    safety_officer_id = g.user_id
     if not safety_officer_id:
-        return jsonify(message="safetyOfficerId must be a valid UUID."), 400
+        return jsonify(message="Sign in to continue."), 401
     failure = _check_safety_officer(safety_officer_id)
     if failure:
         return failure
 
     try:
-        with ThreadPoolExecutor(max_workers=QUEUE_WORKERS) as pool:
+        with _RequestPool(max_workers=QUEUE_WORKERS) as pool:
             events_call = pool.submit(
                 clients.list_events_by_status,
                 PENDING_SAFETY_CHECK,
-                safety_officer_id,
                 SAFETY_OFFICER,
             )
             venues_call = pool.submit(clients.list_venues)
@@ -1108,10 +1119,10 @@ def _queue_entry(event, open_round, bookings, venue_names):
 # --- Steps shared by both routes --------------------------------------------
 
 
-def _load_event(event_id, coordinator_id):
+def _load_event(event_id):
     """Step 2: the event, and AC5 — Event Service answers 403 for a stranger."""
     try:
-        return clients.get_event(event_id, coordinator_id), None
+        return clients.get_event(event_id), None
     except clients.EventNotFoundError:
         return None, (jsonify(message="Event request not found."), 404)
     except clients.EventNotAssignedError:
@@ -1174,18 +1185,16 @@ def _already_pending(open_round):
     )
 
 
-def _outstanding(event_id, coordinator_id):
+def _outstanding(event_id):
     """Step 4: read both sets of arrangements and apply the readiness rule.
 
     The two calls are independent, so this costs the slower one rather than
     both. A read that fails is never treated as "nothing outstanding" — an
     unreadable arrangement blocks the submission (fail closed).
     """
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with _RequestPool(max_workers=2) as pool:
         bookings_call = pool.submit(clients.get_event_venue_bookings, event_id)
-        requests_call = pool.submit(
-            clients.get_event_equipment_requests, event_id, coordinator_id
-        )
+        requests_call = pool.submit(clients.get_event_equipment_requests, event_id)
         try:
             bookings, requests = bookings_call.result(), requests_call.result()
         except clients.DownstreamTimeout:
@@ -1228,11 +1237,11 @@ def _check_safety_officer(user_id):
     return None
 
 
-def _load_event_for_officer(event_id, safety_officer_id):
+def _load_event_for_officer(event_id):
     """Step 3 of approve: read the event as the Safety Officer, not a coordinator."""
     try:
         return (
-            clients.get_event(event_id, safety_officer_id, viewer_role=SAFETY_OFFICER),
+            clients.get_event(event_id, viewer_role=SAFETY_OFFICER),
             None,
         )
     except (clients.EventNotFoundError, clients.EventNotAssignedError):

@@ -59,11 +59,7 @@ def event_registrations(event_id):
 @bp.get("/registrations")
 def attendee_registrations():
     try:
-        attendee_id = str(UUID(request.args.get("attendeeId", "")))
-    except (ValueError, TypeError, AttributeError):
-        return jsonify(message="A valid attendeeId is required."), 400
-    try:
-        registrations = with_attendee_details(get_attendee_registrations(attendee_id))
+        registrations = with_attendee_details(get_attendee_registrations())
         events = {event["id"]: event for event in get_confirmed_events()}
         missing_ids = {row["event_id"] for row in registrations if row.get("event_id") and row["event_id"] not in events}
         if missing_ids:
@@ -90,9 +86,8 @@ def register_for_event():
         ), 400
     try:
         cleaned["eventId"] = str(UUID(cleaned["eventId"]))
-        cleaned["attendeeId"] = str(UUID(cleaned["attendeeId"]))
     except (ValueError, TypeError, AttributeError):
-        return jsonify(message="A valid event and attendee are required."), 400
+        return jsonify(message="A valid event is required."), 400
 
     try:
         event = get_confirmed_event(cleaned["eventId"])
@@ -137,19 +132,11 @@ def register_for_event():
 
 @bp.patch("/registrations/<uuid:registration_id>/withdraw")
 def withdraw_from_event(registration_id):
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify(message="Send a JSON object."), 400
-    try:
-        attendee_id = str(UUID(data.get("attendeeId", "")))
-    except (ValueError, TypeError, AttributeError):
-        return jsonify(message="A valid attendeeId is required."), 400
-
     try:
         registration = next(
             (
                 item
-                for item in get_attendee_registrations(attendee_id)
+                for item in get_attendee_registrations()
                 if item.get("registration_id") == str(registration_id)
             ),
             None,
@@ -186,7 +173,7 @@ def withdraw_from_event(registration_id):
         return jsonify(message="The withdrawal deadline is unavailable."), 502
 
     try:
-        withdrawn = withdraw_saved_registration(str(registration_id), attendee_id, event["eventName"])
+        withdrawn = withdraw_saved_registration(str(registration_id), event["eventName"])
     except RegistrationConflictError as error:
         return jsonify(code=error.code, message=error.message), 409
     except Exception:

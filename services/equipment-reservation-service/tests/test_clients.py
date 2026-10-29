@@ -2,10 +2,11 @@
 import httpx
 import pytest
 
-from app import clients
+from app import clients, create_app
 from app.clients import DownstreamError
 
-HEADERS = {"X-Dev-User-Id": "u", "X-Dev-Role": "Technical Support", "Cookie": "must-not-be-forwarded"}
+# The incoming browser request; only the caller's token travels downstream (SCRUM-8).
+HEADERS = {"Authorization": "Bearer user-token", "Cookie": "must-not-be-forwarded"}
 
 
 class FakeResponse:
@@ -36,23 +37,24 @@ def sent(monkeypatch):
     return calls, fake
 
 
-# Review AC1/AC3 / Reservation AC2 (transport): forward identity and event/status filters to request storage.
-def test_list_requests_forwards_only_identity_headers_and_filters(sent):
+# Review AC1/AC3 / Reservation AC2 (transport): forward the caller's token and event/status filters to request storage.
+def test_list_requests_forwards_only_the_callers_token_and_filters(sent):
     calls, fake = sent
     fake.response = FakeResponse(body={"requests": [1]})
 
-    assert clients.list_requests(HEADERS, "Approved", ["a", "b"]) == [1]
+    with create_app().test_request_context(headers=HEADERS):
+        assert clients.list_requests("Approved", ["a", "b"]) == [1]
 
     method, url, kwargs = calls[0]
     assert (method, url) == ("GET", "http://localhost:5011/equipment-requests")
     assert kwargs["params"] == {"status": "Approved", "eventIds": "a,b"}
-    assert kwargs["headers"] == {"X-Dev-User-Id": "u", "X-Dev-Role": "Technical Support"}
+    assert kwargs["headers"] == {"Authorization": "Bearer user-token"}
 
 
 # Review AC3 (access boundary): no assigned event IDs means no request lookup.
 def test_list_requests_with_no_event_ids_skips_the_call(sent):
     calls, _ = sent
-    assert clients.list_requests(HEADERS, "Approved", []) == []
+    assert clients.list_requests("Approved", []) == []
     assert calls == []
 
 
@@ -61,14 +63,14 @@ def test_safety_records_are_read_for_only_the_requested_event(sent, monkeypatch)
     monkeypatch.setenv("SAFETY_CHECK_RECORD_SERVICE_URL", "http://records:5000")
     fake.response = FakeResponse(body={"safetyChecks": [{"roundNumber": 2}]})
     assert clients.get_event_safety_checks("event-id") == [{"roundNumber": 2}]
-    assert calls[0] == ("GET", "http://records:5000/safety-check-records", {"timeout": 10, "params": {"eventId": "event-id"}})
+    assert calls[0] == ("GET", "http://records:5000/safety-check-records", {"timeout": 10, "params": {"eventId": "event-id"}, "headers": {}})
 
 
 # Review AC1 (transport): support an unfiltered staff request-list lookup.
 def test_list_requests_without_filters(sent):
     calls, fake = sent
     fake.response = FakeResponse(body={"requests": []})
-    clients.list_requests(HEADERS)
+    clients.list_requests()
     assert calls[0][2]["params"] == {}
 
 
@@ -77,9 +79,9 @@ def test_get_and_review_calls(sent):
     calls, fake = sent
     fake.response = FakeResponse(body={"request": {"id": "r", "eventId": "ev"}, "requests": [{"id": "r"}]})
 
-    assert clients.get_request(HEADERS, "r") == {"id": "r", "eventId": "ev"}
-    assert clients.review_request(HEADERS, "r", "Approved") == {"id": "r", "eventId": "ev"}
-    assert clients.review_event_requests(HEADERS, "ev", "Rejected", "No technician available.") == [{"id": "r"}]
+    assert clients.get_request("r") == {"id": "r", "eventId": "ev"}
+    assert clients.review_request("r", "Approved") == {"id": "r", "eventId": "ev"}
+    assert clients.review_event_requests("ev", "Rejected", "No technician available.") == [{"id": "r"}]
 
     assert [(c[0], c[1]) for c in calls] == [
         ("GET", "http://localhost:5011/equipment-requests/r"),
@@ -91,18 +93,19 @@ def test_get_and_review_calls(sent):
     assert calls[3][2]["json"] == {"status": "Rejected", "rejectionReason": "No technician available.", "notificationContext": {"eventId": "ev"}}
 
 
-# Create request AC1/AC2 (transport): forward equipment needs, the event ID and caller identity to storage.
-def test_create_event_requests_posts_items_with_identity_headers(sent):
+# Create request AC1/AC2 (transport): forward equipment needs, the event ID and the caller's token to storage.
+def test_create_event_requests_posts_items_with_the_callers_token(sent):
     calls, fake = sent
     fake.response = FakeResponse(201, body={"requests": [{"id": "r"}]})
     items = [{"equipmentId": "e", "quantityRequested": 2, "technicalRequirements": ""}]
 
-    assert clients.create_event_requests(HEADERS, "ev", items) == [{"id": "r"}]
+    with create_app().test_request_context(headers=HEADERS):
+        assert clients.create_event_requests("ev", items) == [{"id": "r"}]
 
     method, url, kwargs = calls[0]
     assert (method, url) == ("POST", "http://localhost:5011/events/ev/equipment-requests")
     assert kwargs["json"] == {"items": items, "notificationContext": {"eventId": "ev"}}
-    assert kwargs["headers"] == {"X-Dev-User-Id": "u", "X-Dev-Role": "Technical Support", "X-Internal-Token": "synthetic"}
+    assert kwargs["headers"] == {"Authorization": "Bearer user-token", "X-Internal-Token": "synthetic"}
 
 
 # Review AC1 / Reservation AC2 (supporting lookup): resolve summaries for the requested event IDs.
@@ -117,12 +120,14 @@ def test_event_summaries_are_fetched_in_chunks_of_100(sent):
 
 # Review AC3 (transport): obtain only event IDs assigned to the current coordinator.
 def test_list_assigned_event_ids_uses_coordinator_scoped_event_endpoint(sent):
+    """Event Service scopes the list to the coordinator in the forwarded token."""
     calls, fake = sent
     fake.response = FakeResponse(body={"events": [{"id": "event-1"}, {"id": "event-2"}]})
 
-    assert clients.list_assigned_event_ids("coordinator-1") == ["event-1", "event-2"]
+    with create_app().test_request_context(headers=HEADERS):
+        assert clients.list_assigned_event_ids() == ["event-1", "event-2"]
     assert calls[0][0:2] == ("GET", "http://localhost:5003/events")
-    assert calls[0][2]["params"] == {"coordinatorId": "coordinator-1"}
+    assert calls[0][2] == {"timeout": 10, "headers": {"Authorization": "Bearer user-token"}}
 
 
 # Reservation AC1 / Availability AC1/AC2 (transport): fetch overlapping events and the equipment catalogue.
@@ -151,7 +156,7 @@ def test_expected_downstream_errors_pass_through_with_their_message(sent, status
     _, fake = sent
     fake.response = FakeResponse(status, {"message": "nope"})
     with pytest.raises(DownstreamError) as error:
-        clients.get_request(HEADERS, "r")
+        clients.get_request("r")
     assert (error.value.status, error.value.message) == (status, "nope")
 
 
@@ -161,7 +166,7 @@ def test_other_downstream_failures_become_502_with_a_generic_message_for_bad_bod
     _, fake = sent
     fake.response = response
     with pytest.raises(DownstreamError) as error:
-        clients.get_request(HEADERS, "r")
+        clients.get_request("r")
     assert error.value.status == 502
 
 

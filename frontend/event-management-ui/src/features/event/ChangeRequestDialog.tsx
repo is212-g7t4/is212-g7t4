@@ -3,6 +3,7 @@ import type { EditableField, EventChanges } from './eventDetails'
 import { EDITABLE_FIELDS, FIELD_INPUTS, fieldLabels, sentenceList } from './eventDetails'
 import type { SubmittedEvent } from './submission'
 import { validateEvent } from './submission'
+import { authFetch } from '../auth/session'
 
 type Props = {
   event: SubmittedEvent
@@ -12,7 +13,7 @@ type Props = {
 }
 
 async function submitEventChangeRequest(eventId: string, organiserId: string, changes: EventChanges, reason: string) {
-  const response = await fetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}/events/${eventId}/change-requests`, {
+  const response = await authFetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}/events/${eventId}/change-requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ organiserId, changes, reason }),

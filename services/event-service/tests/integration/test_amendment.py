@@ -6,8 +6,8 @@ Story:      As an Event Coordinator, I want to request an amendment on a submitt
 Real:       Flask app and routes, validation, app/models.py SQL, postgres:17.6 with the
             full migration chain.
 Doubled:    nothing (Event Service makes no outbound calls).
-Not proven: JWT authentication; identity is the coordinatorId / organiserId the caller
-            sends. Frontend behaviour, and that Equipment Reservation / Event Workflow keep
+Not proven: Supabase sign-in itself; the caller is a token signed with a test key
+            (SCRUM-8). Frontend behaviour, and that Equipment Reservation / Event Workflow keep
             stock held (their own unit tests cover the status list).
 
 AC1  Given an Event Request has status 'Submitted' and is assigned to the current Event

@@ -81,25 +81,16 @@ function NavButton({ active, onClick, icon, children }: { active: boolean; onCli
   )
 }
 
-export function Topbar({ route, title, users, activeUserId, onUserChange, onNotifications }: { onNotifications?: () => void; route: Route; title?: string; users: User[]; activeUserId: string; onUserChange: (userId: string) => void }) {
+export function Topbar({ route, title, user, onSignOut, onNotifications }: { onNotifications?: () => void; route: Route; title?: string; user?: User; onSignOut: () => void }) {
   return (
     <header className="topbar">
       <h1>{title ?? routeTitles[route]}</h1>
 
       {onNotifications && <NotificationBell onViewAll={onNotifications} />}
-      <label className="role-switcher">
-        Viewing as
-        <select
-          value={activeUserId}
-          onChange={(change) => onUserChange(change.target.value)}
-          aria-label="Select active user"
-          disabled={users.length === 0}
-        >
-          {users.length === 0
-            ? <option value="">No users available</option>
-            : users.map((user) => <option key={user.id} value={user.id}>{user.username} — {user.role}</option>)}
-        </select>
-      </label>
+      <div className="role-switcher">
+        <span>Signed in as {user ? `${user.username} — ${user.role}` : 'Unknown user'}</span>
+        <button className="button secondary small" type="button" onClick={onSignOut}>Sign out</button>
+      </div>
     </header>
   )
 }

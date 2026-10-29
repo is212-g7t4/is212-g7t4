@@ -7,6 +7,7 @@ from app import create_app
 from app import clients, routes
 from app.search import _shift, availability_for, shortlist
 from datetime import datetime
+from tests.unit.factories import signed_in, bearer
 
 
 VENUE_ID = "00000000-0000-0000-0000-000000000001"
@@ -32,7 +33,7 @@ def test_venue_edit_saves_then_reconciles_without_changing_bookings(monkeypatch)
         or {"venueId": VENUE_ID, "conflictCount": 1, "conflicts": []},
     )
 
-    response = create_app().test_client().put(
+    response = signed_in(create_app().test_client()).put(
         f"/venues/{VENUE_ID}", json={"setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
     )
 
@@ -49,7 +50,7 @@ def test_conflict_read_uses_current_venue_buffers(monkeypatch):
         lambda venue: {"venueId": venue["id"], "conflictCount": 0, "conflicts": []},
     )
 
-    response = create_app().test_client().get(
+    response = signed_in(create_app().test_client()).get(
         f"/venues/{VENUE_ID}/legacy-conflicts"
     )
 
@@ -82,13 +83,13 @@ def test_conflict_read_enriches_event_names_for_venue_staff(monkeypatch):
     monkeypatch.setattr(
         routes,
         "get_event_for_internal_viewer",
-        lambda event_id, viewer_id, role: calls.append((event_id, viewer_id, role))
+        lambda event_id, role: calls.append((event_id, role))
         or {"eventName": {"event-1": "Workshop", "event-2": "Summit"}[event_id]},
     )
 
-    response = create_app().test_client().get(
+    response = signed_in(create_app().test_client()).get(
         f"/venues/{VENUE_ID}/legacy-conflicts",
-        headers={"X-Dev-User-Id": "staff-1", "X-Dev-Role": "Venue Staff"},
+        headers=bearer("staff-1", "Venue Staff"),
     )
 
     assert response.status_code == 200
@@ -115,9 +116,9 @@ def test_event_name_failure_keeps_conflict_response_usable(monkeypatch):
         return {"eventName": ""}
 
     monkeypatch.setattr(routes, "get_event_for_internal_viewer", event)
-    response = create_app().test_client().get(
+    response = signed_in(create_app().test_client()).get(
         f"/venues/{VENUE_ID}/legacy-conflicts",
-        headers={"X-Dev-User-Id": "staff-1", "X-Dev-Role": "Venue Staff"},
+        headers=bearer("staff-1", "Venue Staff"),
     )
 
     assert response.status_code == 200
@@ -140,7 +141,7 @@ def test_downstream_validation_error_is_preserved(monkeypatch):
         ),
     )
 
-    result = create_app().test_client().put(f"/venues/{VENUE_ID}", json={})
+    result = signed_in(create_app().test_client()).put(f"/venues/{VENUE_ID}", json={})
 
     assert result.status_code == 400
     assert result.json["errors"] == ["Bad buffer"]
@@ -165,12 +166,12 @@ def test_new_composite_clients_forward_current_venue_buffers(monkeypatch):
     monkeypatch.setattr(
         clients.httpx,
         "put",
-        lambda url, json: response("PUT", url, {"venue": VENUE}),
+        lambda url, json, headers: response("PUT", url, {"venue": VENUE}),
     )
     monkeypatch.setattr(
         clients.httpx,
         "post",
-        lambda url, json: response("POST", url, {"conflictCount": 0}),
+        lambda url, json, headers: response("POST", url, {"conflictCount": 0}),
     )
 
     assert clients.get_venue(VENUE_ID) == VENUE
@@ -193,20 +194,17 @@ def test_internal_event_client_requests_venue_staff_view(monkeypatch):
         )
 
     monkeypatch.setattr(clients.httpx, "get", get)
-    assert clients.get_event_for_internal_viewer("event-1", "staff-1", "Venue Staff") == {
+    assert clients.get_event_for_internal_viewer("event-1", "Venue Staff") == {
         "eventName": "Workshop"
     }
-    assert seen["kwargs"]["params"] == {
-        "coordinatorId": "staff-1",
-        "viewerRole": "Venue Staff",
-    }
+    assert seen["kwargs"]["params"] == {"viewerRole": "Venue Staff"}
 
 
 def test_get_booking_client_translates_not_found(monkeypatch):
     monkeypatch.setattr(
         clients.httpx,
         "get",
-        lambda url: httpx.Response(404, request=httpx.Request("GET", url)),
+        lambda url, headers: httpx.Response(404, request=httpx.Request("GET", url)),
     )
     with pytest.raises(clients.BookingNotFoundError):
         clients.get_booking("missing")
@@ -230,7 +228,7 @@ def test_buffered_search_widens_read_and_applies_exact_window(monkeypatch):
         return {"bookings": [], "closures": []}
 
     monkeypatch.setattr(routes, "get_bookings_between", window)
-    response = create_app().test_client().get(
+    response = signed_in(create_app().test_client()).get(
         "/venue-search",
         query_string={
             "start": "2090-10-01T10:00:00",
@@ -267,7 +265,7 @@ def test_booking_create_and_edit_forward_catalogue_buffers(monkeypatch):
         "requiredCapacity": 20,
         "venueRequirements": "Stage",
     }
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
 
     assert client.post("/booking-requests", json=payload).status_code == 201
     assert client.patch("/booking-requests/booking-1", json=payload).status_code == 200
@@ -276,7 +274,7 @@ def test_booking_create_and_edit_forward_catalogue_buffers(monkeypatch):
 
 
 def test_venue_edit_failure_paths_are_explicit(monkeypatch):
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     path = f"/venues/{VENUE_ID}"
     assert client.put(path, json=[]).status_code == 400
 
@@ -311,7 +309,7 @@ def test_venue_edit_failure_paths_are_explicit(monkeypatch):
 
 def test_conflict_read_failure_paths(monkeypatch):
     path = f"/venues/{VENUE_ID}/legacy-conflicts"
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     request = httpx.Request("GET", "http://venue")
 
     for status, expected in [(404, 404), (503, 502)]:

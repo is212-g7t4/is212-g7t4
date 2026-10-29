@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from app import create_app
-from tests.unit.factories import EVENT_ID, OFFICER_ID, RECORD_ID, record_row
+from tests.unit.factories import EVENT_ID, OFFICER_ID, RECORD_ID, record_row, signed_in
 
 
 @pytest.fixture
@@ -25,17 +25,17 @@ def setup(monkeypatch):
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client(), OFFICER_ID, "Safety Officer"), connection, cursor
 
 
 @pytest.fixture
 def no_database():
     app = create_app({"TESTING": True, "DATABASE_URL": None})
-    return app.test_client()
+    return signed_in(app.test_client(), OFFICER_ID, "Safety Officer")
 
 
 def decide(client, safety_check_id=RECORD_ID, **overrides):
-    body = {"status": "Safety Approved", "decidedBy": OFFICER_ID, **overrides}
+    body = {"status": "Safety Approved", **overrides}
     return client.patch(f"/safety-check-records/{safety_check_id}/decision", json=body)
 
 
@@ -166,14 +166,15 @@ def test_bad_round_id_is_rejected(safety_check_id, setup):
     cursor.execute.assert_not_called()
 
 
-def test_bad_decided_by_is_rejected(setup):
+def test_decider_is_the_signed_in_officer_not_the_body(setup):
+    """SCRUM-8: a forged decidedBy is ignored; the token names the decider."""
     client, _, cursor = setup
+    cursor.fetchone.return_value = record_row()
 
-    response = decide(client, decidedBy="nope")
+    decide(client, decidedBy="99999999-9999-4999-8999-999999999999")
 
-    assert response.status_code == 400
-    assert response.json["message"] == "decidedBy must be a valid UUID."
-    cursor.execute.assert_not_called()
+    assert all("99999999-9999-4999-8999-999999999999" not in str(c.args) for c in cursor.execute.call_args_list)
+    assert any(OFFICER_ID in str(c.args) for c in cursor.execute.call_args_list)
 
 
 def test_decide_non_object_body_is_rejected(setup):
@@ -191,7 +192,7 @@ def test_decide_non_object_body_is_rejected(setup):
 def test_decide_without_database_url(no_database):
     response = no_database.patch(
         f"/safety-check-records/{RECORD_ID}/decision",
-        json={"status": "Safety Approved", "decidedBy": OFFICER_ID},
+        json={"status": "Safety Approved"},
     )
 
     assert response.status_code == 503

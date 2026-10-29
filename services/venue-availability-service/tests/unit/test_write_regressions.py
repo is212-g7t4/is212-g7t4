@@ -55,7 +55,7 @@ def test_write_database_unconfigured(setup):
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("payload", [None, [], {}, {"reviewedBy": "bad"}])
+@pytest.mark.parametrize("payload", [{"setupTimeMinutes": -1}, {"turnaroundTimeMinutes": "x"}])
 def test_decision_validation_unchanged(setup, payload):
     client, cursor = setup
     assert (
@@ -78,9 +78,8 @@ def test_decision_database_unconfigured(setup):
     cursor.execute.assert_not_called()
 
 
-def test_write_remains_naive_pending_without_dev_gate(setup):
+def test_write_remains_naive_pending(setup):
     client, cursor = setup
-    client.application.config["CALENDAR_DEV_MODE"] = False
     cursor.fetchone.side_effect = [booking_row()]
     response = client.post("/venue-bookings", json=PAYLOAD)
     assert response.status_code == 201

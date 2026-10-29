@@ -35,12 +35,11 @@ Or `docker compose up --build equipment-service` (port 5002).
   canonicalised), anything else is stored as given and uses the base
   `Equipment` class.
   `400` on validation errors (empty `equipmentType` or text, quantity
-  not a whole number ≥ 0), `401` without the DEV headers, `403` unless the
-  role is Technical Support.
+  not a whole number ≥ 0), `401` without a valid sign-in token, `403` unless
+  the token's role is Technical Support.
 
-DEV auth: `X-Dev-User-Id` (UUID) and `X-Dev-Role` headers, as in Venue
-Availability Service. These can be spoofed; replace with Supabase JWT
-verification when real auth lands.
+Every endpoint needs a Supabase access token (`Authorization: Bearer
+<token>`, SCRUM-8); the caller's role comes from the token.
 
 Item shape: `{id, type, description, totalQuantity, location, status,
 setupRequirements}`. `503` if the database is unreachable or `DATABASE_URL`

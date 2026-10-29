@@ -38,7 +38,7 @@ from app import create_app
 from app import models
 from tests.unit.factories import (
     BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID,
-    assert_booking_intent, assert_no_booking_intent, booking_row,
+    assert_booking_intent, assert_no_booking_intent, bearer, booking_row, signed_in,
 )
 
 REASON = "Hall is too small for the stage"
@@ -54,10 +54,12 @@ def _update_call(cursor):
     )
 
 
-def _decide(client, action, **body):
+def _decide(client, action, reviewedBy=USER_ID, **body):
+    """Decide as the signed-in Venue Staff reviewer (SCRUM-8: the reviewer comes from the token)."""
     return client.patch(
         f"/venue-bookings/{BOOKING_ID}/{action}",
-        json={"reviewedBy": USER_ID, **body},
+        json=body,
+        headers=bearer(reviewedBy, "Venue Staff"),
     )
 
 
@@ -284,5 +286,5 @@ def test_ac5_edit_or_safety_reset_clears_previous_decision(setup):
 
 def test_decision_requires_configured_database_after_validation():
     """Failure: a valid rejection still needs the database to be configured."""
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert _decide(client, "reject", rejectionReason=REASON).status_code == 503

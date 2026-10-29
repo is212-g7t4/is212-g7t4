@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import create_app
+from tests.unit.factories import bearer
 
 ALICE_ID = "e7334aa9-eb3a-4c45-84b5-280501b6c109"
 MARCUS_ID = "7912075d-46f5-405b-9af3-05502f42f173"
@@ -31,7 +32,9 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    client = app.test_client()
+    client.environ_base["HTTP_AUTHORIZATION"] = bearer(ALICE_ID, "Event Coordinator")["Authorization"]
+    return client, connection, cursor
 
 
 def test_list_users_returns_all_users(setup):
@@ -95,13 +98,13 @@ def test_get_user_rejects_invalid_uuid(setup):
 
 def test_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
-    response = client.get("/users")
+    response = client.get("/users", headers=bearer(ALICE_ID, "Event Coordinator"))
     assert response.status_code == 503
 
 
 def test_get_user_missing_database_configuration():
     client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
-    response = client.get(f"/users/{ALICE_ID}")
+    response = client.get(f"/users/{ALICE_ID}", headers=bearer(ALICE_ID, "Event Coordinator"))
     assert response.status_code == 503
 
 

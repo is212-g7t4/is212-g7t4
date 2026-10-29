@@ -1,5 +1,5 @@
-import type { User } from '../../types'
 import type { Venue } from './venues'
+import { authFetch } from '../auth/session'
 
 export interface VenueHold {
   id: string
@@ -12,7 +12,7 @@ export interface VenueHold {
 const availabilityServiceUrl = () => import.meta.env.VITE_VENUE_AVAILABILITY_SERVICE_URL || 'http://localhost:5008'
 
 export async function fetchActiveVenueHolds(): Promise<VenueHold[]> {
-  const response = await fetch(`${availabilityServiceUrl()}/venue-holds`)
+  const response = await authFetch(`${availabilityServiceUrl()}/venue-holds`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load active venue holds.')
   return body.holds as VenueHold[]
@@ -21,17 +21,12 @@ export async function fetchActiveVenueHolds(): Promise<VenueHold[]> {
 export async function placeVenueHold(
   venueId: string,
   expiresAt: string,
-  user: Pick<User, 'id' | 'role'>,
   coordinatorId?: string,
   buffer: Pick<Venue, 'setupTimeMinutes' | 'turnaroundTimeMinutes'> = {},
 ): Promise<VenueHold> {
-  const response = await fetch(`${availabilityServiceUrl()}/venue-holds`, {
+  const response = await authFetch(`${availabilityServiceUrl()}/venue-holds`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Dev-User-Id': user.id,
-      'X-Dev-Role': user.role,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ venueId, expiresAt, ...(coordinatorId ? { coordinatorId } : {}), ...(
       buffer.setupTimeMinutes !== undefined || buffer.turnaroundTimeMinutes !== undefined
         ? { setupTimeMinutes: buffer.setupTimeMinutes ?? 0, turnaroundTimeMinutes: buffer.turnaroundTimeMinutes ?? 0 }
@@ -44,10 +39,8 @@ export async function placeVenueHold(
 }
 
 // Holds placed for this coordinator that expire within 3 days; the service decides.
-export async function fetchHoldReminders(user: Pick<User, 'id' | 'role'>): Promise<VenueHold[]> {
-  const response = await fetch(`${availabilityServiceUrl()}/venue-holds/reminders`, {
-    headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
-  })
+export async function fetchHoldReminders(): Promise<VenueHold[]> {
+  const response = await authFetch(`${availabilityServiceUrl()}/venue-holds/reminders`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load hold reminders.')
   return body.reminders as VenueHold[]

@@ -13,14 +13,13 @@ test('loads active venue holds', async () => {
   expect(fetch).toHaveBeenCalledWith('http://localhost:5008/venue-holds')
 })
 
-test('places a hold with the selected Venue Staff identity', async () => {
+test('places a hold', async () => {
   vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ hold: { id: 'h1' } }) } as Response)
 
-  await placeVenueHold('venue-1', '2026-10-09T12:00', { id: 'staff-1', role: 'Venue Staff' })
+  await placeVenueHold('venue-1', '2026-10-09T12:00')
 
   expect(fetch).toHaveBeenCalledWith('http://localhost:5008/venue-holds', expect.objectContaining({
     method: 'POST',
-    headers: expect.objectContaining({ 'X-Dev-User-Id': 'staff-1', 'X-Dev-Role': 'Venue Staff' }),
     body: JSON.stringify({ venueId: 'venue-1', expiresAt: '2026-10-09T12:00' }),
   }))
 })
@@ -40,7 +39,7 @@ test('marks held venues On Hold without changing other venue statuses', () => {
 test('sends the coordinator the hold is placed for', async () => {
   vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ hold: { id: 'h1' } }) } as Response)
 
-  await placeVenueHold('venue-1', '2026-10-09T12:00', { id: 'staff-1', role: 'Venue Staff' }, 'coord-1')
+  await placeVenueHold('venue-1', '2026-10-09T12:00', 'coord-1')
 
   expect(vi.mocked(fetch).mock.calls[0][1]?.body).toBe(JSON.stringify({ venueId: 'venue-1', expiresAt: '2026-10-09T12:00', coordinatorId: 'coord-1' }))
 })
@@ -51,7 +50,6 @@ test('sends venue buffers together with the coordinator reminder assignment', as
   await placeVenueHold(
     'venue-1',
     '2026-10-09T12:00',
-    { id: 'staff-1', role: 'Venue Staff' },
     'coord-1',
     { setupTimeMinutes: 30, turnaroundTimeMinutes: 45 },
   )
@@ -65,19 +63,17 @@ test('sends venue buffers together with the coordinator reminder assignment', as
   }))
 })
 
-test('loads hold reminders with the coordinator identity', async () => {
+test('loads hold reminders', async () => {
   vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ reminders: [{ id: 'h1' }] }) } as Response)
 
-  await expect(fetchHoldReminders({ id: 'c1', role: 'Event Coordinator' })).resolves.toEqual([{ id: 'h1' }])
-  expect(fetch).toHaveBeenCalledWith('http://localhost:5008/venue-holds/reminders', {
-    headers: { 'X-Dev-User-Id': 'c1', 'X-Dev-Role': 'Event Coordinator' },
-  })
+  await expect(fetchHoldReminders()).resolves.toEqual([{ id: 'h1' }])
+  expect(fetch).toHaveBeenCalledWith('http://localhost:5008/venue-holds/reminders')
 })
 
 test('hold reminder failures surface the service message', async () => {
   vi.mocked(fetch).mockResolvedValue({ ok: false, json: async () => ({ message: 'nope' }) } as Response)
 
-  await expect(fetchHoldReminders({ id: 'c1', role: 'Event Coordinator' })).rejects.toThrow('nope')
+  await expect(fetchHoldReminders()).rejects.toThrow('nope')
 })
 
 

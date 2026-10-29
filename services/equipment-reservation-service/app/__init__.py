@@ -3,10 +3,12 @@ import os
 from flask import Flask, request
 
 from app.routes import bp
+from app.auth import authenticate
 
 
 def create_app(config=None) -> Flask:
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config.from_mapping(FRONTEND_ORIGIN=os.getenv("FRONTEND_ORIGIN", "http://localhost:5174"))
     app.config.update(config or {})
     app.register_blueprint(bp)
@@ -22,7 +24,7 @@ def create_app(config=None) -> Flask:
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, X-Dev-User-Id, X-Dev-Role"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, Authorization"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200

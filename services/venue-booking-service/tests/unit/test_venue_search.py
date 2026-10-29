@@ -17,6 +17,7 @@ import pytest
 
 from app import create_app
 from app.search import SINGAPORE
+from tests.unit.factories import signed_in
 
 # Search inputs represent Singapore dates, regardless of the test runner's timezone.
 TOMORROW = (datetime.now(SINGAPORE) + timedelta(days=1)).date().isoformat()
@@ -72,7 +73,7 @@ def search(client, **overrides):
 
 @pytest.fixture
 def client():
-    return create_app().test_client()
+    return signed_in(create_app().test_client())
 
 
 # --- AC2: required criteria -------------------------------------------------
@@ -401,7 +402,7 @@ def test_search_is_read_only(client):
 
 def test_cors_allows_the_ui_origin_by_default():
     """The UI calls this service directly, so its dev origin must be allowed."""
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
 
     response = client.get("/venue-search", headers={"Origin": "http://localhost:5174"})
 
@@ -424,7 +425,7 @@ def test_search_venues_sends_repeatable_filters_and_a_timeout(monkeypatch):
 
     captured = {}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, headers=None):
         captured.update(url=url, params=params, timeout=timeout)
         return httpx.Response(
             200, json={"venues": [BALLROOM]}, request=httpx.Request("GET", url)
@@ -447,7 +448,7 @@ def test_get_bookings_between_uses_the_all_venue_window_read(monkeypatch):
 
     captured = {}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, timeout=None, headers=None):
         captured.update(url=url, params=params, timeout=timeout)
         return httpx.Response(
             200,

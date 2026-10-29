@@ -1,4 +1,5 @@
 import type { EventData } from '../../types'
+import { authFetch } from '../auth/session'
 
 export interface SubmittedEvent extends EventData {
   id: string
@@ -163,7 +164,7 @@ export async function eventApi(
   method?: 'POST' | 'PATCH' | 'DELETE',
 ) {
   const headers: Record<string, string> = data ? { 'Content-Type': 'application/json' } : {}
-  const response = await fetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}${path}`, {
+  const response = await authFetch(`${import.meta.env.VITE_EVENT_SERVICE_URL || 'http://localhost:5003'}${path}`, {
     method: method || (data ? 'POST' : 'GET'), headers, ...(data ? { body: JSON.stringify(data) } : {}),
   })
   const body = await response.json().catch(() => ({}))
@@ -172,7 +173,7 @@ export async function eventApi(
 }
 
 export async function assignmentApi(path: string, method: 'GET' | 'POST' = 'GET', data?: Record<string, string>) {
-  const response = await fetch(`${import.meta.env.VITE_COORDINATOR_ASSIGNMENT_SERVICE_URL || 'http://localhost:5004'}${path}`, {
+  const response = await authFetch(`${import.meta.env.VITE_COORDINATOR_ASSIGNMENT_SERVICE_URL || 'http://localhost:5004'}${path}`, {
     method,
     headers: data ? { 'Content-Type': 'application/json' } : undefined,
     ...(data ? { body: JSON.stringify(data) } : {}),

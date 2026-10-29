@@ -1,5 +1,6 @@
 import type { EventChanges } from '../event/eventDetails'
 import type { SubmittedEvent } from '../event/submission'
+import { authFetch } from '../auth/session'
 
 // SCRUM-149: the Operational Safety Check submit flow. Calls Safety Check
 // Service (the composite) — it is the service that owns this workflow, and
@@ -173,7 +174,7 @@ export class SafetySubmitError extends Error {
 const serviceUrl = () => import.meta.env.VITE_SAFETY_CHECK_SERVICE_URL || 'http://localhost:5012'
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${serviceUrl()}${path}`, init)
+  const response = await authFetch(`${serviceUrl()}${path}`, init)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new SafetySubmitError(

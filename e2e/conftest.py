@@ -1,6 +1,7 @@
 """Opt-in cross-service SCRUM-46 fixtures; never run against the shared stack."""
 
 import json
+from urllib.parse import parse_qsl, urlsplit
 import os
 from pathlib import Path
 import subprocess
@@ -10,6 +11,8 @@ import httpx
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import pytest
+
+from signing import TokenIssuer
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -25,8 +28,9 @@ class AttendeeStack:
     """Owned HTTP/SQL/worker handles for one isolated SCRUM-46 scenario.
     All endpoints and database identities come from attendee_stack, never shared configuration.
     """
-    def __init__(self, env, urls, db_identity, logs):
+    def __init__(self, env, urls, db_identity, logs, issuer):
         self.env, self.urls, self.db_identity, self.logs = env, urls, db_identity, logs
+        self.issuer = issuer
 
     def query(self, statement, params=()):
         """Run arrange/assert SQL only after matching the live owned container and binding.
@@ -51,6 +55,15 @@ class AttendeeStack:
         """Call one fixture-owned service and return its successful JSON body.
         Fail with request context on non-2xx rather than silently accepting a broken action.
         """
+        body = kwargs.get("json") if isinstance(kwargs.get("json"), dict) else {}
+        query = dict(parse_qsl(urlsplit(path).query))
+        # SCRUM-8: the actor a request names is sent as that user's token, not trusted as an ID.
+        for field, role in (("attendeeId", "Attendee"), ("coordinatorId", "Event Coordinator"), ("decidedBy", "Safety Officer")):
+            if user := body.get(field) or query.get(field):
+                kwargs["headers"] = {**self.issuer.bearer(user, role), **kwargs.get("headers", {})}
+                if field in body:
+                    kwargs["json"] = {k: v for k, v in body.items() if k != field}
+                break
         response = httpx.request(
             method, self.urls[service] + path, timeout=10, **kwargs
         )
@@ -85,13 +98,13 @@ class AttendeeStack:
 
     def inbox(self, user):
         """Read this synthetic attendee identity's current inbox through the real API.
-        Dev headers test existing recipient scoping, not authenticated production identity.
+        The attendee signs in with a token from the harness's own issuer (SCRUM-8).
         """
         return self.call(
             "notification",
             "GET",
             "/notifications?limit=100",
-            headers={"X-Dev-User-Id": user, "X-Dev-Role": "Attendee"},
+            headers=self.issuer.bearer(user, "Attendee"),
         )["notifications"]
 
     def delivered(self, user, source):
@@ -112,6 +125,7 @@ def attendee_stack(tmp_path):
     cleanup and checks volumes even after a failed assertion; no shared stack is used.
     """
     names, processes, logs, volumes = [], [], [], []
+    issuer = TokenIssuer()
     suffix = uuid4().hex
     dbname = "scrum46-pg-" + suffix
     broker = "scrum46-rabbit-" + suffix
@@ -122,7 +136,7 @@ def attendee_stack(tmp_path):
         PYTHON_DOTENV_DISABLED="1",
         UV_NO_ENV_FILE="1",
         INTERNAL_SERVICE_TOKEN="synthetic",
-        NOTIFICATION_DEV_MODE="true",
+        SUPABASE_URL=issuer.url,
         FLASK_DEBUG="0",
     )
     try:
@@ -151,7 +165,7 @@ def attendee_stack(tmp_path):
         env["DATABASE_URL"] = (
             f"postgresql://isolated:synthetic-only@127.0.0.1:{port}/isolated"
         )
-        stack = AttendeeStack(env, {}, (dbname, inspected["Id"], port), tmp_path)
+        stack = AttendeeStack(env, {}, (dbname, inspected["Id"], port), tmp_path, issuer)
         wait(lambda: stack.query("SELECT 1"))
         connection = psycopg2.connect(env["DATABASE_URL"])
         try:
@@ -262,6 +276,7 @@ def attendee_stack(tmp_path):
         )
         yield stack
     finally:
+        issuer.close()
         diagnostic_failures = []
         try:
             for name in names:

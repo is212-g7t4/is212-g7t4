@@ -10,7 +10,7 @@
  * Mocked APIs: proves the UI flow and the request it sends. Persistence, the
  * stamp and the API's role refusal are proven by Venue Service's tests.
  */
-import { allUsers, asUser, json, mock, mockVenueSafetyInfo, test, expect, users, venues } from './fixtures'
+import { allUsers, asUser, switchUser, json, mock, mockVenueSafetyInfo, test, expect, users, venues } from './fixtures'
 
 const EMERGENCY = 'Exits on north and south walls\nAssembly point at the front lawn'
 const RESTRICTIONS = 'Noise curfew 10pm; no open flames'
@@ -24,11 +24,11 @@ test('Venue Staff record safety information and an Event Coordinator can read it
   let venue = { ...venues[0] }
   await mock(page, 'venue', `/venues/${venue.id}`, (route) => json(route, { venue }))
   await mock(page, 'venueBooking', `/venues/${venue.id}`, (route) => json(route, { venue, legacyConflicts: { conflicts: [] } }))
-  const safetySaves: { body: unknown; role: string | undefined; userId: string | undefined }[] = []
+  const safetySaves: { body: unknown; authorization: string | undefined }[] = []
   await mockVenueSafetyInfo(page, venue.id, (route) => {
     const request = route.request()
     const body = request.postDataJSON()
-    safetySaves.push({ body, role: request.headers()['x-dev-role'], userId: request.headers()['x-dev-user-id'] })
+    safetySaves.push({ body, authorization: request.headers()['authorization'] })
     venue = {
       ...venue, ...body,
       safetyInfoUpdatedBy: users.venueStaff.user_id, safetyInfoUpdatedAt: '2026-10-26T10:30:00+08:00',
@@ -52,15 +52,14 @@ test('Venue Staff record safety information and an Event Coordinator can read it
     await expect(safety.getByText(RESTRICTIONS)).toBeVisible()
     expect(safetySaves).toEqual([{
       body: { emergencyAccessDetails: EMERGENCY, knownRestrictions: RESTRICTIONS },
-      role: 'Venue Staff',
-      userId: users.venueStaff.user_id,
+      authorization: `Bearer e2e-${users.venueStaff.user_id}`,
     }])
     await expect(safety.getByText(/Exits on north and south walls/)).toBeVisible()
     await expect(safety.getByText(/Last updated .*26 Oct 2026.* by Vera Koh/)).toBeVisible()
   })
 
   await test.step('AC4: an Event Coordinator sees the values but has no Edit Venue button', async () => {
-    await page.getByLabel('Select active user').selectOption({ label: 'Carl Ng — Event Coordinator' })
+    await switchUser(page, users.coordinator)
     await expect(safety.getByText(RESTRICTIONS)).toBeVisible()
     await expect(page.getByRole('button', { name: /Edit Venue/ })).toHaveCount(0)
   })

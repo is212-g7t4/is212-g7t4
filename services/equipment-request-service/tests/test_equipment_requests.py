@@ -6,13 +6,14 @@ import pytest
 
 from app import create_app
 from flask.testing import FlaskClient
+from tests.unit.factories import bearer
 
 USER_ID = "ad3d6da3-7220-4f80-9157-2ee4abc0455c"
 REQUEST_ID = "2a1bfb57-a3c0-4450-897e-cc5c73690000"
 EVENT_ID = "4a569df8-b7e4-44a2-af9f-d60000000000"
-TS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}
-COORDINATOR = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
-SAFETY_OFFICER = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Safety Officer"}
+TS = bearer(USER_ID, "Technical Support")
+COORDINATOR = bearer(USER_ID, "Event Coordinator")
+SAFETY_OFFICER = bearer(USER_ID, "Safety Officer")
 ORIGIN = "http://localhost:5174"
 
 
@@ -67,7 +68,7 @@ def test_safety_flag_resets_only_selected_event_requests_to_pending(setup):
     cursor.fetchall.side_effect = [[db_row(status="Approved", reviewed_by=USER_ID)], [db_row()]]
     response = client.post(
         f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={"X-Internal-Service-Token": "test-internal-token"},
+        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"},
         json={"requestIds": [REQUEST_ID]},
     )
     assert response.status_code == 200
@@ -83,13 +84,13 @@ def test_safety_reset_rejects_other_event_request_without_writes(setup):
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-internal-token"
     cursor.fetchall.return_value = []
     response = client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={"X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]})
+        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]})
     assert response.status_code == 404
     assert cursor.execute.call_count == 1
 
 
 @pytest.mark.parametrize("token,headers,code", [
-    (None, {}, 503), ("test-internal-token", {}, 403),
+    (None, SAFETY_OFFICER, 503), ("test-internal-token", SAFETY_OFFICER, 403),
     ("test-internal-token", TS, 403),
 ])
 def test_safety_reset_requires_internal_credentials(setup, token, headers, code):
@@ -110,7 +111,7 @@ def test_safety_reset_validates_ids(setup, event_id, payload):
     client, _, connect = setup
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-internal-token"
     assert client.post(f"/events/{event_id}/equipment-requests/safety-reset",
-        headers={"X-Internal-Service-Token": "test-internal-token"}, json=payload).status_code == 400
+        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"}, json=payload).status_code == 400
     connect.assert_not_called()
 
 
@@ -118,7 +119,7 @@ def test_safety_reset_requires_database(setup):
     client, _, connect = setup
     client.application.config.update(INTERNAL_SERVICE_TOKEN="test-internal-token", DATABASE_URL=None)
     assert client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={"X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]}).status_code == 503
+        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]}).status_code == 503
     connect.assert_not_called()
 
 
@@ -242,10 +243,10 @@ def test_list_rejects_bad_filters(setup, query):
 
 @pytest.mark.parametrize(
     "headers,code",
-    [({}, 401), ({"X-Dev-User-Id": "bad", "X-Dev-Role": "Technical Support"}, 401), ({"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Attendee"}, 403)],
+    [({}, 401), ({"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}, 401), (bearer(USER_ID, "Attendee"), 403)],
 )
-def test_list_requires_authorised_dev_user(setup, headers, code):
-    # Review AC1/AC3 (access): require an identified user with a permitted reader role.
+def test_list_requires_signed_in_reader(setup, headers, code):
+    # Review AC1/AC3 (access): require a signed-in user (SCRUM-8) with a permitted reader role.
     client, _, connect = setup
     assert client.get("/equipment-requests", headers=headers).status_code == code
     connect.assert_not_called()
@@ -460,7 +461,7 @@ def test_create_saves_nothing_when_an_event_or_equipment_does_not_exist(setup):
 
 
 # Create request AC1 (access): only an identified Event Coordinator may record equipment needs.
-@pytest.mark.parametrize("headers,code", [({}, 401), (TS, 403), ({"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Attendee"}, 403)])
+@pytest.mark.parametrize("headers,code", [({}, 401), (TS, 403), (bearer(USER_ID, "Attendee"), 403)])
 def test_only_event_coordinators_can_create(setup, headers, code):
     client, _, connect = setup
     assert client.post(f"/events/{EVENT_ID}/equipment-requests", headers=headers, json={"items": [item()]}).status_code == code

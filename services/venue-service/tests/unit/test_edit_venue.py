@@ -5,7 +5,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row
+from tests.unit.factories import VALID_PAYLOAD, VENUE_ID, saved_row, signed_in
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return app.test_client(), cursor
+    return signed_in(app.test_client()), cursor
 
 
 def test_ac2_edit_saves_current_venue_fields_and_status(setup):
@@ -227,7 +227,7 @@ def test_edit_database_error_returns_503(setup, monkeypatch):
 
 
 def test_edit_missing_database_url_returns_503():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     response = client.put(f"/venues/{VENUE_ID}", json=VALID_PAYLOAD)
 

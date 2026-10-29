@@ -69,7 +69,7 @@ def test_ac3_venue_withdrawal_captures_earliest_approved_booking_not_requirement
             200, json={"status": "Approved"}
         )
         clients.set_event_venue_change_status(
-            event, "coord", "round", 1, True, "Venue changed"
+            event, "round", 1, True, "Venue changed"
         )
         assert json.loads(saved.calls[0].request.content)["venueBefore"] == "Hall A"
 
@@ -85,6 +85,7 @@ from tests.unit.factories import (
     user,
     booking,
     venue,
+    signed_in,
 )
 
 
@@ -142,8 +143,7 @@ def test_ac3_safety_approval_carries_final_venue_only_for_the_current_review_cyc
                 f"http://event.test/events/{EVENT_ID}/safety-status"
             ).respond(200, json=event("Confirmed"))
         response = (
-            create_app()
-            .test_client()
+            signed_in(create_app().test_client())
             .post(
                 "/safety-checks/approve",
                 json=dict(eventId=EVENT_ID, safetyOfficerId=OFFICER_ID),

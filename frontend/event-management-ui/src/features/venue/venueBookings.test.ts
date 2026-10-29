@@ -3,17 +3,15 @@ import { createVenueBooking, fetchVenueBookings, updateVenueBooking, cancelVenue
 
 const details = { eventId: 'event', venueId: 'venue', coordinatorId: 'coordinator', requestedStartTime: '2026-12-01T09:00', requestedEndTime: '2026-12-01T10:00', requiredCapacity: 10, venueRequirements: '' }
 
-test('venue staff queue and review send the staff identity to the owning composite', async () => {
-  const user = { id: 'staff', role: 'Venue Staff' as const }
+test('venue staff queue and review use the owning composite', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [] })))
   vi.stubGlobal('fetch', fetcher)
-  expect(await fetchVenueRequests(user, 'Pending')).toEqual([])
-  expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests?status=Pending'),
-    expect.objectContaining({ headers: { 'X-Dev-User-Id': 'staff', 'X-Dev-Role': 'Venue Staff' } }))
+  expect(await fetchVenueRequests('Pending')).toEqual([])
+  expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests?status=Pending'), undefined)
   fetcher.mockResolvedValue(new Response(JSON.stringify({ id: 'booking', status: 'Approved' })))
-  await reviewVenueRequest('booking/id', 'Approved', user)
+  await reviewVenueRequest('booking/id', 'Approved')
   expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests/booking%2Fid/review'),
-    expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ status: 'Approved', reviewedBy: 'staff' }) }))
+    expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ status: 'Approved' }) }))
 })
 afterEach(() => vi.unstubAllGlobals())
 test('existing edit and cancel routes preserve encoded IDs and request bodies', async () => {
@@ -64,27 +62,24 @@ test('SCRUM-28 AC2: the event-status refusal keeps its code and message', async 
 })
 
 test('SCRUM-29 AC4: reviewVenueRequest sends a reason only with a rejection', async () => {
-  const user = { id: 'staff', role: 'Venue Staff' as const }
   const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: 'booking', status: 'Rejected' })))
   vi.stubGlobal('fetch', fetcher)
-  await reviewVenueRequest('booking', 'Rejected', user, 'Too small')
+  await reviewVenueRequest('booking', 'Rejected', 'Too small')
   expect(fetcher).toHaveBeenLastCalledWith(expect.stringContaining('/booking-requests/booking/review'),
-    expect.objectContaining({ body: JSON.stringify({ status: 'Rejected', reviewedBy: 'staff', rejectionReason: 'Too small' }) }))
-  await reviewVenueRequest('booking', 'Approved', user, 'ignored')
+    expect.objectContaining({ body: JSON.stringify({ status: 'Rejected', rejectionReason: 'Too small' }) }))
+  await reviewVenueRequest('booking', 'Approved', 'ignored')
   expect(fetcher).toHaveBeenLastCalledWith(expect.anything(),
-    expect.objectContaining({ body: JSON.stringify({ status: 'Approved', reviewedBy: 'staff' }) }))
+    expect.objectContaining({ body: JSON.stringify({ status: 'Approved' }) }))
 })
 
-test('SCRUM-29 AC1: fetchVenueRequestDetail asks the composite with the staff identity', async () => {
+test('SCRUM-29 AC1: fetchVenueRequestDetail asks the composite', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ booking: { id: 'b' }, canDecide: true })))
   vi.stubGlobal('fetch', fetcher)
-  expect(await fetchVenueRequestDetail('b/1', { id: 'staff', role: 'Venue Staff' })).toMatchObject({ canDecide: true })
-  expect(fetcher).toHaveBeenLastCalledWith(expect.stringMatching(/\/booking-requests\/b%2F1$/),
-    expect.objectContaining({ headers: { 'X-Dev-User-Id': 'staff', 'X-Dev-Role': 'Venue Staff' } }))
-  expect(fetcher.mock.calls[0][1].method).toBeUndefined()
+  expect(await fetchVenueRequestDetail('b/1')).toMatchObject({ canDecide: true })
+  expect(fetcher).toHaveBeenLastCalledWith(expect.stringMatching(/\/booking-requests\/b%2F1$/), undefined)
 })
 
 test('SCRUM-29 AC5: the already-decided refusal keeps its code', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'BOOKING_ALREADY_DECIDED', message: 'Decided.' }), { status: 409 })))
-  await expect(reviewVenueRequest('b', 'Approved', { id: 'staff', role: 'Venue Staff' })).rejects.toMatchObject({ status: 409, code: 'BOOKING_ALREADY_DECIDED' })
+  await expect(reviewVenueRequest('b', 'Approved')).rejects.toMatchObject({ status: 409, code: 'BOOKING_ALREADY_DECIDED' })
 })

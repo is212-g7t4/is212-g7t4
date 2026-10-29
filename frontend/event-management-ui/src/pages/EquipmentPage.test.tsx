@@ -64,7 +64,6 @@ test('submits a new record, confirms it and reloads the list', async () => {
   expect(await screen.findByText('Added Projector: 4K projector.')).toBeInTheDocument()
   expect(createEquipment).toHaveBeenCalledWith(
     { equipmentType: 'Microphone', description: 'Laptop A', totalQuantity: 3, location: 'Store', status: 'Available' },
-    user,
   )
   expect(fetchEquipment).toHaveBeenCalledTimes(2)
 })

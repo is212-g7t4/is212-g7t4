@@ -31,8 +31,8 @@ import { routeTitles } from './types'
 import type { EventData, Role, Route, User } from './types'
 import { AlertIcon, CheckIcon } from './components/Icon'
 import { HoldReminderAlert } from './features/venue/HoldReminderAlert'
-
-const ACTIVE_USER_STORAGE_KEY = 'activeUserId'
+import { LoginPage } from './features/auth/LoginPage'
+import { endSession, loadSession, SESSION_ENDED_EVENT } from './features/auth/session'
 
 const paths: Record<Route, string> = {
   notifications: '/notifications',
@@ -117,13 +117,7 @@ function App() {
   const [draftId, setDraftId] = useState<string | null>(getDraftId)
   const [detailOrigin, setDetailOrigin] = useState<Route>('review')
   const [users, setUsers] = useState<User[]>([])
-  const [activeUserId, setActiveUserId] = useState<string>(() => {
-    try {
-      return localStorage.getItem(ACTIVE_USER_STORAGE_KEY) || ''
-    } catch {
-      return ''
-    }
-  })
+  const [session, setSession] = useState(loadSession)
   const [event, setEvent] = useState<EventData>({
     eventName: '',
     description: '',
@@ -161,6 +155,14 @@ function App() {
   }, [])
 
   useEffect(() => {
+    // SCRUM-8 AC1: a rejected or expired token returns the user to sign in.
+    const ended = () => setSession(null)
+    window.addEventListener(SESSION_ENDED_EVENT, ended)
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, ended)
+  }, [])
+
+  useEffect(() => {
+    if (!session) return
     let active = true
     fetchUsers().then((fetched) => {
       if (active) setUsers(fetched)
@@ -168,17 +170,9 @@ function App() {
       if (active) setNotice({ message: `Unable to load users: ${cause.message}`, tone: 'error' })
     })
     return () => { active = false }
-  }, [])
+  }, [session])
 
-  const activeUser = users.find((user) => user.id === activeUserId) ?? users[0]
-
-  useEffect(() => {
-    try {
-      if (activeUser) localStorage.setItem(ACTIVE_USER_STORAGE_KEY, activeUser.id)
-    } catch {
-      // localStorage unavailable (e.g. private browsing) — active user just won't persist.
-    }
-  }, [activeUser])
+  const activeUser = session?.user
 
   const navigate = (nextRoute: Route) => {
     setNotice(null)
@@ -238,10 +232,11 @@ function App() {
     setEquipmentTargetSearch(window.location.search)
     setChangeRequestTargetSearch(window.location.search)
   }
+  if (!session) return <LoginPage onSignedIn={setSession} />
   return <NotificationProvider user={activeUser} onNavigate={openNotification}><div className="app-shell">
     <Sidebar route={route} role={role} onNavigate={navigate} />
     <main className={`main-content${route === 'venueCalendar' ? ' calendar-route' : ''}`}>
-      <Topbar route={route} title={inEventsPage ? 'Events' : undefined} users={users} activeUserId={activeUser?.id ?? ''} onUserChange={setActiveUserId} onNotifications={() => navigate('notifications')} />
+      <Topbar route={route} title={inEventsPage ? 'Events' : undefined} user={activeUser} onSignOut={endSession} onNotifications={() => navigate('notifications')} />
       {route === 'notifications' && <div className="page-stack"><NotificationsPage /></div>}
       {notice && <div className={`notice ${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.tone === 'success' ? <CheckIcon size={15} /> : <AlertIcon size={15} />}{notice.message}</div>}
       <HoldReminderAlert user={activeUser} />

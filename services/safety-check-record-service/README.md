@@ -26,7 +26,7 @@ this service calls no other service (AGENTS.md).
 
 ### `POST /safety-check-records`
 
-Body: `{eventId, submittedBy, equipmentPlacementNotes, crowdMovementNotes}`.
+Body: `{eventId, equipmentPlacementNotes, crowdMovementNotes}`; the submitter is the signed-in caller.
 Both note fields are optional, up to 2000 characters each; blank or
 whitespace-only notes are stored as `NULL`.
 
@@ -48,7 +48,7 @@ submission there is no row to lock, so `UNIQUE (event_id, round_number)`
 
 ### `PATCH /safety-check-records/<id>/decision`
 
-Body: `{status, decidedBy, remarks?, flags?}`. `status` is one of
+Body: `{status, remarks?, flags?}`; the decider is the signed-in caller. `status` is one of
 `DECISION_STATUSES`: `Safety Approved`, `Changes Requested`, `Safety Rejected`.
 Per-status rules, checked before the database is touched:
 
@@ -102,7 +102,7 @@ missing.
 
 ### `POST /safety-check-records/<id>/withdraw`
 
-Body: `{withdrawnBy, reason}`. `reason` is required, non-blank text up to 2000
+Body: `{reason}`; the withdrawer is the signed-in caller. `reason` is required, non-blank text up to 2000
 characters — it is what SCRUM-153 AC1's "the coordinator is told why" quotes.
 
 A high-impact change to a `Confirmed` event invalidates its safety approval
@@ -219,8 +219,8 @@ high-impact change invalidated, so it is absent from `DECISION_STATUSES` and
 `Approved` is deliberately **not** one of them — that is only ever an *event*
 status, the one an event holds before its safety check.
 
-No DEV identity headers: this is a service-to-service API, like
-`venue-availability-service`'s reads.
+Callers forward the signed-in user's `Authorization: Bearer <token>`
+(SCRUM-8); `submittedBy`, `decidedBy` and `withdrawnBy` come from it.
 
 ## Commands
 

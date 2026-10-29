@@ -3,7 +3,7 @@
 Owns `public."VenueBooking"`, timed venue holds, and their overlap algorithm. Extends the existing
 atomic; there is no duplicate availability/conflict service. The calendar UI
 may read this atomic directly; booking writes come through Venue Booking
-Service, and Venue Staff hold writes use the DEV identity simulation below.
+Service, and Venue Staff hold writes are checked against the signed-in token (see Authentication).
 No calls to User/Venue/Event services or their tables are added.
 `GET /venues` remains owned by Venue Service.
 
@@ -32,7 +32,7 @@ fill its database password; do not overwrite an existing `.env`.
 ```sh
 cd services/venue-availability-service
 uv sync --locked
-CALENDAR_DEV_MODE=true uv run --env-file ../../.env flask --app app run --host 127.0.0.1 --port 5008
+uv run --env-file ../../.env flask --app app run --host 127.0.0.1 --port 5008
 ```
 
 This explicitly loads the **root** `.env`, not an assumed service-local file.
@@ -44,37 +44,26 @@ From repository root, once the other existing Compose entries' service `.env`
 files are configured:
 
 ```sh
-CALENDAR_DEV_MODE=true docker compose up --build venue-availability-service
+docker compose up --build venue-availability-service
 ```
 
 The new Compose entry uses root `.env` and binds `127.0.0.1:5008:5000`.
-It defaults to disabled DEV calendar mode. Do not expose this development
-service publicly. Full Compose validation can fail on other services' missing
+Do not expose this development service publicly. Full Compose validation can fail on other services' missing
 `.env` files even when starting only this service; local Flask avoids that.
 
-## DEV user-switcher header contract — NOT authentication
+## Authentication (SCRUM-8)
 
-Calendar reads are disabled (`503`) unless environment **`CALENDAR_DEV_MODE=true`**
-is set exactly (lowercase). The Flask test/config equivalent is boolean `True`.
-This deliberate opt-in only simulates the existing user-switcher's identity.
+Every endpoint except `/health` needs a Supabase access token
+(`Authorization: Bearer <token>`); the caller's id and role come from the
+token, never from the request. `401` without a valid token. Background
+workers send `X-Internal-Token` instead.
 
-Every `GET /venue-bookings` needs both headers:
+`GET /venue-bookings` is for internal roles: `Event Coordinator`,
+`Event Coordinator Lead`, `Venue Staff`, `Technical Support` and the canonical
+alias `Technical Support Staff`. `Event Organiser`, `Attendee` and all other
+roles receive `403`.
 
-| Header | Value |
-|---|---|
-| `X-Dev-User-Id` | Selected user's UUID; syntactically validated, **not** looked up |
-| `X-Dev-Role` | Exact selected role string |
-
-Allowed roles: `Event Coordinator`, `Venue Staff`, `Technical Support`, and the
-canonical alias `Technical Support Staff`. `Event Organiser`, `Attendee` and
-all other role strings receive `403`. Missing/invalid user UUID or missing role
-receives `401`. There is no user-table query, JWT verification or real auth.
-**Headers are caller-supplied and spoofable. This is not secure access control.**
-Production must replace this simulation with verified identity/role enforcement.
-Existing POST/PATCH endpoints are intentionally not gated or reworked here.
-
-`POST /venue-holds` requires `CALENDAR_DEV_MODE=true`, a valid
-`X-Dev-User-Id`, and exact `X-Dev-Role: Venue Staff`. Its JSON body is
+`POST /venue-holds` requires the `Venue Staff` role. Its JSON body is
 `{"venueId": "<UUID>", "expiresAt": "2026-10-09T12:00"}`. Expiry is required,
 must be a future naive Singapore-local ISO datetime, and returns `400` if
 invalid. A hold conflicting with any non-rejected/non-cancelled booking or
@@ -91,8 +80,8 @@ cannot be bypassed by a new or newly approved booking. Holds are `On Hold` rows 
 table.
 
 CORS allows only the configured exact `FRONTEND_ORIGIN`, including on errors.
-`OPTIONS /venue-bookings` requires no identity and returns allowed headers
-`Content-Type, X-Dev-User-Id, X-Dev-Role` and methods `GET, OPTIONS, POST`.
+`OPTIONS` requires no token and returns allowed headers
+`Content-Type, Authorization` and methods `GET, OPTIONS, POST` on every path.
 No wildcard origin or credentials support is enabled. CORS is not authentication.
 
 ## Calendar read
@@ -122,14 +111,14 @@ GET output always includes `+08:00`. URL-encode `+` as `%2B`, or use curl's
 
 ```sh
 curl --get 'http://127.0.0.1:5008/venue-bookings' \
-  -H 'X-Dev-User-Id: 00000000-0000-0000-0000-000000000001' \
-  -H 'X-Dev-Role: Event Coordinator' \
+  -H "Authorization: Bearer $TOKEN" \
   --data-urlencode 'venueId=00000000-0000-0000-0000-0000000000f1' \
   --data-urlencode 'dateFrom=2026-10-01T00:00:00+08:00' \
   --data-urlencode 'dateTo=2026-11-01T00:00:00+08:00'
 ```
 
 The UUIDs above are illustrative; use a venue selected from `GET /venues`.
+`$TOKEN` is the `accessToken` from User Service's `POST /auth/login`.
 
 ## Buffer conflicts and legacy reconciliation
 
@@ -195,12 +184,9 @@ Rejected and Cancelled bookings are excluded — they cannot take a venue. A row
 this service cannot read raises `503` rather than being dropped, for the same
 reason as the calendar: a dropped booking would show a taken venue as free.
 
-**Not behind `CALENDAR_DEV_MODE` or the `X-Dev-*` headers.** Those simulate
-the browser's user switcher, and this caller is a composite, not a browser —
-it has no user identity to forward and should not invent one. The endpoint
-exposes no more than the calendar read does, and Venue Booking Service applies
-its own role rule. If the DEV simulation is ever replaced by real
-service-to-service auth, this endpoint is a caller to cover.
+**Not role-gated.** The caller is a composite forwarding the signed-in
+user's token, not a browser. The endpoint exposes no more than the calendar
+read does, and Venue Booking Service applies its own role rule.
 
 ```sh
 curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
@@ -211,7 +197,8 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
 ## Venue booking writes and event grouping
 
 - `POST /venue-bookings`: body `{eventId, venueId, requestedStartTime,
-  requestedEndTime, requiredCapacity, venueRequirements, requestedBy}`;
+  requestedEndTime, requiredCapacity, venueRequirements}` (the requester is
+  the signed-in caller);
   creates `Pending Review` and stamps `requested_at` with the database's
   `now()` (SCRUM-28); returns `409` on an approved overlap for the same
   venue. Conflict detection keys on venue and time, not event, so overlapping
@@ -231,8 +218,7 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
   submission (SCRUM-28 Part B).
 - `PATCH /venue-bookings/<id>/cancel`: scopes by `eventId` and retains the
   selected row as `Cancelled`; repeating the request is idempotent.
-- `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{reviewedBy,
-  setupTimeMinutes?, turnaroundTimeMinutes?, rejectionReason?}`; approval
+- `PATCH /venue-bookings/<id>/approve` or `/reject`: body `{setupTimeMinutes?, turnaroundTimeMinutes?, rejectionReason?}`; approval
   rechecks buffered conflicts (`409 VENUE_UNAVAILABLE` + `conflictTypes`).
   Both stamp `reviewed_by` and `reviewed_at = now()` (SCRUM-29).
   - A reject needs `rejectionReason`: text of 1–500 characters after trimming,
@@ -244,7 +230,7 @@ curl --get 'http://127.0.0.1:5008/venue-bookings/window' \
     approved booking, edit it, which sends it back to `Pending Review`.
 - `POST /events/<eventId>/venue-bookings/safety-reset` also clears
   `reviewed_at` and `rejection_reason` on the bookings it resets.
-- `GET /health` remains available without DEV headers.
+- `GET /health` remains available without a sign-in token.
 
 ## Tests and review
 
@@ -266,5 +252,5 @@ uv run pytest -m integration --no-cov tests/integration
 
 See [BACKEND_REVIEW.md](BACKEND_REVIEW.md) for flow, file map, acceptance mapping,
 actual verification results and remaining scope. Frontend/AC2 and operational
-`venueBlock` support are deferred. Real authentication, database constraints,
+`venueBlock` support are deferred. Database constraints,
 index audits and concurrent-write locking improvements remain separate work.

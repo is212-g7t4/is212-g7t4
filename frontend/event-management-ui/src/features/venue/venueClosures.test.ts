@@ -20,24 +20,24 @@ test.each([
  ['2099-01-01T09:00', '2099-01-01T10:00', '  '],
 ])('SCRUM-170 rejects invalid interval/reason before POST: %s %s', async (start, end, reason) => {
  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher)
- await expect(createClosure('v1', start, end, reason, user, 'signed')).rejects.toThrow()
+ await expect(createClosure('v1', start, end, reason, 'signed')).rejects.toThrow()
  expect(fetcher).not.toHaveBeenCalled()
 })
 test.each([400, 401, 403, 404])('SCRUM-170 reports rejected save %s', async status => {
  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Rejected' }), { status })))
- await expect(createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', 'Repairs', user, 'signed')).rejects.toThrow('Rejected')
+ await expect(createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', 'Repairs', 'signed')).rejects.toThrow('Rejected')
 })
 test.each(['network', 'malformed', 'server'])('SCRUM-170 warns ambiguous %s save without retry', async failure => {
  const fetcher = failure === 'network' ? vi.fn().mockRejectedValue(new TypeError('offline')) : vi.fn().mockResolvedValue(new Response('{}', { status: failure === 'server' ? 503 : 201 }))
  vi.stubGlobal('fetch', fetcher)
- await expect(createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', 'Repairs', user, 'signed')).rejects.toThrow(/may have been recorded/)
+ await expect(createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', 'Repairs', 'signed')).rejects.toThrow(/may have been recorded/)
  expect(fetcher).toHaveBeenCalledTimes(1)
 })
 test('SCRUM-170 lists bounded pages with opaque cursor and cancellation', async () => {
  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ closures: [closure], nextCursor: 'opaque+/' })))
  vi.stubGlobal('fetch', fetcher)
  const signal = new AbortController().signal
- expect(await listClosures('v1', user, 'opaque+/', signal)).toEqual({ closures: [closure], nextCursor: 'opaque+/' })
+ expect(await listClosures('v1', 'opaque+/', signal)).toEqual({ closures: [closure], nextCursor: 'opaque+/' })
  const [url, init] = fetcher.mock.calls[0]
  expect(new URL(url).searchParams.get('cursor')).toBe('opaque+/')
  expect(new URL(url).searchParams.get('limit')).toBe('50')
@@ -45,23 +45,22 @@ test('SCRUM-170 lists bounded pages with opaque cursor and cancellation', async 
 })
 test.each([{ closures: [{ ...closure, venueId: 'foreign' }], nextCursor: null }, { closures: [], nextCursor: 1 }, { closures: [{ ...closure, endDateTime: 'bad' }], nextCursor: null }])('SCRUM-170 rejects malformed list', async body => {
  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body))))
- await expect(listClosures('v1', user)).rejects.toThrow(/Unable to load/)
+ await expect(listClosures('v1')).rejects.toThrow(/Unable to load/)
 })
 test('SCRUM-170 rejected non-JSON save gives controlled message', async () => {
  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('invalid', { status: 400 })))
- await expect(createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', 'Repairs', user, 'signed')).rejects.toThrow(/Check your input/)
+ await expect(createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', 'Repairs', 'signed')).rejects.toThrow(/Check your input/)
 })
 test('SCRUM-170 list accepts nullable legacy metadata and rejects non-JSON', async () => {
  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ closures: [{ ...closure, createdAt: null, createdBy: null }], nextCursor: null }))).mockResolvedValueOnce(new Response('bad')))
- expect((await listClosures('v1', user)).closures[0].createdBy).toBeNull()
- await expect(listClosures('v1', user)).rejects.toThrow(/Unable to load/)
+ expect((await listClosures('v1')).closures[0].createdBy).toBeNull()
+ await expect(listClosures('v1')).rejects.toThrow(/Unable to load/)
 })
-test('SCRUM-170 creates ongoing closure through composite with exact body and staff headers', async () => {
+test('SCRUM-170 creates ongoing closure through composite with exact body', async () => {
  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ closure, rejectedCount: 0 }), { status: 201 }))
  vi.stubGlobal('fetch', fetcher)
- expect(await createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', ' Repairs ', user, 'signed')).toEqual({ ...closure, rejectedCount: 0 })
+ expect(await createClosure('v1', '2020-01-01T09:00', '2099-01-01T10:00', ' Repairs ', 'signed')).toEqual({ ...closure, rejectedCount: 0 })
  const [url, init] = fetcher.mock.calls[0]
  expect(url).toBe('http://localhost:5007/venue-closures')
  expect(JSON.parse(init.body)).toEqual({ venueId: 'v1', startDateTime: closure.startDateTime, endDateTime: closure.endDateTime, reason: 'Repairs', confirmed: true, confirmationToken: 'signed' })
- expect(init.headers).toMatchObject({ 'X-Dev-User-Id': user.id, 'X-Dev-Role': 'Venue Staff' })
 })

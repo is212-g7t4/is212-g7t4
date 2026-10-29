@@ -1,7 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { fetchCalendar } from './api'
 const venue = '00000000-0000-0000-0000-000000000001'
-const user = { id: venue, role: 'Technical Support' }
 export const booking = {
   id: venue,
   eventId: venue,
@@ -18,25 +17,25 @@ test('caller abort signal reaches fetch without loosening single-venue validatio
   const controller = new AbortController()
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({closures: [], bookings: [booking]})))
   vi.stubGlobal('fetch', fetcher)
-  await fetchCalendar(venue, {start: '2026-10-01', end: '2026-10-02'}, user, controller.signal)
+  await fetchCalendar(venue, {start: '2026-10-01', end: '2026-10-02'}, controller.signal)
   expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal)
 })
 test('valid UUID belonging to another selected venue still fails this single-venue response', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({closures: [], bookings: [{...booking, venueId: '00000000-0000-0000-0000-000000000002'}]}))))
-  await expect(fetchCalendar(venue,{start:'2026-10-01',end:'2026-10-02'},user)).rejects.toThrow('Invalid availability response')
+  await expect(fetchCalendar(venue,{start:'2026-10-01',end:'2026-10-02'})).rejects.toThrow('Invalid availability response')
 })
 test('valid sub-millisecond API interval preserves microseconds', async () => {
   const row = { ...booking, requestedStartTime: '2026-10-01T10:00:00.000001+08:00',
     requestedEndTime: '2026-10-01T10:00:00.000999+08:00' }
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [row] }))))
-  await expect(fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user)).resolves.toEqual([row])
+  await expect(fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' })).resolves.toEqual([row])
 })
 test.each(['2026-10-01T10:00:00.000001+08:00', '2026-10-01T10:00:00.000000+08:00'])('equal/reversed microsecond interval fails closed: %s', async (end) => {
   const row = { ...booking, requestedStartTime: '2026-10-01T10:00:00.000001+08:00', requestedEndTime: end }
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [row] }))))
-  await expect(fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user)).rejects.toThrow('Invalid availability response')
+  await expect(fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' })).rejects.toThrow('Invalid availability response')
 })
-test('GET uses selected DEV identity and encoded explicit SGT bounds', async () => {
+test('GET uses encoded explicit SGT bounds', async () => {
   const fetcher = vi
     .fn()
     .mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [booking] })))
@@ -45,17 +44,12 @@ test('GET uses selected DEV identity and encoded explicit SGT bounds', async () 
     await fetchCalendar(
       venue,
       { start: '2026-10-01', end: '2026-10-02' },
-      user,
     ),
   ).toEqual([booking])
-  const [url, options] = fetcher.mock.calls[0]
+  const [url] = fetcher.mock.calls[0]
   expect(new URL(url).searchParams.get('dateFrom')).toBe(
     '2026-10-01T00:00:00+08:00',
   )
-  expect(options.headers).toEqual({
-    'X-Dev-User-Id': venue,
-    'X-Dev-Role': 'Technical Support',
-  })
 })
 
 test.each([401, 403, 503])('HTTP %s fails closed', async (status) => {
@@ -64,7 +58,7 @@ test.each([401, 403, 503])('HTTP %s fails closed', async (status) => {
     vi.fn().mockResolvedValue(new Response('{}', { status })),
   )
   await expect(
-    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
+    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }),
   ).rejects.toThrow('Availability unavailable')
 })
 test.each([
@@ -83,7 +77,7 @@ test.each([
     vi.fn().mockResolvedValue(new Response(JSON.stringify(body))),
   )
   await expect(
-    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
+    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }),
   ).rejects.toThrow('Invalid availability response')
 })
 
@@ -101,17 +95,17 @@ test.each([
       .mockResolvedValue(new Response(JSON.stringify({ closures: [], bookings: [row] }))),
   )
   await expect(
-    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
+    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }),
   ).rejects.toThrow('Invalid availability response')
 })
 test('non-JSON and network failure reject; empty and both pending statuses succeed', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not JSON')))
   await expect(
-    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
+    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }),
   ).rejects.toThrow('Invalid availability response')
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
   await expect(
-    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
+    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }),
   ).rejects.toThrow('offline')
   for (const bookings of [
     [],
@@ -126,7 +120,6 @@ test('non-JSON and network failure reject; empty and both pending statuses succe
       await fetchCalendar(
         venue,
         { start: '2026-10-01', end: '2026-10-02' },
-        user,
       ),
     ).toEqual(bookings)
   }
@@ -142,6 +135,6 @@ test.each([
     vi.fn().mockResolvedValue(new Response(JSON.stringify(body))),
   )
   await expect(
-    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }, user),
+    fetchCalendar(venue, { start: '2026-10-01', end: '2026-10-02' }),
   ).rejects.toThrow('Invalid availability response')
 })

@@ -23,6 +23,7 @@ from testcontainers.community.postgres import PostgresContainer  # noqa: E402
 
 from app import create_app  # noqa: E402
 from tests.integration.factories import SAFETY_TOKEN, make_safety_coordinator
+from tests.unit.factories import signed_in
 
 TOKEN = SAFETY_TOKEN
 
@@ -130,7 +131,7 @@ def client(database_url, monkeypatch):
     assert database_url in OWNED_URLS
     # Both channels, in case a code path reads os.environ rather than app.config (§4).
     monkeypatch.setenv("DATABASE_URL", database_url)
-    return create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client()
+    return signed_in(create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client())
 
 
 class Database:
@@ -275,8 +276,8 @@ def event_change_notification_owner(database_url, monkeypatch):
     assert_local(database_url)
     assert database_url in OWNED_URLS, "Story setup requires the session fixture's exact URL"
     monkeypatch.setenv("DATABASE_URL", database_url)
-    client = create_app({"TESTING": True, "DATABASE_URL": database_url,
-                         "INTERNAL_SERVICE_TOKEN": TOKEN}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": database_url,
+                                   "INTERNAL_SERVICE_TOKEN": TOKEN}).test_client())
     assert client.application.config["DATABASE_URL"] == os.environ["DATABASE_URL"] == database_url
     with closing(psycopg2.connect(database_url)) as connection:
         db = MigrationDatabase(connection)
@@ -321,8 +322,8 @@ def safety_notification_owner(migration_database, monkeypatch):
         dsn = make_dsn(**params, password='synthetic-only')
         monkeypatch.setenv('DATABASE_URL', dsn)
         assert_owned()
-        client = create_app({'TESTING': True, 'DATABASE_URL': dsn,
-                             'INTERNAL_SERVICE_TOKEN': TOKEN}).test_client()
+        client = signed_in(create_app({'TESTING': True, 'DATABASE_URL': dsn,
+                                       'INTERNAL_SERVICE_TOKEN': TOKEN}).test_client())
         assert client.application.config["DATABASE_URL"] == os.environ["DATABASE_URL"] == dsn
         try:
             yield client, db

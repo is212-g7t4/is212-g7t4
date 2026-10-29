@@ -22,6 +22,7 @@ Missing-key checks are supporting configuration safety, not direct acceptance.
 
 import pytest
 from app import closure_store
+from tests.unit.factories import bearer
 
 DATA = dict(
     venueId="venue",
@@ -37,13 +38,13 @@ def test_read_only_preview_route_returns_complete_impact(setup):
 
     client, cursor = setup
     client.application.config.update(
-        VENUE_CLOSURE_DEV_MODE=True, CLOSURE_CONFIRMATION_KEY=KEY
+        CLOSURE_CONFIRMATION_KEY=KEY
     )
     cursor.fetchall.return_value = [booking_row()]
     response = client.post(
         "/venue-closures/preview",
         json=DATA | {"venueId": VENUE_ID},
-        headers={"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"},
+        headers=bearer(USER_ID, "Venue Staff"),
     )
     assert response.status_code == 200
     assert response.json["affectedCount"] == 1
@@ -87,13 +88,13 @@ def test_key_is_required_without_default(setup, path, key):
 
     client, cursor = setup
     client.application.config.update(
-        VENUE_CLOSURE_DEV_MODE=True, CLOSURE_CONFIRMATION_KEY=key
+        CLOSURE_CONFIRMATION_KEY=key
     )
     data = DATA | {"venueId": VENUE_ID}
     if path == "/venue-closures":
         data |= dict(confirmed=True, confirmationToken="invalid")
     response = client.post(
-        path, json=data, headers={"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"}
+        path, json=data, headers=bearer(USER_ID, "Venue Staff")
     )
     assert response.status_code == 503
     cursor.execute.assert_not_called()
@@ -114,12 +115,12 @@ def test_create_requires_explicit_confirmation(setup, extra):
 
     client, cursor = setup
     client.application.config.update(
-        VENUE_CLOSURE_DEV_MODE=True, CLOSURE_CONFIRMATION_KEY=KEY
+        CLOSURE_CONFIRMATION_KEY=KEY
     )
     response = client.post(
         "/venue-closures",
         json=DATA | {"venueId": VENUE_ID} | extra,
-        headers={"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"},
+        headers=bearer(USER_ID, "Venue Staff"),
     )
     assert response.status_code == 400
     cursor.execute.assert_not_called()
@@ -131,9 +132,9 @@ def test_preview_failure_and_stale_confirmation_write_nothing(setup):
 
     client, cursor = setup
     client.application.config.update(
-        VENUE_CLOSURE_DEV_MODE=True, CLOSURE_CONFIRMATION_KEY=KEY
+        CLOSURE_CONFIRMATION_KEY=KEY
     )
-    headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"}
+    headers = bearer(USER_ID, "Venue Staff")
     assert (
         client.post("/venue-closures/preview", json={}, headers=headers).status_code
         == 400

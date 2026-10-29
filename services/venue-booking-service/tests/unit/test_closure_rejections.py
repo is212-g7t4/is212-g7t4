@@ -13,6 +13,7 @@ SCRUM-171 composite preserves immutable-state errors."""
 import pytest
 import httpx
 from app import create_app
+from tests.unit.factories import signed_in, bearer
 
 STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
 
@@ -48,11 +49,11 @@ def test_immutable_atomic_response_remains_state_error(monkeypatch, action):
             {"id": "venue", "status": "Available", "capacity": 100, "name": "Hall"}
         ],
     )
-    client = create_app().test_client()
+    client = signed_in(create_app().test_client())
     suffix = "" if action == "update" else "/" + action
     result = client.patch(
         "/booking-requests/booking" + suffix,
-        headers={"X-Dev-User-Id": STAFF_ID, "X-Dev-Role": "Venue Staff"},
+        headers=bearer(STAFF_ID, "Venue Staff"),
         json=dict(
             eventId="event",
             venueId="venue",

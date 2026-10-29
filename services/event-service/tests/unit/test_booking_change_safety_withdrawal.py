@@ -24,6 +24,7 @@ from app.models import (
     SAFETY_TRANSITIONS,
     VENUE_CHANGE_ONLY_MOVES,
 )
+from tests.unit.factories import signed_in
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
 COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
@@ -58,7 +59,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url", "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN})
-    return app.test_client(), cursor
+    return signed_in(app.test_client()), cursor
 
 
 def event_row(status, action_history, coordinator_id=COORDINATOR_ID):
@@ -219,7 +220,6 @@ def test_approved_without_the_withdrawal_marker_is_still_refused(setup):
         ({"reason": "  "}, "reason is required."),
         ({"reason": None}, "reason is required."),
         ({"reason": "x" * 2001}, "reason must be 2000 characters or fewer."),
-        ({"coordinatorId": "nope"}, "A valid coordinator ID is required."),
         ({"restoredSafetyCheckId": ROUND_ID}, "Send withdrawnSafetyCheckId or restoredSafetyCheckId, not both."),
         ({"status": "Pending Safety Check"}, "withdrawnSafetyCheckId is only valid with status 'Approved'."),
     ],

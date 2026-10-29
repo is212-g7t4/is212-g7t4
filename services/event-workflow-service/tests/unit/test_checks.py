@@ -6,7 +6,6 @@ import pytest
 from app import checks, clients
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
-COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
 HALL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 MIC = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
@@ -49,15 +48,15 @@ def world(monkeypatch):
     }
     monkeypatch.setattr(clients, "get_event_venue_bookings", lambda event_id: data["bookings"])
     monkeypatch.setattr(clients, "list_venues", lambda: data["venues"])
-    monkeypatch.setattr(clients, "list_event_equipment_requests", lambda event_id, viewer: data["own"])
+    monkeypatch.setattr(clients, "list_event_equipment_requests", lambda event_id: data["own"])
     monkeypatch.setattr(clients, "list_overlapping_events", lambda *args: data["others"])
-    monkeypatch.setattr(clients, "list_approved_equipment_requests", lambda ids, viewer: data["approved"])
+    monkeypatch.setattr(clients, "list_approved_equipment_requests", lambda ids: data["approved"])
     monkeypatch.setattr(clients, "list_equipment", lambda: data["equipment"])
     return data
 
 
 def conflicts(changes, high):
-    return checks.find_conflicts(EVENT, changes, high, COORDINATOR_ID)
+    return checks.find_conflicts(EVENT, changes, high)
 
 
 def test_clarification_keeps_approved_equipment_allocations_reserved():
@@ -234,7 +233,6 @@ def test_dates_missing_on_a_legacy_event_are_skipped(world, monkeypatch):
         {**EVENT, "preferredStartDate": "", "preferredEndDate": ""},
         {"preferredEndDate": ""},
         ["preferredEndDate"],
-        COORDINATOR_ID,
     ) == []
 
 

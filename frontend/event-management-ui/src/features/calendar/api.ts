@@ -1,4 +1,5 @@
 import { timestampMicros } from './dates'
+import { authFetch } from '../auth/session'
 
 export interface CalendarBooking {
   id: string
@@ -24,11 +25,10 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const validId = (id: unknown): id is string => typeof id === 'string' && uuid.test(id)
 interface ClosureResponse { closureId: string; venueId: string; startDateTime: string; endDateTime: string; reason: string }
 
-/** Venue/date window + DEV identity → complete validated read-only entries. */
+/** Venue/date window → complete validated read-only entries for the signed-in user. */
 export async function fetchCalendar(
   venueId: string,
   window: { start: string; end: string },
-  user: { id: string; role: string },
   signal?: AbortSignal,
   buffer: { setupTimeMinutes?: number; turnaroundTimeMinutes?: number } = {},
 ): Promise<CalendarEntry[]> {
@@ -39,10 +39,10 @@ export async function fetchCalendar(
     setupTimeMinutes: String(buffer.setupTimeMinutes ?? 0),
     turnaroundTimeMinutes: String(buffer.turnaroundTimeMinutes ?? 0),
   })
-  const response = await fetch(`${import.meta.env.VITE_VENUE_AVAILABILITY_SERVICE_URL || 'http://localhost:5008'}/venue-bookings?${query}`, {
-    signal, headers: { 'X-Dev-User-Id': user.id, 'X-Dev-Role': user.role },
+  const response = await authFetch(`${import.meta.env.VITE_VENUE_AVAILABILITY_SERVICE_URL || 'http://localhost:5008'}/venue-bookings?${query}`, {
+    signal,
   })
-  if (!response.ok) throw new Error(`Availability unavailable (HTTP ${response.status}). Check DEV mode and selected user.`)
+  if (!response.ok) throw new Error(`Availability unavailable (HTTP ${response.status}).`)
   const body: unknown = await response.json().catch(() => null)
   if (!body || typeof body !== 'object' || !('bookings' in body) || !Array.isArray(body.bookings) ||
       !body.bookings.every(item => validBooking(item, venueId)) || !('closures' in body) ||

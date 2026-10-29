@@ -161,10 +161,30 @@ export function mockSafetyQueue(page: Page, events: () => Record<string, unknown
   }))
 }
 
-export const asUser = (page: Page, userId: string) =>
-  page.addInitScript((id) => localStorage.setItem('activeUserId', id), userId)
+// SCRUM-8: a stored sign-in session for one of the mocked users (the API mocks ignore the token).
+export const asUser = (page: Page, userId: string) => {
+  const user = Object.values(users).find((u) => u.user_id === userId)!
+  const session = { accessToken: `e2e-${userId}`, expiresAt: 4102444800, user: {
+    id: user.user_id, username: user.username, email: user.email, role: user.role, organization: user.organization,
+  } }
+  // Seed once per tab, so a later sign-out or switchUser survives navigation.
+  return page.addInitScript((value) => {
+    if (sessionStorage.getItem('e2e-seeded')) return
+    sessionStorage.setItem('e2e-seeded', '1')
+    localStorage.setItem('session', value)
+  }, JSON.stringify(session))
+}
 
 // SCRUM-167: Venue Staff save a venue's safety information on Venue Service.
 export function mockVenueSafetyInfo(page: Page, venueId: string, handler: (route: Route) => unknown) {
   return mock(page, 'venue', `/venues/${venueId}/safety-info`, handler)
+}
+
+// SCRUM-8: sign out, then sign in as another mocked user through the login form.
+export async function switchUser(page: Page, user: (typeof users)[keyof typeof users]) {
+  await mock(page, 'user', '/auth/login', (route) => json(route, { accessToken: `e2e-${user.user_id}`, expiresAt: 4102444800, user }))
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await page.getByLabel(/Email/).fill(user.email)
+  await page.getByLabel(/Password/).fill('e2e-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
 }

@@ -1,18 +1,18 @@
-"""SCRUM-25 calendar read: AC1 ranges, AC3 blocking, AC4 dev role simulation."""
+"""SCRUM-25 calendar read: AC1 ranges, AC3 blocking, AC4 role check (signed-in role, SCRUM-8)."""
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import psycopg2
 import pytest
-from tests.unit.factories import USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import USER_ID, VENUE_ID, booking_row, bearer
 
 from app import create_app
 from app.calendar import SINGAPORE, parse_boundary
 from app.models import CalendarDataError, validate_calendar_row
 
 QUERY = dict(venueId=VENUE_ID, dateFrom="2026-10-01T00:00", dateTo="2026-10-02T00:00")
-HEADERS = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
+HEADERS = bearer(USER_ID, "Event Coordinator")
 
 
 @pytest.fixture
@@ -22,30 +22,19 @@ def calendar(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchall.return_value = []
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *a, **k: connection)
-    app = create_app(dict(TESTING=True, DATABASE_URL="test", CALENDAR_DEV_MODE=True))
+    app = create_app(dict(TESTING=True, DATABASE_URL="test"))
     return app, app.test_client(), cursor
-
-
-def test_ac4_disabled_by_default(monkeypatch):
-    monkeypatch.setattr("app.list_bookings", lambda *a: [])
-    monkeypatch.delenv("CALENDAR_DEV_MODE", raising=False)
-    client = create_app(dict(TESTING=True, DATABASE_URL="test")).test_client()
-    assert (
-        client.get("/venue-bookings", query_string=QUERY, headers=HEADERS).status_code
-        == 503
-    )
 
 
 @pytest.mark.parametrize(
     "headers,code",
     [
         ({}, 401),
-        ({"X-Dev-Role": "Venue Staff"}, 401),
-        ({"X-Dev-User-Id": "bad", "X-Dev-Role": "Venue Staff"}, 401),
-        ({"X-Dev-User-Id": USER_ID}, 401),
-        ({**HEADERS, "X-Dev-Role": "Attendee"}, 403),
-        ({**HEADERS, "X-Dev-Role": "Event Organiser"}, 403),
-        ({**HEADERS, "X-Dev-Role": "Administrator"}, 403),
+        ({"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Venue Staff"}, 401),
+        ({"Authorization": "Bearer not-a-jwt"}, 401),
+        (bearer(USER_ID, "Attendee"), 403),
+        (bearer(USER_ID, "Event Organiser"), 403),
+        (bearer(USER_ID, "Administrator"), 403),
     ],
 )
 def test_ac4_reject_identity(calendar, headers, code):
@@ -73,7 +62,7 @@ def test_ac4_internal_roles(calendar, role):
         client.get(
             "/venue-bookings",
             query_string=QUERY,
-            headers={**HEADERS, "X-Dev-Role": role},
+            headers=bearer(USER_ID, role),
         ).status_code
         == 200
     )
@@ -239,14 +228,13 @@ def test_ac4_cors_preflight(calendar):
         headers={
             "Origin": "http://localhost:5174",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "X-Dev-User-Id,X-Dev-Role",
+            "Access-Control-Request-Headers": "Authorization",
         },
     )
     assert response.status_code == 200
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
     assert "GET" in response.headers["Access-Control-Allow-Methods"]
-    for header in ["X-Dev-User-Id", "X-Dev-Role"]:
-        assert header in response.headers["Access-Control-Allow-Headers"]
+    assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
     cursor.execute.assert_not_called()
 
 
@@ -310,10 +298,15 @@ def test_cors_untrusted_origin(calendar, origin):
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
-def test_cors_health_no_custom_headers(calendar):
+def test_cors_preflight_allows_the_token_on_every_browser_read(calendar):
+    """SCRUM-8: a bearer token makes every browser GET preflighted, not only the calendar's."""
     _, client, _ = calendar
-    response = client.get("/health", headers={"Origin": "http://localhost:5174"})
-    assert "Access-Control-Allow-Methods" not in response.headers
+    response = client.options(
+        f"/events/{VENUE_ID}/venue-bookings",
+        headers={"Origin": "http://localhost:5174", "Access-Control-Request-Headers": "Authorization"},
+    )
+    assert response.status_code == 200
+    assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
 
 
 def test_database_unconfigured(calendar):
@@ -335,20 +328,6 @@ def test_database_failure_no_details(calendar):
 
 
 @pytest.mark.parametrize(
-    "value,code", [("true", 200), ("false", 503), ("1", 503), ("TRUE", 503), ("", 503)]
-)
-def test_dev_mode_exact_environment_opt_in(monkeypatch, calendar, value, code):
-    monkeypatch.setenv("CALENDAR_DEV_MODE", value)
-    app = create_app(dict(TESTING=True, DATABASE_URL="test"))
-    assert (
-        app.test_client()
-        .get("/venue-bookings", query_string=QUERY, headers=HEADERS)
-        .status_code
-        == code
-    )
-
-
-@pytest.mark.parametrize(
     "role", ["event coordinator", " Venue Staff", "Venue Staff,Attendee"]
 )
 def test_roles_are_exact_not_substring_matches(calendar, role):
@@ -357,7 +336,7 @@ def test_roles_are_exact_not_substring_matches(calendar, role):
         client.get(
             "/venue-bookings",
             query_string=QUERY,
-            headers=HEADERS | {"X-Dev-Role": role},
+            headers=bearer(USER_ID, role),
         ).status_code
         == 403
     )

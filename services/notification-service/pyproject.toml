@@ -3,7 +3,12 @@ name = "notification-service"
 version = "0.1.0"
 description = "Persistent in-app notifications"
 requires-python = ">=3.12"
-dependencies = ["flask>=3.1.3", "psycopg2-binary>=2.9", "pika>=1.3.2"]
+dependencies = [
+    "flask>=3.1.3",
+    "psycopg2-binary>=2.9",
+    "pika>=1.3.2",
+    "pyjwt[crypto]>=2.10",
+]
 
 [dependency-groups]
 dev = [

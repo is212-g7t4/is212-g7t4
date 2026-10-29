@@ -4,10 +4,12 @@ from flask import Flask, request
 
 from app import clients
 from app.routes import bp
+from app.auth import authenticate
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.before_request(authenticate)
     app.config["FRONTEND_ORIGIN"] = os.getenv(
         # The Vite dev server is pinned to 5174 (strictPort in vite.config.ts),
         # so that is the origin the browser sends.
@@ -34,7 +36,7 @@ def create_app() -> Flask:
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
             response.headers["Access-Control-Allow-Methods"] = "GET, PATCH, OPTIONS"
         if request.method == "OPTIONS":
             response.status_code = 200

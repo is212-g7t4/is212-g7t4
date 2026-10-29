@@ -11,6 +11,7 @@ import pytest
 from app import create_app
 from app.models import SINGAPORE
 from app.models import FIELDS
+from tests.unit.factories import signed_in
 
 VALID = {
     "eventName": "Community Workshop", "description": "A workshop", "purpose": "Learning",
@@ -27,7 +28,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return app.test_client(), connection, cursor
+    return signed_in(app.test_client()), connection, cursor
 
 
 def saved_row(**overrides):
@@ -147,11 +148,13 @@ def test_ac3_no_filters_still_requires_and_scopes_by_coordinator(setup):
     assert params == [COORDINATOR_ID]
 
 
-@pytest.mark.parametrize("query_string", ["", "?coordinatorId=", "?coordinatorId=not-a-uuid"])
-def test_ac3_requires_valid_coordinator_id(query_string, setup):
-    client, _, cursor = setup
+@pytest.mark.parametrize("query_string", ["", f"?coordinatorId={COORDINATOR_ID}", "?organiserId=33333333-3333-4333-8333-333333333333"])
+def test_ac3_requires_a_signed_in_user(query_string, setup):
+    """SCRUM-8: whose events are listed comes from the token; a query id alone grants nothing."""
+    _, _, cursor = setup
+    client = setup[0].application.test_client()
     response = client.get(f"/events{query_string}")
-    assert response.status_code == 400
+    assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 
@@ -229,7 +232,7 @@ def test_unrecognised_role_cannot_request_all_internal_events(setup):
 
 
 def test_ac2_missing_database_configuration():
-    client = create_app({"TESTING": True, "DATABASE_URL": None}).test_client()
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     response = client.get(f"/events?coordinatorId={COORDINATOR_ID}")
     assert response.status_code == 503
 
@@ -257,13 +260,6 @@ def test_organiser_lists_only_their_own_events_in_all_statuses(setup):
     assert "organiser_id = %s" in where
     assert where.replace("status IS DISTINCT FROM 'Draft'", "").count("status") == 0
     assert params == [ORGANISER_ID]
-
-
-def test_organiser_list_rejects_invalid_id(setup):
-    client, _, cursor = setup
-    response = client.get("/events?organiserId=nope")
-    assert response.status_code == 400
-    cursor.execute.assert_not_called()
 
 
 def test_organiser_list_reports_missing_database_url(setup):

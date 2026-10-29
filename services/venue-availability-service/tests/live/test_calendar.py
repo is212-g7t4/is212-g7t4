@@ -8,6 +8,7 @@ import psycopg2
 import pytest
 
 from app import create_app
+from tests.unit.factories import bearer
 
 # Needs a real database, so it is deselected by default and must re-enable the
 # sockets that the unit-test run blocks. Run it with:
@@ -54,9 +55,7 @@ def test_live_calendar_read_only(monkeypatch):
             "dateTo": (start + timedelta(days=42)).isoformat(),
         }
         monkeypatch.setattr("app.models.psycopg2.connect", readonly_connect)
-        app = create_app(
-            {"TESTING": True, "DATABASE_URL": url, "CALENDAR_DEV_MODE": True}
-        )
+        app = create_app({"TESTING": True, "DATABASE_URL": url})
         client = app.test_client()
         outcomes = {}
         for role in (
@@ -70,10 +69,7 @@ def test_live_calendar_read_only(monkeypatch):
             response = client.get(
                 "/venue-bookings",
                 query_string=query,
-                headers={
-                    "X-Dev-User-Id": "00000000-0000-0000-0000-000000000001",
-                    "X-Dev-Role": role,
-                },
+                headers=bearer("00000000-0000-0000-0000-000000000001", role),
             )
             expected = 403 if role in ("Event Organiser", "Attendee") else 200
             assert response.status_code == expected
@@ -86,8 +82,6 @@ def test_live_calendar_read_only(monkeypatch):
             )
             outcomes[role] = {"http": response.status_code, "count": len(bookings)}
         assert client.get("/venue-bookings", query_string=query).status_code == 401
-        app.config["CALENDAR_DEV_MODE"] = False
-        assert client.get("/venue-bookings", query_string=query).status_code == 503
         print(
             {
                 "read_only": "on",
@@ -95,7 +89,6 @@ def test_live_calendar_read_only(monkeypatch):
                 "sampled_existing_booking": bool(sample),
                 "outcomes": outcomes,
                 "missing_identity": 401,
-                "disabled": 503,
             }
         )
     except Exception as error:

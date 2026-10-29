@@ -32,19 +32,19 @@ def test_ac1_register_withdraw_reregister_keep_reference_and_distinct_action_ids
     make_user(db, ORGANISER_ID, "Event Organiser")
     make_user(db, ATTENDEE_ID, "Attendee")
     event = make_event(db)
-    body = dict(eventId=event, attendeeId=ATTENDEE_ID, capacity=2)
+    body = dict(eventId=event, capacity=2)
     # Act
     first = client.post("/registrations", json=body)
     assert first.status_code == 201, first.json
     ref = first.json["registration"]["registration_id"]
     assert client.post("/registrations", json=body).status_code == 409
     withdrawn = client.patch(
-        f"/registrations/{ref}/withdraw", json=dict(attendeeId=ATTENDEE_ID)
+        f"/registrations/{ref}/withdraw", json={}
     )
     assert withdrawn.status_code == 200, withdrawn.json
     assert (
         client.patch(
-            f"/registrations/{ref}/withdraw", json=dict(attendeeId=ATTENDEE_ID)
+            f"/registrations/{ref}/withdraw", json={}
         ).status_code
         == 409
     )
@@ -93,7 +93,7 @@ def test_ac1_outbox_write_failure_rolls_back_registration_without_phantom_work(
         # Act: fail intent insertion after the business mutation has begun.
         response = client.post(
             "/registrations",
-            json=dict(eventId=event, attendeeId=ATTENDEE_ID, capacity=2),
+            json=dict(eventId=event, capacity=2),
         )
         # Assert: independent connections observe neither half of the transaction.
         assert response.status_code == 503
@@ -118,7 +118,7 @@ def test_ac1_frozen_action_survives_retry_and_rejects_stale_leases(client, db):
     make_user(db, ATTENDEE_ID, "Attendee")
     event = make_event(db)
     response = client.post(
-        "/registrations", json=dict(eventId=event, attendeeId=ATTENDEE_ID, capacity=2)
+        "/registrations", json=dict(eventId=event, capacity=2)
     )
     ref = response.json["registration"]["registration_id"]
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "synthetic"

@@ -2077,3 +2077,18 @@ td small {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Sign in (SCRUM-8) */
+
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--space-6);
+}
+
+.login-panel {
+  display: grid;
+  gap: var(--space-4);
+  width: min(380px, 100%);
+}

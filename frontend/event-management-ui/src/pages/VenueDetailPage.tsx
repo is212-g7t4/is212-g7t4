@@ -129,7 +129,7 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], users = []
       if (active) setLoading(false)
     })
     if (role === 'Venue Staff') {
-      fetchLegacyConflicts(venueId, user).then((result) => {
+      fetchLegacyConflicts(venueId).then((result) => {
         if (active) {
           setLegacyConflicts(result.conflicts)
           setConflictError('')
@@ -154,7 +154,6 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], users = []
       setHold(await placeVenueHold(
         venueId,
         holdExpiry,
-        user,
         holdCoordinator || undefined,
         venue ?? {},
       ))
@@ -236,7 +235,7 @@ function VenueDetailContent({ venueId, role, user, coordinators = [], users = []
         </div>
         {holdError && <p className="field-error" role="alert">{holdError}</p>}
       </form>}
-      {role === 'Venue Staff' && user?.role === 'Venue Staff' && venue.id === venueId && <VenueClosuresPanel key={`${venueId}:${user.id}`} venueId={venueId} venueName={venue.name} user={user} />}
+      {role === 'Venue Staff' && user?.role === 'Venue Staff' && venue.id === venueId && <VenueClosuresPanel key={`${venueId}:${user.id}`} venueId={venueId} venueName={venue.name} />}
     </article>}
   </div>
 }

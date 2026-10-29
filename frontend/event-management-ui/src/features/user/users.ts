@@ -1,6 +1,7 @@
 import type { Role, User } from '../../types'
+import { authFetch } from '../auth/session'
 
-interface ApiUser {
+export interface ApiUser {
   user_id: string
   username: string
   email: string
@@ -9,7 +10,7 @@ interface ApiUser {
   contact_details: string
 }
 
-function toUser(apiUser: ApiUser): User {
+export function toUser(apiUser: ApiUser): User {
   return {
     id: apiUser.user_id,
     username: apiUser.username,
@@ -21,14 +22,14 @@ function toUser(apiUser: ApiUser): User {
 }
 
 export async function fetchUser(id: string): Promise<User> {
-  const response = await fetch(`${import.meta.env.VITE_USER_SERVICE_URL || 'http://localhost:5001'}/users/${encodeURIComponent(id)}`)
+  const response = await authFetch(`${import.meta.env.VITE_USER_SERVICE_URL || 'http://localhost:5001'}/users/${encodeURIComponent(id)}`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load event organiser contact details.')
   return toUser(body as ApiUser)
 }
 
 export async function fetchUsers(): Promise<User[]> {
-  const response = await fetch(`${import.meta.env.VITE_USER_SERVICE_URL || 'http://localhost:5001'}/users`)
+  const response = await authFetch(`${import.meta.env.VITE_USER_SERVICE_URL || 'http://localhost:5001'}/users`)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.message || 'Unable to load users.')
   return (body.users as ApiUser[]).map(toUser)

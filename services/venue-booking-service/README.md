@@ -93,6 +93,11 @@ verification gates.
 
 ## Endpoints
 
+Every endpoint except `/health` needs `Authorization: Bearer <token>`
+(SCRUM-8); `401` without it. The caller (coordinator or Venue Staff reviewer)
+is taken from the token, and the header is forwarded to every downstream
+service.
+
 - `GET /venue-search` — SCRUM-26 Venue Search and Filtering. Finds the venues
   that fit an event's requirements **and** are free at the requested time.
   Read-only: nothing is booked.
@@ -101,8 +106,7 @@ verification gates.
   Service and bookings in Venue Availability Service — so the merge happens
   here. The bookings come from that service's `GET /venue-bookings/window`
   (all venues, one call); its `GET /venue-bookings` is the single-venue
-  calendar read SCRUM-25 added, behind a DEV-mode identity simulation a
-  composite should not impersonate. The initial catalogue and availability
+  calendar read SCRUM-25 added. The initial catalogue and availability
   calls run in parallel (`ThreadPoolExecutor`, 2.5 s timeout each). When a
   matching venue has non-zero buffers, one widened availability read includes
   records just outside the advertised event window; the composite then applies
@@ -150,12 +154,12 @@ verification gates.
   ```
 
 - `POST /booking-requests` — submits one independently evaluated venue booking
-  request. Body must include `eventId`, `venueId`, `coordinatorId`,
+  request. Body must include `eventId`, `venueId`,
   `requestedStartTime`, `requestedEndTime`, `requiredCapacity`, and
   `venueRequirements`. More than one request may share an `eventId`.
   - `404` if the event doesn't exist, or if `venueId` isn't in Venue
     Service's catalogue.
-  - `403` if the event isn't assigned to `coordinatorId`.
+  - `403` if the event isn't assigned to the caller.
   - `409` with `code: "EVENT_NOT_ACCEPTING_VENUE_REQUESTS"` and `eventStatus`
     if the event isn't `Submitted`, `Under Review`, `Approved` or
     `Safety Changes Requested` (SCRUM-28). Checked before the venue
@@ -172,7 +176,7 @@ verification gates.
 - `GET /venues/<venueId>/legacy-conflicts` — returns the current conflict
   pairs with original and effective occupancy times. It reconciles on read so
   later booking edits or cancellations cannot leave stale buffer markers.
-- `GET /events/<eventId>/booking-requests?coordinatorId=<id>` — lists every
+- `GET /events/<eventId>/booking-requests` — lists every
   venue booking for the assigned coordinator's event as a separate item,
   enriched with the venue name.
 - `PATCH /booking-requests/<id>` — modifies only the selected booking. The
@@ -180,7 +184,7 @@ verification gates.
   operational status, booking-specific capacity, and conflicts are checked
   again. Success resets that booking to `Pending Review` and clears its prior
   reviewer; cancelled bookings cannot be modified.
-- `PATCH /booking-requests/<id>/cancel` — body `{eventId, coordinatorId}`;
+- `PATCH /booking-requests/<id>/cancel` — body `{eventId}`;
   retains only the selected booking with `status: "Cancelled"`. The operation
   is idempotent and does not alter sibling bookings for the event.
 - **Edit and cancel are gated (SCRUM-28 Part B).** Both answer `409` with
@@ -198,7 +202,7 @@ verification gates.
   `SAFETY_CHECK_SERVICE_URL` (default `http://localhost:5012`).
 - `PATCH /booking-requests/<id>/approve` / `PATCH /booking-requests/<id>/reject`
   — legacy decision URLs, kept as thin wrappers around `/review` below
-  (SCRUM-29): same Venue Staff headers, `reviewedBy`, reason, event-status and
+  (SCRUM-29): same Venue Staff role, reason, event-status and
   awaiting-review checks, with the decision taken from the URL.
 
 ## Venue Staff Request Review
@@ -208,8 +212,8 @@ filtering and latest-round safety feedback. Each awaiting request has a
 **Review** button opening a dialog with the request's details and
 Approve/Reject (a reason is required to reject); decided rows show "Approved
 on …" / "Rejected on …" and open the same dialog read-only (SCRUM-29).
-`GET /booking-requests[?status=Pending|Approved|Rejected]` requires DEV Venue
-Staff identity headers. Pending includes both `Pending` and `Pending Review`.
+`GET /booking-requests[?status=Pending|Approved|Rejected]` requires a
+signed-in Venue Staff caller. Pending includes both `Pending` and `Pending Review`.
 Each event group also carries `eventStart`/`eventEnd` (the event's preferred
 dates, `null` when unset) and `awaitingReviewCount`; each booking carries
 `requestedAt` (`null` for legacy rows) and `awaitingReview`. Within an event,
@@ -217,7 +221,7 @@ awaiting bookings come first, oldest submission first (SCRUM-28).
 The composite reads events, bookings and venue names from their owning APIs;
 `SAFETY_CHECK_RECORD_SERVICE_URL` supplies safety flags for revision events.
 
-`GET /booking-requests/<id>` (SCRUM-29 AC1) requires the same headers and
+`GET /booking-requests/<id>` (SCRUM-29 AC1) requires the same caller and
 opens one request: `booking` (the Venue Availability record plus `venueName`,
 `awaitingReview` and the buffered `occupiedFrom`/`occupiedTo` window), `event`
 (`id`, `eventName`, `status`, `coordinatorId`, `preferredStartDate`,
@@ -227,13 +231,13 @@ opens one request: `booking` (the Venue Availability record plus `venueName`,
 `canDecide` and `decisionBlockedReason`. `401`/`403` for identity/role, `404`
 for an unknown booking, `502` on a downstream failure, `504` on a timeout.
 
-`PATCH /booking-requests/<id>/review` requires the same headers and body
-`{status: "Approved" | "Rejected", reviewedBy: "<active staff UUID>",
-rejectionReason?}`. Existing conflict checks still run on approval. Results:
+`PATCH /booking-requests/<id>/review` requires the same caller and body
+`{status: "Approved" | "Rejected", rejectionReason?}`; the reviewer is the
+signed-in caller. Existing conflict checks still run on approval. Results:
 
 - `200` with the decided booking, including `reviewedBy`, `reviewedAt` and
   `rejectionReason` (SCRUM-29).
-- `400` for a bad status or a `reviewedBy` that isn't the caller;
+- `400` for a bad status;
   `400 REJECTION_REASON_REQUIRED` for a reject whose reason is missing, blank
   or over 500 characters (checked before any downstream call).
 - `404` if the booking doesn't exist.

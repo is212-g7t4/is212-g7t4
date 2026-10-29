@@ -82,10 +82,10 @@ test.each(['Select all', 'Deselect all'])('bulk %s aborts stale grid and inspect
     .mockImplementationOnce(() => new Promise(r => {finishGrid = r}))
     .mockImplementationOnce(() => new Promise(r => {finishInspection = r}))
   fireEvent.click(screen.getByRole('button', {name: 'Refresh'}))
-  const gridSignal = vi.mocked(fetchCalendar).mock.calls[0][3]!
+  const gridSignal = vi.mocked(fetchCalendar).mock.calls[0][2]!
   range('2027-01-01T09:00', '2027-04-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
-  const inspectionSignal = vi.mocked(fetchCalendar).mock.calls[1][3]!
+  const inspectionSignal = vi.mocked(fetchCalendar).mock.calls[1][2]!
   fireEvent.click(screen.getByRole('button', {name: action}))
   expect(gridSignal.aborted).toBe(true)
   expect(inspectionSignal.aborted).toBe(true)
@@ -168,7 +168,7 @@ test('obsolete multi-venue chains abort transport and never start later venues o
   vi.mocked(fetchCalendar).mockClear().mockImplementationOnce(() => new Promise(r => {finish = r}))
   range('2027-01-01T09:00', '2027-04-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
-  const signal = vi.mocked(fetchCalendar).mock.calls[0][3]
+  const signal = vi.mocked(fetchCalendar).mock.calls[0][2]
   expect(signal).toBeInstanceOf(AbortSignal)
   range('2027-01-02T09:00', '2027-01-02T10:00')
   expect(signal!.aborted).toBe(true)
@@ -255,7 +255,7 @@ test.each(['success', 'failure'])('combined snapshot ignores stale %s after sele
   let reject!: (error: Error) => void
   vi.mocked(fetchCalendar).mockImplementationOnce(() => new Promise((r,j) => {resolve=r;reject=j}))
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
-  const signal=vi.mocked(fetchCalendar).mock.calls[1][3]!
+  const signal=vi.mocked(fetchCalendar).mock.calls[1][2]!
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
   await screen.findByText('No bookings or closures in this window.')
@@ -275,7 +275,7 @@ test.each(['success', 'failure'])('selected-set edit aborts multi-venue inspecti
   vi.mocked(fetchCalendar).mockClear().mockImplementationOnce(() => new Promise((r,j) => {resolve=r;reject=j}))
   range('2027-01-01T09:00','2027-03-01T00:00')
   fireEvent.click(screen.getByRole('button', {name:'Inspect range'}))
-  const signal=vi.mocked(fetchCalendar).mock.calls[0][3]!
+  const signal=vi.mocked(fetchCalendar).mock.calls[0][2]!
   fireEvent.click(screen.getByRole('checkbox', {name:'Room'}))
   await screen.findByText('No bookings or closures in this window.')
   expect(signal.aborted).toBe(true)
@@ -329,7 +329,7 @@ test.each(['success', 'failure'])('identity switch ignores old identity late %s'
   const nextUser = { ...user, id: venues[1].id }
   page.rerender(<VenueCalendarPage user={nextUser} initialDate="2026-10-01" />)
   await waitFor(() => expect(fetchCalendar).toHaveBeenCalledTimes(2))
-  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, { start: '2026-09-28', end: '2026-11-09' }, nextUser, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, { start: '2026-09-28', end: '2026-11-09' }, expect.any(AbortSignal))
   await act(async () => { if (outcome === 'success') resolveOld([approved]); else rejectOld(new Error('old identity')) })
   openInspector()
   expect(screen.getByLabelText('Start (SGT)')).toBeEnabled()
@@ -373,7 +373,7 @@ test('default month loads real catalogue choices including non-requestable venue
   expect(fetchCalendar).toHaveBeenCalledWith(
     user.id,
     { start: '2026-09-28', end: '2026-11-09' },
-    user, expect.any(AbortSignal),
+    expect.any(AbortSignal),
   )
 })
 test.each(['Event Organiser', 'Attendee'] as Role[])(
@@ -393,7 +393,7 @@ test('view/navigation preserve anchor, month dates open day, venue and refresh r
     expect(fetchCalendar).toHaveBeenLastCalledWith(
       user.id,
       { start: '2026-09-28', end: '2026-11-09' },
-      user, expect.any(AbortSignal),
+      expect.any(AbortSignal),
     ),
   )
   fireEvent.click(screen.getByRole('button', { name: 'Day' }))
@@ -401,7 +401,7 @@ test('view/navigation preserve anchor, month dates open day, venue and refresh r
     expect(fetchCalendar).toHaveBeenLastCalledWith(
       user.id,
       { start: '2026-10-01', end: '2026-10-02' },
-      user, expect.any(AbortSignal),
+      expect.any(AbortSignal),
     ),
   )
   fireEvent.click(screen.getByRole('button', { name: 'Next' }))
@@ -409,7 +409,7 @@ test('view/navigation preserve anchor, month dates open day, venue and refresh r
     expect(fetchCalendar).toHaveBeenLastCalledWith(
       user.id,
       { start: '2026-10-02', end: '2026-10-03' },
-      user, expect.any(AbortSignal),
+      expect.any(AbortSignal),
     ),
   )
   fireEvent.click(screen.getByRole('button', { name: 'Previous' }))
@@ -421,7 +421,7 @@ test('view/navigation preserve anchor, month dates open day, venue and refresh r
     expect(fetchCalendar).toHaveBeenLastCalledWith(
       user.id,
       { start: '2026-10-15', end: '2026-10-16' },
-      user, expect.any(AbortSignal),
+      expect.any(AbortSignal),
     ),
   )
   selectOnly(1)
@@ -429,7 +429,7 @@ test('view/navigation preserve anchor, month dates open day, venue and refresh r
     expect(fetchCalendar).toHaveBeenLastCalledWith(
       venues[1].id,
       { start: '2026-10-15', end: '2026-10-16' },
-      user, expect.any(AbortSignal),
+      expect.any(AbortSignal),
     ),
   )
   const calls = vi.mocked(fetchCalendar).mock.calls.length
@@ -578,7 +578,7 @@ test('inspection fetches outside the grid independently without navigating or us
   range('2027-01-01T09:30', '2027-01-01T10:30')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(await screen.findByRole('status')).toHaveTextContent('1 unavailable')
-  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2027-01-01', end: '2027-01-02'}, user, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2027-01-01', end: '2027-01-02'}, expect.any(AbortSignal))
   expect(screen.getByLabelText('Anchor date')).toHaveValue('2026-10-01')
   expect(screen.queryByRole('button', {name: /^Open /})).not.toBeInTheDocument()
 })
@@ -610,13 +610,13 @@ test('long inspection uses sequential 42-day chunks and deduplicates spanning re
   range('2027-01-01T09:00', '2027-04-01T10:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(fetchCalendar).toHaveBeenCalledTimes(2)
-  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2027-01-01', end: '2027-02-12'}, user, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2027-01-01', end: '2027-02-12'}, expect.any(AbortSignal))
   expect(screen.getByText('Loading inspection…')).toBeInTheDocument()
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
   await act(async () => finish([spanning]))
   expect(await screen.findByRole('status')).toHaveTextContent('1 unavailable')
-  expect(fetchCalendar).toHaveBeenNthCalledWith(3, user.id, {start: '2027-02-12', end: '2027-03-26'}, user, expect.any(AbortSignal))
-  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2027-03-26', end: '2027-04-02'}, user, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenNthCalledWith(3, user.id, {start: '2027-02-12', end: '2027-03-26'}, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2027-03-26', end: '2027-04-02'}, expect.any(AbortSignal))
 })
 
 test.each(['conflict', 'failure'])('later chunk %s fails the whole inspection without partial results', async kind => {
@@ -687,7 +687,7 @@ test('midnight end excludes next day and ignores records outside precise range',
   range('2026-10-01T10:00:01', '2026-10-02T00:00:00')
   fireEvent.click(screen.getByRole('button', {name: 'Inspect range'}))
   expect(await screen.findByRole('status')).toHaveTextContent('0 unavailable')
-  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2026-10-01', end: '2026-10-02'}, user, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenLastCalledWith(user.id, {start: '2026-10-01', end: '2026-10-02'}, expect.any(AbortSignal))
   fireEvent.click(screen.getByRole('button', {name: 'Refresh'}))
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
 })
@@ -834,7 +834,7 @@ test('inspection replaces browsing with only selected dates in week format', asy
   expect(result).toHaveTextContent('2027-02-10 09:00')
   expect(result.querySelector('.calendar-result-week')).toHaveStyle({gridTemplateColumns: 'repeat(2, minmax(140px, 1fr))'})
   expect(screen.getByRole('button', {name: 'Month'})).toHaveAttribute('aria-pressed', 'false')
-  expect(fetchCalendar).toHaveBeenLastCalledWith(venues[0].id, {start: '2027-02-10', end: '2027-02-12'}, user, expect.any(AbortSignal))
+  expect(fetchCalendar).toHaveBeenLastCalledWith(venues[0].id, {start: '2027-02-10', end: '2027-02-12'}, expect.any(AbortSignal))
   fireEvent.click(screen.getByRole('button', {name: 'Back to calendar'}))
   expect(screen.getAllByRole('button', {name: /^Open /})).toHaveLength(42)
   expect(screen.getByRole('button', {name: 'Month'})).toHaveAttribute('aria-pressed', 'true')
