@@ -60,7 +60,10 @@ Because the status lives in this table, a coordinator reading
 `POST /events/<event_id>/equipment-requests/safety-reset` accepts
 `{"requestIds": ["<uuid>"]}` (1-500 distinct IDs). It requires an
 `X-Internal-Service-Token` matching `INTERNAL_SERVICE_TOKEN`, shared with
-Safety Check Service. This is not a browser or staff decision endpoint.
+Safety Check Service, **and** the `Safety Officer` role (SCRUM-10): Safety Check
+Service forwards the signed-in Safety Officer's token, and any other role gets
+`403 {"message": "Your role cannot change this information."}`. This is not a
+browser or staff decision endpoint.
 All IDs must belong to the event; otherwise nothing is updated. In one
 transaction, the selected requests become `Pending` and `reviewed_by` is
 cleared. Requests outside the selection are unchanged. Repeating the same
@@ -69,11 +72,16 @@ reset before staff review has the same result.
 
 ### SCRUM-48 transactional notification ownership
 
-Create and individual/bulk review also require a trusted `notificationContext`
-from Equipment Reservation Service and `X-Internal-Token` matching
-`INTERNAL_SERVICE_TOKEN`. This closes the direct-write notification bypass: the
-atomic never fetches Event/User/Equipment data or calls RabbitMQ. Browser callers
-must use the composite. Context includes event identity/name, equipment names,
+Create and individual/bulk review also take a `notificationContext` built by
+Equipment Reservation Service. Create needs the `Event Coordinator` or
+`Event Coordinator Lead` role and review needs `Technical Support`, both checked on the
+forwarded user's token. These routes do **not** check an internal token (only the outbox
+routes and `safety-reset` do), and the context is validated for shape only, so this
+service does not itself prove the context came from Equipment Reservation Service; see
+the known gaps in
+[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
+The atomic never fetches Event/User/Equipment data or calls RabbitMQ. Browser callers
+should use the composite. Context includes event identity/name, equipment names,
 and submission recipient IDs or the decision-time coordinator ID. The owner
 uses its **returned changed rows** to build IDs/quantities and freezes one
 full-list submission envelope per TSS or one decision envelope per changed row.

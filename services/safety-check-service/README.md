@@ -580,3 +580,13 @@ service's own arrangements/role checks if it somehow had
 `INTERNAL_SERVICE_TOKEN`. Set `INTERNAL_SERVICE_TOKEN` (shared with
 [`event-service`](../event-service/)) in this service's environment; without
 it, every call to `/safety-status` is refused.
+
+**Roles (SCRUM-10).** Submit, resubmit, re-check, and the two venue-change routes
+(`withdraw-for-venue-change`, `restore-after-venue-change`) need the
+`Event Coordinator` or `Event Coordinator Lead` role; any other role gets
+`403 {"message": "Your role cannot change this information."}` before anything is read
+or sent downstream. Approve, request-changes and reject stay Safety Officer only
+(looked up in User Service). Downstream, Event Service checks the same roles on
+`/safety-status` and now answers `503` instead of skipping the token check when
+`INTERNAL_SERVICE_TOKEN` is not configured there. The full matrix is in
+[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).

@@ -92,12 +92,16 @@ No edit, withdrawal, reassignment or reminder notification triggers are added.
 
 Before the write, this composite resolves event name, equipment names and either
 TSS recipients (both `Technical Support` and `Technical Support Staff`) or the
-current coordinator. Equipment Request Service accepts these snapshots only with
-`X-Internal-Token` matching `INTERNAL_SERVICE_TOKEN`; direct create/review calls
-without trusted context are rejected. Existing browser callers continue using this
-composite, without sending internal tokens. Configure the same token in Event,
-Equipment Request and Equipment Reservation services. Cross-service reads remain
-outside the atomic. An unavailable context service refuses the action before saving;
+current coordinator. The Event Service read (`/internal/events/<id>/notification-context`)
+needs `X-Internal-Token` matching `INTERNAL_SERVICE_TOKEN`; if that token is not
+configured here the action is refused with `503` before anything is saved. The create and
+review calls to Equipment Request Service carry only the caller's own token (SCRUM-10):
+Equipment Request authenticates the forwarded user and checks the role, and it validates
+only the shape of the snapshot (see the known gaps in
+[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md)).
+Existing browser callers continue using this composite, without sending internal tokens.
+Configure the same token in Event, Equipment Request (its outbox routes) and Equipment
+Reservation services. Cross-service reads remain outside the atomic. An unavailable context service refuses the action before saving;
 broker/consumer outages do **not** affect successful writes.
 
 The owner builds and freezes complete envelopes in `EquipmentNotificationOutbox`

@@ -504,7 +504,7 @@ Whatever applies to the whole file also goes in the module header's
 
 ## 12. Repo-specific reference
 
-### 12.1 Per-service reference (as of 22 Oct 2026; re-check before relying on it)
+### 12.1 Per-service reference (as of 22 Oct 2026; write-role gates added 30 Oct 2026 for SCRUM-10; re-check before relying on it)
 
 All DB-backed atomics use raw `psycopg2` with a new connection per call, and
 call `load_dotenv()` at import. Composites have no database and use `httpx`.
@@ -512,20 +512,20 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 | Service | Kind | How the DB URL reaches the app | Outbound HTTP (where base URLs are set) | Identity today | RabbitMQ |
 |---|---|---|---|---|---|
 | user | atomic | `create_app(config)["DATABASE_URL"]` | none | Supabase token; `POST /auth/login` is public | none |
-| event | atomic | `create_app(config)` | none | Supabase token (`?viewerRole=` asks for a wider view, judged on the token's role); `X-Internal-Token` checked against `app.config["INTERNAL_SERVICE_TOKEN"]` | none |
-| venue | atomic | `create_app(config)` | none | Supabase token; Venue Staff role on `PUT /venues/<id>/safety-info` (SCRUM-167) | none |
-| venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | Supabase token (requester/reviewer from it); `X-Internal-Service-Token` (config); outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
+| event | atomic | `create_app(config)` | none | Supabase token (`?viewerRole=` asks for a wider view, judged on the token's role); `X-Internal-Token` (outbox, notification-context) and `X-Internal-Service-Token` (workflow-only routes) checked against `app.config["INTERNAL_SERVICE_TOKEN"]`, failing closed with `503` when unset; write roles per route (Organiser, Lead, Coordinators; Safety Officer on `/safety-status` decisions), see docs/scrum-10-role-based-modification-control.md | none |
+| venue | atomic | `create_app(config)` | none | Supabase token; Venue Staff role on `POST /venues`, `PUT /venues/<id>` and `PUT /venues/<id>/safety-info` (SCRUM-167, SCRUM-10) | none |
+| venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | Supabase token (requester/reviewer from it); write roles: Coordinators create/edit/cancel, Venue Staff approve/reject, Safety Officer plus `X-Internal-Service-Token` (config) on `safety-reset`; outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
 | equipment | atomic | `create_app(config)` | none | Supabase token | none |
-| equipment-request | atomic | `create_app(config)` | none | Supabase token | none (not tier-ready, see Transition) |
-| registration | atomic | `create_app(config)` | none | Supabase token (the attendee) | none |
-| safety-check-record | atomic | `create_app(config)` | none | Supabase token | none |
+| equipment-request | atomic | `create_app(config)` | none | Supabase token; create = Coordinators, review = Technical Support; `safety-reset` needs the Safety Officer role plus `X-Internal-Service-Token`; outbox routes use `X-Internal-Token` | none (not tier-ready, see Transition) |
+| registration | atomic | `create_app(config)` | none | Supabase token (the attendee); register and withdraw need the Attendee role (SCRUM-10) | none |
+| safety-check-record | atomic | `create_app(config)` | none | Supabase token; Coordinators open, withdraw, restore and delete rounds, Safety Officer decides and reopens (SCRUM-10); no integration tier yet | none |
 | notification | atomic | **env only**: `create_app()` takes no config | none | Supabase token (the inbox owner) | consumer (pika) |
-| attendee-registration | composite | n/a | Event, Registration, User (`app/clients.py`, frozen at import) | Supabase token, forwarded | none |
+| attendee-registration | composite | n/a | Event, Registration, User (`app/clients.py`, frozen at import) | Supabase token, forwarded; register and withdraw need the Attendee role (SCRUM-10) | none |
 | coordinator-assignment | composite | n/a | User, Event (`app/clients.py`, frozen at import) | Supabase token, forwarded; Lead role looked up via User Service | none |
 | equipment-reservation | composite | n/a | Equipment Request, Event, Equipment, Safety Check Record (`app/clients.py`, **read per call**) | Supabase token, forwarded | none (not tier-ready, see Transition) |
-| event-workflow | composite | n/a | Event, User, Venue Availability, Venue, Equipment Request, Equipment (`app/clients.py`, frozen at import, plus `INTERNAL_SERVICE_TOKEN`) | Supabase token, forwarded; role via User Service | none |
-| safety-check | composite | n/a | Event, Venue Availability, Equipment Request, Safety Check Record, User, Venue, Equipment (`app/clients.py`, frozen at import; uses a `ThreadPoolExecutor`) | Supabase token, forwarded; role via User Service | none |
-| venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | Supabase token, forwarded; Venue Staff role for review (`GET /booking-requests/<id>`, `/review`, and since SCRUM-29 the legacy `/approve` and `/reject`) | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
+| event-workflow | composite | n/a | Event, User, Venue Availability, Venue, Equipment Request, Equipment (`app/clients.py`, frozen at import, plus `INTERNAL_SERVICE_TOKEN`) | Supabase token, forwarded; role via User Service; `PATCH /events/<id>/details` also needs a coordinator role on the token (SCRUM-10) | none |
+| safety-check | composite | n/a | Event, Venue Availability, Equipment Request, Safety Check Record, User, Venue, Equipment (`app/clients.py`, frozen at import; uses a `ThreadPoolExecutor`) | Supabase token, forwarded; Safety Officer role via User Service for decisions; submit, re-check and venue-change routes need a coordinator role on the token (SCRUM-10) | none |
+| venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | Supabase token, forwarded; Venue Staff role for review (`GET /booking-requests/<id>`, `/review`, and since SCRUM-29 the legacy `/approve` and `/reject`) and for `PUT /venues/<id>`; create, edit and cancel need a coordinator role (SCRUM-10) | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
 
 ### 12.2 Known gaps
 
@@ -555,6 +555,16 @@ changing app code; report them.
   endpoints stubbed.
 - **Equipment Request and Equipment Reservation aren't tier-ready** (see
   Transition).
+- **Equipment Request's integration suite needs a pinned image.** Its
+  `tests/integration/conftest.py` sets `PG_IMAGE` to
+  `postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3`
+  and asserts it is already present locally; it never pulls it, so every test
+  errors at setup on a machine without that exact digest. It does not use
+  `postgres:17.6` like the other suites.
+- **Safety Check Record has no integration tier**, so its SCRUM-10 role gates are
+  proven by unit tests only. The new write-role gates in the composites (Venue
+  Booking, Safety Check, Attendee Registration, Event Workflow) are likewise
+  unit-tested only.
 
 ### 12.3 Doc disagreements to resolve (not by the agent)
 
