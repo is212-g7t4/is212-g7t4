@@ -23,7 +23,7 @@ below for how this should shape commits.
 
 ```
 is212-g7t4/
-├── e2e/                             # cross-service end-to-end harnesses (real services); CI `repo-e2e` job
+├── e2e/                             # real-stack journeys and retained setup/helpers
 │   └── journeys/                    # Playwright user journeys on the real stack; manual, see TRACEABILITY.md
 ├── frontend/                        # React SPA (Event Management System UI)
 ├── services/
@@ -264,8 +264,11 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
 Real-stack Playwright journeys, one per Jira "E2E Testing J<n>" task. They are
 manual and opt-in, never in CI: start the stack (`npm run dev`), then
 `npm run test:journeys` from the repo root. They are a different tier from the
-mocked suite in `frontend/event-management-ui/e2e/` and from the Python
-harnesses in the repo-root `e2e/*.py`; don't merge or delete either.
+mocked suite in `frontend/event-management-ui/e2e/`; preserve both maintained
+suites. The five legacy SCRUM-46/171/173 root Python harnesses were explicitly
+archived and retired; preserve `e2e/conftest.py`, `e2e/factories.py`,
+`e2e/signing.py`, journeys and shared helpers. Replacement journey coverage is
+still incomplete; do not claim it replaces all retired checks.
 
 When adding a journey, use one `J<n>/` folder per Jira journey. Put alternate
 paths in child folders or files within that journey folder, following the J5
@@ -302,8 +305,9 @@ A single workflow, `.github/workflows/ci.yml`, runs on every pull request, on
 pushes to `main`, nightly at 02:00 Singapore time, and on demand via the
 **Run workflow** button. No secrets are needed.
 
-**Every run runs every test.** Backend unit and integration tests, the repo
-e2e harnesses, the frontend suite and the e2e suite are not path-filtered: a change in one service can break another
+**Every run runs every maintained CI test.** Backend unit and integration tests,
+the frontend suite and the mocked Playwright e2e suite are not path-filtered:
+a change in one service can break another
 through a shared contract, so nothing is skipped on the grounds that a PR
 "didn't touch it". A skipped job that reports green is worse than a slow one.
 Only `docker-build` still consults the `changes` job.
@@ -313,7 +317,6 @@ Only `docker-build` still consults the `changes` job.
 | `discover-services` | Lists `services/*/pyproject.toml` (unit/audit matrix) and `services/*/tests/integration/` (integration matrix); fails if either list is empty |
 | `unit-tests` (matrix, one per service) | `uv sync --locked`, then `uv run pytest` — flags come from `pyproject.toml`. Enforces the coverage floor, writes `junit.xml` + `coverage.xml` as artifacts, and adds a coverage table to the run summary |
 | `integration-tests` (matrix, one per service with `tests/integration/`) | `uv run pytest -m integration --no-cov` against throwaway `postgres:17.6` containers (composites stub their callees with `respx`); uploads `integration-junit.xml` |
-| `repo-e2e` | The repo-root `e2e/` harnesses (SCRUM-46, SCRUM-171 backend, SCRUM-173) with real service processes and their own throwaway Postgres/RabbitMQ containers; uploads their evidence |
 | `dependency-audit` (matrix, one per service) | `pip-audit` on the locked deps, so a vulnerable dependency reports as an audit failure rather than a test failure |
 | `frontend` | `npm audit --audit-level=high`, oxlint, Vitest with coverage, `tsc -b` + Vite build |
 | `e2e` | Playwright smoke tests (mocked APIs); uploads the report if it fails |
@@ -322,7 +325,7 @@ Only `docker-build` still consults the `changes` job.
 | `ci-passed` | Summary check — require this one in branch protection |
 
 - **`ci-passed` is the only required check.** It fails if any job failed or was
-  cancelled, *and* separately if `unit-tests`, `integration-tests`, `repo-e2e`
+  cancelled, *and* separately if `unit-tests`, `integration-tests`
   or `dependency-audit` is anything other than `success` — a skipped backend job must never count as a pass.
   Renaming or adding jobs therefore never touches the branch protection rules.
 - **Adding a service:** CI discovers services automatically — any folder under
@@ -338,8 +341,8 @@ Only `docker-build` still consults the `changes` job.
   `.env.example`) are listed in `.github/.gitleaksignore`. Run it locally with
   `gitleaks detect --gitleaks-ignore-path .github/.gitleaksignore`.
 - **Not covered:** Python lint/format, frontend formatting, browser tests
-  against the real stack (the `e2e/journeys/` Playwright journeys and
-  `e2e/verify_scrum171_frontend.py` stay manual), and the opt-in live Supabase test
+  against the real stack (the `e2e/journeys/` Playwright journeys stay manual),
+  and the opt-in live Supabase test
   (`venue-availability-service/tests/live/test_calendar.py`, `live` marker) — it
   needs Supabase credentials, which CI deliberately does not have.
 

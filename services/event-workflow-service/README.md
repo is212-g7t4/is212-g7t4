@@ -85,9 +85,12 @@ publisher, without a database or broker. Event's separate
 `tests/integration/test_infra_migrations.py` preserves full-chain install/upgrade
 checks. See the [team integration guide](../../docs/testing/integration-testing.md).
 These service tests do not prove cross-service delivery or browser navigation.
-SCRUM-45 E2E tests are handed off. Ordinary `scripts/scrum45_support/` helpers
-support the retained `scripts/scrum45_manual_sandbox.py` launcher and its lifecycle
-safety tests; they are not an acceptance suite or service integration fixtures.
+`scripts/test_support/process_lifecycle.py` supplies explicit command, polling,
+port-discovery and owned-resource cleanup helpers for retained root E2E setup and
+lifecycle safety tests. Importing the package or module starts nothing; cleanup
+requires caller-owned process groups, log handles and exact container names and
+returns failure diagnostics. These helpers are not an acceptance suite or service
+integration fixtures.
 Existing teammate E2E is unchanged.
 See `docs/scrum-45-manual-testing.md` for the separate shared-development gates.
 

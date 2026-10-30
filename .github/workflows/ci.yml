@@ -192,55 +192,6 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  # The repo e2e tier (docs/testing/integration-testing.md §2): the
-  # cross-service harnesses in the repo-root e2e/ folder, with real Flask
-  # processes for several services and their own throwaway PostgreSQL and
-  # RabbitMQ containers. The browser-driven checks (e2e/journeys/,
-  # e2e/verify_scrum171_frontend.py) are deliberately not run here.
-  repo-e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      PYTHON_DOTENV_DISABLED: "1"
-      REPORTS: ${{ github.workspace }}/reports/repo-e2e
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: services/*/uv.lock
-      # The harnesses start each service from its own .venv.
-      - name: Install every service's dependencies
-        run: |
-          for dir in services/*/; do
-            case "$dir" in services/_template-*) continue ;; esac
-            (cd "$dir" && uv sync --locked)
-          done
-      - name: Pull infrastructure images
-        run: |
-          for image in postgres:17.6 postgres:17 postgres:16 rabbitmq:4-management; do
-            docker pull -q "$image"
-          done
-      - name: SCRUM-46 attendee notifications + SCRUM-173 venue disruption notifications
-        env:
-          SCRUM173_INTEGRATION_EVIDENCE: ${{ env.REPORTS }}/scrum173
-        run: |
-          uv run --no-project --no-env-file --with pytest --with psycopg2-binary --with httpx --with 'pyjwt[crypto]' \
-            python -m pytest e2e/test_attendee_notifications.py e2e/test_scrum173_real.py \
-            --junitxml="$REPORTS/junit.xml"
-      - name: SCRUM-171 venue closure (HTTP + PostgreSQL)
-        if: success() || failure()
-        run: |
-          uv run --no-project --no-env-file --with psycopg2-binary --with 'pyjwt[crypto]' \
-            python e2e/verify_scrum171_postgres.py --output "$REPORTS/scrum171"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: repo-e2e-reports
-          path: reports/repo-e2e/
-          retention-days: 14
-          if-no-files-found: ignore
-
   # Split out of the test job so that a vulnerable dependency reports as an
   # audit failure rather than as a "test" failure.
   dependency-audit:
@@ -345,7 +296,6 @@ jobs:
         discover-services,
         unit-tests,
         integration-tests,
-        repo-e2e,
         dependency-audit,
         frontend,
         e2e,
@@ -368,7 +318,6 @@ jobs:
           RESULTS: >-
             unit-tests=${{ needs.unit-tests.result }}
             integration-tests=${{ needs.integration-tests.result }}
-            repo-e2e=${{ needs.repo-e2e.result }}
             dependency-audit=${{ needs.dependency-audit.result }}
         run: |
           status=0
