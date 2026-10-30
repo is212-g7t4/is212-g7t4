@@ -28,7 +28,7 @@ DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
 # The Lead is a coordinator with extra rights; composites read on a Lead's behalf with their token.
 READ_ROLES = REVIEW_ROLES | {"Event Coordinator", "Event Coordinator Lead", "Safety Officer"}
-CREATE_ROLES = {"Event Coordinator"}
+CREATE_ROLES = {"Event Coordinator", "Event Coordinator Lead"}
 MAX_ITEMS = 50
 MAX_REQUIREMENTS_LENGTH = 1000
 
@@ -167,7 +167,7 @@ def create_app(config=None):
     @app.post("/events/<event_id>/equipment-requests")
     def event_requests_create(event_id):
         # Assignment, event status and equipment availability are checked by Equipment Reservation Service.
-        requester_id, failure = authorise(CREATE_ROLES, "Only Event Coordinators can request equipment.")
+        requester_id, failure = authorise(CREATE_ROLES, "Only Event Coordinators and the Event Coordinator Lead can request equipment.")
         if failure:
             return failure
         event_id = _uuid_or_none(event_id)

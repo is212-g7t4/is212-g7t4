@@ -34,7 +34,8 @@ The caller's `Authorization: Bearer <token>` (SCRUM-8) is forwarded to the
 atomics, which decide access from it.
 
 - `GET /equipment-reservations[?status=Pending|Approved|Rejected]` — Technical
-  Support or Event Coordinator. Returns `{events: [{eventId, eventName,
+  Support, Event Coordinator or Event Coordinator Lead (coordinators and the Lead
+  see only their assigned events). Returns `{events: [{eventId, eventName,
   eventStatus, startTime, endTime, requests: [...]}]}`. Each
   request has the Equipment Request Service fields plus `equipment`
   (`description, type, totalQuantity, status`) and, for Pending lines only,
@@ -49,7 +50,7 @@ atomics, which decide access from it.
   Bulk rejection uses the same reason for every Pending line; request reads
   include the saved `rejectionReason` for staff and assigned coordinators.
 - `POST /equipment-reservations/events/<event_id>/requests` — Event Coordinator
-  only; body `{"items": [{"equipmentId", "quantityRequested",
+  or Event Coordinator Lead only; body `{"items": [{"equipmentId", "quantityRequested",
   "technicalRequirements"?}]}`. `403` unless the event is assigned to the
   caller, `409` unless it is Under Review or Safety Changes Requested, `409` if any item's
   physical status is Unavailable, `404` if an item is not in the catalogue.
