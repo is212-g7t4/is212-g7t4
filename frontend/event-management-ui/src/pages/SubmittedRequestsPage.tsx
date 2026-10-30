@@ -41,7 +41,7 @@ export function SubmittedRequestsPage({ role, currentCoordinatorId, currentCoord
     let active = true
     const params = new URLSearchParams({ coordinatorId: currentCoordinator.id })
     if (isLead(role)) params.set('viewerRole', role)
-    Promise.all([eventApi(`/events/submitted?${params.toString()}`), assignmentApi('/coordinators')]).then(([eventBody, coordinatorBody]) => {
+    Promise.all([eventApi(`/events/submitted?${params.toString()}`), isLead(role) ? assignmentApi('/coordinators') : Promise.resolve({ coordinators: [] })]).then(([eventBody, coordinatorBody]) => {
       if (!active) return
       setEvents(eventBody.events)
       setCoordinators(coordinatorBody.coordinators)

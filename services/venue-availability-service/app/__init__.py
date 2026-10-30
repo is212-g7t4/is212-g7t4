@@ -84,6 +84,16 @@ def _parse_buffer_minutes(value, default=0):
         return None
 
 
+BOOKING_VIEW_ROLES = (
+    "Event Coordinator", "Event Coordinator Lead", "Venue Staff", "Technical Support", "Technical Support Staff",
+)
+
+
+def _may_view_bookings():
+    """SCRUM-9: booking records and holds are for internal roles; internal callers have no user."""
+    return g.user_id is None or g.role in BOOKING_VIEW_ROLES
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.before_request(authenticate)
@@ -228,6 +238,8 @@ def create_app(config=None):
 
     @app.get("/venue-holds")
     def get_holds():
+        if not _may_view_bookings():
+            return jsonify(message="Internal roles only."), 403
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
@@ -403,12 +415,16 @@ def create_app(config=None):
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."
             ), 503
-        return jsonify(
-            bookings=list_event_bookings(app.config["DATABASE_URL"], str(event_id))
-        )
+        bookings = list_event_bookings(app.config["DATABASE_URL"], str(event_id))
+        if g.role == "Attendee":
+            # SCRUM-9: an Attendee only needs the confirmed venue, not pending or rejected requests.
+            bookings = [b for b in bookings if b["status"] == "Approved"]
+        return jsonify(bookings=bookings)
 
     @app.get("/venue-bookings/<uuid:booking_id>")
     def get_booking_route(booking_id):
+        if not _may_view_bookings():
+            return jsonify(message="Internal roles only."), 403
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Venue Availability Service."

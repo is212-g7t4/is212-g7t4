@@ -93,6 +93,7 @@ def registration(**overrides):
 
 
 def test_event_registrations_include_attendee_details_from_user_service(client, monkeypatch):
+    monkeypatch.setattr("app.routes.can_view_event", lambda event_id, role: True)
     """Coordinator registration list: details come from User, looked up once each."""
     get_user = Mock(return_value=USER)
     monkeypatch.setattr(
@@ -112,6 +113,7 @@ def test_event_registrations_include_attendee_details_from_user_service(client, 
 
 
 def test_event_registrations_tolerate_unknown_or_missing_attendee(client, monkeypatch):
+    monkeypatch.setattr("app.routes.can_view_event", lambda event_id, role: True)
     monkeypatch.setattr(
         "app.routes.get_event_registrations",
         lambda event_id: [registration(), registration(attendee_id=None)],
@@ -125,6 +127,7 @@ def test_event_registrations_tolerate_unknown_or_missing_attendee(client, monkey
 
 
 def test_event_registrations_report_downstream_failure(client, monkeypatch):
+    monkeypatch.setattr("app.routes.can_view_event", lambda event_id, role: True)
     monkeypatch.setattr("app.routes.get_event_registrations", lambda event_id: [registration()])
     monkeypatch.setattr("app.routes.get_user", Mock(side_effect=RuntimeError("secret")))
 

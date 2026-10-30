@@ -159,6 +159,7 @@ def test_ac1_draft_requests_fail_loudly_without_a_database(method, path):
 def test_ac1_coordinator_event_lists_exclude_drafts(setup, path):
     """AC1: the coordinator-facing lists that aren't already status-filtered leave drafts out."""
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator Lead")
     cursor.fetchall.return_value = []
 
     response = client.get(path)
