@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from uuid import UUID
 import pika
+import psycopg2
 from app import store
 
 LOG = logging.getLogger(__name__)
@@ -257,8 +258,16 @@ def process(dsn, channel, method, body):
         store.quarantine(dsn, body, error)
         LOG.warning("notification quarantined: %s", store.safe_error(error))
     else:
-        store.deliver(dsn, envelope)
-        LOG.info("notification persisted id=%s", envelope["id"])
+        try:
+            store.deliver(dsn, envelope)
+        except psycopg2.errors.ForeignKeyViolation as error:
+            # A retained broker message can outlive a fixture/event that has
+            # since been removed. Quarantine that unresolvable notification
+            # and ACK it so it cannot poison the queue on every reconnect.
+            store.quarantine(dsn, body, error)
+            LOG.warning("notification quarantined: %s", store.safe_error(error))
+        else:
+            LOG.info("notification persisted id=%s", envelope["id"])
     channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
