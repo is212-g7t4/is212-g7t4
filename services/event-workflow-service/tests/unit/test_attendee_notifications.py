@@ -1,13 +1,47 @@
-"""SCRUM-46 Attendee Registration and Update Notifications: Event Workflow unit tests.
+"""
+SCRUM-46: Attendee Registration and Update Notifications
 
-Story: As an Attendee, I want to receive notifications about my registration status, so that I can confirm my place and stay updated on event changes.
+User Story
+----------
+As an Attendee, I want to receive notifications about my registration status,
+so that I can confirm my place and stay updated on event changes.
 
-Real: dispatcher preparation, freeze ordering and retry decisions.
-Doubled: owner API and publisher. Not proven: SQL, broker delivery or authentication.
-AC1 Given an Attendee successfully registers for an event, the system sends an in-app notification confirming their registration with the event name, date, time, venue, and registration reference number.
-AC2 Given an Attendee successfully withdraws their registration, the system sends an in-app notification confirming the withdrawal with the event name.
-AC3 Given an event cancellation takes effect, or a change to its date, time or venue is approved and applied, all currently registered Attendees receive an in-app notification with the event name and cancellation status or updated details, as applicable.
-AC = acceptance criterion; DR = supporting design rule.
+Acceptance Criteria
+-------------------
+AC1: Given an Attendee successfully registers for an event, the system sends an
+     in-app notification confirming their registration with the event name,
+     date, time, venue, and registration reference number.
+AC2: Given an Attendee successfully withdraws their registration, the system
+     sends an in-app notification confirming the withdrawal with the event
+     name.
+AC3: Given an event cancellation takes effect, or a change to its date, time or
+     venue is approved and applied, all currently registered Attendees receive
+     an in-app notification with the event name and cancellation status or
+     updated details, as applicable.
+
+Real
+----
+- The event-workflow notification workers: they claim jobs from the owning
+  service's outbox over HTTP, look up current recipients and display facts, ask
+  the owner to freeze the envelope, publish the frozen envelope to RabbitMQ and
+  mark it published, retrying or holding on failure.
+- Assertions are on the envelopes frozen and published, call order, and
+  retry/hold decisions.
+
+Doubled
+-------
+- Owner outbox and lookup HTTP (Event, User, Registration, Venue Availability):
+  Stub (respx / monkeypatched httpx fixtures) - canned replies; requests
+  inspected.
+- RabbitMQ publisher (pika): Mock - publish arguments, confirms and persistence
+  inspected.
+
+Not proven
+----------
+- That the owner freezes the envelope in the same transaction as the change (->
+  the owning service's notification tests and integration tests).
+- That Notification Service stores and shows the inbox item (->
+  notification-service consumer tests and frontend NotificationCenter tests).
 """
 
 from unittest.mock import Mock
@@ -23,8 +57,6 @@ from tests.unit.factories import (
 )
 
 
-# AC1 / AC2 ---- action message preparation
-# Supporting AC2 ---- withdrawal message
 @pytest.mark.parametrize(
     "kind,message",
     [
@@ -36,16 +68,22 @@ from tests.unit.factories import (
         ),
         ("registration.withdrawn", "Registration withdrawn for Workshop."),
     ],
+    ids=["registration_confirmed", "registration_withdrawn"],
 )
-def test_ac1_ac2_registration_actions_use_attendee_destination_and_required_content(
+def test_registration_alert_targets_attendee_with_required_content(
     kind, message
 ):
-    """Normal: dispatch a claimed confirmation or withdrawal with display enrichment supplied by an API double.
-    Require one readable message, the exact registration destination/reference and
-    owner completion. Confirmation includes schedule/venue/reference; withdrawal
-    needs the event name. This checks dispatcher content, not owner persistence or
-    broker delivery: freeze and publish are recording doubles.
     """
+    Summary: Registration and withdrawal alerts go to the attendee with their required content and link.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (owner outbox), Mock (publish)
+    """
+    # Arrange (Given)
     api = Mock()
     api.claim.return_value = [job(kind)]
     api.registration_details.return_value = dict(
@@ -56,7 +94,11 @@ def test_ac1_ac2_registration_actions_use_attendee_destination_and_required_cont
     )
     api.freeze.side_effect = lambda j, e: e
     broker = Mock()
+
+    # Act (When)
     dispatch_once(api, broker)
+
+    # Assert (Then)
     assert broker.call_count == 1
     envelope = broker.call_args.args[0]
     assert envelope["message"] == message
@@ -67,23 +109,27 @@ def test_ac1_ac2_registration_actions_use_attendee_destination_and_required_cont
     api.published.assert_called_once()
 
 
-# AC3 ---- audience and immutable event content
-# --- first successful recipient preparation, never event-time audience history
 @pytest.mark.parametrize(
-    "kind", ["attendee.cancelled-fanout", "attendee.updated-fanout"]
+    "kind", ["attendee.cancelled-fanout", "attendee.updated-fanout"],
+    ids=["cancelled_fanout", "updated_fanout"],
 )
-def test_ac3_parent_freezes_the_first_prepared_attendee_list(kind):
-    """Normal: dispatch either a cancellation-fanout or update-fanout parent.
-    A doubled Registration lookup supplies the current audience; require one exact
-    owner expand operation and no parent publication. Only recipient child jobs are
-    inbox messages, and the first preparation selects membership. Owner storage and
-    publisher are mocked, so atomic audience freezing belongs to Event integration.
+def test_change_fanout_freezes_first_attendee_list(kind):
     """
+    Summary: A cancellation or change notice goes to the attendee list as first prepared, not a later one.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (owner outbox; attendee list changes later), Mock (publish)
+    """
+    # Arrange (Given)
     api = Mock()
     api.claim.return_value = [job(kind)]
     recipients = [dict(recipientId=USER, registrationId=REF)]
     api.attendee_recipients.return_value = recipients
     broker = Mock()
+
+    # Act + Assert (When / Then)
     assert dispatch_once(api, broker) == 1
     api.attendee_recipients.assert_called_once_with(EVENT)
     api.operation.assert_called_once_with(
@@ -114,16 +160,20 @@ def test_ac3_parent_freezes_the_first_prepared_attendee_list(kind):
             "Workshop was updated. Start date/time: 01 Mar 2030, 09:00 SGT → 02 Mar 2030, 09:00 SGT; End date/time: 01 Mar 2030, 17:00 SGT → 02 Mar 2030, 17:00 SGT; Venue: Hall A → Hall C.",
         ),
     ],
+    ids=["cancelled", "venue_changed", "schedule_changed"],
 )
-def test_ac3_saved_event_details_publish_without_latest_state_lookup(
+def test_change_alert_publishes_saved_details_without_rereading_event(
     kind, changes, message
 ):
-    """Normal: dispatch child work with cancellation, venue-only, or combined saved changes.
-    The dispatcher must publish the specified literal text and registration link
-    without querying registration display facts again. This prevents delayed delivery
-    from substituting later mutable event state. Claimed work, freeze and publisher
-    are doubles; actual SQL/RabbitMQ are exercised in their other tiers.
     """
+    Summary: A change notice carries the saved details, not whatever the event says later.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (owner outbox), Mock (publish; no event lookup)
+    """
+    # Arrange (Given)
     item = job(kind)
     item["source"]["eventName"] = "Workshop"
     if changes:
@@ -132,7 +182,11 @@ def test_ac3_saved_event_details_publish_without_latest_state_lookup(
     api.claim.return_value = [item]
     api.freeze.side_effect = lambda j, e: e
     broker = Mock()
+
+    # Act (When)
     dispatch_once(api, broker)
+
+    # Assert (Then)
     assert broker.call_args.args[0]["message"] == message
     assert broker.call_args.args[0]["destination"] == dict(
         kind="attendee-registration", registrationId=REF
@@ -140,16 +194,16 @@ def test_ac3_saved_event_details_publish_without_latest_state_lookup(
     api.registration_details.assert_not_called()
 
 
-# DR ---- actual HTTP contracts and failure isolation
-@pytest.mark.parametrize("state", ["confirmed", "withdrawn", "no-approved"])
-def test_dr_registration_enrichment_uses_actual_approved_booking_contract(
+@pytest.mark.parametrize("state", ["confirmed", "withdrawn", "no-approved"], ids=["confirmed", "withdrawn", "no_approved_booking"])
+def test_registration_alert_names_approved_booking_venue(
     attendee_http, state
 ):
-    """Boundary: enrich a legacy registration through the real HTTP client with strict remote doubles.
-    confirmed selects the earliest Approved booking, ignoring an earlier Pending row;
-    withdrawn needs only the event name; no-approved must raise instead of inventing a
-    venue. Expected fields follow each owner's serializer. This protects required
-    message content but does not prove the remote services accept or store anything.
+    """
+    Summary: A registration alert names the venue from the event's approved booking.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (venue booking lookup)
     """
     api, http = attendee_http
     # Event app/__init__.py::notification_context includeSchedule opt-in.
@@ -218,16 +272,19 @@ def test_dr_registration_enrichment_uses_actual_approved_booking_contract(
 
 
 @pytest.mark.parametrize(
-    "state", ["two-confirmed", "empty", "invalid-list", "wrong-event"]
+    "state", ["two-confirmed", "empty", "invalid-list", "wrong-event"],
+    ids=["two_confirmed", "empty", "invalid_list", "wrong_event"],
 )
-def test_dr_attendee_lookup_filters_withdrawn_and_rejects_incomplete_responses(
+def test_attendee_lookup_skips_withdrawn_and_refuses_bad_responses(
     attendee_http, state
 ):
-    """Boundary: read an event-filtered registration response through the real HTTP adapter.
-    two-confirmed returns the exact attendee/reference pairs and ignores Withdrawn;
-    empty is a valid zero audience. invalid-list supplies an object instead of rows,
-    and wrong-event supplies an unrelated row: both must raise, not silently complete
-    fanout. HTTP is strictly doubled; this proves filtering, not database membership.
+    """
+    Summary: Change notices skip withdrawn attendees and refuse malformed attendee lists.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (registration lookup replies)
     """
     api, http = attendee_http
     rows = [
@@ -261,27 +318,37 @@ def test_dr_attendee_lookup_filters_withdrawn_and_rejects_incomplete_responses(
         )
 
 
-def test_dr_registration_owner_mode_targets_registration_outbox(monkeypatch):
-    """Configuration: construct the real outbox client with isolated registration-owner settings.
-    Expect its base URL to target Registration, normalized without a trailing slash,
-    so the additional worker does not poll Event by mistake. Environment changes are
-    fixture-restored; constructing this client makes no network or broker request.
+def test_registration_worker_uses_registration_outbox(monkeypatch):
     """
+    Summary: Registration alerts are claimed from Registration Service's own outbox.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (environment), Mock (outbox URL)
+    """
+    # Arrange (Given)
     from app.dispatcher import OutboxAPI
 
     monkeypatch.setenv("OUTBOX_OWNER", "registration")
     monkeypatch.setenv("REGISTRATION_SERVICE_URL", "http://registration.test/")
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic")
+
+    # Act + Assert (When / Then)
     assert OutboxAPI().base == "http://registration.test"
 
 
-def test_ac1_saved_registration_snapshot_is_not_reconstructed_from_later_event_state():
-    """Normal: dispatch an action that already contains its event name, period and Hall A snapshot.
-    Make latest-state enrichment raise if called; the dispatcher must instead publish
-    once with the exact saved details and never perform that lookup. This protects
-    action-time content on delayed delivery, while API freeze and broker publication
-    remain doubles rather than evidence of storage or actual delivery.
+def test_registration_alert_uses_saved_snapshot_not_later_event():
     """
+    Summary: A confirmation uses the details saved at registration, not later event changes.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (owner outbox)
+    """
+    # Arrange (Given)
     item = job("registration.confirmed")
     item["source"].update(
         eventName="Workshop",
@@ -294,7 +361,11 @@ def test_ac1_saved_registration_snapshot_is_not_reconstructed_from_later_event_s
     api.registration_details.side_effect = RuntimeError("Latest event must not be read")
     api.freeze.side_effect = lambda j, e: e
     broker = Mock()
+
+    # Act (When)
     dispatch_once(api, broker)
+
+    # Assert (Then)
     assert broker.call_count == 1
     assert broker.call_args.args[0]["details"] == item["source"]
     api.registration_details.assert_not_called()

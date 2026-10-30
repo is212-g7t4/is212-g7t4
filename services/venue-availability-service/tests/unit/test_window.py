@@ -1,12 +1,50 @@
-"""SCRUM-26 — GET /venue-bookings/window, the venue search's bookings read.
+"""
+SCRUM-26: Venue Search and Filtering
 
-The calendar read (GET /venue-bookings, SCRUM-25) answers for one venue at a
-time. Venue search needs the opposite: every venue's bookings in one window,
-in a single call, inside a 3-second budget. This endpoint is that read.
+User Story
+----------
+As an Event Coordinator, I want to search and filter potential venues by event
+requirements, so that I can shortlist venues that meet my specific event
+requirements.
 
-It is deliberately not behind CALENDAR_DEV_MODE or the X-Dev-* headers —
-those simulate the browser's user switcher, and this caller is Venue Booking
-Service, a composite. Database calls are mocked.
+Acceptance Criteria
+-------------------
+AC1: Event Coordinator must be able to input the following criteria: Date and
+     time (required), Expected attendance (required), Location (optional),
+     Minimum capacity (optional), Accessibility requirements (optional),
+     Supported layout (optional), and Required facilities (optional).
+AC2: Given the Event Coordinator submits a search without the mandatory fields,
+     when they click the search button, the system displays a message informing
+     the user to input the required fields.
+AC3: Given the Event Coordinator provides all required fields, when they click
+     search, then the system must return a list of venues matching all active
+     criteria within 3 seconds.
+AC4: The search results must display the following for each matching venue:
+     name, location, capacity, accessibility, supported layouts, available
+     facilities, and availability status for the requested date/time.
+AC5: Given no venues match the selected criteria, when the search completes,
+     then the system must display a message informing the user that no venues
+     are available.
+AC6: The Event Coordinator must be able to clear all search and filter criteria
+     with a single button click, resetting the form to its initial empty state.
+
+Real
+----
+- GET /venue-bookings/window: every venue's bookings and active holds in a time
+  window (at most 42 days), naive Singapore times, the status filter, the
+  Python overlap re-check and failing closed on unreadable rows.
+- Assertions are on the bookings returned and the status.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
+
+Not proven
+----------
+- That the SQL, locks and constraints behave the same on real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
 """
 from datetime import datetime
 
@@ -36,8 +74,15 @@ def booking_row(**overrides):
     return row
 
 
-def test_returns_every_venues_bookings_in_one_call(setup):
-    """The point of the endpoint: no venueId, so the whole catalogue."""
+def test_window_returns_every_venues_bookings_in_one_call(setup):
+    """
+    Summary: The search gets every venue's bookings for the requested time in one call.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (cursor returns bookings of two venues)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchall.return_value = [
         booking_row(),
@@ -48,8 +93,10 @@ def test_returns_every_venues_bookings_in_one_call(setup):
         ),
     ]
 
+    # Act (When)
     response = client.get(f"/venue-bookings/window?{WINDOW}")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert [(b["venueId"], b["status"]) for b in response.json["bookings"]] == [
         (VENUE_ID, "Approved"),
@@ -63,28 +110,33 @@ def test_returns_every_venues_bookings_in_one_call(setup):
     ]
 
 
-def test_needs_no_dev_mode_or_identity_headers(setup):
-    """A composite is not a browser, so the user-switcher simulation is skipped."""
+def test_window_answers_composite_without_identity_headers(setup):
+    """
+    Summary: The search composite can read the window without browser identity headers.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (cursor returns no rows)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchall.return_value = []
 
+    # Act (When)
     response = client.get(f"/venue-bookings/window?{WINDOW}")
 
+    # Assert (Then)
     assert response.status_code == 200
 
 
-def test_database_unconfigured_returns_503_before_read(setup):
-    client, cursor = setup
-    client.application.config["DATABASE_URL"] = None
-
-    response = client.get(f"/venue-bookings/window?{WINDOW}")
-
-    assert response.status_code == 503
-    cursor.execute.assert_not_called()
-
-
-def test_times_are_naive_local(setup):
-    """The search compares against naive VenueBooking timestamps."""
+def test_window_returns_naive_singapore_times(setup):
+    """
+    Summary: Times are returned as Singapore local times, matching the stored bookings.
+    AC4: The search results must display the following for each matching venue:
+        name, location, capacity, accessibility, supported layouts, available
+        facilities, and availability status for the requested date/time.
+    Double: Stub (cursor returns bookings)
+    """
     client, cursor = setup
     cursor.fetchall.return_value = [booking_row()]
 
@@ -94,7 +146,14 @@ def test_times_are_naive_local(setup):
     assert "+08:00" not in booking["requestedEndTime"]
 
 
-def test_active_hold_is_returned_as_an_on_hold_interval(setup):
+def test_window_returns_active_hold_as_on_hold(setup):
+    """
+    Summary: An active hold is returned as an On Hold interval.
+    AC4: The search results must display the following for each matching venue:
+        name, location, capacity, accessibility, supported layouts, available
+        facilities, and availability status for the requested date/time.
+    Double: Stub (cursor returns a hold)
+    """
     client, cursor = setup
     cursor.fetchall.return_value = [
         {
@@ -119,8 +178,14 @@ def test_active_hold_is_returned_as_an_on_hold_interval(setup):
     assert hold["venueId"] == VENUE_ID
 
 
-def test_rejected_cancelled_and_expired_never_block(setup):
-    """Only statuses that can still take the venue are returned."""
+def test_window_never_returns_rejected_cancelled_or_expired(setup):
+    """
+    Summary: Rejected, cancelled and expired bookings never make a venue look taken.
+    AC4: The search results must display the following for each matching venue:
+        name, location, capacity, accessibility, supported layouts, available
+        facilities, and availability status for the requested date/time.
+    Double: Stub (cursor; SQL inspected)
+    """
     client, cursor = setup
     cursor.fetchall.return_value = []
 
@@ -130,16 +195,25 @@ def test_rejected_cancelled_and_expired_never_block(setup):
     assert "NOT IN ('Rejected', 'Cancelled', 'Expired')" in query
 
 
-def test_offset_input_is_converted_to_singapore_local(setup):
-    """Same time convention as the calendar read."""
+def test_window_with_offset_input_reads_singapore_time(setup):
+    """
+    Summary: A window given with a time zone is read in Singapore time.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (cursor; parameters inspected)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchall.return_value = []
 
+    # Act (When)
     response = client.get(
         "/venue-bookings/window"
         "?dateFrom=2026-11-10T09:00:00%2B08:00&dateTo=2026-11-10T12:00:00%2B08:00"
     )
 
+    # Assert (Then)
     assert response.status_code == 200
     _, params = cursor.execute.call_args.args
     assert params == [
@@ -148,8 +222,15 @@ def test_offset_input_is_converted_to_singapore_local(setup):
     ]
 
 
-def test_booking_outside_the_window_is_filtered_out(setup):
-    """SQL keeps null/inverted candidates, so Python re-checks the overlap."""
+def test_window_filters_out_booking_outside_the_window(setup):
+    """
+    Summary: A booking outside the window is filtered out.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (cursor returns an outside row)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchall.return_value = [
         booking_row(
@@ -158,12 +239,19 @@ def test_booking_outside_the_window_is_filtered_out(setup):
         )
     ]
 
+    # Act + Assert (When / Then)
     # End-exclusive: a booking starting exactly when the window ends is free.
     assert client.get(f"/venue-bookings/window?{WINDOW}").json["bookings"] == []
 
 
-def test_unreadable_row_fails_the_read_rather_than_hiding_it(setup):
-    """A dropped booking would show a taken venue as free — 503 instead."""
+def test_window_with_unreadable_row_returns_503(setup):
+    """
+    Summary: An unreadable booking fails the read rather than showing a taken venue as free.
+    AC4: The search results must display the following for each matching venue:
+        name, location, capacity, accessibility, supported layouts, available
+        facilities, and availability status for the requested date/time.
+    Double: Stub (cursor returns a malformed row)
+    """
     client, cursor = setup
     cursor.fetchall.return_value = [booking_row(status="Nonsense")]
 
@@ -186,30 +274,72 @@ def test_unreadable_row_fails_the_read_rather_than_hiding_it(setup):
         "dateFrom=2026-01-01T00:00:00&dateTo=2026-03-01T00:00:00",  # over 42 days
         "dateFrom=2026-11-10T09:00:00&dateFrom=2026-11-11T09:00:00&dateTo=2026-11-10T12:00:00",
     ],
+    ids=["empty", "datefrom_2026_11_10t09_00_00", "dateto_2026_11_10t12_00_00", "datefrom_not_a_date_dateto_2026_11_10t12_00_00", "datefrom_2026_11_10_dateto_2026_11_11", "datefrom_2026_11_10t12_00_00_dateto_2026_11_10t0", "datefrom_2026_11_10t09_00_00_dateto_2026_11_10t0", "datefrom_2026_01_01t00_00_00_dateto_2026_03_01t0", "datefrom_2026_11_10t09_00_00_datefrom_2026_11_11"],
 )
-def test_unusable_window_returns_400_before_any_query(setup, query):
-    """Failure: never answer a window the service cannot read."""
+def test_window_with_unusable_range_returns_400(setup, query):
+    """
+    Summary: A window the service cannot read is refused before any query.
+    AC2: Given the Event Coordinator submits a search without the mandatory
+        fields, when they click the search button, the system displays a
+        message informing the user to input the required fields.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, cursor = setup
 
+    # Act + Assert (When / Then)
     assert client.get(f"/venue-bookings/window?{query}").status_code == 400
     cursor.execute.assert_not_called()
 
 
-def test_exactly_42_days_is_allowed(setup):
-    """Boundary: the cap is inclusive, matching the calendar's bound."""
+def test_window_of_exactly_42_days_is_allowed(setup):
+    """
+    Summary: A window of exactly 42 days is accepted.
+    AC3: (boundary: window = 42 days)
+    Double: Stub (cursor returns no rows)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchall.return_value = []
 
+    # Act (When)
     response = client.get(
         "/venue-bookings/window?dateFrom=2026-01-01T00:00:00&dateTo=2026-02-12T00:00:00"
     )
 
+    # Assert (Then)
     assert response.status_code == 200
 
 
-def test_window_read_is_read_only(setup):
-    """It is a read: no write verb is offered."""
+def test_window_offers_no_write_method(setup):
+    """
+    Summary: The window is read-only.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: None
+    """
     client, _ = setup
 
     for method in (client.post, client.patch, client.put, client.delete):
         assert method("/venue-bookings/window").status_code == 405
+
+
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_window_when_database_url_missing_returns_503(setup):
+    """
+    Summary: The window read reports itself unavailable when no database is configured.
+    Supporting design check: an unconfigured service answers 503
+    Double: None
+    """
+    client, cursor = setup
+    client.application.config["DATABASE_URL"] = None
+
+    response = client.get(f"/venue-bookings/window?{WINDOW}")
+
+    assert response.status_code == 503
+    cursor.execute.assert_not_called()

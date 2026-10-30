@@ -1,23 +1,50 @@
-"""SCRUM-10 Role-Based Modification Control: Equipment Request Service unit tests.
+"""
+SCRUM-10: Role-Based Modification Control for Events
 
-Story:      As a registered user, I want to modify only information appropriate to my
-            role and relationship to an event, so that I can perform my responsibilities
-            without changing information outside my permissions.
-Real:       Flask app, routes, token verification, the role check and the internal-token check.
-Doubled:    psycopg2 (mocked connection).
-Not proven: that a refused reset leaves the stored requests unchanged in a real database;
-            Supabase issuing the token. Create and review already refuse the wrong role
-            (tests/test_equipment_requests.py).
+User Story
+----------
+As a registered user, I want to modify only information appropriate to my role
+and relationship to an event, so that I can perform my responsibilities without
+changing information outside my permissions.
 
-AC1  Given an authenticated user is permitted to modify information based on their role and
-     relationship to the event, when they make a valid change to that information, then the
-     change is allowed.
-AC2  Given an authenticated user's role does not permit them to modify particular information,
-     when they attempt to change that information, then the modification is prevented and the
-     existing information remains unchanged.
-AC3  Not covered here: a safety reset is not tied to an event's coordinator or organiser.
-AC4  Not covered here: this route has no read-only counterpart for the roles it refuses.
-AC5  Not covered here: see AC3.
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to modify information based on
+     their role and relationship to the event, when they make a valid change to
+     that information, then the change is allowed.
+AC2: Given an authenticated user's role does not permit them to modify
+     particular information, when they attempt to change that information, then
+     the modification is prevented and the existing information remains
+     unchanged.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to modify that event's information, when they attempt to make a
+     change, then the modification is prevented and the existing information
+     remains unchanged.
+AC4: Given a user is permitted to view particular information but is not
+     permitted to modify it, when they attempt to change that information, then
+     the modification is prevented while their permitted viewing access remains
+     unaffected.
+AC5: Given a user is permitted to modify information for one event but does not
+     have the required access to another event, when they attempt to modify
+     information for both events, then only modifications to information for
+     which they have the required access are allowed.
+
+Real
+----
+- POST /events/<id>/equipment-requests/safety-reset: token verification, the
+  Safety Officer role check and the internal-token check run for real.
+- Assertions are on the status and on the database not being touched.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`) - a MagicMock connection.
+
+Not proven
+----------
+- That a refused reset leaves the stored requests unchanged in real PostgreSQL
+  (NOT COVERED ANYWHERE).
+- Create and review role refusals (-> test_scrum32_create_equipment_request.py
+  and test_scrum33_equipment_request_review.py).
 """
 from unittest.mock import MagicMock
 
@@ -43,29 +70,49 @@ def setup(monkeypatch):
 
 # AC1 ----
 
-def test_ac1_a_safety_officer_with_the_token_gets_past_both_checks(setup):
-    """Normal: role and token both fit, so the handler runs and asks for valid request ids."""
+def test_safety_reset_when_safety_officer_with_service_token_reaches_validation(setup):
+    """
+    Summary: A Safety Officer acting through Safety Check Service gets past both checks.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (MagicMock connection)
+    """
+    # Arrange (Given)
     client, _ = setup
 
+    # Act (When)
     response = client.post(PATH, json={}, headers={**bearer(USER_ID, "Safety Officer"), "X-Internal-Service-Token": TOKEN})
 
+    # Assert (Then)
     assert response.status_code == 400
 
 
 # AC2 ----
 
 @pytest.mark.parametrize(
-    "role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Venue Staff", "Event Organiser", "Attendee"]
+    "role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Venue Staff", "Event Organiser", "Attendee"],
+    ids=["event_coordinator", "event_coordinator_lead", "technical_support", "venue_staff", "event_organiser", "attendee"],
 )
-def test_ac2_only_a_safety_officer_may_reset_requests_even_with_the_internal_token(setup, role):
-    """Failure: the service-to-service token proves the route, not the person; the role must also fit."""
+def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_token(setup, role):
+    """
+    Summary: The service token proves the route, not the person: any other role is refused.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Stub (MagicMock connection)
+    """
+    # Arrange (Given)
     client, connection = setup
 
+    # Act (When)
     response = client.post(
         PATH, json={"requestIds": [REQUEST_ID]},
         headers={**bearer(USER_ID, role), "X-Internal-Service-Token": TOKEN},
     )
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["message"] == "Your role cannot change this information."
     connection.cursor.assert_not_called()

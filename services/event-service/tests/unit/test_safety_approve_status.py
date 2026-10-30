@@ -1,22 +1,47 @@
-"""SCRUM-150: the event-side half of "approve the Operational Safety Check".
+"""
+SCRUM-150: Approve Operational Safety Check
 
-AC1 Given an event is 'Pending Safety Check', when I approve it, then its
-    status changes to 'Confirmed'.
-AC2 Given I approve an event, then the safety check is recorded with the
-    status 'Safety Approved', together with my identity, the approval
-    timestamp and any optional remarks, in the event's history — the
-    event-side half of that history lives here (`actionHistory`); the
-    `SafetyCheck` row, decided by Safety Check Record Service, is the
-    authoritative record.
-AC3 Given an event is not 'Pending Safety Check', then the approve action is
-    not available and an API call is rejected without changing the event.
+User Story
+----------
+As a Safety Officer, I want to approve an event's operational safety
+arrangements, so that the event can proceed to preparation.
 
-`PATCH /events/<id>/safety-status` is the only way into a safety status, and
-only Safety Check Service calls it — the caller's role check (Safety Officer)
-lives there. This endpoint owns the lifecycle move, and re-checks the round
-under a row lock so a stale or made-up round can't confirm the event (AC3).
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+     status changes to 'Confirmed'.
+AC2: Given I approve an event, then the safety check is recorded with the
+     status 'Safety Approved', together with my identity, the approval
+     timestamp and any optional remarks, in the event's history.
+AC3: Given an event is not 'Pending Safety Check', then the approve action is
+     not available and an API call is rejected without changing the event.
+AC4: Given the safety check I approve follows a high-impact change, when I
+     approve it, then the changed details become visible to registered
+     Attendees.
 
-Database calls are mocked; no live database writes.
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 import json
 from datetime import UTC, datetime
@@ -127,22 +152,37 @@ def patch_safety_status(client, headers=INTERNAL_HEADERS, **overrides):
 
 
 def test_pending_safety_check_moves_to_confirmed(setup):
-    """AC1: 'Pending Safety Check' -> 'Confirmed' with the open round's id."""
+    """
+    Summary: 'Pending Safety Check' -> 'Confirmed' with the open round's id.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Pending Safety Check"),
         event_row("Confirmed"),
     ]
 
+    # Act (When)
     response = patch_safety_status(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Confirmed"
     assert cursor.execute.call_args_list[1].args[1][0] == "Confirmed"
 
 
 def test_history_entry_has_decided_by_safety_check_id_remarks_and_time(setup):
-    """AC2: the event-side history entry carries the officer's decision."""
+    """
+    Summary: The event-side history entry carries the officer's decision.
+    AC2: Given I approve an event, then the safety check is recorded with the
+        status 'Safety Approved', together with my identity, the approval
+        timestamp and any optional remarks, in the event's history.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Pending Safety Check"),
@@ -153,6 +193,8 @@ def test_history_entry_has_decided_by_safety_check_id_remarks_and_time(setup):
 
     stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
     action = stored["actionHistory"][-1]
+
+    # Act + Assert (When / Then)
     assert action["status"] == "Confirmed"
     assert action["decidedBy"] == OFFICER_ID
     assert action["safetyCheckId"] == SAFETY_CHECK_ID
@@ -164,33 +206,57 @@ def test_history_entry_has_decided_by_safety_check_id_remarks_and_time(setup):
 
 
 def test_remarks_are_optional(setup):
+    """
+    Summary: Remarks are optional.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Pending Safety Check"),
         event_row("Confirmed"),
     ]
 
+    # Act (When)
     response = patch_safety_status(client, remarks=None)
 
+    # Assert (Then)
     assert response.status_code == 200
     stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
     assert stored["actionHistory"][-1]["remarks"] is None
 
 
 def test_no_coordinator_check_on_approve(setup):
-    """AC1: the Safety Officer deciding need not be the assigned coordinator."""
+    """
+    Summary: The Safety Officer deciding need not be the assigned coordinator.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Pending Safety Check", coordinator_id=COORDINATOR_ID),
         event_row("Confirmed"),
     ]
 
+    # Act (When)
     response = patch_safety_status(client, decidedBy=OFFICER_ID)
 
+    # Assert (Then)
     assert response.status_code == 200
 
 
 def test_coordinator_decision_is_left_alone(setup):
+    """
+    Summary: Coordinator decision is left alone.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Pending Safety Check"),
@@ -199,20 +265,32 @@ def test_coordinator_decision_is_left_alone(setup):
 
     patch_safety_status(client)
 
+    # Act (When)
     stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
+
+    # Assert (Then)
     assert stored["decision"]["status"] == "Approved"
     assert stored["actionDetails"] == "Venue booked."
 
 
 def test_move_runs_under_a_row_lock(setup):
+    """
+    Summary: Move runs under a row lock.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Pending Safety Check"),
         event_row("Confirmed"),
     ]
 
+    # Act (When)
     patch_safety_status(client)
 
+    # Assert (Then)
     assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
 
 
@@ -221,12 +299,21 @@ def test_move_runs_under_a_row_lock(setup):
 
 @pytest.mark.parametrize("current_status", NON_PENDING_STATUSES)
 def test_only_pending_safety_check_can_be_confirmed(current_status, setup):
-    """AC3: every other status is refused, and the event is not touched."""
+    """
+    Summary: Every other status is refused, and the event is not touched.
+    AC3: Given an event is not 'Pending Safety Check', then the approve action
+        is not available and an API call is rejected without changing the
+        event.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(current_status)
 
+    # Act (When)
     response = patch_safety_status(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "INVALID_SAFETY_TRANSITION"
     assert response.json["currentStatus"] == current_status
@@ -235,12 +322,21 @@ def test_only_pending_safety_check_can_be_confirmed(current_status, setup):
 
 
 def test_stale_safety_check_id_is_refused(setup):
-    """AC3: a round that isn't the one this event has open can't confirm it."""
+    """
+    Summary: A round that isn't the one this event has open can't confirm it.
+    AC3: Given an event is not 'Pending Safety Check', then the approve action
+        is not available and an API call is rejected without changing the
+        event.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Pending Safety Check")
 
+    # Act (When)
     response = patch_safety_status(client, safetyCheckId=OTHER_SAFETY_CHECK_ID)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "STALE_SAFETY_CHECK"
     # Only the SELECT ran: nothing was updated.
@@ -248,22 +344,32 @@ def test_stale_safety_check_id_is_refused(setup):
 
 
 def test_missing_pending_entry_is_refused(setup):
-    """No 'Pending Safety Check' action at all means there is no round to match."""
+    """
+    Summary: No 'Pending Safety Check' action at all means there is no round to match.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Pending Safety Check", action_history=[])
 
+    # Act (When)
     response = patch_safety_status(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "STALE_SAFETY_CHECK"
 
 
 def test_a_coordinator_progress_save_does_not_make_the_open_round_stale(setup):
-    """A progress note saved while the event waits for its decision writes its
-    own 'Pending Safety Check' entry, with no round id. Matching on status
-    alone let that shadow the real submission, so the Safety Officer could no
-    longer approve the round that is genuinely open.
     """
+    Summary: A progress note saved while the event waits for its decision writes its own 'Pending Safety Check' entry, with no round id.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row(
@@ -287,17 +393,23 @@ def test_a_coordinator_progress_save_does_not_make_the_open_round_stale(setup):
         event_row("Confirmed"),
     ]
 
+    # Act (When)
     response = patch_safety_status(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Confirmed"
     assert cursor.execute.call_args_list[1].args[1][0] == "Confirmed"
 
 
 def test_a_progress_save_cannot_stand_in_for_a_submission(setup):
-    """The flip side: an entry with no round id is not a submission, so it
-    can't satisfy the check on its own.
     """
+    Summary: The flip side: an entry with no round id is not a submission, so it can't satisfy the check on its own.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(
         "Pending Safety Check",
@@ -311,18 +423,29 @@ def test_a_progress_save_cannot_stand_in_for_a_submission(setup):
         ],
     )
 
+    # Act (When)
     response = patch_safety_status(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "STALE_SAFETY_CHECK"
 
 
 def test_missing_event_is_404(setup):
+    """
+    Summary: Missing event is 404.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = None
 
+    # Act (When)
     response = patch_safety_status(client)
 
+    # Assert (Then)
     assert response.status_code == 404
     assert response.json["message"] == "Event request not found."
 
@@ -331,30 +454,57 @@ def test_missing_event_is_404(setup):
 
 
 def test_remarks_over_the_limit_are_rejected(setup):
+    """
+    Summary: Remarks over the limit are rejected.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_safety_status(client, remarks="x" * 2001)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "remarks must be 2000 characters or fewer."
     cursor.execute.assert_not_called()
 
 
 def test_non_text_remarks_are_rejected(setup):
+    """
+    Summary: Non text remarks are rejected.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_safety_status(client, remarks={"nested": "object"})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "remarks must be text."
     cursor.execute.assert_not_called()
 
 
 def test_bad_safety_check_id_is_rejected(setup):
+    """
+    Summary: Bad safety check id is rejected.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_safety_status(client, safetyCheckId="not-a-uuid")
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "A valid safety check ID is required."
     cursor.execute.assert_not_called()

@@ -1,14 +1,47 @@
-"""SCRUM-48: reliable delivery of equipment submission/decision notifications.
+"""
+SCRUM-48: Equipment Request Notification and Decision Alerts
 
-Story: Technical Support Staff and Event Coordinators receive in-app equipment
-alerts so they can coordinate arrangements. AC1 is submission; AC2 is approval;
-AC3 is rejection without its workflow reason. All cases here are supporting
-reliability/transport design rules (DR), NOT new acceptance criteria.
+User Story
+----------
+As an Event Coordinator and Technical Support Staff, I want to receive
+notifications about equipment requests and decisions, so that I can coordinate
+equipment arrangements efficiently.
 
-Public seams: dispatcher single-cycle/loop/CLI, owner HTTP adapter and publisher.
-HTTP, broker and subprocess boundaries are fresh doubles. These tests prove
-ordering, identity preservation and requested delivery settings, not durable
-inbox uniqueness, real broker confirmations, OS child reaping or live workers.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator submits an equipment request, the system sends
+     an in-app notification to Technical Support Staff with the event name,
+     requested equipment list, and a link to review the request.
+AC2: Given equipment is confirmed as available or found to be unavailable, the
+     system sends an in-app notification to the Event Coordinator with the
+     event name, equipment list, and availability status.
+AC3: Given an equipment request is submitted and pending review, the system
+     sends an in-app notification to Technical Support Staff that a request
+     requires their review.
+
+Real
+----
+- app.dispatcher: the owner outbox HTTP adapter, the single dispatch cycle
+  (publish before marking published, retry on failure), the RabbitMQ publisher,
+  the bounded child attempt, the back-off loop and both CLI entry points run
+  for real.
+- Assertions are on call order, the exact envelope published, retry arguments
+  and exit codes.
+
+Doubled
+-------
+- httpx (owner outbox): Stub (`transport`) - canned claim/published/retry
+  replies; requests inspected.
+- pika (RabbitMQ): Mock (`broker`) - asserts durable queue, confirms and
+  persistent mandatory publish.
+- subprocess.run, time.sleep: Stub - simulate child outcomes and skip waits.
+
+Not proven
+----------
+- That a real RabbitMQ broker confirms and keeps the message, and that
+  Notification Service de-duplicates redeliveries (-> notification-service
+  consumer tests; NOT COVERED ANYWHERE against a live broker).
+- That the OS kills and reaps a timed-out child (NOT COVERED ANYWHERE).
 """
 from copy import deepcopy
 import json
@@ -49,11 +82,11 @@ def transport(monkeypatch):
     return request
 
 
-def test_owner_adapter_preserves_token_and_frozen_job_identity(transport, job):
-    """DR HTTP: Arrange owner responses; claim/published/retry; assert exact
-    internal-only requests with same source/lease, bounded timeout and error.
-
-    Why: Worker HTTP calls must retain the credentials and lease of the claimed job.
+def test_outbox_api_calls_owner_with_internal_token_and_same_lease(transport, job):
+    """
+    Summary: Delivery calls to the owner keep the internal token and the claimed alert's lease.
+    AC2: (delivery: the queued alert is handed over unchanged)
+    Double: Stub (owner replies), Mock (requests inspected)
     """
     transport.return_value = httpx.Response(200, json={"jobs": [job]},
         request=httpx.Request("POST", "http://owner.invalid/claim"))
@@ -71,11 +104,11 @@ def test_owner_adapter_preserves_token_and_frozen_job_identity(transport, job):
              json={"leaseToken": LEASE, "error": "TimeoutError"})]
 
 
-def test_owner_adapter_does_not_hide_http_failure(transport, job):
-    """DR failure: Arrange owner 409; finalize; assert the HTTP status raises
-    rather than pretending the stale worker successfully finalized its lease.
-
-    Why: A rejected lease must not be reported as a completed publication.
+def test_outbox_api_when_owner_refuses_raises_http_error(transport, job):
+    """
+    Summary: A refused finalisation is raised, not reported as delivered.
+    AC2: (delivery: each alert is sent once)
+    Double: Stub (owner answers 409)
     """
     transport.return_value = httpx.Response(409, json={"message": "Lease lost."},
         request=httpx.Request("POST", "http://owner.invalid/published"))
@@ -83,11 +116,11 @@ def test_owner_adapter_does_not_hide_http_failure(transport, job):
         dispatcher.OutboxAPI().published(job)
 
 
-def test_single_cycle_publishes_owner_envelope_before_marking_published(job):
-    """DR order: Arrange a frozen job; dispatch; assert publish occurs before
-    published and receives the exact owner object, not a regenerated draft.
-
-    Why: Marking first could permanently lose an undelivered alert.
+def test_dispatch_once_publishes_before_marking_published(job):
+    """
+    Summary: An alert is published before it is marked delivered, exactly as the owner froze it.
+    AC2: (delivery: an alert is never marked sent before it is)
+    Double: Mock (api and publisher call order)
     """
     api = MagicMock()
     api.claim.return_value = [job]
@@ -101,14 +134,13 @@ def test_single_cycle_publishes_owner_envelope_before_marking_published(job):
     api.retry.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["publish", "published-response-lost", "missing-envelope"])
+@pytest.mark.parametrize("failure", ["publish", "published-response-lost", "missing-envelope"], ids=["publish_fails", "published_response_lost", "missing_envelope"])
 @pytest.mark.parametrize("retry_fails", [False, True], ids=["retry-recorded", "retry-response-lost"])
-def test_failed_delivery_retries_original_job_without_exposing_exception_text(job, failure, retry_fails, caplog):
-    """DR recovery: Arrange failure before/after broker acceptance or absent
-    envelope; dispatch; assert retry uses original source/lease and error class,
-    never exception secrets, and retry failure is left for lease recovery.
-
-    Why: Recovery must preserve the source identity without leaking sensitive errors.
+def test_dispatch_once_when_delivery_fails_retries_same_alert_without_secrets(job, failure, retry_fails, caplog):
+    """
+    Summary: A failed delivery is retried with the same alert and lease, without leaking exception text.
+    AC2: (delivery: a failed send is retried)
+    Double: Stub (publish or mark fails), Mock (retry arguments inspected)
     """
     api = MagicMock()
     api.claim.return_value = [job]
@@ -136,12 +168,12 @@ def test_failed_delivery_retries_original_job_without_exposing_exception_text(jo
     assert ("lease will recover" in caplog.text) is retry_fails
 
 
-def test_reclaim_after_unknown_publication_reuses_frozen_payload_and_source(job):
-    """DR at-least-once: Arrange broker accepted but owner response lost; retry
-    with a new lease; assert byte-equivalent payload/source on both attempts.
-    This proves producer identity only, not durable inbox dedup/read-state.
-
-    Why: A new source on retry would defeat downstream deduplication.
+def test_dispatch_after_lost_response_republishes_identical_alert(job):
+    """
+    Summary: When the outcome of a send is unknown, the retry sends the identical alert again.
+    AC2: (delivery: each alert keeps one identity)
+    Double: Stub (claim returns the job twice), Mock (published payloads
+        compared)
     """
     api = MagicMock()
     api.claim.side_effect = [[deepcopy(job)], [{**deepcopy(job), "leaseToken": RECIPIENT}]]
@@ -156,10 +188,11 @@ def test_reclaim_after_unknown_publication_reuses_frozen_payload_and_source(job)
     assert api.retry.call_count == 1
 
 
-def test_empty_claim_has_no_publication_or_mutation():
-    """DR no-op: Arrange no work; dispatch once; assert no publish/retry/mark.
-
-    Why: An idle cycle must not fabricate work or alter unrelated jobs.
+def test_dispatch_once_when_nothing_waiting_does_nothing():
+    """
+    Summary: An idle cycle sends and changes nothing.
+    AC2: (delivery: only real alerts are sent)
+    Double: Mock (no publish, retry or mark)
     """
     api, publisher = MagicMock(), MagicMock()
     api.claim.return_value = []
@@ -180,11 +213,11 @@ def broker(monkeypatch, transport):
                            channel=connection.channel.return_value)
 
 
-def test_publisher_requests_confirmed_durable_mandatory_json_and_closes(broker, job):
-    """DR broker contract: Arrange channel; publish; assert durable queue,
-    confirms BEFORE persistent mandatory publish and exact message identity.
-
-    Why: Losing delivery flags or confirms would weaken the delivery contract.
+def test_publish_sends_durable_confirmed_message_and_closes(broker, job):
+    """
+    Summary: Alerts go to the durable notifications queue with broker confirmation, and the connection is closed.
+    AC2: (delivery: the broker keeps the alert)
+    Double: Mock (pika channel calls inspected)
     """
     dispatcher.publish(job["envelope"])
     assert broker.channel.method_calls[:2] == [call.queue_declare(queue="notifications.v1", durable=True), call.confirm_delivery()]
@@ -201,14 +234,13 @@ def test_publisher_requests_confirmed_durable_mandatory_json_and_closes(broker, 
     broker.connection.close.assert_called_once()
 
 
-@pytest.mark.parametrize("stage", ["channel", "queue_declare", "confirm_delivery", "basic_publish"])
+@pytest.mark.parametrize("stage", ["channel", "queue_declare", "confirm_delivery", "basic_publish"], ids=["channel", "queue_declare", "confirm_delivery", "basic_publish"])
 @pytest.mark.parametrize("still_open", [True, False], ids=["owned-open-connection", "already-closed-connection"])
-def test_publisher_propagates_broker_failure_and_closes_only_open_connection(broker, job, stage, still_open):
-    """DR failure cleanup: Arrange channel/declaration/confirm/publish error;
-    publish; assert original error propagates and owned open connection closes.
-    No test opens a real broker connection.
-
-    Why: Silent publication failure would prevent recovery; leaked connections would accumulate.
+def test_publish_when_broker_fails_raises_and_closes_open_connection(broker, job, stage, still_open):
+    """
+    Summary: A broker failure at any step is raised and the connection it opened is closed.
+    AC2: (delivery: a failed send is not hidden)
+    Double: Stub (one pika step raises), Mock (close inspected)
     """
     failure = RuntimeError("broker failed")
     target = broker.connection.channel if stage == "channel" else getattr(broker.channel, stage)
@@ -220,13 +252,12 @@ def test_publisher_propagates_broker_failure_and_closes_only_open_connection(bro
     assert broker.connection.close.call_count == int(still_open)
 
 
-@pytest.mark.parametrize("outcome,expected", [(None, 1), (3, 0), (2, None), ("timeout", None)])
-def test_bounded_attempt_distinguishes_empty_work_from_failure(monkeypatch, outcome, expected):
-    """DR process boundary: Arrange subprocess success/empty/failure/timeout;
-    attempt; assert claim is INSIDE the bounded child and timeout is propagated.
-    subprocess.run itself owns kill/reap; this unit test does not prove OS cleanup.
-
-    Why: Idle work and failed work need different retry behavior.
+@pytest.mark.parametrize("outcome,expected", [(None, 1), (3, 0), (2, None), ("timeout", None)], ids=["sent", "idle", "failed", "timed_out"])
+def test_attempt_in_child_when_run_reports_sent_idle_failed_or_timed_out(monkeypatch, outcome, expected):
+    """
+    Summary: Each bounded attempt reports whether it sent, found nothing, failed or timed out.
+    AC2: (delivery: a stuck attempt cannot block later alerts)
+    Double: Stub (subprocess.run returns or times out)
     """
     runner = MagicMock()
     monkeypatch.setattr(subprocess, "run", runner)
@@ -245,11 +276,11 @@ def test_bounded_attempt_distinguishes_empty_work_from_failure(monkeypatch, outc
     runner.assert_called_once_with([sys.executable, "-m", "app.dispatcher", "--attempt"], timeout=7, check=True)
 
 
-def test_worker_loop_caps_backoff_then_resets_after_success_and_stops(monkeypatch):
-    """DR loop: Arrange repeated outages, success, another outage and interrupt;
-    run; assert exponential cap, reset to one, idle wait and clean shutdown.
-
-    Why: Outages must not spin, and recovery must not retain an excessive delay.
+def test_worker_loop_when_outages_repeat_caps_backoff_then_resets(monkeypatch):
+    """
+    Summary: Repeated outages back off up to a cap, recovery resets the wait, and an interrupt stops the worker.
+    AC2: (delivery: retries continue after outages without spinning)
+    Double: Stub (attempt outcomes, sleep), Mock (sleep durations inspected)
     """
     outcomes = [RuntimeError("offline")] * 8 + [1, RuntimeError("again"), 0, KeyboardInterrupt()]
     attempt = MagicMock(side_effect=outcomes)
@@ -262,11 +293,11 @@ def test_worker_loop_caps_backoff_then_resets_after_success_and_stops(monkeypatc
 
 
 @pytest.mark.parametrize("has_job", [False, True], ids=["empty-exit-3", "processed-exit-0"])
-def test_one_shot_cli_claims_only_one_cycle_with_doubled_io(monkeypatch, transport, broker, job, has_job):
-    """DR CLI: Arrange one-shot argv and owner job/empty response; execute real
-    module entrypoint; assert process exit contract with no live subprocess/I/O.
-
-    Why: The one-shot command must not unexpectedly become a long-running worker.
+def test_one_shot_cli_runs_a_single_cycle_and_exits_with_result(monkeypatch, transport, broker, job, has_job):
+    """
+    Summary: The one-shot command runs one cycle and exits with a code saying whether it sent anything.
+    AC2: (delivery: the worker can be run once by hand)
+    Double: Stub (owner and broker replies)
     """
     monkeypatch.delitem(sys.modules, "app.dispatcher", raising=False)
     monkeypatch.setattr(sys, "argv", ["app.dispatcher", "--attempt"])
@@ -279,11 +310,11 @@ def test_one_shot_cli_claims_only_one_cycle_with_doubled_io(monkeypatch, transpo
     assert broker.channel.basic_publish.call_count == int(has_job)
 
 
-def test_daemon_cli_enters_loop_and_honours_interrupt_without_real_worker(monkeypatch, transport):
-    """DR CLI: Arrange default argv and a child-run interrupt double; execute
-    real daemon entrypoint; assert clean return, without starting a worker.
-
-    Why: The daemon entrypoint must remain stoppable through its normal interrupt path.
+def test_daemon_cli_enters_loop_and_stops_on_interrupt(monkeypatch, transport):
+    """
+    Summary: The default command runs the worker loop and stops cleanly on interrupt.
+    AC2: (delivery: the worker can be stopped cleanly)
+    Double: Stub (attempt raises KeyboardInterrupt)
     """
     monkeypatch.delitem(sys.modules, "app.dispatcher", raising=False)
     monkeypatch.setattr(sys, "argv", ["app.dispatcher"])

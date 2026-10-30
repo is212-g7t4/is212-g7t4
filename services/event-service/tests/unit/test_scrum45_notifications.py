@@ -1,20 +1,50 @@
-"""SCRUM-45 Event Organiser Status and Update Notifications: event-service unit tests.
+"""
+SCRUM-45: Event Organiser Status and Update Notifications
 
-Story: As an Event Organiser, I want to receive an in-app notification when the Lead Coordinator approves or rejects my event request, so that I know the outcome and who is responsible for coordinating my event.
-Real: own Flask routes, validation, mutation/outbox logic and SQL construction.
-Doubled: PostgreSQL connection/cursor. Event makes no HTTP or broker calls.
-Not proven: production authentication, hosted Supabase, cross-service delivery or browser navigation.
-Owned: transactionally saved historical intent, mutation guards and owner freeze/lease APIs. Not covered here: coordinator name lookup (Workflow), inbox delivery (Notification), UI/E2E.
-AC = acceptance criterion; DR = supporting design rule, not an extra AC.
+User Story
+----------
+As an Event Organiser, I want to receive an in-app notification when the Lead
+Coordinator approves or rejects my event request, so that I know the outcome
+and and who is responsible for coordinating my event.
 
-AC1 A successfully recorded approval sends an in-app approval notification to the submitting Event Organiser.
-  Owned: SQL insertion and approval guards only; actual commit and delivery belong to integration/Workflow/Notification.
-AC2 A successfully recorded rejection sends an in-app rejection notification to the submitting Event Organiser, including the rejection reason.
-  Owned: SQL insertion of rejection facts/reason only; actual commit and inbox delivery are outside this unit boundary.
-AC3 Both decision notifications include event name, decision, and a link to the event request and its decision details.
-  Owned: Saved decision facts and freeze UPDATE/response contract; real persistence and linked-page rendering are not proven.
-AC4 A successfully recorded initial assignment or reassignment sends the submitting Event Organiser an in-app notification with event name, newly assigned coordinator name, and an event-details link.
-  Owned: Initial/replacement coordinator IDs and named freeze contract; User name lookup and inbox delivery are outside Event.
+Acceptance Criteria
+-------------------
+AC1: Given the Lead Coordinator successfully records an approval of an event
+     request, the Event Organiser who submitted it receives an in-app
+     notification confirming the approval.
+AC2: Given the Lead Coordinator successfully records a rejection of an event
+     request, the Event Organiser who submitted it receives an in-app
+     notification confirming the rejection and stating the rejection reason.
+AC3: Both decision notifications include the event name, the decision, and a
+     link to view the event request and its decision details.
+AC4: Given an initial coordinator assignment or reassignment is successfully
+     recorded, the Event Organiser receives an in-app notification with the
+     event name, the newly assigned coordinator’s name, and a link to view the
+     event details.
+
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 from datetime import UTC, datetime
 
@@ -40,15 +70,15 @@ def approval_row(status='Under Review', organiser=approval_ORGANISER):
     return result
 
 @pytest.fixture
-def boundary():
+def boundary(mocker):
     """Yield the Flask client, mocked connection and cursor so tests can inspect SQL and
     transaction exit.
     """
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
-    with patch('psycopg2.connect', return_value=connection):
-        client = signed_in(create_app({'TESTING': True, 'DATABASE_URL': 'synthetic', 'INTERNAL_SERVICE_TOKEN': 'test-token'}).test_client())
-        yield (client, connection, cursor)
+    mocker.patch('psycopg2.connect', return_value=connection)
+    client = signed_in(create_app({'TESTING': True, 'DATABASE_URL': 'synthetic', 'INTERNAL_SERVICE_TOKEN': 'test-token'}).test_client())
+    yield (client, connection, cursor)
 
 def approval_approve(client, route, actor=approval_ACTOR):
     """Send approval through the dedicated or progress route and return the HTTP response."""
@@ -169,13 +199,20 @@ rejection_LEASE = '40000000-0000-0000-0000-000000000001'
 # AC1 — Approval
 
 @pytest.mark.parametrize('route', ['approve', 'progress'])
-def test_ac1_approval_records_saved_organiser_and_event_facts(boundary, route):
-    """Normal: approve through either route; SQL captures the original organiser and event name
-    despite changed UPDATE results, preserving who and what the decision concerned.
+def test_approval_records_saved_organiser_and_event_facts(boundary, route):
     """
+    Summary: Approve through either route; SQL captures the original organiser and event name despite changed UPDATE results, preserving who and what the decision concerned.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, cursor = boundary
     updated = {**approval_row('Approved'), 'event_name': 'Renamed', 'organiser_id': approval_ACTOR}
     cursor.fetchone.side_effect = [approval_row(), updated]
+
+    # Act + Assert (When / Then)
     assert approval_approve(client, route).status_code == 200
     inserts = [call.args[1] for call in cursor.execute.call_args_list if 'INSERT INTO public."EventNotificationOutbox"' in call.args[0]]
     assert len(inserts) == 1, 'Successful approval must save notification intent'
@@ -187,13 +224,22 @@ def test_ac1_approval_records_saved_organiser_and_event_facts(boundary, route):
 # AC2 — Rejection and reason
 
 @pytest.mark.parametrize('route', ['reject', 'progress'])
-def test_ac2_rejection_records_notification_with_reason(boundary, route):
-    """Normal: reject through either route; one outbox INSERT includes the exact reason and
-    submitting organiser, so a recorded rejection has notification work in the same transaction.
+def test_rejection_records_notification_with_reason(boundary, route):
     """
+    Summary: Reject through either route; one outbox INSERT includes the exact reason and submitting organiser, so a recorded rejection has notification work in the same transaction.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, cursor = boundary
     cursor.fetchone.side_effect = [rejection_row(), rejection_row('Rejected')]
+
+    # Act (When)
     response = rejection_reject(client, route)
+
+    # Assert (Then)
     assert response.status_code == 200
     # SCRUM-45 owns the organiser alert; SCRUM-49 separately verifies both recipients.
     inserts = [call.args[1] for call in cursor.execute.call_args_list
@@ -207,16 +253,25 @@ def test_ac2_rejection_records_notification_with_reason(boundary, route):
 
 @pytest.mark.parametrize('reason', ['x' * 40000, '界' * 18000, ('"\\\n' * 10000)],
                          ids=['ascii', 'multibyte', 'escaped'])
-def test_ac2_large_accepted_reason_can_cross_freeze_boundary(boundary, reason):
-    """Boundary: reject with long ASCII, Unicode or escaped text, then freeze its larger envelope;
-    the response preserves every character so an accepted reason does not become undeliverable.
+def test_large_accepted_reason_can_cross_freeze_boundary(boundary, reason):
     """
+    Summary: Reject with long ASCII, Unicode or escaped text, then freeze its larger envelope; the response preserves every character so an accepted reason does not become undeliverable.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     import json
     client, _, cursor = boundary
     # HTTPX uses compact UTF-8 JSON, not Flask's default ASCII-escaped serializer.
     encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
     reason = "x" + reason + "x"
+
+    # Act (When)
     body = encode(dict(coordinatorId=rejection_ACTOR, reason=reason))
+
+    # Assert (Then)
     assert len(body) <= 65536
     cursor.fetchone.side_effect = [{**rejection_row(), 'event_name': '😀' * 255},
                                  {**rejection_row('Rejected'), 'event_name': '😀' * 255}]
@@ -248,36 +303,57 @@ def test_ac2_large_accepted_reason_can_cross_freeze_boundary(boundary, reason):
     ('published', 65537, rejection_HEADERS, 413),
     ('freeze', 135168, {}, 401),
     ('freeze', 135168, {'X-Internal-Token': 'wrong'}, 401),
-])
-def test_ac2_dr_freeze_allowance_is_bounded_and_authenticated(boundary, action, size, headers, expected):
-    """Failure: submit unauthorised, malformed or oversized outbox requests; the expected HTTP
-    error occurs without SQL, keeping the larger freeze allowance bounded and private.
+], ids=["freeze_135168_rejection_headers_400", "freeze_135169_rejection_headers_413", "retry_65537_rejection_headers_413", "hold_65537_rejection_headers_413", "published_65537_rejection_headers_413", "freeze_135168_401", "freeze_135168_x_internal_token_wrong_401"])
+def test_freeze_allowance_is_bounded_and_authenticated(boundary, action, size, headers, expected):
     """
+    Summary: Submit unauthorised, malformed or oversized outbox requests; the expected HTTP error occurs without SQL, keeping the larger freeze allowance bounded and private.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, cursor = boundary
+
+    # Act (When)
     response = client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/{action}',
                            headers=headers, data=b' ' * size, content_type='application/json')
+
+    # Assert (Then)
     assert response.status_code == expected
     cursor.execute.assert_not_called()
     assert client.application.config['MAX_CONTENT_LENGTH'] == 65536
 
 
 @pytest.mark.parametrize('size,expected', [(65536, 400), (65537, 413)])
-def test_ac2_dr_public_rejection_limit_does_not_change(boundary, size, expected):
-    """Boundary: send invalid JSON at and just above the public size limit; parser and size errors
-    differ without SQL, so the internal freeze allowance does not enlarge public requests.
+def test_public_rejection_limit_does_not_change(boundary, size, expected):
     """
+    Summary: Send invalid JSON at and just above the public size limit; parser and size errors differ without SQL, so the internal freeze allowance does not enlarge public requests.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
+
+    # Act (When)
     response = client.patch(f'/events/{rejection_EVENT}/reject', data=b' ' * size,
                             content_type='application/json')
+
+    # Assert (Then)
     assert response.status_code == expected
     cursor.execute.assert_not_called()
 
 
 # AC3 — Decision content and link
 
-def test_ac3_approval_envelope_can_be_frozen_and_read_back(boundary):
-    """Normal: freeze a valid approval through the owner API; inspect the envelope UPDATE and
-    returned content so accepting a request alone cannot masquerade as saving it.
+def test_approval_envelope_can_be_frozen_and_read_back(boundary):
+    """
+    Summary: Freeze a valid approval through the owner API; inspect the envelope UPDATE and returned content so accepting a request alone cannot masquerade as saving it.
+    AC3: Both decision notifications include the event name, the decision, and
+        a link to view the event request and its decision details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
     """
     client, _, cursor = boundary
     pending = dict(source_id=approval_JOB_ID, source=approval_SOURCE, type='event.approval', envelope=None, attempts=1, lease_token=approval_LEASE, lease_valid=True, created_at=datetime(2026, 10, 21, tzinfo=UTC))
@@ -294,13 +370,23 @@ def test_ac3_approval_envelope_can_be_frozen_and_read_back(boundary):
 
 # AC4 — Initial assignment and reassignment
 
-def test_ac4_initial_assignment_saves_historical_notification_on_same_transaction(boundary):
-    """Normal: assign an unassigned event; one outbox INSERT contains the coordinator ID, event
-    name and submitting organiser before normal transaction exit, preserving the initial change.
+def test_initial_assignment_saves_historical_notification_on_same_transaction(boundary):
     """
+    Summary: Assign an unassigned event; one outbox INSERT contains the coordinator ID, event name and submitting organiser before normal transaction exit, preserving the initial change.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, cursor = boundary
     cursor.fetchone.side_effect = [dict(coordinator_id=None, status='Submitted'), initial_assignment_assigned_row()]
+
+    # Act (When)
     response = initial_assignment_assign(client)
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     saved = initial_assignment_intents(cursor)
     assert len(saved) == 1, 'Initial assignment must persist notification intent'
@@ -308,13 +394,23 @@ def test_ac4_initial_assignment_saves_historical_notification_on_same_transactio
     assert saved[0][2].adapted == dict(eventId=initial_assignment_EVENT, eventName='Community Workshop', recipientId=initial_assignment_ORGANISER, coordinatorId=initial_assignment_COORDINATOR)
     assert connection.__exit__.call_args.args[0] is None
 
-def test_ac4_claim_exposes_assignment_type_and_freeze_accepts_named_saved_identity(boundary):
-    """Normal: claim assignment work and freeze a named envelope; inspect its type, UPDATE and
-    response so the owner accepts content tied to the saved coordinator, not a later assignment.
+def test_claim_exposes_assignment_type_and_freeze_accepts_named_saved_identity(boundary):
     """
+    Summary: Claim assignment work and freeze a named envelope; inspect its type, UPDATE and response so the owner accepts content tied to the saved coordinator, not a later assignment.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchall.return_value = [initial_assignment_pending()]
+
+    # Act (When)
     job = client.post('/internal/notification-outbox/claim', headers=initial_assignment_HEADERS, json={}).json['jobs'][0]
+
+    # Assert (Then)
     assert job.get('type') == 'event.coordinator-assignment'
     envelope = dict(version=1, id=initial_assignment_JOB_ID, type='event.coordinator-assignment', recipientId=initial_assignment_ORGANISER, createdAt=job['createdAt'], message='Alice Tan has been assigned to coordinate Community Workshop.', destination=dict(kind='event-details', eventId=initial_assignment_EVENT), details={**initial_assignment_SOURCE, 'coordinatorName': 'Alice Tan'})
     cursor.fetchone.side_effect = [initial_assignment_pending(), {**initial_assignment_pending(), 'envelope': envelope}]
@@ -326,13 +422,23 @@ def test_ac4_claim_exposes_assignment_type_and_freeze_accepts_named_saved_identi
     assert writes[0][1][0].adapted == envelope
     assert writes[0][1][1] == initial_assignment_JOB_ID
 
-def test_ac4_reassignment_records_replacement_coordinator_for_submitting_organiser(boundary):
-    """Normal: replace Alice with Bob through Event HTTP; one outbox INSERT names Bob's saved ID
-    and the submitting organiser, keeping reassignment distinct from the previous coordinator.
+def test_reassignment_records_replacement_coordinator_for_submitting_organiser(boundary):
     """
+    Summary: Replace Alice with Bob through Event HTTP; one outbox INSERT names Bob's saved ID and the submitting organiser, keeping reassignment distinct from the previous coordinator.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, cursor = boundary
     cursor.fetchone.side_effect = [dict(coordinator_id=reassignment_ALICE, status='Under Review'), reassignment_row(reassignment_BOB)]
+
+    # Act (When)
     response = reassignment_assign(client, reassignment_BOB)
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     saved = reassignment_intents(cursor)
     assert len(saved) == 1, 'A successful reassignment must save notification work'
@@ -340,24 +446,48 @@ def test_ac4_reassignment_records_replacement_coordinator_for_submitting_organis
     assert saved[0][2].adapted == dict(eventId=reassignment_EVENT, eventName='Community Workshop', recipientId=reassignment_ORGANISER, coordinatorId=reassignment_BOB)
     assert connection.__exit__.call_args.args[0] is None
 
-@pytest.mark.parametrize('details', [None, {}, {**initial_assignment_SOURCE, 'coordinatorName': ' '}, {**initial_assignment_SOURCE, 'coordinatorName': 12}, {**initial_assignment_SOURCE, 'coordinatorName': 'Alice', 'coordinatorId': initial_assignment_ORGANISER}])
-def test_ac4_freeze_refuses_nameless_or_substituted_assignment_identity(boundary, details):
-    """Failure: AC4/DR4: owning freeze HTTP rejects missing name or substituted saved ID; malformed preparation must not overwrite the historical change."""
+@pytest.mark.parametrize('details', [None, {}, {**initial_assignment_SOURCE, 'coordinatorName': ' '}, {**initial_assignment_SOURCE, 'coordinatorName': 12}, {**initial_assignment_SOURCE, 'coordinatorName': 'Alice', 'coordinatorId': initial_assignment_ORGANISER}], ids=["none", "empty", "initial_assignment_source_coordinatorname", "initial_assignment_source_coordinatorname_12", "initial_assignment_source_coordinatorname_alice"])
+def test_freeze_refuses_nameless_or_substituted_assignment_identity(boundary, details):
+    """
+    Summary: Owning freeze HTTP rejects missing name or substituted saved ID; malformed preparation must not overwrite the historical change.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = initial_assignment_pending()
     envelope = dict(version=1, id=initial_assignment_JOB_ID, type='event.coordinator-assignment', recipientId=initial_assignment_ORGANISER, createdAt='2026-10-21T00:00:00+00:00', message='Alice has been assigned to coordinate Community Workshop.', destination=dict(kind='event-details', eventId=initial_assignment_EVENT), details=details)
+
+    # Act (When)
     result = client.post(f'/internal/notification-outbox/{initial_assignment_JOB_ID}/freeze', headers=initial_assignment_HEADERS, json=dict(leaseToken=initial_assignment_LEASE, envelope=envelope))
+
+    # Assert (Then)
     assert result.status_code == 400
     assert cursor.execute.call_count == 1
 
 
 # Supporting DR2/DR3/DR4/DR5/DR6/DR8 — transaction, recovery, history and identity
 
-def test_ac4_dr_name_hold_releases_lease_and_excludes_held_work_from_claims(boundary):
-    """Normal: DR6: owning HTTP hold records durable diagnosis without retry schedule; claim boundary excludes held jobs so unrelated work remains eligible."""
+def test_name_hold_releases_lease_and_excludes_held_work_from_claims(boundary):
+    """
+    Summary: DR6: owning HTTP hold records durable diagnosis without retry schedule; claim boundary excludes held jobs so unrelated work remains eligible.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = initial_assignment_pending()
+
+    # Act (When)
     response = client.post(f'/internal/notification-outbox/{initial_assignment_JOB_ID}/hold', headers=initial_assignment_HEADERS, json=dict(leaseToken=initial_assignment_LEASE, error=f'CoordinatorNameUnavailable coordinatorId={initial_assignment_COORDINATOR}'))
+
+    # Assert (Then)
     assert response.status_code == 200
     writes = [call for call in cursor.execute.call_args_list if call.args[0].startswith('UPDATE')]
     assert len(writes) == 1
@@ -368,12 +498,24 @@ def test_ac4_dr_name_hold_releases_lease_and_excludes_held_work_from_claims(boun
     assert client.post('/internal/notification-outbox/claim', headers=initial_assignment_HEADERS, json={}).json == {'jobs': []}
     assert 'held_at IS NULL' in cursor.execute.call_args.args[0]
 
-def test_ac4_dr_held_work_can_be_inspected_and_released_after_name_repair(boundary):
-    """Normal: DR6: authenticated operator reads held source/diagnosis and explicitly releases it for retry after repairing User data; no event rewrite needed."""
+def test_held_work_can_be_inspected_and_released_after_name_repair(boundary):
+    """
+    Summary: DR6: authenticated operator reads held source/diagnosis and explicitly releases it for retry after repairing User data; no event rewrite needed.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     held_at = datetime(2026, 10, 21, tzinfo=UTC)
     cursor.fetchall.return_value = [{**initial_assignment_pending(), 'held_at': held_at, 'last_error': 'CoordinatorNameUnavailable'}]
+
+    # Act (When)
     response = client.get('/internal/notification-outbox/held', headers=initial_assignment_HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json['jobs'] == [dict(id=initial_assignment_JOB_ID, source=initial_assignment_SOURCE, error='CoordinatorNameUnavailable', heldAt=held_at.isoformat())]
     cursor.fetchone.return_value = {'source_id': initial_assignment_JOB_ID}
@@ -385,24 +527,40 @@ def test_ac4_dr_held_work_can_be_inspected_and_released_after_name_repair(bounda
     assert 'available_at=now()' in cursor.execute.call_args.args[0]
 
 @pytest.mark.parametrize('action', ['hold', 'release'])
-def test_ac4_dr_hold_and_repair_require_internal_authentication(boundary, action):
-    """Failure: call hold, release and held-work listing without a token; every request returns 401
-    before opening a cursor, so outsiders cannot hide or requeue notifications.
+def test_hold_and_repair_require_internal_authentication(boundary, action):
     """
+    Summary: Call hold, release and held-work listing without a token; every request returns 401 before opening a cursor, so outsiders cannot hide or requeue notifications.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, _ = boundary
+
+    # Act + Assert (When / Then)
     assert client.post(f'/internal/notification-outbox/{initial_assignment_JOB_ID}/{action}', json={}).status_code == 401
     assert client.get('/internal/notification-outbox/held').status_code == 401
     connection.cursor.assert_not_called()
 
-def test_ac2_dr_pending_rejection_can_be_claimed_frozen_and_completed(boundary):
-    """Normal: claim, freeze and complete rejection work through authenticated HTTP; inspect the
-    saved-envelope UPDATE and published response to check the worker-facing lifecycle contract,
-    not actual delivery.
+def test_pending_rejection_can_be_claimed_frozen_and_completed(boundary):
     """
+    Summary: Claim, freeze and complete rejection work through authenticated HTTP; inspect the saved-envelope UPDATE and published response to check the worker-facing lifecycle contract, not actual delivery.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     pending = dict(source_id=rejection_JOB_ID, source=rejection_SOURCE, type='event.rejection', envelope=None, attempts=1, lease_token=rejection_LEASE, lease_valid=True, created_at=datetime(2026, 10, 21, tzinfo=UTC))
     cursor.fetchall.return_value = [pending]
+
+    # Act (When)
     claim = client.post('/internal/notification-outbox/claim', json={}, headers=rejection_HEADERS)
+
+    # Assert (Then)
     assert claim.status_code == 200, 'Event must expose durable pending work to its worker'
     assert claim.json['jobs'][0]['source'] == rejection_SOURCE
     envelope = dict(version=1, id=rejection_JOB_ID, recipientId=rejection_ORGANISER, type='event.rejection', createdAt='2026-10-21T00:00:00+00:00', message=f'Community Workshop was rejected: {rejection_REASON}', destination=dict(kind='event-details', eventId=rejection_EVENT), details=rejection_SOURCE)
@@ -420,29 +578,55 @@ def test_ac2_dr_pending_rejection_can_be_claimed_frozen_and_completed(boundary):
     assert complete.json['status'] == 'published'
 
 @pytest.mark.parametrize('route', ['approve', 'progress'])
-def test_ac1_dr_ownerless_approval_is_diagnosed_without_guessing_recipient(boundary, route, caplog):
-    """Boundary: approve a legacy event without an organiser; the request succeeds with a
-    missing-owner diagnostic and no outbox INSERT, avoiding a guessed recipient.
+def test_ownerless_approval_is_diagnosed_without_guessing_recipient(boundary, route, caplog):
     """
+    Summary: Approve a legacy event without an organiser; the request succeeds with a missing-owner diagnostic and no outbox INSERT, avoiding a guessed recipient.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [approval_row(organiser=None), approval_row('Approved', organiser=None)]
+
+    # Act + Assert (When / Then)
     assert approval_approve(client, route).status_code == 200
     assert 'missing organiser' in caplog.text
     assert not any(('INSERT INTO public."EventNotificationOutbox"' in call.args[0] for call in cursor.execute.call_args_list))
 
-def test_ac4_dr_ownerless_legacy_reassignment_is_diagnosed_without_recipient_guess(boundary, caplog):
-    """Boundary: DR5: ownerless legacy reassignment still succeeds, records diagnosis and creates no publishable work or guessed recipient."""
+def test_ownerless_legacy_reassignment_is_diagnosed_without_recipient_guess(boundary, caplog):
+    """
+    Summary: DR5: ownerless legacy reassignment still succeeds, records diagnosis and creates no publishable work or guessed recipient.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [dict(coordinator_id=reassignment_ALICE, status='Under Review'), reassignment_row(reassignment_BOB, None)]
+
+    # Act + Assert (When / Then)
     assert reassignment_assign(client, reassignment_BOB).status_code == 200
     assert 'missing organiser' in caplog.text
     assert reassignment_intents(cursor) == []
 
 @pytest.mark.parametrize('route', ['reject', 'progress'])
-def test_ac2_dr_legacy_event_without_organiser_is_diagnosed_without_delivery(boundary, route, caplog):
-    """Boundary: DR5: an ownerless rejection is diagnosed without guessing an organiser; its assigned coordinator still receives confirmation."""
+def test_legacy_event_without_organiser_is_diagnosed_without_delivery(boundary, route, caplog):
+    """
+    Summary: DR5: an ownerless rejection is diagnosed without guessing an organiser; its assigned coordinator still receives confirmation.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [rejection_row(organiser=None), rejection_row('Rejected', organiser=None)]
+
+    # Act + Assert (When / Then)
     assert rejection_reject(client, route).status_code == 200
     assert 'missing organiser' in caplog.text
     inserts = [call.args[1] for call in cursor.execute.call_args_list
@@ -453,59 +637,104 @@ def test_ac2_dr_legacy_event_without_organiser_is_diagnosed_without_delivery(bou
         recipientId=rejection_ACTOR, decision="Rejected", reason=rejection_REASON)
 
 @pytest.mark.parametrize('route', ['approve', 'progress'])
-def test_ac1_dr_repeated_approval_does_not_notify_again(boundary, route):
-    """Conflict: repeat approval through either route; conflict or unchanged progress creates no
-    outbox INSERT, preventing duplicate notification work for the same decision.
+def test_repeated_approval_does_not_notify_again(boundary, route):
     """
+    Summary: Repeat approval through either route; conflict or unchanged progress creates no outbox INSERT, preventing duplicate notification work for the same decision.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [approval_row('Approved'), approval_row('Approved')]
+
+    # Act + Assert (When / Then)
     assert approval_approve(client, route).status_code == (409 if route == 'approve' else 200)
     assert not any(('INSERT INTO public."EventNotificationOutbox"' in call.args[0] for call in cursor.execute.call_args_list))
 
-@pytest.mark.parametrize('current,status,code', [(initial_assignment_COORDINATOR, 'Under Review', 409), (None, 'Rejected', 409)])
-def test_ac4_dr_failed_or_unchanged_assignment_has_no_intent(boundary, current, status, code):
-    """Conflict: assign the current coordinator or assign a rejected event; HTTP 409 and no outbox
-    INSERT prevent failed or unchanged actions from notifying the organiser.
+@pytest.mark.parametrize('current,status,code', [(initial_assignment_COORDINATOR, 'Under Review', 409), (None, 'Rejected', 409)], ids=["initial_assignment_coordinator_under_review_409", "none_rejected_409"])
+def test_failed_or_unchanged_assignment_has_no_intent(boundary, current, status, code):
     """
+    Summary: Assign the current coordinator or assign a rejected event; HTTP 409 and no outbox INSERT prevent failed or unchanged actions from notifying the organiser.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = dict(coordinator_id=current, status=status)
+
+    # Act + Assert (When / Then)
     assert initial_assignment_assign(client).status_code == code
     assert initial_assignment_intents(cursor) == []
 
-@pytest.mark.parametrize('current,status', [(reassignment_BOB, 'Under Review'), (reassignment_ALICE, 'Rejected'), (reassignment_ALICE, 'Cancelled'), (reassignment_ALICE, 'Clarification Requested')])
-def test_ac4_dr_unchanged_or_closed_reassignment_creates_no_notification(boundary, current, status):
-    """Conflict: reassign to the same person or from a disallowed status; HTTP 409 and no outbox
-    INSERT prevent notifications for changes that never happened.
+@pytest.mark.parametrize('current,status', [(reassignment_BOB, 'Under Review'), (reassignment_ALICE, 'Rejected'), (reassignment_ALICE, 'Cancelled'), (reassignment_ALICE, 'Clarification Requested')], ids=["reassignment_bob_under_review", "reassignment_alice_rejected", "reassignment_alice_cancelled", "reassignment_alice_clarification_requested"])
+def test_unchanged_or_closed_reassignment_creates_no_notification(boundary, current, status):
     """
+    Summary: Reassign to the same person or from a disallowed status; HTTP 409 and no outbox INSERT prevent notifications for changes that never happened.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = dict(coordinator_id=current, status=status)
+
+    # Act + Assert (When / Then)
     assert reassignment_assign(client, reassignment_BOB).status_code == 409
     assert reassignment_intents(cursor) == []
 
 @pytest.mark.parametrize('route', ['reject', 'progress'])
-def test_ac2_dr_repeated_rejection_does_not_create_more_intent(boundary, route):
-    """Conflict: DR2: repeat already rejected request at HTTP boundary; observe no new intent on conflict or unchanged-status progress update."""
+def test_repeated_rejection_does_not_create_more_intent(boundary, route):
+    """
+    Summary: DR2: repeat already rejected request at HTTP boundary; observe no new intent on conflict or unchanged-status progress update.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [rejection_row('Rejected'), rejection_row('Rejected')]
+
+    # Act + Assert (When / Then)
     assert rejection_reject(client, route).status_code == (409 if route == 'reject' else 200)
     assert not any(('INSERT INTO public."EventNotificationOutbox"' in call.args[0] for call in cursor.execute.call_args_list))
 
-def test_ac2_dr_second_freeze_reads_back_first_frozen_content(boundary):
-    """Conflict: freeze an already frozen job with different content; the response returns the
-    first envelope without an UPDATE, keeping retry history immutable.
+def test_second_freeze_reads_back_first_frozen_content(boundary):
     """
+    Summary: Freeze an already frozen job with different content; the response returns the first envelope without an UPDATE, keeping retry history immutable.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = dict(source_id=rejection_JOB_ID, source=rejection_SOURCE, envelope={'first': True}, lease_token=rejection_LEASE, lease_valid=True, attempts=2, created_at=datetime(2026, 10, 21, tzinfo=UTC))
+
+    # Act (When)
     result = client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/freeze', headers=rejection_HEADERS, json={'leaseToken': rejection_LEASE, 'envelope': {'second': True}})
+
+    # Assert (Then)
     assert result.json['envelope'] == {'first': True}
     assert cursor.execute.call_count == 1
 
 @pytest.mark.parametrize('route', ['approve', 'progress'])
-def test_ac1_dr_approval_storage_failure_aborts_decision_transaction(boundary, route):
-    """Failure: make the approval intent INSERT raise a database error; HTTP 503 and exceptional
-    transaction exit require the rollback contract, rather than reporting a decision without
-    notification work.
+def test_approval_storage_failure_aborts_decision_transaction(boundary, route):
     """
+    Summary: Make the approval intent INSERT raise a database error; HTTP 503 and exceptional transaction exit require the rollback contract, rather than reporting a decision without notification work.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     import psycopg2
     client, connection, cursor = boundary
     cursor.fetchone.side_effect = [approval_row(), approval_row('Approved')]
@@ -514,42 +743,76 @@ def test_ac1_dr_approval_storage_failure_aborts_decision_transaction(boundary, r
         if 'INSERT INTO public."EventNotificationOutbox"' in sql:
             raise psycopg2.OperationalError('isolated intent failure')
     cursor.execute.side_effect = execute
+
+    # Act + Assert (When / Then)
     assert approval_approve(client, route).status_code == 503
     assert connection.__exit__.call_args.args[0] is psycopg2.OperationalError
 
 @pytest.mark.parametrize('route', ['approve', 'progress'])
-def test_ac1_dr_unassigned_actor_cannot_approve_or_notify(boundary, route):
-    """Failure: approve as someone other than the assigned coordinator; HTTP 403 after only the
-    lookup prevents an unauthorised decision or notification INSERT.
+def test_unassigned_actor_cannot_approve_or_notify(boundary, route):
     """
+    Summary: Approve as someone other than the assigned coordinator; HTTP 403 after only the lookup prevents an unauthorised decision or notification INSERT.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = approval_row()
+
+    # Act + Assert (When / Then)
     assert approval_approve(client, route, approval_ORGANISER).status_code == 403
     assert cursor.execute.call_count == 1
 
-@pytest.mark.parametrize('change', [{'recipientId': approval_ACTOR}, {'type': 'event.rejection'}, {'message': 'Community Workshop was rejected'}, {'details': {**approval_SOURCE, 'eventName': 'Renamed'}}, {'destination': {'kind': 'event-details', 'eventId': approval_ORGANISER}}, {'createdAt': '2026-10-22T00:00:00+00:00'}])
-def test_ac1_dr_freeze_refuses_rewritten_approval_history(boundary, change):
-    """Failure: alter saved approval facts, recipient or destination before freeze; HTTP 400 after
-    only the lookup prevents writing a message that rewrites the original decision.
+@pytest.mark.parametrize('change', [{'recipientId': approval_ACTOR}, {'type': 'event.rejection'}, {'message': 'Community Workshop was rejected'}, {'details': {**approval_SOURCE, 'eventName': 'Renamed'}}, {'destination': {'kind': 'event-details', 'eventId': approval_ORGANISER}}, {'createdAt': '2026-10-22T00:00:00+00:00'}], ids=["recipientid_approval_actor", "type_event_rejection", "message_community_workshop_was_rejected", "details_approval_source_eventname_renamed", "destination_kind_event_details_eventid_approval", "createdat_2026_10_22t00_00_00_00_00"])
+def test_freeze_refuses_rewritten_approval_history(boundary, change):
     """
+    Summary: Alter saved approval facts, recipient or destination before freeze; HTTP 400 after only the lookup prevents writing a message that rewrites the original decision.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = dict(source_id=approval_JOB_ID, source=approval_SOURCE, type='event.approval', envelope=None, lease_valid=True, created_at=datetime(2026, 10, 21, tzinfo=UTC))
+
+    # Act (When)
     result = client.post(f'/internal/notification-outbox/{approval_JOB_ID}/freeze', headers=approval_HEADERS, json={'leaseToken': approval_LEASE, 'envelope': {**approval_ENVELOPE, **change}})
+
+    # Assert (Then)
     assert result.status_code == 400
     assert cursor.execute.call_count == 1
 
-def test_ac4_dr_legacy_assignment_diagnoses_missing_organiser_without_guessing_recipient(boundary, caplog):
-    """Failure: DR5: assign legacy ownerless event via HTTP; action succeeds with a diagnostic but no publishable intent or guessed recipient."""
+def test_legacy_assignment_diagnoses_missing_organiser_without_guessing_recipient(boundary, caplog):
+    """
+    Summary: DR5: assign legacy ownerless event via HTTP; action succeeds with a diagnostic but no publishable intent or guessed recipient.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.side_effect = [dict(coordinator_id=None, status='Submitted'), initial_assignment_assigned_row(None)]
+
+    # Act + Assert (When / Then)
     assert initial_assignment_assign(client).status_code == 200
     assert 'missing organiser' in caplog.text
     assert initial_assignment_intents(cursor) == []
 
-def test_ac4_dr_outbox_failure_aborts_assignment_transaction(boundary):
-    """Failure: make the assignment intent INSERT raise a database error; HTTP 503 and exceptional
-    transaction exit protect the assignment-and-notification rollback contract.
+def test_outbox_failure_aborts_assignment_transaction(boundary):
     """
+    Summary: Make the assignment intent INSERT raise a database error; HTTP 503 and exceptional transaction exit protect the assignment-and-notification rollback contract.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     import psycopg2
     client, connection, cursor = boundary
     cursor.fetchone.side_effect = [dict(coordinator_id=None, status='Submitted'), initial_assignment_assigned_row()]
@@ -558,28 +821,45 @@ def test_ac4_dr_outbox_failure_aborts_assignment_transaction(boundary):
         if 'INSERT INTO public."EventNotificationOutbox"' in sql:
             raise psycopg2.OperationalError('isolated injected failure')
     cursor.execute.side_effect = execute
+
+    # Act + Assert (When / Then)
     assert initial_assignment_assign(client).status_code == 503
     assert connection.__exit__.call_args.args[0] is psycopg2.OperationalError
 
-def test_ac4_dr_hold_refuses_invalid_diagnosis_or_stale_lease(boundary):
-    """Failure: hold work with an invalid diagnosis, then a stale lease; HTTP 400 without a write
-    and HTTP 409 respectively prevent invalid or obsolete workers from holding current work.
+def test_hold_refuses_invalid_diagnosis_or_stale_lease(boundary):
     """
+    Summary: Hold work with an invalid diagnosis, then a stale lease; HTTP 400 without a write and HTTP 409 respectively prevent invalid or obsolete workers from holding current work.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = initial_assignment_pending()
+
+    # Act + Assert (When / Then)
     assert client.post(f'/internal/notification-outbox/{initial_assignment_JOB_ID}/hold', headers=initial_assignment_HEADERS, json=dict(leaseToken=initial_assignment_LEASE, error=None)).status_code == 400
     assert cursor.execute.call_count == 1
     cursor.fetchone.return_value = None
     assert client.post(f'/internal/notification-outbox/{initial_assignment_JOB_ID}/hold', headers=initial_assignment_HEADERS, json=dict(leaseToken=initial_assignment_LEASE, error='missing name')).status_code == 409
 
-def test_ac4_dr_hold_diagnostics_reports_storage_failure_and_repair_requires_held_work(boundary):
-    """Failure: release nonexistent held work, then list with broken or missing storage; HTTP 409
-    and 503 distinguish a repair conflict from an outage instead of claiming successful
-    recovery.
+def test_hold_diagnostics_reports_storage_failure_and_repair_requires_held_work(boundary):
     """
+    Summary: Release nonexistent held work, then list with broken or missing storage; HTTP 409 and 503 distinguish a repair conflict from an outage instead of claiming successful recovery.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     import psycopg2
     client, _, cursor = boundary
     cursor.fetchone.return_value = None
+
+    # Act + Assert (When / Then)
     assert client.post(f'/internal/notification-outbox/{initial_assignment_JOB_ID}/release', headers=initial_assignment_HEADERS, json={}).status_code == 409
     cursor.execute.side_effect = psycopg2.OperationalError('isolated failure')
     assert client.get('/internal/notification-outbox/held', headers=initial_assignment_HEADERS).status_code == 503
@@ -587,21 +867,44 @@ def test_ac4_dr_hold_diagnostics_reports_storage_failure_and_repair_requires_hel
     assert client.get('/internal/notification-outbox/held', headers=initial_assignment_HEADERS).status_code == 503
 
 @pytest.mark.parametrize('unavailable_database', [False, True], ids=['invalid-coordinator', 'database-unconfigured'])
-def test_ac4_dr_invalid_or_unavailable_reassignment_has_no_database_work(boundary, unavailable_database):
-    """Failure: DR2: invalid coordinator or missing DB configuration rejects before any transaction, so failed action cannot create notification work."""
+def test_invalid_or_unavailable_reassignment_has_no_database_work(boundary, unavailable_database):
+    """
+    Summary: DR2: invalid coordinator or missing DB configuration rejects before any transaction, so failed action cannot create notification work.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, cursor = boundary
     if unavailable_database:
         client.application.config['DATABASE_URL'] = None
+
+    # Act (When)
     result = reassignment_assign(client, reassignment_BOB if unavailable_database else 'not-a-uuid')
+
+    # Assert (Then)
     assert result.status_code == (503 if unavailable_database else 400)
     connection.cursor.assert_not_called()
     assert reassignment_intents(cursor) == []
 
-def test_ac2_dr_publish_outage_releases_claim_for_retry_without_erasing_frozen_content(boundary):
-    """Failure: DR3: retry HTTP operation records backoff and releases lease; observe SQL boundary retains envelope and never marks undelivered work published."""
+def test_publish_outage_releases_claim_for_retry_without_erasing_frozen_content(boundary):
+    """
+    Summary: DR3: retry HTTP operation records backoff and releases lease; observe SQL boundary retains envelope and never marks undelivered work published.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = dict(lease_valid=True, attempts=1)
+
+    # Act (When)
     response = client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/retry', json={'leaseToken': rejection_LEASE, 'error': 'BrokerUnavailable'}, headers=rejection_HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 200
     sql, values = cursor.execute.call_args.args
     assert 'available_at' in sql and 'lease_token=NULL' in sql
@@ -609,8 +912,15 @@ def test_ac2_dr_publish_outage_releases_claim_for_retry_without_erasing_frozen_c
     assert values == (2, 'BrokerUnavailable', rejection_JOB_ID)
 
 @pytest.mark.parametrize('route', ['reject', 'progress'])
-def test_ac2_dr_outbox_failure_aborts_event_transaction(boundary, route):
-    """Failure: DR2: inject DB error at intent write; observe 503 and exceptional transaction exit (unit rollback contract; real rollback needs integration)."""
+def test_outbox_failure_aborts_event_transaction(boundary, route):
+    """
+    Summary: DR2: inject DB error at intent write; observe 503 and exceptional transaction exit (unit rollback contract; real rollback needs integration).
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     import psycopg2
     client, connection, cursor = boundary
     cursor.fetchone.side_effect = [rejection_row(), rejection_row('Rejected')]
@@ -619,59 +929,99 @@ def test_ac2_dr_outbox_failure_aborts_event_transaction(boundary, route):
         if 'INSERT INTO public."EventNotificationOutbox"' in sql:
             raise psycopg2.OperationalError('injected intent failure')
     cursor.execute.side_effect = execute
+
+    # Act + Assert (When / Then)
     assert rejection_reject(client, route).status_code == 503
     assert connection.__exit__.call_args.args[0] is psycopg2.OperationalError
 
 @pytest.mark.parametrize('token', [None, 'wrong', 'é'])
-def test_ac2_dr_outbox_rejects_unauthenticated_calls_without_db_access(boundary, token):
-    """Failure: claim work without the exact internal token; HTTP 401 before opening a cursor
-    protects pending organiser notifications from unauthorised access.
+def test_outbox_rejects_unauthenticated_calls_without_db_access(boundary, token):
     """
+    Summary: Claim work without the exact internal token; HTTP 401 before opening a cursor protects pending organiser notifications from unauthorised access.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, connection, _ = boundary
     headers = {} if token is None else {'X-Internal-Token': token}
+
+    # Act + Assert (When / Then)
     assert client.post('/internal/notification-outbox/claim', headers=headers).status_code == 401
     connection.cursor.assert_not_called()
 
 @pytest.mark.parametrize('missing', [True, False])
-def test_ac2_dr_expired_or_missing_lease_cannot_complete_work(boundary, missing):
-    """Failure: complete work whose lookup is missing or reports an expired lease; HTTP 409 with no
-    UPDATE prevents a stale worker from marking delivery complete.
+def test_expired_or_missing_lease_cannot_complete_work(boundary, missing):
     """
+    Summary: Complete work whose lookup is missing or reports an expired lease; HTTP 409 with no UPDATE prevents a stale worker from marking delivery complete.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = None if missing else dict(lease_valid=False)
+
+    # Act (When)
     result = client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/published', headers=rejection_HEADERS, json={'leaseToken': rejection_LEASE})
+
+    # Assert (Then)
     assert result.status_code == 409
     assert cursor.execute.call_count == 1
 
-@pytest.mark.parametrize('change', [{'version': True}, {'id': rejection_ORGANISER}, {'type': 'event.approval'}, {'recipientId': rejection_ACTOR}, {'createdAt': '2026-10-22T00:00:00+00:00'}, {'destination': {'kind': 'event-details', 'eventId': rejection_ORGANISER}}, {'details': {}}, {'message': 'replacement history'}])
-def test_ac2_dr_freeze_refuses_changes_to_historical_rejection(boundary, change):
-    """Failure: alter rejection identity, content, recipient or link before freeze; HTTP 400 after
-    only the lookup prevents writing a notification inconsistent with the saved decision.
+@pytest.mark.parametrize('change', [{'version': True}, {'id': rejection_ORGANISER}, {'type': 'event.approval'}, {'recipientId': rejection_ACTOR}, {'createdAt': '2026-10-22T00:00:00+00:00'}, {'destination': {'kind': 'event-details', 'eventId': rejection_ORGANISER}}, {'details': {}}, {'message': 'replacement history'}], ids=["version_true", "id_rejection_organiser", "type_event_approval", "recipientid_rejection_actor", "createdat_2026_10_22t00_00_00_00_00", "destination_kind_event_details_eventid_rejection", "details", "message_replacement_history"])
+def test_freeze_refuses_changes_to_historical_rejection(boundary, change):
     """
+    Summary: Alter rejection identity, content, recipient or link before freeze; HTTP 400 after only the lookup prevents writing a notification inconsistent with the saved decision.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     pending = dict(source_id=rejection_JOB_ID, source=rejection_SOURCE, type='event.rejection', envelope=None, attempts=1, lease_token=rejection_LEASE, lease_valid=True, created_at=datetime(2026, 10, 21, tzinfo=UTC))
     cursor.fetchone.return_value = pending
     envelope = dict(version=1, id=rejection_JOB_ID, recipientId=rejection_ORGANISER, type='event.rejection', createdAt='2026-10-21T00:00:00+00:00', message=f'Community Workshop was rejected: {rejection_REASON}', destination=dict(kind='event-details', eventId=rejection_EVENT), details=rejection_SOURCE)
+
+    # Act (When)
     result = client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/freeze', headers=rejection_HEADERS, json={'leaseToken': rejection_LEASE, 'envelope': {**envelope, **change}})
+
+    # Assert (Then)
     assert result.status_code == 400
     assert cursor.execute.call_count == 1
 
-@pytest.mark.parametrize('action,body', [('published', {'leaseToken': rejection_LEASE}), ('retry', {'leaseToken': rejection_LEASE, 'error': 17}), ('retry', None), ('retry', {'leaseToken': 'bad'})])
-def test_ac2_dr_outbox_refuses_unprepared_completion_and_invalid_inputs(boundary, action, body):
-    """Failure: complete unfrozen work or send malformed retry data; HTTP 400 prevents completion
-    before preparation and rejects unusable recovery requests.
+@pytest.mark.parametrize('action,body', [('published', {'leaseToken': rejection_LEASE}), ('retry', {'leaseToken': rejection_LEASE, 'error': 17}), ('retry', None), ('retry', {'leaseToken': 'bad'})], ids=["published_leasetoken_rejection_lease", "retry_leasetoken_rejection_lease_error_17", "retry_none", "retry_leasetoken_bad"])
+def test_outbox_refuses_unprepared_completion_and_invalid_inputs(boundary, action, body):
     """
+    Summary: Complete unfrozen work or send malformed retry data; HTTP 400 prevents completion before preparation and rejects unusable recovery requests.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = boundary
     cursor.fetchone.return_value = dict(lease_valid=True, envelope=None)
+
+    # Act + Assert (When / Then)
     assert client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/{action}', headers=rejection_HEADERS, json=body).status_code == 400
 
-def test_ac2_dr_outbox_reports_storage_and_configuration_failures(boundary):
-    """Failure: call an unknown operation, then claim with broken or missing storage; HTTP 404 and
-    503 keep invalid requests distinct from outages rather than reporting an empty successful
-    batch.
+def test_outbox_reports_storage_and_configuration_failures(boundary):
     """
+    Summary: Call an unknown operation, then claim with broken or missing storage; HTTP 404 and 503 keep invalid requests distinct from outages rather than reporting an empty successful batch.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     import psycopg2
     client, _, cursor = boundary
+
+    # Act + Assert (When / Then)
     assert client.post(f'/internal/notification-outbox/{rejection_JOB_ID}/unknown', headers=rejection_HEADERS).status_code == 404
     cursor.execute.side_effect = psycopg2.OperationalError('down')
     assert client.post('/internal/notification-outbox/claim', headers=rejection_HEADERS).status_code == 503

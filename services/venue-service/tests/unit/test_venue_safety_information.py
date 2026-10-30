@@ -1,12 +1,69 @@
-"""SCRUM-167 Record Venue Safety Information: Venue Service.
+"""
+SCRUM-167: Record Venue Safety Information
 
+User Story
+----------
 As a Venue Staff member, I want to record a venue's emergency access details
 and known operational restrictions, so that the Safety Officer can take them
 into account when reviewing events at that venue.
 
-Covers PUT /venues/<id>/safety-info (role check, validation, stamp), the four
-safety fields on GET /venues and GET /venues/<id>, and that the profile routes
-cannot be used to write them.
+Acceptance Criteria
+-------------------
+AC1: Given authorised Venue Staff edit a venue, when they enter emergency
+     access details (e.g. exits, assembly point, emergency vehicle access) and
+     known restrictions (e.g. noise curfew, no open flames, floor load limit),
+     then the details are saved with the venue and shown on its details page.
+AC2: Given a venue has no safety information recorded, when it is viewed, then
+     the fields show "Not provided" rather than appearing blank.
+AC3: Given safety information is updated, when it is saved, then the editor and
+     timestamp are recorded.
+AC4: Given a user who is not Venue Staff, when they attempt to edit venue
+     safety information through the UI or API, then the change is rejected and
+     the existing values are unchanged.
+
+SCRUM-8: User Authentication and Authorization
+
+User Story
+----------
+As a system user, I want to securely access the system, so that I can use the
+information and functionality available to me.
+
+Acceptance Criteria
+-------------------
+AC1: Given a system user has not been successfully authenticated, when they
+     attempt to access protected information or functionality, then access is
+     denied.
+AC2: Given a system user successfully authenticates, when they access protected
+     information or functionality, then their access is evaluated according to
+     their role and relationship to the relevant event.
+AC3: Given a system user's authentication attempt is unsuccessful, when the
+     authentication attempt is completed, then they remain unable to access
+     protected information or functionality.
+
+Real
+----
+- PUT /venues/<id>/safety-info: the Venue Staff role check, body and length
+  validation, blank-to-NULL storage, the update that stamps the editor and the
+  database clock only when something changed, and the Singapore-time
+  serialisation run for real; GET /venues and GET /venues/<id> return the
+  fields.
+- Assertions are on the status, errors, the SQL and values sent, and the
+  returned fields.
+
+Doubled
+-------
+- psycopg2.connect: Stub / Mock (`setup` fixture) - the cursor returns canned
+  Venue rows, an empty update (no change), or raises ForeignKeyViolation /
+  OperationalError; SQL inspected; asserted not called for refused callers.
+
+Not proven
+----------
+- That the details page shows "Not provided" (AC2, UI half) (-> frontend venue
+  detail tests and docs/test-scripts/scrum-167 manual script).
+- That the Safety Officer's review shows these fields (-> safety-check- service
+  unit tests for SCRUM-163).
+- That the real User foreign key rejects unknown editors (->
+  tests/integration/).
 """
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -70,16 +127,27 @@ def put_safety(client, body=SAFETY_PAYLOAD, headers=None):
 # AC1 ----------------------------------------------------------------------
 
 
-def test_ac1_safety_details_are_saved_and_returned(setup):
-    """Normal: Venue Staff save both texts; they are written and echoed back."""
+def test_save_safety_info_when_venue_staff_saves_and_returns_both_texts(setup):
+    """
+    Summary: Venue Staff can save emergency access details and known restrictions, and get them back.
+    AC1: Given authorised Venue Staff edit a venue, when they enter emergency
+        access details (e.g. exits, assembly point, emergency vehicle access)
+        and known restrictions (e.g. noise curfew, no open flames, floor load
+        limit), then the details are saved with the venue and shown on its
+        details page.
+    Double: Stub (cursor returns the updated row; update inspected)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = safety_row()
 
+    # Act (When)
     response = put_safety(client, {
         "emergencyAccessDetails": f"  {SAFETY_PAYLOAD['emergencyAccessDetails']}  ",
         "knownRestrictions": f"\n{SAFETY_PAYLOAD['knownRestrictions']}\n",
     })
 
+    # Assert (Then)
     assert response.status_code == 200
     _, params = cursor.execute.call_args_list[0].args
     assert params == {
@@ -95,13 +163,24 @@ def test_ac1_safety_details_are_saved_and_returned(setup):
     assert venue["safetyInfoUpdatedAt"] == "2030-01-15T10:30:00+08:00"
 
 
-def test_ac1_venue_details_include_safety_information(setup):
-    """Normal: the details read returns the recorded texts."""
+def test_get_venue_includes_safety_information(setup):
+    """
+    Summary: A venue's details include its recorded safety information.
+    AC1: Given authorised Venue Staff edit a venue, when they enter emergency
+        access details (e.g. exits, assembly point, emergency vehicle access)
+        and known restrictions (e.g. noise curfew, no open flames, floor load
+        limit), then the details are saved with the venue and shown on its
+        details page.
+    Double: Stub (cursor returns a row with both texts)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = safety_row()
 
+    # Act (When)
     response = client.get(f"/venues/{VENUE_ID}")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["venue"]["emergencyAccessDetails"] == SAFETY_PAYLOAD["emergencyAccessDetails"]
     assert response.json["venue"]["knownRestrictions"] == SAFETY_PAYLOAD["knownRestrictions"]
@@ -109,13 +188,24 @@ def test_ac1_venue_details_include_safety_information(setup):
     assert all(column in select_query for column in SAFETY_COLUMNS)
 
 
-def test_ac1_catalogue_list_includes_safety_information(setup):
-    """Normal: the catalogue list carries the fields, because Safety Check reads it."""
+def test_list_venues_includes_safety_information(setup):
+    """
+    Summary: The venue list carries safety information too, for the Safety Officer's review.
+    AC1: Given authorised Venue Staff edit a venue, when they enter emergency
+        access details (e.g. exits, assembly point, emergency vehicle access)
+        and known restrictions (e.g. noise curfew, no open flames, floor load
+        limit), then the details are saved with the venue and shown on its
+        details page.
+    Double: Stub (cursor returns a row with both texts)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchall.return_value = [safety_row()]
 
+    # Act (When)
     response = client.get("/venues")
 
+    # Assert (Then)
     assert response.status_code == 200
     venue = response.json["venues"][0]
     assert venue["emergencyAccessDetails"] == SAFETY_PAYLOAD["emergencyAccessDetails"]
@@ -123,13 +213,20 @@ def test_ac1_catalogue_list_includes_safety_information(setup):
     assert venue["safetyInfoUpdatedBy"] == STAFF_ID
 
 
-def test_ac1_text_of_exactly_2000_characters_is_accepted(setup):
-    """Boundary: 2000 characters is the longest text allowed."""
+def test_save_safety_info_with_2000_characters_is_accepted(setup):
+    """
+    Summary: Safety texts of up to 2000 characters are accepted.
+    AC1: (boundary: length = 2000)
+    Double: Stub (cursor returns the updated row)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = safety_row()
 
+    # Act (When)
     response = put_safety(client, {"emergencyAccessDetails": "x" * 2000, "knownRestrictions": "y" * 2000})
 
+    # Assert (Then)
     assert response.status_code == 200
     _, params = cursor.execute.call_args_list[0].args
     assert params["emergency"] == "x" * 2000
@@ -142,13 +239,21 @@ def test_ac1_text_of_exactly_2000_characters_is_accepted(setup):
         ("emergencyAccessDetails", "Emergency Access Details"),
         ("knownRestrictions", "Known Restrictions"),
     ],
+    ids=["emergency_access", "known_restrictions"],
 )
-def test_ac1_text_of_2001_characters_is_refused(key, label, setup):
-    """Boundary: one character over the limit is refused before the database."""
+def test_save_safety_info_with_2001_characters_returns_400_before_database(key, label, setup):
+    """
+    Summary: A safety text one character over the limit is refused before anything is saved.
+    AC1: (boundary: length = 2001)
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, _, connect = setup
 
+    # Act (When)
     response = put_safety(client, {**SAFETY_PAYLOAD, key: "x" * 2001})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["errors"] == [f"{label} must be at most 2000 characters."]
     connect.assert_not_called()
@@ -165,12 +270,23 @@ def test_ac1_text_of_2001_characters_is_refused(key, label, setup):
     ],
     ids=["missing-emergency", "missing-restrictions", "number", "list", "non-object"],
 )
-def test_ac1_missing_key_or_non_text_value_is_refused(body, error, setup):
-    """Failure: the body must name both fields as text or null."""
+def test_save_safety_info_with_missing_or_non_text_field_returns_400(body, error, setup):
+    """
+    Summary: Both safety fields must be sent, as text or null.
+    AC1: Given authorised Venue Staff edit a venue, when they enter emergency
+        access details (e.g. exits, assembly point, emergency vehicle access)
+        and known restrictions (e.g. noise curfew, no open flames, floor load
+        limit), then the details are saved with the venue and shown on its
+        details page.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, _, connect = setup
 
+    # Act (When)
     response = put_safety(client, body)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Please correct the safety information."
     assert error in response.json["errors"]
@@ -188,13 +304,21 @@ def test_ac1_missing_key_or_non_text_value_is_refused(body, error, setup):
     ],
     ids=["null-columns", "columns-absent"],
 )
-def test_ac2_unrecorded_safety_information_serialises_as_null(row, setup):
-    """Boundary: nothing recorded reads as null (the UI shows "Not provided"), never ""."""
+def test_get_venue_without_safety_info_returns_null_fields(row, setup):
+    """
+    Summary: A venue with nothing recorded returns null, never empty text, so the UI shows "Not provided".
+    AC2: Given a venue has no safety information recorded, when it is viewed,
+        then the fields show "Not provided" rather than appearing blank.
+    Double: Stub (cursor returns null or absent safety columns)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = row
 
+    # Act (When)
     venue = client.get(f"/venues/{VENUE_ID}").json["venue"]
 
+    # Assert (Then)
     assert venue["emergencyAccessDetails"] is None
     assert venue["knownRestrictions"] is None
     assert venue["safetyInfoUpdatedBy"] is None
@@ -202,13 +326,21 @@ def test_ac2_unrecorded_safety_information_serialises_as_null(row, setup):
 
 
 @pytest.mark.parametrize("blank", ["", "   ", None], ids=["empty", "whitespace", "null"])
-def test_ac2_blank_or_whitespace_input_is_stored_as_null(blank, setup):
-    """Boundary: a cleared field is stored as NULL, not empty text."""
+def test_save_safety_info_with_blank_text_stores_null(blank, setup):
+    """
+    Summary: Clearing a safety field stores nothing rather than blank text.
+    AC2: Given a venue has no safety information recorded, when it is viewed,
+        then the fields show "Not provided" rather than appearing blank.
+    Double: Stub (cursor returns the updated row; values inspected)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = saved_row()
 
+    # Act (When)
     response = put_safety(client, {"emergencyAccessDetails": blank, "knownRestrictions": blank})
 
+    # Assert (Then)
     assert response.status_code == 200
     _, params = cursor.execute.call_args_list[0].args
     assert params["emergency"] is None
@@ -218,38 +350,62 @@ def test_ac2_blank_or_whitespace_input_is_stored_as_null(blank, setup):
 # AC3 ----------------------------------------------------------------------
 
 
-def test_ac3_update_stamps_editor_and_server_time(setup):
-    """Normal: the save records the editor id and the database's own clock."""
+def test_save_safety_info_records_editor_and_database_time(setup):
+    """
+    Summary: Each save records who edited and the database's time.
+    AC3: Given safety information is updated, when it is saved, then the editor
+        and timestamp are recorded.
+    Double: Stub (cursor returns the updated row; SQL inspected)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = safety_row()
 
     put_safety(client)
 
     query, params = cursor.execute.call_args_list[0].args
+
+    # Act + Assert (When / Then)
     assert "safety_info_updated_by = %(editor)s" in query
     assert "safety_info_updated_at = now()" in query
     assert "IS DISTINCT FROM" in query
     assert params["editor"] == STAFF_ID
 
 
-def test_ac3_serialised_timestamp_is_singapore_time(setup):
-    """Normal: a UTC timestamp is returned as Singapore time."""
+def test_save_safety_info_returns_timestamp_in_singapore_time(setup):
+    """
+    Summary: The edit time is shown in Singapore time.
+    AC3: Given safety information is updated, when it is saved, then the editor
+        and timestamp are recorded.
+    Double: Stub (cursor returns a UTC timestamp)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.return_value = safety_row()
 
+    # Act (When)
     venue = client.get(f"/venues/{VENUE_ID}").json["venue"]
 
+    # Assert (Then)
     assert venue["safetyInfoUpdatedAt"] == "2030-01-15T10:30:00+08:00"
 
 
-def test_ac3_unchanged_save_returns_venue_without_restamping(setup):
-    """Boundary: saving identical values updates nothing, so the old stamp stays."""
+def test_save_safety_info_when_unchanged_keeps_previous_stamp(setup):
+    """
+    Summary: Saving the same values again does not change who edited or when.
+    AC3: Given safety information is updated, when it is saved, then the editor
+        and timestamp are recorded.
+    Double: Stub (update changes no row; the venue is read back)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     other_staff = "0e6f7c55-1b2a-4d3e-8f90-123456789abc"
     cursor.fetchone.side_effect = [None, safety_row(safety_info_updated_by=other_staff)]
 
+    # Act (When)
     response = put_safety(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert cursor.execute.call_count == 2
     assert cursor.execute.call_args_list[1].args[0].lstrip().startswith("SELECT")
@@ -269,13 +425,23 @@ def test_ac3_unchanged_save_returns_venue_without_restamping(setup):
         "Event Organiser",
         "Technical Support Staff",
     ],
+    ids=["event_coordinator", "event_coordinator_lead", "safety_officer", "event_organiser", "technical_support"],
 )
-def test_ac4_non_venue_staff_role_is_refused_before_any_db_call(role, setup):
-    """Failure: only Venue Staff may change safety information."""
+def test_save_safety_info_when_not_venue_staff_returns_403_without_database(role, setup):
+    """
+    Summary: Nobody but Venue Staff can change safety information, and nothing is changed for them.
+    AC4: Given a user who is not Venue Staff, when they attempt to edit venue
+        safety information through the UI or API, then the change is rejected
+        and the existing values are unchanged.
+    Double: Mock (psycopg2.connect not called)
+    """
+    # Arrange (Given)
     client, _, connect = setup
 
+    # Act (When)
     response = put_safety(client, headers=staff_headers(role=role))
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "VENUE_STAFF_ONLY"
     connect.assert_not_called()
@@ -290,25 +456,46 @@ def test_ac4_non_venue_staff_role_is_refused_before_any_db_call(role, setup):
     ],
     ids=["no-token", "dev-headers-only", "invalid-token"],
 )
-def test_ac4_missing_or_invalid_identity_is_refused(headers, message, setup):
-    """Failure (SCRUM-8): a request without a valid sign-in never reaches the database."""
+def test_save_safety_info_without_valid_sign_in_returns_401_without_database(headers, message, setup):
+    """
+    Summary: A save without a valid sign-in never reaches the database.
+    AC4: Given a user who is not Venue Staff, when they attempt to edit venue
+        safety information through the UI or API, then the change is rejected
+        and the existing values are unchanged.
+    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
+        when they attempt to access protected information or functionality,
+        then access is denied.
+    Double: Mock (psycopg2.connect not called)
+    """
+    # Arrange (Given)
     _, _, connect = setup
     client = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"}).test_client()
 
+    # Act (When)
     response = put_safety(client, headers=headers)
 
+    # Assert (Then)
     assert response.status_code == 401
     assert response.json["message"] == message
     connect.assert_not_called()
 
 
-def test_ac4_unknown_editor_is_refused(setup):
-    """Failure: the User FK refuses an editor that does not exist; that is a 403, not a 503."""
+def test_save_safety_info_when_editor_unknown_returns_403(setup):
+    """
+    Summary: An editor with no user record is refused rather than reported as an outage.
+    AC4: Given a user who is not Venue Staff, when they attempt to edit venue
+        safety information through the UI or API, then the change is rejected
+        and the existing values are unchanged.
+    Double: Stub (update raises ForeignKeyViolation)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.execute.side_effect = psycopg2.errors.ForeignKeyViolation("fk_venue_safety_editor")
 
+    # Act (When)
     response = put_safety(client)
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json == {
         "code": "UNKNOWN_EDITOR",
@@ -324,8 +511,15 @@ def test_ac4_unknown_editor_is_refused(setup):
     ],
     ids=["profile-edit", "profile-create"],
 )
-def test_ac4_profile_edit_does_not_write_safety_fields(method, path, fetches, setup):
-    """Conflict: the profile routes have no role check, so they must ignore safety keys."""
+def test_profile_save_with_safety_fields_ignores_them(method, path, fetches, setup):
+    """
+    Summary: The general add and edit forms cannot change safety information.
+    AC4: Given a user who is not Venue Staff, when they attempt to edit venue
+        safety information through the UI or API, then the change is rejected
+        and the existing values are unchanged.
+    Double: Stub (cursor returns rows; SQL inspected)
+    """
+    # Arrange (Given)
     client, cursor, _ = setup
     cursor.fetchone.side_effect = fetches
     body = {
@@ -335,8 +529,10 @@ def test_ac4_profile_edit_does_not_write_safety_fields(method, path, fetches, se
         "safetyInfoUpdatedBy": STAFF_ID,
     }
 
+    # Act (When)
     response = getattr(client, method)(path, json=body)
 
+    # Assert (Then)
     assert response.status_code in (200, 201)
     write_query, write_params = cursor.execute.call_args_list[-1].args
     written = write_query.split("RETURNING")[0]
@@ -346,8 +542,42 @@ def test_ac4_profile_edit_does_not_write_safety_fields(method, path, fetches, se
     assert STAFF_ID not in write_params
 
 
-def test_cors_allows_the_authorization_header(setup):
-    """Normal: the browser preflight for the safety save is allowed to send the sign-in token."""
+# Other failures -----------------------------------------------------------
+
+
+def test_save_safety_info_when_venue_unknown_returns_404(setup):
+    """
+    Summary: Saving safety information for a venue that does not exist is refused.
+    AC1: Given authorised Venue Staff edit a venue, when they enter emergency
+        access details (e.g. exits, assembly point, emergency vehicle access)
+        and known restrictions (e.g. noise curfew, no open flames, floor load
+        limit), then the details are saved with the venue and shown on its
+        details page.
+    Double: Stub (no row updated and none found)
+    """
+    # Arrange (Given)
+    client, cursor, _ = setup
+    cursor.fetchone.side_effect = [None, None]
+
+    # Act (When)
+    response = put_safety(client)
+
+    # Assert (Then)
+    assert response.status_code == 404
+    assert response.json["message"] == "Venue not found."
+
+
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_save_safety_info_preflight_allows_authorization_header(setup):
+    """
+    Summary: The browser may send the sign-in token with a safety save.
+    Supporting design check: CORS allows the Authorization header
+    Double: None
+    """
     client, _, _ = setup
 
     response = client.options(
@@ -366,22 +596,12 @@ def test_cors_allows_the_authorization_header(setup):
     assert "PUT" in response.headers["Access-Control-Allow-Methods"]
 
 
-# Other failures -----------------------------------------------------------
-
-
-def test_unknown_venue_is_404(setup):
-    """Failure: no row updated and none found means the venue does not exist."""
-    client, cursor, _ = setup
-    cursor.fetchone.side_effect = [None, None]
-
-    response = put_safety(client)
-
-    assert response.status_code == 404
-    assert response.json["message"] == "Venue not found."
-
-
-def test_database_error_is_503(setup, monkeypatch):
-    """Failure: a database outage is a 503 without internals."""
+def test_save_safety_info_when_database_fails_returns_503_without_internals(setup, monkeypatch):
+    """
+    Summary: A database outage while saving gives a 503 without internals.
+    Supporting design check: database errors answer 503 with a safe message
+    Double: Stub (psycopg2.connect raises OperationalError)
+    """
     client, _, _ = setup
 
     def explode(*args, **kwargs):
@@ -395,8 +615,12 @@ def test_database_error_is_503(setup, monkeypatch):
     assert "db.example" not in response.get_data(as_text=True)
 
 
-def test_database_not_configured_is_503():
-    """Failure: no DATABASE_URL means the save cannot run."""
+def test_save_safety_info_when_database_url_missing_returns_503():
+    """
+    Summary: Saving reports itself unavailable when no database is configured.
+    Supporting design check: an unconfigured Venue Service answers 503
+    Double: None
+    """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Venue Staff")
 
     response = put_safety(client)

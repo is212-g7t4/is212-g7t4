@@ -150,3 +150,92 @@ def signed_in(client, user_id="00000000-0000-4000-8000-000000000001", role="Even
     client.__class__ = ActingClient
     client.environ_base["HTTP_AUTHORIZATION"] = bearer(user_id, role)["Authorization"]
     return client
+
+
+VALID = {
+    "eventName": "Community Workshop",
+    "description": "A workshop",
+    "purpose": "Learning",
+    "preferredStartDate": "2026-10-01T09:00",
+    "preferredEndDate": "2026-10-01T17:00",
+    "expectedAttendance": "25",
+}
+
+
+def saved_row():
+    row = {column: VALID.get(key, "") for key, column in FIELDS.items()}
+    row.update(
+        event_id="00000000-0000-0000-0000-000000000001",
+        status="Submitted",
+        submission_date=datetime(2026, 9, 15, 1, 30, tzinfo=UTC),
+        preferred_start_date=datetime(2026, 10, 1, 9),
+        preferred_end_date=datetime(2026, 10, 1, 17),
+        expected_attendance=25,
+        coordinator_id=None,
+    )
+    row["description"] = json.dumps(
+        {
+            "_connectsphere": "event-submission-v1",
+            "description": VALID["description"],
+            "purpose": VALID["purpose"],
+        }
+    )
+    return row
+
+
+def approved_row():
+    row = saved_row()
+    row["status"] = "Approved"
+    row["coordinator_id"] = COORDINATOR_ID
+    row["description"] = json.dumps(
+        {
+            "_connectsphere": "event-submission-v1",
+            "description": VALID["description"],
+            "purpose": VALID["purpose"],
+            "approval": {
+                "coordinatorId": COORDINATOR_ID,
+                "approvedAt": "2026-09-15T02:30:00.000000+00:00",
+            },
+        }
+    )
+    return row
+
+
+def rejected_row():
+    row = saved_row()
+    row["status"] = "Rejected"
+    row["coordinator_id"] = COORDINATOR_ID
+    row["description"] = json.dumps(
+        {
+            "_connectsphere": "event-submission-v1",
+            "description": VALID["description"],
+            "purpose": VALID["purpose"],
+            "decision": {
+                "status": "Rejected",
+                "coordinatorId": COORDINATOR_ID,
+                "decidedAt": "2026-09-15T02:30:00.000000+00:00",
+                "reason": "The selected venue is unavailable.",
+            },
+            "decisionHistory": [
+                {
+                    "status": "Rejected",
+                    "coordinatorId": COORDINATOR_ID,
+                    "decidedAt": "2026-09-15T02:30:00.000000+00:00",
+                    "reason": "The selected venue is unavailable.",
+                }
+            ],
+        }
+    )
+    return row
+
+
+LEAD_ID = "33333333-3333-4333-8333-333333333333"
+
+
+COORDINATOR_ID = "11111111-1111-4111-8111-111111111111"
+
+
+OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
+
+
+ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
