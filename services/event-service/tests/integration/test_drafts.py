@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from tests.unit.factories import signed_in
 from tests.integration.factories import (
     COMPLETE,
     COORDINATOR_ID,
@@ -82,6 +83,7 @@ def test_ac1_coordinator_lists_leave_out_drafts(client, db, path):
     """Normal: coordinator views list the submitted request, never the draft."""
     make_event(db, status="Draft", event_name="Secret Draft")
     make_event(db, status="Submitted", event_name="Submitted Fair")
+    signed_in(client, LEAD_ID, LEAD)
 
     response = client.get(path)
 
@@ -353,7 +355,7 @@ def test_ac5_submitting_a_complete_draft_moves_it_to_submitted(client, db):
     assert row["expected_attendance"] == 25
     assert row["preferred_start_date"] == datetime(2030, 3, 1, 9, tzinfo=SINGAPORE)
     assert draft_names(client) == []
-    unassigned = client.get("/events/unassigned").get_json()["events"]
+    unassigned = signed_in(client, LEAD_ID, LEAD).get("/events/unassigned").get_json()["events"]
     assert [event["id"] for event in unassigned] == [draft_id]
 
 

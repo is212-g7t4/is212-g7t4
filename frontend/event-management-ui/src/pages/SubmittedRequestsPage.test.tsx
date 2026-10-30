@@ -49,6 +49,8 @@ test('an Event Coordinator who is not the Lead sees no Reassign option', async (
   expect(await screen.findByRole('heading', { name: 'Community Workshop' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /reassign/i })).not.toBeInTheDocument()
   expect(screen.queryByText(/reassign/i)).not.toBeInTheDocument()
+  // SCRUM-9: the coordinator list is the Lead's alone, so a coordinator never asks for it.
+  expect(assignmentApi).not.toHaveBeenCalled()
 })
 
 test('the Lead sees the Reassign option', async () => {

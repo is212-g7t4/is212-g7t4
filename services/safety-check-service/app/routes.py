@@ -39,6 +39,7 @@ NOTE_FIELDS = (
 PENDING_SAFETY_CHECK = "Pending Safety Check"
 READY_STATUS = "Approved"
 SAFETY_OFFICER = "Safety Officer"
+LEAD_ROLE = "Event Coordinator Lead"
 CONFIRMED = "Confirmed"
 SAFETY_APPROVED = "Safety Approved"
 SAFETY_CHANGES_REQUESTED = "Safety Changes Requested"
@@ -100,7 +101,7 @@ def review_safety_check(event_id):
     safety_officer_id = g.user_id
     if not safety_officer_id:
         return jsonify(message="Sign in to continue."), 401
-    failure = _check_safety_officer(safety_officer_id)
+    failure = _token_safety_officer()
     if failure:
         return failure
 
@@ -964,7 +965,7 @@ def safety_check_feedback():
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
 
-    _, failure = _load_event(event_id)
+    _, failure = _load_event_for_viewer(event_id)
     if failure:
         return failure
 
@@ -1031,7 +1032,7 @@ def safety_check_queue():
     safety_officer_id = g.user_id
     if not safety_officer_id:
         return jsonify(message="Sign in to continue."), 401
-    failure = _check_safety_officer(safety_officer_id)
+    failure = _token_safety_officer()
     if failure:
         return failure
 
@@ -1220,6 +1221,32 @@ def _compensate(safety_check_id):
             "failed; it is left open and must be removed by hand.",
             safety_check_id,
         )
+
+
+def _token_safety_officer():
+    """SCRUM-9 read routes: the caller's role from the signed token, no User Service lookup."""
+    if g.role != SAFETY_OFFICER:
+        return jsonify(code="NOT_SAFETY_OFFICER", message=NOT_SAFETY_OFFICER), 403
+    return None
+
+
+def _load_event_for_viewer(event_id):
+    """The event for someone reading its safety feedback: the assigned coordinator,
+    the Lead, or a Safety Officer. Every other role is refused."""
+    if g.role == "Event Coordinator":
+        return _load_event(event_id)
+    if g.role not in (LEAD_ROLE, SAFETY_OFFICER):
+        return None, (jsonify(message="Your role cannot view safety feedback."), 403)
+    try:
+        return clients.get_event(event_id, viewer_role=g.role), None
+    except clients.EventNotFoundError:
+        return None, (jsonify(message="Event request not found."), 404)
+    except clients.EventNotAssignedError:
+        return None, (jsonify(message="Your role cannot view safety feedback."), 403)
+    except clients.DownstreamTimeout:
+        return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 504)
+    except clients.DownstreamError:
+        return None, (jsonify(message=UNREADABLE_ARRANGEMENTS), 502)
 
 
 def _check_safety_officer(user_id):

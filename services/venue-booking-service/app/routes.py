@@ -2,6 +2,7 @@ import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 from flask import Blueprint, g, jsonify, request
@@ -22,6 +23,7 @@ from app.clients import (
     get_booking,
     get_event_bookings,
     get_event,
+    get_event_as,
     get_event_for_internal_viewer,
     get_staff_events,
     get_safety_records,
@@ -86,6 +88,40 @@ REVIEW_VENUE_FIELDS = (
     "setupTimeMinutes",
     "turnaroundTimeMinutes",
 )
+
+
+
+# Booking times are naive Singapore local time, like the event's own dates.
+SINGAPORE = ZoneInfo("Asia/Singapore")
+
+
+def _booking_window_invalid(event, start, end, now=None):
+    """
+    SCRUM-28: a venue request must be for a future slot that falls on the
+    event's own dates. Days, not exact times, so a booking can still cover
+    setup on the morning of the event. Returns a 422 response, or None.
+    """
+    current = now or datetime.now(SINGAPORE).replace(tzinfo=None)
+    if start <= current:
+        return jsonify(
+            message="The requested start time must be in the future.",
+            code="BOOKING_IN_PAST",
+        ), 422
+    try:
+        event_start = datetime.fromisoformat(event.get("preferredStartDate") or "")
+        event_end = datetime.fromisoformat(event.get("preferredEndDate") or "")
+    except (TypeError, ValueError):
+        # No event dates to compare against; Venue Staff still review it.
+        return None
+    if start.date() < event_start.date() or end.date() > event_end.date():
+        return jsonify(
+            message=(
+                "The requested time must fall within the event's dates "
+                f"({event_start.date().isoformat()} to {event_end.date().isoformat()})."
+            ),
+            code="BOOKING_OUTSIDE_EVENT_DATES",
+        ), 422
+    return None
 
 
 def _queue_order(booking):
@@ -455,6 +491,9 @@ def create_booking_request():
             code="EVENT_NOT_ACCEPTING_VENUE_REQUESTS",
             eventStatus=event.get("status"),
         ), 409
+    invalid_window = _booking_window_invalid(event, parsed_start, parsed_end)
+    if invalid_window:
+        return invalid_window
 
     try:
         venues = get_venues()
@@ -511,12 +550,15 @@ def list_booking_requests(event_id):
     if not g.user_id:
         return jsonify(message="Sign in to continue."), 401
     try:
-        get_event(event_id)
+        if g.role == "Event Coordinator":
+            get_event(event_id)
+        else:
+            get_event_as(event_id, g.role)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
         return jsonify(
-            message="This event request is not assigned to the given coordinator."
+            message="You cannot view the venue requests for this event."
         ), 403
     except Exception as error:
         return jsonify(message=f"Failed to look up the event: {error}"), 502
@@ -608,6 +650,9 @@ def update_booking_request(booking_id):
     closed = _changes_closed(event)
     if closed:
         return closed
+    invalid_window = _booking_window_invalid(event, parsed_start, parsed_end)
+    if invalid_window:
+        return invalid_window
 
     try:
         venues = get_venues()

@@ -10,6 +10,7 @@ from tests.unit.factories import bearer
 USER = "ad3d6da3-7220-4f80-9157-2ee4abc0455c"
 TS = bearer(USER, "Technical Support")
 COORDINATOR = bearer(USER, "Event Coordinator")
+LEAD = bearer(USER, "Event Coordinator Lead")
 
 TARGET = "00000000-0000-4000-8000-0000000000a1"
 OTHER = "00000000-0000-4000-8000-0000000000b2"
@@ -617,6 +618,31 @@ def test_create_is_blocked_once_the_event_is_no_longer_open(assigned, client, ev
     assert response.status_code == 409
     assert response.json["message"] == "Equipment can only be requested while the event is Under Review or Safety Changes Requested."
     assert not any(call[0] == "create_event_requests" for call in assigned.calls)
+
+
+# The Lead requests equipment like a coordinator, for events assigned to them.
+def test_lead_creates_pending_lines_for_an_assigned_event(assigned, client):
+    response = client.post(CREATE_URL, headers=LEAD, json={"items": [new_item()]})
+
+    assert response.status_code == 201
+    assert [r["status"] for r in response.json["requests"]] == ["Pending"]
+
+
+def test_lead_cannot_create_for_an_event_assigned_to_someone_else(world, client):
+    world.coordinator_assignments = {TARGET: THIRD}
+
+    assert client.post(CREATE_URL, headers=LEAD, json={"items": [new_item()]}).status_code == 403
+
+
+def test_lead_lists_only_requests_for_assigned_events(world, client):
+    event_id = "00000000-0000-4000-8000-0000000000e1"
+    world.requests = [line("assigned", event_id, MIC, 2), line("other", OTHER, MIC, 1)]
+    world.coordinator_assignments = {event_id: USER, OTHER: THIRD}
+
+    response = client.get("/equipment-reservations", headers=LEAD)
+
+    assert response.status_code == 200
+    assert [event["eventId"] for event in response.json["events"]] == [event_id]
 
 
 # Create request AC1 (selection rule): physically Unavailable equipment cannot be requested.

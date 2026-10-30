@@ -94,6 +94,30 @@ def get_event(event_id: str) -> dict:
     return response.json()
 
 
+# How each role asks Event Service for one event (SCRUM-9); Event Service decides
+# whether that role/relationship may open it. A Coordinator uses get_event().
+EVENT_VIEW_PARAMS = {
+    "Event Organiser": {"organiserId": "me"},
+    "Event Coordinator Lead": {"viewerRole": "me"},
+    "Venue Staff": {"viewerRole": "me"},
+}
+
+
+def get_event_as(event_id: str, role) -> dict:
+    """Fetch an event the way `role` is allowed to see it, or raise EventNotAssignedError."""
+    if role not in EVENT_VIEW_PARAMS:
+        raise EventNotAssignedError
+    response = httpx.get(
+        f"{EVENT_SERVICE_URL}/events/{event_id}", params=EVENT_VIEW_PARAMS[role], headers=_forwarded_auth()
+    )
+    if response.status_code == 404:
+        raise EventNotFoundError
+    if response.status_code == 403:
+        raise EventNotAssignedError
+    response.raise_for_status()
+    return response.json()
+
+
 def get_event_for_internal_viewer(event_id: str, viewer_role: str) -> dict:
     """Resolve event display details for an authorised internal venue workflow."""
     response = httpx.get(

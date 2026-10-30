@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.clients import (
     RegistrationConflictError,
+    can_view_event,
     get_attendee_registrations,
     get_confirmed_event,
     get_confirmed_events,
@@ -48,7 +49,19 @@ def with_attendee_details(registrations):
 
 @bp.get("/events/<uuid:event_id>/registrations")
 def event_registrations(event_id):
-    """Coordinator registration list for one event, with attendee details."""
+    """Registration list for one event, with attendee details.
+
+    Only the event's organiser, its assigned coordinator or the Lead may see the
+    attendees' personal details (SCRUM-9).
+    """
+    try:
+        viewable = can_view_event(str(event_id), g.role)
+    except Exception:
+        return jsonify(message="Unable to load registrations right now."), 502
+    if viewable is None:
+        return jsonify(message="Event not found."), 404
+    if not viewable:
+        return jsonify(message="You cannot view the registrations for this event."), 403
     try:
         registrations = with_attendee_details(get_event_registrations(str(event_id)))
     except Exception:
