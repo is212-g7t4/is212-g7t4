@@ -13,7 +13,7 @@ Characterization tests: SCRUM-25 must not change the existing write contract."""
 
 import pytest
 from app.calendar import SINGAPORE
-from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import BOOKING_ID, bearer, EVENT_ID, USER_ID, VENUE_ID, booking_row
 
 PAYLOAD = dict(
     eventId=EVENT_ID,
@@ -59,7 +59,7 @@ def test_write_database_unconfigured(setup):
 def test_decision_validation_unchanged(setup, payload):
     client, cursor = setup
     assert (
-        client.patch(f"/venue-bookings/{BOOKING_ID}/approve", json=payload).status_code
+        client.patch(f"/venue-bookings/{BOOKING_ID}/approve", headers=bearer(USER_ID, "Venue Staff"), json=payload).status_code
         == 400
     )
     cursor.execute.assert_not_called()
@@ -70,7 +70,7 @@ def test_decision_database_unconfigured(setup):
     client.application.config["DATABASE_URL"] = None
     assert (
         client.patch(
-            f"/venue-bookings/{BOOKING_ID}/reject",
+            f"/venue-bookings/{BOOKING_ID}/reject", headers=bearer(USER_ID, "Venue Staff"),
             json={"reviewedBy": USER_ID, "rejectionReason": "Venue unsuitable"},
         ).status_code
         == 503

@@ -21,7 +21,7 @@ from app.models import (
     list_bookings,
     reconcile_legacy_conflicts,
 )
-from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
+from tests.unit.factories import bearer, EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
 
 
 SECOND_BOOKING_ID = "00000000-0000-0000-0000-00000000000c"
@@ -236,6 +236,7 @@ def test_buffer_route_validation_and_internal_lookup_contract(monkeypatch):
     assert client.patch(
         f"/venue-bookings/{booking_id}/approve",
         json={"reviewedBy": USER_ID, "setupTimeMinutes": True},
+        headers=bearer(USER_ID, "Venue Staff"),
     ).status_code == 400
 
     monkeypatch.setattr(app_module, "get_booking", lambda *args: {"id": booking_id})

@@ -18,7 +18,7 @@ import pytest
 
 from app import create_app
 from tests.unit.availability_db import AvailabilityDB
-from tests.unit.factories import EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
+from tests.unit.factories import bearer, EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
 
 PAYLOAD = dict(
     eventId=EVENT_ID,
@@ -106,8 +106,10 @@ def test_existing_edit_and_approval_report_closure_type(monkeypatch, action):
         path = f"/venue-bookings/{BOOKING_ID}" + (
             "/approve" if action == "approve" else ""
         )
+        role = "Venue Staff" if action == "approve" else "Event Coordinator"
         response = client.patch(
-            path, json={"reviewedBy": USER_ID} if action == "approve" else PAYLOAD
+            path, json={"reviewedBy": USER_ID} if action == "approve" else PAYLOAD,
+            headers=bearer(USER_ID, role),
         )
         assert response.status_code == 409
         assert response.json["code"] == "VENUE_UNAVAILABLE"

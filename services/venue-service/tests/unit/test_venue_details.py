@@ -47,7 +47,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return signed_in(app.test_client()), connection, cursor
+    return signed_in(app.test_client(), role="Venue Staff"), connection, cursor
 
 
 def test_ac1_returns_all_venue_characteristics(setup):
@@ -184,7 +184,7 @@ def test_database_error_returns_503(setup, monkeypatch):
 
 def test_missing_database_url_returns_503():
     """Failure: an unconfigured service says so rather than crashing."""
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Venue Staff")
 
     assert client.get(f"/venues/{VENUE_ID}").status_code == 503
     assert client.get("/venues").status_code == 503

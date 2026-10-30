@@ -94,6 +94,21 @@ def _may_view_bookings():
     return g.user_id is None or g.role in BOOKING_VIEW_ROLES
 
 
+BOOKING_REQUESTER_ROLES = ("Event Coordinator", "Event Coordinator Lead")
+BOOKING_REVIEWER_ROLES = ("Venue Staff",)
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change bookings, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing.
+    Internal callers have no user and pass.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.before_request(authenticate)
@@ -322,6 +337,8 @@ def create_app(config=None):
 
     @app.post("/venue-bookings")
     def create_booking_route():
+        if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -437,6 +454,8 @@ def create_app(config=None):
 
     @app.patch("/venue-bookings/<uuid:booking_id>")
     def update_booking_route(booking_id):
+        if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -507,6 +526,8 @@ def create_app(config=None):
 
     @app.patch("/venue-bookings/<uuid:booking_id>/cancel")
     def cancel_booking_route(booking_id):
+        if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         event_id = _parse_uuid(data.get("eventId")) if isinstance(data, dict) else None
         if not event_id:
@@ -540,6 +561,8 @@ def create_app(config=None):
         return _decide(booking_id, "Rejected")
 
     def _decide(booking_id, status):
+        if (forbidden := _cannot_modify(BOOKING_REVIEWER_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         # The Venue Staff reviewer whose token Venue Booking Service forwards.
         reviewed_by = g.user_id
@@ -604,6 +627,9 @@ def create_app(config=None):
 
     @app.post("/venues/<uuid:venue_id>/legacy-conflicts/reconcile")
     def reconcile_legacy_conflicts_route(venue_id):
+        # Also refreshed on read by the legacy-conflicts view, so it follows the booking-view roles.
+        if not _may_view_bookings():
+            return jsonify(message="Your role cannot change this information."), 403
         data = request.get_json(silent=True)
         setup_time = _parse_buffer_minutes(
             data.get("setupTimeMinutes") if isinstance(data, dict) else None

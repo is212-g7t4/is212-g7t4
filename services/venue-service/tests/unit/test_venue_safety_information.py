@@ -56,7 +56,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return signed_in(app.test_client()), cursor, connect
+    return signed_in(app.test_client(), role="Venue Staff"), cursor, connect
 
 
 def put_safety(client, body=SAFETY_PAYLOAD, headers=None):
@@ -397,7 +397,7 @@ def test_database_error_is_503(setup, monkeypatch):
 
 def test_database_not_configured_is_503():
     """Failure: no DATABASE_URL means the save cannot run."""
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Venue Staff")
 
     response = put_safety(client)
 

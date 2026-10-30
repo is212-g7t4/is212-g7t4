@@ -36,9 +36,22 @@ from app.auth import authenticate
 SAFETY_VIEW_ROLES = (
     "Event Coordinator", "Event Coordinator Lead", "Safety Officer", "Venue Staff", "Technical Support",
 )
+COORDINATOR_ROLES = ("Event Coordinator", "Event Coordinator Lead")
+SAFETY_OFFICER_ROLES = ("Safety Officer",)
 NO_DATABASE = (
     "DATABASE_URL is not configured for Safety Check Record Service."
 )
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change safety checks, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing.
+    Internal callers have no user and pass.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
 
 
 def _uuid_or_none(value):
@@ -103,6 +116,8 @@ def create_app(config=None) -> Flask:
         and the event's arrangements. Everything is re-validated here anyway:
         an atomic never trusts its caller's homework.
         """
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -159,6 +174,8 @@ def create_app(config=None) -> Flask:
         Not a general "withdraw a safety check" endpoint, and it refuses any
         round that has been decided.
         """
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         safety_check_id = _uuid_or_none(safety_check_id)
         if not safety_check_id:
             return jsonify(message="The safety check ID must be a valid UUID."), 400
@@ -183,6 +200,8 @@ def create_app(config=None) -> Flask:
         locked `FOR UPDATE` so a simultaneous decide loses the race here, not
         in the event (AC3 / the race guard).
         """
+        if (forbidden := _cannot_modify(SAFETY_OFFICER_ROLES)):
+            return forbidden
         safety_check_id = _uuid_or_none(safety_check_id)
         if not safety_check_id:
             return jsonify(message="The safety check ID must be a valid UUID."), 400
@@ -239,6 +258,8 @@ def create_app(config=None) -> Flask:
         same request just made, never an older decision (SCRUM-153 handles
         a deliberate later withdrawal).
         """
+        if (forbidden := _cannot_modify(SAFETY_OFFICER_ROLES)):
+            return forbidden
         safety_check_id = _uuid_or_none(safety_check_id)
         if not safety_check_id:
             return jsonify(message="The safety check ID must be a valid UUID."), 400
@@ -274,6 +295,8 @@ def create_app(config=None) -> Flask:
         compensation: round N stays in the history as 'Approval Withdrawn',
         with its original decision intact (AC3).
         """
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         safety_check_id = _uuid_or_none(safety_check_id)
         if not safety_check_id:
             return jsonify(message="The safety check ID must be a valid UUID."), 400
@@ -329,6 +352,8 @@ def create_app(config=None) -> Flask:
         endpoint: it refuses unless the round it opened is still undecided and
         still the latest.
         """
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         safety_check_id = _uuid_or_none(safety_check_id)
         if not safety_check_id:
             return jsonify(message="The safety check ID must be a valid UUID."), 400

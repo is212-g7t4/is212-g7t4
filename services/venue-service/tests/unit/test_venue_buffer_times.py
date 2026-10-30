@@ -14,7 +14,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return signed_in(app.test_client()), cursor
+    return signed_in(app.test_client(), role="Venue Staff"), cursor
 
 
 def test_each_venue_returns_its_own_saved_buffer_times(setup):

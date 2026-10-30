@@ -201,7 +201,7 @@ def test_approve_booking_succeeds_when_no_conflict(setup):
     ]
 
     response = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}
+        f"/venue-bookings/{BOOKING_ID}/approve", headers=bearer(USER_ID, "Venue Staff"), json={"reviewedBy": USER_ID}
     )
 
     assert response.status_code == 200
@@ -215,7 +215,7 @@ def test_approve_booking_rejects_when_now_conflicting(setup):
     cursor.fetchall.return_value = [{"conflict_type": "APPROVED_BOOKING"}]
 
     response = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}
+        f"/venue-bookings/{BOOKING_ID}/approve", headers=bearer(USER_ID, "Venue Staff"), json={"reviewedBy": USER_ID}
     )
 
     assert response.status_code == 409
@@ -228,7 +228,7 @@ def test_approve_booking_missing_returns_404(setup):
     cursor.fetchone.side_effect = [None]
 
     response = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}
+        f"/venue-bookings/{BOOKING_ID}/approve", headers=bearer(USER_ID, "Venue Staff"), json={"reviewedBy": USER_ID}
     )
 
     assert response.status_code == 404
@@ -243,7 +243,7 @@ def test_reject_booking_does_not_recheck_conflicts(setup):
     ]
 
     response = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/reject",
+        f"/venue-bookings/{BOOKING_ID}/reject", headers=bearer(USER_ID, "Venue Staff"),
         # SCRUM-29 AC4: a reject now carries a reason.
         json={"reviewedBy": USER_ID, "rejectionReason": "Venue unsuitable"},
     )
@@ -258,10 +258,10 @@ def test_cancelled_booking_cannot_be_approved_or_rejected(setup):
     cursor.fetchone.return_value = booking_row(status="Cancelled")
 
     approve = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}
+        f"/venue-bookings/{BOOKING_ID}/approve", headers=bearer(USER_ID, "Venue Staff"), json={"reviewedBy": USER_ID}
     )
     reject = client.patch(
-        f"/venue-bookings/{BOOKING_ID}/reject",
+        f"/venue-bookings/{BOOKING_ID}/reject", headers=bearer(USER_ID, "Venue Staff"),
         # SCRUM-29 AC4: a reject now carries a reason.
         json={"reviewedBy": USER_ID, "rejectionReason": "Venue unsuitable"},
     )

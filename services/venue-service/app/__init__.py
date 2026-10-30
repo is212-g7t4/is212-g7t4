@@ -26,6 +26,19 @@ class InvalidCriteriaError(Exception):
     """A filter parameter on GET /venues was present but unusable."""
 
 
+def _venue_staff_only():
+    """SCRUM-10: the 403 for a signed-in caller who is not Venue Staff, else None.
+
+    Runs before the body is read, so a refused change touches nothing.
+    """
+    if g.user_id is not None and g.role != "Venue Staff":
+        return jsonify(
+            code="VENUE_STAFF_ONLY",
+            message="Only Venue Staff can change venue details.",
+        ), 403
+    return None
+
+
 def _nonblank(values):
     return [value.strip() for value in values if value.strip()]
 
@@ -128,6 +141,8 @@ def create_app(config=None):
 
     @app.route("/venues", methods=["POST"])
     def add_venue():
+        if (forbidden := _venue_staff_only()):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -171,6 +186,8 @@ def create_app(config=None):
 
     @app.route("/venues/<uuid:venue_id>", methods=["PUT"])
     def edit_venue(venue_id):
+        if (forbidden := _venue_staff_only()):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
