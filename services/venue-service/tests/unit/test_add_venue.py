@@ -25,7 +25,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return signed_in(app.test_client()), connection, cursor
+    return signed_in(app.test_client(), role="Venue Staff"), connection, cursor
 
 
 def test_ac3_valid_submission_is_saved_and_visible_in_catalogue(setup):
@@ -183,7 +183,7 @@ def test_database_error_returns_503(setup, monkeypatch):
 
 def test_missing_database_url_returns_503():
     """Failure: an unconfigured service says so rather than crashing."""
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Venue Staff")
 
     response = client.post("/venues", json=VALID_PAYLOAD)
 

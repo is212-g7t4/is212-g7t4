@@ -83,6 +83,20 @@ NOT_SAFETY_OFFICER = (
     "Only a Safety Officer can decide an event's Operational Safety Check."
 )
 UNREADABLE_ARRANGEMENTS = "Unable to check the event's arrangements right now."
+COORDINATOR_ROLES = ("Event Coordinator", LEAD_ROLE)
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change this information, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing, here or downstream.
+    A caller with no user passes and meets the handler's own sign-in check.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
+
+
 UNREADABLE_ROLE = "Unable to check the caller's role right now."
 UNREADABLE_QUEUE = "Unable to load the safety check queue right now."
 VENUE_CHANGE_TIMEOUT = "Updating the event's safety approval took too long. Please try again."
@@ -210,6 +224,8 @@ def submit_safety_check():
     event update then fails, the round just created is deleted again — there is
     no distributed transaction, so this compensates by hand.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -422,6 +438,8 @@ def recheck_safety():
     details and its safety status must change together, or AC1's guarantee
     (never prepared on an outdated review) doesn't hold.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -590,6 +608,8 @@ def withdraw_for_venue_change():
     Record first, then event, as in `recheck_safety`: the record service's row
     lock is the race guard. If the event move fails, the withdrawal is undone.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -676,6 +696,8 @@ def restore_after_venue_change():
     reading 'Confirmed' with no approval in force: at worst it stays
     'Approved' with its round approved again, and the coordinator resubmits.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400

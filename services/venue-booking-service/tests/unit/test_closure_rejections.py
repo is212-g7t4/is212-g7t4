@@ -53,7 +53,8 @@ def test_immutable_atomic_response_remains_state_error(monkeypatch, action):
     suffix = "" if action == "update" else "/" + action
     result = client.patch(
         "/booking-requests/booking" + suffix,
-        headers=bearer(STAFF_ID, "Venue Staff"),
+        # Decisions are Venue Staff's; editing and cancelling are the coordinator's (SCRUM-10).
+        headers=bearer(STAFF_ID, "Venue Staff" if action in ("approve", "reject") else "Event Coordinator"),
         json=dict(
             eventId="event",
             venueId="venue",
