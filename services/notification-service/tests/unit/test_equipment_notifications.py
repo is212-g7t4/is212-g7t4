@@ -1,21 +1,43 @@
-"""SCRUM-48 equipment request notifications: consumer contract regression coverage.
+"""
+SCRUM-48: Equipment Request Notification and Decision Alerts
 
-Story: As an Event Coordinator and Technical Support Staff (TSS), I want
-notifications about equipment requests and decisions to coordinate equipment.
-AC1: submission alerts TSS with the event and complete requested items/quantities.
-AC2: approval alerts the assigned Event Coordinator with the approved equipment.
-AC3: rejection alerts the assigned Event Coordinator without the workflow reason.
+User Story
+----------
+As an Event Coordinator and Technical Support Staff, I want to receive
+notifications about equipment requests and decisions, so that I can coordinate
+equipment arrangements efficiently.
 
-The three valid parameters map to the ORIGINAL AC1/AC2/AC3, not new business
-scenarios. Negative parameters are approved supporting technical contract rules,
-not additional ACs. Existing feature code is tested as regression/coverage; these
-passing cases are not claimed as new RED -> GREEN development evidence.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator submits an equipment request, the system sends
+     an in-app notification to Technical Support Staff with the event name,
+     requested equipment list, and a link to review the request.
+AC2: Given equipment is confirmed as available or found to be unavailable, the
+     system sends an in-app notification to the Event Coordinator with the
+     event name, equipment list, and availability status.
+AC3: Given an equipment request is submitted and pending review, the system
+     sends an in-app notification to Technical Support Staff that a request
+     requires their review.
 
-Public seam: process(dsn, channel, method, body), through real JSON validation and
-store SQL construction. Function-scoped DB connection/cursor and broker channel
-are doubles. Assert exact inbox/quarantine writes and transaction-exit-before-ACK.
-This proves neither durable DB commits nor upstream recipient selection, real
-AMQP delivery, concurrent deduplication, inbox HTTP visibility or UI navigation.
+Real
+----
+- app.consumer.process(): JSON validation, the equipment envelope validators
+  and the inbox/quarantine SQL, with the broker ACK only after storage.
+- Assertions are on the SQL sent, the ACK and its order.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`storage` fixture) - fresh MagicMock connection and
+  cursor; SQL inspected.
+- Broker channel: Mock - asserts basic_ack after the commit.
+
+Not proven
+----------
+- That the inbox row is committed and de-duplicated in real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the producer publishes this envelope to RabbitMQ and the UI shows it
+  with a working link (-> the producing service's dispatcher tests and the
+  frontend NotificationCenter tests).
 """
 from copy import deepcopy
 import json
@@ -78,19 +100,31 @@ def storage(monkeypatch):
     pytest.param("Approved", COORDINATOR, "equipment.request-decision", [REQUEST], id="AC2-coordinator-approval"),
     pytest.param("Rejected", COORDINATOR, "equipment.request-decision", [REQUEST], id="AC3-coordinator-rejection"),
 ])
-def test_ac1_ac2_ac3_equipment_contract_reaches_inbox_before_ack(
+def test_process_equipment_alert_stores_in_inbox_before_ack(
     storage, outcome, recipient, kind, request_ids,
 ):
-    """AC1/2/3 regression: consume valid bytes; assert unchanged content/link and inbox-before-ACK.
-
-    Why: Early ACK could lose an alert before the storage transaction completes.
     """
+    Summary: Equipment submission and decision alerts are stored in the right inbox before the message is acknowledged.
+    AC1: Given an Event Coordinator submits an equipment request, the system
+        sends an in-app notification to Technical Support Staff with the event
+        name, requested equipment list, and a link to review the request.
+    AC2: Given equipment is confirmed as available or found to be unavailable,
+        the system sends an in-app notification to the Event Coordinator with
+        the event name, equipment list, and availability status.
+    AC3: Given an equipment request is submitted and pending review, the system
+        sends an in-app notification to Technical Support Staff that a request
+        requires their review.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     connection, cursor, channel, order = storage
     envelope = equipment_envelope(outcome)
     expected = deepcopy(envelope)
 
+    # Act (When)
     process("synthetic", channel, Mock(delivery_tag=48), json.dumps(envelope).encode())
 
+    # Assert (Then)
     cursor.execute.assert_called_once()
     sql, params = cursor.execute.call_args.args
     assert sql.startswith('INSERT INTO public."Notification" ')
@@ -117,7 +151,6 @@ def test_ac1_ac2_ac3_equipment_contract_reaches_inbox_before_ack(
     assert order == ["inbox", "transaction-exit", "ack"]
 
 
-# Supporting rules only: alter one incoming contract field, then observe process.
 @pytest.mark.parametrize("outcome,path,value", [
     pytest.param("submission", ("details", "recipientId"), OTHER, id="recipient-mismatch"),
     pytest.param("submission", ("details", "eventName"), 42, id="event-name-not-text"),
@@ -146,11 +179,18 @@ def test_ac1_ac2_ac3_equipment_contract_reaches_inbox_before_ack(
     pytest.param("submission", ("destination", "requestIds"), [REQUEST], id="destination-incomplete-items"),
     pytest.param("submission", ("destination", "eventId"), "bad-id", id="destination-event-id-invalid"),
 ])
-def test_supporting_equipment_contract_rejects_malformed_alert_before_ack(storage, outcome, path, value):
-    """AC1/2/3 supporting rule: consume malformed bytes; quarantine exact body, never inbox, before ACK.
-
-    Why: Bad alerts must be diagnosable without contaminating the recipient inbox.
+def test_process_malformed_equipment_alert_quarantines_before_ack(storage, outcome, path, value):
     """
+    Summary: A malformed equipment alert is kept aside, not delivered, before acknowledging.
+    AC1: Given an Event Coordinator submits an equipment request, the system
+        sends an in-app notification to Technical Support Staff with the event
+        name, requested equipment list, and a link to review the request.
+    AC2: Given equipment is confirmed as available or found to be unavailable,
+        the system sends an in-app notification to the Event Coordinator with
+        the event name, equipment list, and availability status.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     connection, cursor, channel, order = storage
     envelope = equipment_envelope(outcome)
     target = envelope
@@ -159,8 +199,10 @@ def test_supporting_equipment_contract_rejects_malformed_alert_before_ack(storag
     target[path[-1]] = value
     body = json.dumps(envelope).encode()
 
+    # Act (When)
     process("synthetic", channel, Mock(delivery_tag=48), body)
 
+    # Assert (Then)
     cursor.execute.assert_called_once()
     sql, params = cursor.execute.call_args.args
     assert sql == 'INSERT INTO public."NotificationFailure" (body,error) VALUES (%s,%s)'

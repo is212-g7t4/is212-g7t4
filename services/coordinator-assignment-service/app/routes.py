@@ -137,59 +137,52 @@ def assign_coordinator(event_id, coordinator_id):
         "assignedCoordinatorId": "user-123"
     }
     """
+    acting_user_id = g.user_id
+
     try:
-        if not event_id or not coordinator_id:
-            return jsonify(error="event_id and coordinator_id are required"), 400
-
-        acting_user_id = g.user_id
-
-        try:
-            acting_user = get_user(acting_user_id)
-        except Exception as e:
-            return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
-
-        if not acting_user or acting_user.get("role") != LEAD_ROLE:
-            return jsonify(
-                error="Only the Event Coordinator Lead can assign or reassign coordinators"
-            ), 403
-
-        # Fetch available coordinators to validate the provided coordinator exists
-        # and is available
-        try:
-            available_coordinators = get_available_coordinators()
-            coordinator_ids = [c.get("user_id", c.get("id")) for c in available_coordinators]
-            
-            if coordinator_id not in coordinator_ids:
-                return jsonify(
-                    error=f"Coordinator {coordinator_id} is not available or does not exist"
-                ), 404
-        except Exception as e:
-            return jsonify(
-                error=f"Failed to validate coordinator: {str(e)}"
-            ), 500
-        
-        # Assign the coordinator to the event via Event Service
-        try:
-            result = assign_event_coordinator(event_id, coordinator_id)
-            return jsonify(result), 200
-        except httpx.HTTPStatusError as e:
-            # Event Service's own refusals (unknown event, closed event, no
-            # change) reach the Lead as they are; anything else is a failure.
-            if 400 <= e.response.status_code < 500:
-                try:
-                    message = e.response.json().get("message")
-                except ValueError:
-                    message = None
-                return jsonify(
-                    error=message or "Event Service refused the assignment."
-                ), e.response.status_code
-            return jsonify(
-                error=f"Failed to assign coordinator to event: {str(e)}"
-            ), 500
-        except Exception as e:
-            return jsonify(
-                error=f"Failed to assign coordinator to event: {str(e)}"
-            ), 500
-    
+        acting_user = get_user(acting_user_id)
     except Exception as e:
-        return jsonify(error=f"Internal server error: {str(e)}"), 500
+        return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
+
+    if not acting_user or acting_user.get("role") != LEAD_ROLE:
+        return jsonify(
+            error="Only the Event Coordinator Lead can assign or reassign coordinators"
+        ), 403
+
+    # Fetch available coordinators to validate the provided coordinator exists
+    # and is available
+    try:
+        available_coordinators = get_available_coordinators()
+        coordinator_ids = [c.get("user_id", c.get("id")) for c in available_coordinators]
+        
+        if coordinator_id not in coordinator_ids:
+            return jsonify(
+                error=f"Coordinator {coordinator_id} is not available or does not exist"
+            ), 404
+    except Exception as e:
+        return jsonify(
+            error=f"Failed to validate coordinator: {str(e)}"
+        ), 500
+    
+    # Assign the coordinator to the event via Event Service
+    try:
+        result = assign_event_coordinator(event_id, coordinator_id)
+        return jsonify(result), 200
+    except httpx.HTTPStatusError as e:
+        # Event Service's own refusals (unknown event, closed event, no
+        # change) reach the Lead as they are; anything else is a failure.
+        if 400 <= e.response.status_code < 500:
+            try:
+                message = e.response.json().get("message")
+            except ValueError:
+                message = None
+            return jsonify(
+                error=message or "Event Service refused the assignment."
+            ), e.response.status_code
+        return jsonify(
+            error=f"Failed to assign coordinator to event: {str(e)}"
+        ), 500
+    except Exception as e:
+        return jsonify(
+            error=f"Failed to assign coordinator to event: {str(e)}"
+        ), 500

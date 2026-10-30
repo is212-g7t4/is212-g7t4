@@ -1,14 +1,49 @@
-"""SCRUM-46 Attendee Registration and Update Notifications: Registration unit tests.
+"""
+SCRUM-46: Attendee Registration and Update Notifications
 
-Story: As an Attendee, I want to receive notifications about my registration status, so that I can confirm my place and stay updated on event changes.
+User Story
+----------
+As an Attendee, I want to receive notifications about my registration status,
+so that I can confirm my place and stay updated on event changes.
 
-Real: mutation logic and SQL construction. Doubled: PostgreSQL connection/cursor.
-Not proven: transactional persistence, broker delivery or authentication.
-AC1 Given an Attendee successfully registers for an event, the system sends an in-app notification confirming their registration with the event name, date, time, venue, and registration reference number.
-AC2 Given an Attendee successfully withdraws their registration, the system sends an in-app notification confirming the withdrawal with the event name.
-AC3 Given an event cancellation takes effect, or a change to its date, time or venue is approved and applied, all currently registered Attendees receive an in-app notification with the event name and cancellation status or updated details, as applicable.
-AC1/2 action and owner-delivery contracts are covered here; AC3 runs in Event/Workflow.
-AC = acceptance criterion; DR = supporting design rule.
+Acceptance Criteria
+-------------------
+AC1: Given an Attendee successfully registers for an event, the system sends an
+     in-app notification confirming their registration with the event name,
+     date, time, venue, and registration reference number.
+AC2: Given an Attendee successfully withdraws their registration, the system
+     sends an in-app notification confirming the withdrawal with the event
+     name.
+AC3: Given an event cancellation takes effect, or a change to its date, time or
+     venue is approved and applied, all currently registered Attendees receive
+     an in-app notification with the event name and cancellation status or
+     updated details, as applicable.
+
+Real
+----
+- app.models create/withdraw mutations with their notification-intent insert,
+  and the /internal registration-outbox routes (freeze, claim, published,
+  retry): display-snapshot validation, envelope validation, lease checks and
+  the frozen-before-publish rule run for real.
+- Assertions are on the SQL intents and parameters, the HTTP status and the
+  saved envelope.
+
+Doubled
+-------
+- psycopg2.connect: Stub / Mock (tests/unit/conftest.py `storage`) - a fresh
+  MagicMock connection and cursor per test; canned rows; executed SQL inspected
+  to prove intent, not committed rows.
+
+Not proven
+----------
+- That the intent commits with the registration in real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the dispatcher publishes and Notification Service shows the inbox item
+  (-> attendee-registration-service dispatcher tests and notification-service
+  consumer tests).
+- AC3 (cancellation and change notices to every registered attendee): produced
+  by Attendee Registration Service, not here (-> its
+  test_attendee_notifications tests).
 """
 
 import psycopg2
@@ -22,23 +57,29 @@ from app.models import (
 from tests.unit.factories import EVENT, USER, REF, JOB, LEASE, row, outbox_row, envelope, signed_in
 
 
-# AC1 ----
-def test_ac1_successful_registration_records_durable_action_with_full_reference(
+def test_register_when_successful_records_confirmation_intent_with_reference(
     storage,
 ):
-    """Normal: a new attendee has capacity and no existing registration in the SQL double.
-    Call the real mutation and require one confirmation-intent insert on its cursor,
-    with the returned full registration reference and owner-derived recipient IDs.
-    This checks action/intent wiring; mocked libpq calls do not prove a database commit.
     """
+    Summary: A successful registration queues one confirmation carrying the registration reference.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (cursor: no existing row, free place, saved row), Mock (intent
+        insert inspected)
+    """
+    # Arrange (Given)
     connection, cursor = storage
     cursor.fetchone.side_effect = [None, {"confirmed": 0}, row()]
     result = create_registration("unused", EVENT, USER, 10)
+
     inserts = [
         c.args
         for c in cursor.execute.call_args_list
         if "RegistrationNotificationOutbox" in c.args[0]
     ]
+
+    # Act + Assert (When / Then)
     assert len(inserts) == 1
     assert inserts[0][1][1] == "registration.confirmed"
     assert inserts[0][1][2].adapted == dict(
@@ -47,27 +88,32 @@ def test_ac1_successful_registration_records_durable_action_with_full_reference(
     assert result["registration_id"] == REF
 
 
-# AC2 ----
-def test_ac2_withdrawal_records_its_own_new_action(storage):
-    """Normal: an existing Confirmed row is returned by the mocked database.
-    Withdraw it through the real mutation and require one withdrawal-specific intent
-    that retains the registration reference. A withdrawal must be distinguishable
-    from confirmation; transaction durability is checked in PostgreSQL integrations.
+def test_withdraw_when_successful_records_withdrawal_intent(storage):
     """
+    Summary: A successful withdrawal queues its own withdrawal confirmation.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (cursor returns the row before and after), Mock (intent insert
+        inspected)
+    """
+    # Arrange (Given)
     _, cursor = storage
     cursor.fetchone.side_effect = [row(), row("Withdrawn")]
     withdraw_registration("unused", REF, USER)
+
     inserts = [
         c.args
         for c in cursor.execute.call_args_list
         if "RegistrationNotificationOutbox" in c.args[0]
     ]
+
+    # Act + Assert (When / Then)
     assert len(inserts) == 1
     assert inserts[0][1][1] == "registration.withdrawn"
     assert inserts[0][1][2].adapted["registrationId"] == REF
 
 
-# DR ---- owner HTTP fencing, immutable freeze and bounded technical retry
 @pytest.mark.parametrize(
     "kind,naive",
     [
@@ -75,16 +121,22 @@ def test_ac2_withdrawal_records_its_own_new_action(storage):
         ("registration.confirmed", True),
         ("registration.withdrawn", False),
     ],
+    ids=["confirmed", "confirmed_naive_time", "withdrawn"],
 )
-def test_dr_owner_freezes_required_content_once_and_returns_saved_payload(
+def test_freeze_alert_saves_content_once_and_returns_saved_version(
     storage, kind, naive
 ):
-    """Normal: freeze a claimed action through the owner HTTP route, then offer a changed draft.
-    The SQL double first has no envelope, then returns the saved one; expect an exact
-    first write and reuse without rewriting it. Cases cover confirmation with UTC
-    or naive Singapore times, and withdrawal. This protects immutable retry content,
-    not actual persistence: the route/validation run, but libpq is mocked.
     """
+    Summary: An alert's content is saved once; a later, different draft gets the saved version back.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (cursor: no envelope, then the saved one)
+    """
+    # Arrange (Given)
     _, cursor = storage
     client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
@@ -94,9 +146,13 @@ def test_dr_owner_freezes_required_content_once_and_returns_saved_payload(
     cursor.fetchone.side_effect = [record, {**record, "envelope": saved}]
     path = f"/internal/notification-outbox/{JOB}/freeze"
     headers = {"X-Internal-Token": "synthetic"}
+
+    # Act (When)
     response = client.post(
         path, headers=headers, json=dict(leaseToken=LEASE, envelope=saved)
     )
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json == dict(envelope=saved)
     assert cursor.execute.call_args.args[1][0].adapted == saved
@@ -123,14 +179,20 @@ def test_dr_owner_freezes_required_content_once_and_returns_saved_payload(
         "missing-content",
         "message",
     ],
+    ids=["not_object", "bool_version", "wrong_identity", "wrong_destination", "wrong_details", "missing_content", "bad_message"],
 )
-def test_dr_invalid_registration_envelope_cannot_be_frozen(storage, defect):
-    """Failure: offer one malformed envelope to the real freeze endpoint under a valid lease.
-    Expect 400 and only the initial SQL read, so invalid content cannot be saved.
-    Defects mean: a non-object body, boolean version, wrong recipient, internal-event
-    destination, wrong details reference, missing venue, or incorrect message text.
-    The database row is doubled; this checks validation before the durable-write seam.
+def test_freeze_alert_with_malformed_content_returns_400_without_saving(storage, defect):
     """
+    Summary: Malformed alert content is refused and nothing is saved.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (cursor returns a leased action)
+    """
+    # Arrange (Given)
     _, cursor = storage
     value = envelope()
     if defect == "not-object":
@@ -151,26 +213,32 @@ def test_dr_invalid_registration_envelope_cannot_be_frozen(storage, defect):
     client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
     ).test_client())
+
+    # Act (When)
     response = client.post(
         f"/internal/notification-outbox/{JOB}/freeze",
         headers={"X-Internal-Token": "synthetic"},
         json=dict(leaseToken=LEASE, envelope=value),
     )
+
+    # Assert (Then)
     assert response.status_code == 400
     assert cursor.execute.call_count == 1
 
 
 @pytest.mark.parametrize(
-    "action,frozen", [("published", True), ("published", False), ("retry", False)]
+    "action,frozen", [("published", True), ("published", False), ("retry", False)],
+    ids=["published_frozen", "published_unfrozen", "retry_unfrozen"],
 )
-def test_dr_completion_requires_freeze_and_retry_retains_business_state(
+def test_finish_alert_requires_saved_content_and_never_changes_registration(
     storage, action, frozen
 ):
-    """Boundary: attempt completion with a frozen or unfrozen action, or retry unfrozen work.
-    The real owner route accepts frozen completion and retry, refuses unfrozen
-    completion, and never updates Registration. This separates delivery bookkeeping
-    from the attendee's successful action; SQL results and storage are doubled here.
     """
+    Summary: An alert can only be marked sent once its content is saved, and finishing never changes the registration.
+    AC1: (delivery: an alert is sent only with its saved content)
+    Double: Stub (cursor returns a frozen or unfrozen action)
+    """
+    # Arrange (Given)
     _, cursor = storage
     cursor.fetchone.return_value = {
         **outbox_row(),
@@ -179,11 +247,15 @@ def test_dr_completion_requires_freeze_and_retry_retains_business_state(
     client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
     ).test_client())
+
+    # Act (When)
     response = client.post(
         f"/internal/notification-outbox/{JOB}/{action}",
         headers={"X-Internal-Token": "synthetic"},
         json=dict(leaseToken=LEASE, error="Synthetic outage"),
     )
+
+    # Assert (Then)
     assert response.status_code == (
         400 if action == "published" and not frozen else 200
     )
@@ -193,13 +265,14 @@ def test_dr_completion_requires_freeze_and_retry_retains_business_state(
     )
 
 
-@pytest.mark.parametrize("state", ["missing", "expired"])
-def test_dr_expired_or_missing_lease_cannot_publish(storage, state):
-    """Conflict: complete work whose row is missing or whose mocked lease is expired.
-    The real endpoint must return 409 after its lookup and perform no later write,
-    preventing a stale worker from acknowledging someone else's attempt. This tests
-    the lost-lease branch, not elapsed-time expiry in a running PostgreSQL server.
+@pytest.mark.parametrize("state", ["missing", "expired"], ids=["missing", "expired"])
+def test_finish_alert_with_missing_or_expired_lease_returns_409(storage, state):
     """
+    Summary: A worker whose lease is gone cannot mark an alert sent.
+    AC1: (delivery: each alert is sent once)
+    Double: Stub (cursor returns no row or an expired lease)
+    """
+    # Arrange (Given)
     _, cursor = storage
     cursor.fetchone.return_value = (
         None if state == "missing" else {**outbox_row(), "lease_valid": False}
@@ -207,11 +280,15 @@ def test_dr_expired_or_missing_lease_cannot_publish(storage, state):
     client = signed_in(create_app(
         dict(TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic")
     ).test_client())
+
+    # Act (When)
     response = client.post(
         f"/internal/notification-outbox/{JOB}/published",
         headers={"X-Internal-Token": "synthetic"},
         json=dict(leaseToken=LEASE),
     )
+
+    # Assert (Then)
     assert response.status_code == 409
     assert cursor.execute.call_count == 1
 
@@ -229,15 +306,15 @@ def test_dr_expired_or_missing_lease_cannot_publish(storage, state):
         ("retry-no-error", 400),
         ("database-error", 503),
     ],
+    ids=["claim", "unauthenticated", "token_unconfigured", "database_unconfigured", "unknown_action", "bad_body", "bad_lease", "retry_without_error", "database_error"],
 )
-def test_dr_owner_api_refuses_unsafe_work_and_serializes_claims(storage, case, status):
-    """Boundary: exercise the real internal route with one configuration or input condition.
-    Claim serializes a valid mocked row; missing auth/token, absent database config,
-    unknown operation, non-object body, malformed lease, retry without error text,
-    and simulated SQL outage produce the listed HTTP status instead of unsafe work.
-    These cases protect the delivery entry point; neither authentication of end users
-    nor successful SQL execution is established by the mocked connection.
+def test_alert_outbox_api_serves_claims_and_refuses_unsafe_calls(storage, case, status):
     """
+    Summary: The delivery API hands out claims, and refuses unauthenticated, unconfigured or malformed calls safely.
+    AC1: (delivery: only the trusted worker can send alerts)
+    Double: Stub (cursor returns a claimable row or raises)
+    """
+    # Arrange (Given)
     _, cursor = storage
     config = dict(
         TESTING=True, DATABASE_URL="unused", INTERNAL_SERVICE_TOKEN="synthetic"
@@ -263,24 +340,33 @@ def test_dr_owner_api_refuses_unsafe_work_and_serializes_claims(storage, case, s
         data["leaseToken"] = "invalid"
     elif case == "database-error":
         cursor.execute.side_effect = psycopg2.OperationalError()
+
+    # Act (When)
     response = signed_in(create_app(config).test_client()).post(path, headers=headers, json=data)
+
+    # Assert (Then)
     assert response.status_code == status
     if case == "claim":
         assert response.json["jobs"][0]["id"] == JOB
         assert response.json["jobs"][0]["source"]["registrationId"] == REF
 
 
-@pytest.mark.parametrize("action", ["register", "withdraw"])
-@pytest.mark.parametrize("valid", [True, False])
-def test_ac1_ac2_action_time_display_snapshot_is_persisted_or_refused(
+@pytest.mark.parametrize("action", ["register", "withdraw"], ids=["register", "withdraw"])
+@pytest.mark.parametrize("valid", [True, False], ids=["valid_details", "missing_details"])
+def test_register_or_withdraw_saves_display_details_for_real_attendee_or_refuses(
     storage, action, valid
 ):
-    """Boundary: register or withdraw using a supplied display snapshot and a spoofed recipient.
-    For valid=True, expect one intent using the owner's actual attendee ID and saved
-    name; valid=False removes the required name and must refuse without an intent.
-    All four action/validity combinations guard historical content and identity
-    integrity. HTTP validation/mutations run; the database cursor is a unit double.
     """
+    Summary: The event details shown in the alert are captured at registration or withdrawal, for the real attendee only.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (cursor returns rows), Mock (intent insert inspected)
+    """
+    # Arrange (Given)
     _, cursor = storage
     client = signed_in(create_app(dict(TESTING=True, DATABASE_URL="unused")).test_client())
     context = dict(
@@ -292,6 +378,8 @@ def test_ac1_ac2_action_time_display_snapshot_is_persisted_or_refused(
     )
     if not valid:
         context.pop("eventName")
+
+    # Act (When)
     if action == "register":
         cursor.fetchone.side_effect = [None, {"confirmed": 0}, row()]
         response = client.post(
@@ -306,6 +394,8 @@ def test_ac1_ac2_action_time_display_snapshot_is_persisted_or_refused(
             f"/registrations/{REF}/withdraw",
             json=dict(notificationContext=context),
         )
+
+    # Assert (Then)
     assert response.status_code == (
         (201 if action == "register" else 200) if valid else 400
     )
@@ -320,23 +410,29 @@ def test_ac1_ac2_action_time_display_snapshot_is_persisted_or_refused(
         assert writes[0][2].adapted["recipientId"] == USER
 
 
-@pytest.mark.parametrize("field", ["startDateTime", "endDateTime"])
-@pytest.mark.parametrize("invalid", ["not-a-date", "2030-02-30T09:00:00", "9999-12-31T23:59:59-12:00"])
-def test_ac1_nonrenderable_snapshot_dates_are_refused_before_registration_writes(storage, field, invalid):
-    """Failure: corrupt either captured start or end time before calling registration HTTP.
-    The three values mean unparseable text, an impossible calendar date, and a valid
-    ISO instant that overflows when rendered in Singapore. All six combinations
-    must return 400 before INSERT/UPDATE, preventing permanently undeliverable frozen
-    intent. Routes and date validation run; SQL and its returned rows are doubled.
+@pytest.mark.parametrize("field", ["startDateTime", "endDateTime"], ids=["start", "end"])
+@pytest.mark.parametrize("invalid", ["not-a-date", "2030-02-30T09:00:00", "9999-12-31T23:59:59-12:00"], ids=["unparseable", "impossible_date", "overflowing_instant"])
+def test_register_with_unrenderable_event_dates_returns_400_before_saving(storage, field, invalid):
     """
+    Summary: Event dates that could not be shown in the confirmation are refused before anything is saved.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (cursor), Mock (no insert)
+    """
+    # Arrange (Given)
     _, cursor = storage
     cursor.fetchone.side_effect = [None, {"confirmed": 0}, row()]
     context = dict(eventName="Workshop", startDateTime="2030-03-01T09:00:00",
                    endDateTime="2030-03-01T17:00:00", venueName="Hall A")
     context[field] = invalid
+
+    # Act (When)
     response = signed_in(create_app(dict(TESTING=True, DATABASE_URL="unused")).test_client()).post(
         "/registrations", json=dict(eventId=EVENT, capacity=10,
                                     notificationContext=context))
+
+    # Assert (Then)
     assert response.status_code == 400
     assert not any(c.args[0].lstrip().startswith(("INSERT", "UPDATE"))
                    for c in cursor.execute.call_args_list)

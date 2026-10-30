@@ -1,27 +1,51 @@
-"""SCRUM-10 Role-Based Modification Control: Venue Availability Service unit tests.
+"""
+SCRUM-10: Role-Based Modification Control for Events
 
-Story:      As a registered user, I want to modify only information appropriate to my
-            role and relationship to an event, so that I can perform my responsibilities
-            without changing information outside my permissions.
-Real:       Flask app, routes, token verification and role checks.
-Doubled:    psycopg2 (mocked cursor).
-Not proven: that a refused change leaves the stored row untouched in a real database (see
-            tests/integration/test_booking_modification_access.py); that the requester is the
-            coordinator assigned to the event (Venue Booking Service checks that before calling
-            this service); Supabase issuing the token.
+User Story
+----------
+As a registered user, I want to modify only information appropriate to my role
+and relationship to an event, so that I can perform my responsibilities without
+changing information outside my permissions.
 
-AC1  Given an authenticated user is permitted to modify information based on their role and
-     relationship to the event, when they make a valid change to that information, then the
-     change is allowed.
-AC2  Given an authenticated user's role does not permit them to modify particular information,
-     when they attempt to change that information, then the modification is prevented and the
-     existing information remains unchanged.
-AC3  Not covered here: the event relationship is checked by Venue Booking Service, which calls
-     this service; this service only knows the caller's role.
-AC4  Given a user is permitted to view particular information but is not permitted to modify it,
-     when they attempt to change that information, then the modification is prevented while their
-     permitted viewing access remains unaffected.
-AC5  Not covered here: see AC3.
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to modify information based on
+     their role and relationship to the event, when they make a valid change to
+     that information, then the change is allowed.
+AC2: Given an authenticated user's role does not permit them to modify
+     particular information, when they attempt to change that information, then
+     the modification is prevented and the existing information remains
+     unchanged.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to modify that event's information, when they attempt to make a
+     change, then the modification is prevented and the existing information
+     remains unchanged.
+AC4: Given a user is permitted to view particular information but is not
+     permitted to modify it, when they attempt to change that information, then
+     the modification is prevented while their permitted viewing access remains
+     unaffected.
+AC5: Given a user is permitted to modify information for one event but does not
+     have the required access to another event, when they attempt to modify
+     information for both events, then only modifications to information for
+     which they have the required access are allowed.
+
+Real
+----
+- The booking write routes: token verification and the role checks
+  (coordinators create, edit and cancel; Venue Staff approve and reject; Safety
+  Officers reset) run for real.
+- Assertions are on the status and the database not being touched.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
+
+Not proven
+----------
+- That the coordinator is the event's assigned one (AC3): checked by Venue
+  Booking Service (-> its test_booking_request_modification_access.py).
 """
 import pytest
 
@@ -45,88 +69,148 @@ def send(client, method, path, role):
 
 # AC1 ----
 
-def test_ac1_venue_staff_approve_a_pending_booking(setup):
-    """Normal: the Venue Staff role is permitted to decide a booking."""
+def test_approve_booking_when_venue_staff_is_allowed(setup):
+    """
+    Summary: Venue Staff may decide a booking.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (cursor returns the pending booking)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.side_effect = [booking_row(), booking_row(status="Approved", reviewed_by=USER_ID)]
 
+    # Act (When)
     response = client.patch(
         f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID},
         headers=bearer(USER_ID, "Venue Staff"),
     )
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Approved"
 
 
-@pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead"])
-def test_ac1_coordinators_cancel_a_booking(setup, role):
-    """Normal: both coordinator roles are permitted to cancel a booking."""
+@pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead"], ids=["event_coordinator", "event_coordinator_lead"])
+def test_cancel_booking_when_coordinator_role_is_allowed(setup, role):
+    """
+    Summary: Coordinators and the Lead may cancel a booking.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (cursor returns the booking)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.side_effect = [
         booking_row(status="Approved", reviewed_by=USER_ID), booking_row(status="Cancelled", reviewed_by=USER_ID),
     ]
 
+    # Act (When)
     response = client.patch(
         f"/venue-bookings/{BOOKING_ID}/cancel", json={"eventId": EVENT_ID}, headers=bearer(USER_ID, role)
     )
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Cancelled"
 
 
 # AC2 ----
 
-@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"])
-@pytest.mark.parametrize("method, path", REQUESTER_ROUTES)
-def test_ac2_only_coordinators_may_create_edit_or_cancel_a_booking(setup, method, path, role):
-    """Failure: other roles are refused before the body is read or the database touched."""
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"], ids=["venue_staff", "technical_support", "safety_officer", "event_organiser", "attendee"])
+@pytest.mark.parametrize("method, path", REQUESTER_ROUTES, ids=["create", "edit", "cancel"])
+def test_requester_booking_actions_when_other_role_return_403(setup, method, path, role):
+    """
+    Summary: Only coordinators may create, edit or cancel bookings.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, cursor = setup
 
+    # Act (When)
     response = send(client, method, path, role)
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["message"] == "Your role cannot change this information."
     cursor.execute.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    "role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"]
+    "role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"],
+    ids=["event_coordinator", "event_coordinator_lead", "technical_support", "safety_officer", "event_organiser", "attendee"],
 )
-@pytest.mark.parametrize("method, path", REVIEWER_ROUTES)
-def test_ac2_only_venue_staff_may_approve_or_reject_a_booking(setup, method, path, role):
-    """Failure: a coordinator cannot approve their own request, nor can any other non-staff role."""
+@pytest.mark.parametrize("method, path", REVIEWER_ROUTES, ids=["approve", "reject"])
+def test_reviewer_booking_actions_when_not_venue_staff_return_403(setup, method, path, role):
+    """
+    Summary: Only Venue Staff may approve or reject a booking; a coordinator cannot approve their own.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, cursor = setup
 
+    # Act (When)
     response = send(client, method, path, role)
 
+    # Assert (Then)
     assert response.status_code == 403
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("role", ["Safety Officer", "Event Organiser", "Attendee"])
-def test_ac2_a_role_outside_the_booking_roles_cannot_refresh_legacy_conflicts(setup, role):
-    """Failure: reconcile follows the booking-view roles, so roles outside them are refused."""
+@pytest.mark.parametrize("role", ["Safety Officer", "Event Organiser", "Attendee"], ids=["safety_officer", "event_organiser", "attendee"])
+def test_reconcile_legacy_conflicts_when_role_outside_booking_roles_returns_403(setup, role):
+    """
+    Summary: Roles outside the booking roles cannot refresh legacy conflicts.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, cursor = setup
 
+    # Act (When)
     response = send(client, *RECONCILE, role)
 
+    # Assert (Then)
     assert response.status_code == 403
     cursor.execute.assert_not_called()
 
 
 # AC4 ----
 
-def test_ac4_a_coordinator_keeps_viewing_bookings_when_their_approval_is_refused(setup):
-    """Conflict: the refused approval does not disturb the booking view the role still has."""
+def test_event_bookings_after_refused_approval_still_viewable_by_coordinator(setup):
+    """
+    Summary: A coordinator refused an approval can still view the bookings.
+    AC4: Given a user is permitted to view particular information but is not
+        permitted to modify it, when they attempt to change that information,
+        then the modification is prevented while their permitted viewing access
+        remains unaffected.
+    Double: Stub (cursor returns bookings)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.return_value = booking_row()
     coordinator = bearer(USER_ID, "Event Coordinator")
 
     before = client.get(f"/venue-bookings/{BOOKING_ID}", headers=coordinator)
     refused = client.patch(f"/venue-bookings/{BOOKING_ID}/approve", json={"reviewedBy": USER_ID}, headers=coordinator)
+
+    # Act (When)
     after = client.get(f"/venue-bookings/{BOOKING_ID}", headers=coordinator)
 
+    # Assert (Then)
     assert (before.status_code, refused.status_code, after.status_code) == (200, 403, 200)
     assert before.json == after.json
 
@@ -137,18 +221,29 @@ SAFETY_RESET = f"/events/{EVENT_ID}/venue-bookings/safety-reset"
 
 
 @pytest.mark.parametrize(
-    "role", ["Event Coordinator", "Event Coordinator Lead", "Venue Staff", "Technical Support", "Event Organiser", "Attendee"]
+    "role", ["Event Coordinator", "Event Coordinator Lead", "Venue Staff", "Technical Support", "Event Organiser", "Attendee"],
+    ids=["event_coordinator", "event_coordinator_lead", "venue_staff", "technical_support", "event_organiser", "attendee"],
 )
-def test_ac2_only_a_safety_officer_may_reset_bookings_even_with_the_internal_token(setup, role):
-    """Failure: the service-to-service token proves the route, not the person; the role must also fit."""
+def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_token(setup, role):
+    """
+    Summary: The service token proves the route, not the person: only a Safety Officer may reset bookings.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
     client, cursor = setup
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
 
+    # Act (When)
     response = client.post(
         SAFETY_RESET, json={"bookingIds": [BOOKING_ID]},
         headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, role)},
     )
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["message"] == "Your role cannot change this information."
     cursor.execute.assert_not_called()

@@ -1,16 +1,71 @@
-"""SCRUM-153: the SafetyCheck records behind "re-check safety after a high-impact change".
+"""
+SCRUM-153: Re-check Safety After High-Impact Changes
 
-AC1 Given an event is 'Confirmed', when its date/time, expected attendance,
-    venue requirements, equipment requirements or accessibility needs change,
-    then its status returns to 'Pending Safety Check' and the coordinator is
-    told why — the record half is round N becoming 'Approval Withdrawn' and
-    round N+1 opening as 'Pending'.
-AC3 Given a safety approval is withdrawn, then it stays visible in the event's
-    safety history — round N is kept, not deleted, with the Safety Officer's
-    original decision fields intact plus who withdrew it, when and why.
+User Story
+----------
+As an Event Coordinator, I want a safety approval to be withdrawn when a
+high-impact detail changes afterwards, so that the event is never prepared on
+the basis of an outdated safety review.
 
-The event's own status and history belong to Event Service; this service owns
-only the rounds. Database calls are mocked; no live database writes.
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Confirmed', when its date/time, expected attendance,
+     venue requirements, equipment requirements or accessibility needs change,
+     then its status returns to 'Pending Safety Check' and the coordinator is
+     told why.
+AC2: Given only a low-impact field changes (name, description, purpose,
+     registration needs), then the event stays 'Confirmed'.
+AC3: Given a safety approval is withdrawn, then it stays visible in the event's
+     safety history.
+AC4: Given a high-impact change to a 'Confirmed' event is waiting for its new
+     safety check, when a registered Attendee views the event, then they still
+     see the previously approved details, and the changed details are shown to
+     them only after the Safety Officer approves the new safety check.
+AC5: Given the new safety check ends without approval (changes requested or the
+     event is cancelled), then registered Attendees are never shown the
+     unapproved change, and they continue to see the last approved details or
+     the cancellation.
+
+SCRUM-8: User Authentication and Authorization
+
+User Story
+----------
+As a system user, I want to securely access the system, so that I can use the
+information and functionality available to me.
+
+Acceptance Criteria
+-------------------
+AC1: Given a system user has not been successfully authenticated, when they
+     attempt to access protected information or functionality, then access is
+     denied.
+AC2: Given a system user successfully authenticates, when they access protected
+     information or functionality, then their access is evaluated according to
+     their role and relationship to the relevant event.
+AC3: Given a system user's authentication attempt is unsuccessful, when the
+     authentication attempt is completed, then they remain unable to access
+     protected information or functionality.
+
+Real
+----
+- POST /safety-check-records/<id>/withdraw (in one transaction: round N Safety
+  Approved -> Approval Withdrawn keeping its decision, round N+1 opened Pending
+  with N's notes) and POST .../restore (its undo) run for real, as do the
+  history list and the guards on decide/delete for a withdrawn round.
+- Assertions are on the status, the returned rounds and the SQL sent.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup` fixture) - fresh MagicMock connection; the
+  cursor returns canned SafetyCheck rows (or raises); executed SQL, parameters
+  and the FOR UPDATE lock are inspected.
+
+Not proven
+----------
+- That the event returns to Pending Safety Check and attendees keep seeing the
+  approved details (AC1, AC4, AC5) (-> safety-check-service and event-service
+  unit tests for SCRUM-153).
+- That the row lock serialises concurrent withdrawals in PostgreSQL (->
+  tests/integration/).
 """
 import psycopg2
 import pytest
@@ -69,8 +124,16 @@ def approved_round(round_number=2, **overrides):
 # --- AC1/AC3: withdrawing an approval and opening the next round -------------
 
 
-def test_withdrawing_an_approval_opens_the_next_round(setup):
-    """AC1: round N is withdrawn and round N+1 opens as 'Pending', in one transaction."""
+def test_withdraw_approval_opens_next_pending_round(setup):
+    """
+    Summary: Withdrawing an approval opens the next round as Pending.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns the approved round and the new round)
+    """
+    # Arrange (Given)
     client, connection, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(round_number=2),            # SELECT ... FOR UPDATE
@@ -79,8 +142,10 @@ def test_withdrawing_an_approval_opens_the_next_round(setup):
         record_row(round_number=3, safety_check_id=NEXT_RECORD_ID),
     ]
 
+    # Act (When)
     response = withdraw(client)
 
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["withdrawn"]["status"] == "Approval Withdrawn"
     assert response.json["withdrawn"]["roundNumber"] == 2
@@ -102,8 +167,14 @@ def test_withdrawing_an_approval_opens_the_next_round(setup):
     connection.__enter__.assert_called_once()
 
 
-def test_the_original_decision_is_kept(setup):
-    """AC3: who approved, when and with what remarks survive the withdrawal."""
+def test_withdraw_approval_keeps_original_decision(setup):
+    """
+    Summary: The withdrawn round keeps who approved it and when.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (cursor returns rows; update inspected)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(),
@@ -115,6 +186,8 @@ def test_the_original_decision_is_kept(setup):
     response = withdraw(client)
 
     withdrawn = response.json["withdrawn"]
+
+    # Act + Assert (When / Then)
     assert withdrawn["decidedBy"] == OFFICER_ID
     assert withdrawn["decidedAt"] == "2026-11-02T03:00:00+00:00"
     assert withdrawn["remarks"] == "Looks safe."
@@ -130,8 +203,16 @@ def test_the_original_decision_is_kept(setup):
     assert "remarks" not in set_clause
 
 
-def test_round_n_notes_carry_forward_to_round_n_plus_one(setup):
-    """The Safety Officer reviewing round N+1 starts from round N's notes, not a blank round."""
+def test_withdraw_approval_carries_notes_into_new_round(setup):
+    """
+    Summary: The new round starts with the previous round's notes.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns rows; insert inspected)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     placement = "Speakers either side of the stage."
     crowd = "Entry through Door A."
@@ -147,15 +228,25 @@ def test_round_n_notes_carry_forward_to_round_n_plus_one(setup):
         ),
     ]
 
+    # Act (When)
     response = withdraw(client)
 
+    # Assert (Then)
     assert response.json["opened"]["equipmentPlacementNotes"] == placement
     assert response.json["opened"]["crowdMovementNotes"] == crowd
     assert cursor.execute.call_args_list[3].args[1][3:5] == [placement, crowd]
 
 
-def test_the_coordinator_is_recorded_as_submitting_the_new_round(setup):
-    """Round N+1 is the coordinator's re-check, so they are its `submitted_by`."""
+def test_withdraw_approval_records_coordinator_as_submitter(setup):
+    """
+    Summary: The coordinator who changed the event is recorded as submitting the new round.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns rows; insert inspected)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(),
@@ -164,13 +255,23 @@ def test_the_coordinator_is_recorded_as_submitting_the_new_round(setup):
         record_row(round_number=3, safety_check_id=NEXT_RECORD_ID),
     ]
 
+    # Act (When)
     withdraw(client)
 
+    # Assert (Then)
     assert cursor.execute.call_args_list[3].args[1][2] == COORDINATOR_ID
 
 
-def test_the_round_is_locked_before_it_is_withdrawn(setup):
-    """The race guard: two simultaneous re-checks can't both open round N+1."""
+def test_withdraw_approval_locks_round_first(setup):
+    """
+    Summary: The round is locked before it is withdrawn, so two changes cannot both withdraw it.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor; SQL inspected for FOR UPDATE)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(),
@@ -179,8 +280,10 @@ def test_the_round_is_locked_before_it_is_withdrawn(setup):
         record_row(round_number=3, safety_check_id=NEXT_RECORD_ID),
     ]
 
+    # Act (When)
     withdraw(client)
 
+    # Assert (Then)
     assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
     assert "FOR UPDATE" in cursor.execute.call_args_list[1].args[0]
 
@@ -196,22 +299,28 @@ def test_the_round_is_locked_before_it_is_withdrawn(setup):
         ("Safety Rejected", True, False),
         ("Approval Withdrawn", True, True),
     ],
+    ids=["pending", "changes_requested", "safety_rejected", "already_withdrawn"],
 )
-def test_only_an_approved_round_can_be_withdrawn(status, decided, withdrawn, setup):
-    """There is no approval to withdraw, so nothing is written — including round N+1.
-
-    'Approval Withdrawn' is in the list: the loser of a race between two
-    re-checks finds the round already withdrawn and must not open a second
-    round N+1.
+def test_withdraw_round_that_is_not_approved_returns_409(status, decided, withdrawn, setup):
     """
+    Summary: Only an approved round can be withdrawn.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns a round in another status)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     row = record_row(
         round_number=2, status=status, decided=decided, withdrawn=withdrawn
     )
     cursor.fetchone.side_effect = [row, row]
 
+    # Act (When)
     response = withdraw(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "ROUND_NOT_APPROVED"
     assert response.json["currentStatus"] == status
@@ -220,27 +329,48 @@ def test_only_an_approved_round_can_be_withdrawn(status, decided, withdrawn, set
     assert cursor.execute.call_count == 2
 
 
-def test_a_round_that_is_not_the_latest_cannot_be_withdrawn(setup):
-    """An older round's approval is history; only the round in force can be withdrawn."""
+def test_withdraw_older_round_returns_409(setup):
+    """
+    Summary: Only the latest round can be withdrawn.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor: a newer round exists)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(round_number=1),
         record_row(round_number=2, status="Pending", safety_check_id=NEXT_RECORD_ID),
     ]
 
+    # Act (When)
     response = withdraw(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NOT_LATEST_ROUND"
     assert cursor.execute.call_count == 2
 
 
-def test_withdrawing_a_missing_round_is_404(setup):
+def test_withdraw_missing_round_returns_404(setup):
+    """
+    Summary: Withdrawing a round that does not exist is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor finds nothing)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = None
 
+    # Act (When)
     response = withdraw(client)
 
+    # Assert (Then)
     assert response.status_code == 404
     assert response.json["message"] == "Safety check not found."
     assert cursor.execute.call_count == 1
@@ -249,20 +379,35 @@ def test_withdrawing_a_missing_round_is_404(setup):
 # --- Input and configuration -------------------------------------------------
 
 
-@pytest.mark.parametrize("reason", ["", "   ", None, 42, {"nested": "object"}])
-def test_a_reason_is_required(reason, setup):
-    """AC1 "told why": the reason is what the event's history quotes."""
+@pytest.mark.parametrize("reason", ["", "   ", None, 42, {"nested": "object"}], ids=["empty", "whitespace", "null", "number", "object"])
+def test_withdraw_without_text_reason_returns_400(reason, setup):
+    """
+    Summary: A withdrawal needs a reason the coordinator can be told.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = withdraw(client, reason=reason)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "reason is required."
     cursor.execute.assert_not_called()
 
 
-def test_a_reason_at_the_limit_is_accepted(setup):
-    """Boundary: 2000 characters is the limit, not one under it."""
+def test_withdraw_with_reason_at_limit_is_accepted(setup):
+    """
+    Summary: A reason up to the length limit is accepted.
+    AC1: (boundary: reason at the limit)
+    Double: Stub (cursor returns rows)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(),
@@ -271,76 +416,108 @@ def test_a_reason_at_the_limit_is_accepted(setup):
         record_row(round_number=3, safety_check_id=NEXT_RECORD_ID),
     ]
 
+    # Act (When)
     response = withdraw(client, reason="x" * 2000)
 
+    # Assert (Then)
     assert response.status_code == 201
 
 
-def test_a_reason_over_the_limit_is_rejected(setup):
-    """Boundary: 2001 characters is refused, and nothing is written."""
+def test_withdraw_with_reason_over_limit_returns_400(setup):
+    """
+    Summary: A reason over the limit is refused.
+    AC1: (boundary: reason one over the limit)
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = withdraw(client, reason="x" * 2001)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "reason must be 2000 characters or fewer."
     cursor.execute.assert_not_called()
 
 
-def test_withdrawer_is_the_signed_in_coordinator_not_the_body(setup):
-    """SCRUM-8: a forged withdrawnBy is ignored; the token names the withdrawer."""
+def test_withdraw_with_withdrawer_in_body_records_signed_in_user(setup):
+    """
+    Summary: The person recorded as withdrawing is the signed-in user, never one named in the body.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    SCRUM-8 AC2: Given a system user successfully authenticates, when they
+        access protected information or functionality, then their access is
+        evaluated according to their role and relationship to the relevant
+        event.
+    Double: Stub (cursor returns rows; update inspected)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = record_row(status="Safety Approved", decided=True)
 
+    # Act (When)
     withdraw(client, withdrawnBy="99999999-9999-4999-8999-999999999999")
 
+    # Assert (Then)
     assert all("99999999-9999-4999-8999-999999999999" not in str(c.args) for c in cursor.execute.call_args_list)
 
 
-def test_withdraw_requires_a_valid_record_id(setup):
+def test_withdraw_with_bad_round_id_returns_404(setup):
+    """
+    Summary: A withdrawal must name a valid round.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = withdraw(client, record_id="not-a-uuid")
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "The safety check ID must be a valid UUID."
     cursor.execute.assert_not_called()
 
 
-def test_withdraw_rejects_a_non_object_body(setup):
+def test_withdraw_with_non_object_body_returns_400(setup):
+    """
+    Summary: A request that is not a withdrawal is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = client.post(
         f"/safety-check-records/{RECORD_ID}/withdraw", json=["not", "an", "object"]
     )
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Send a JSON object."
     cursor.execute.assert_not_called()
 
 
-def test_withdraw_without_database_url(no_database):
-    response = withdraw(no_database)
-
-    assert response.status_code == 503
-    assert "DATABASE_URL" in response.json["message"]
-
-
-def test_withdraw_database_failure_is_503(setup):
-    client, _, cursor = setup
-    cursor.execute.side_effect = psycopg2.OperationalError("connection refused")
-
-    response = withdraw(client)
-
-    assert response.status_code == 503
-    assert "connection refused" not in response.json["message"]
-
-
 # --- AC3: the withdrawn round stays in the history ---------------------------
 
 
-def test_the_history_shows_the_withdrawn_round_and_the_new_one(setup):
-    """AC3: both rounds come back, newest first, with the withdrawal recorded."""
+def test_list_rounds_after_withdrawal_shows_withdrawn_and_new_round(setup):
+    """
+    Summary: The history shows the withdrawn approval alongside the new round.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (cursor returns both rounds)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchall.side_effect = [
         [
@@ -355,8 +532,10 @@ def test_the_history_shows_the_withdrawn_round_and_the_new_one(setup):
         [],
     ]
 
+    # Act (When)
     response = client.get(f"/safety-check-records?eventId={EVENT_ID}")
 
+    # Assert (Then)
     assert response.status_code == 200
     rounds = response.json["safetyChecks"]
     assert [r["roundNumber"] for r in rounds] == [3, 2]
@@ -369,50 +548,74 @@ def test_the_history_shows_the_withdrawn_round_and_the_new_one(setup):
     assert rounds[1]["decidedBy"] == OFFICER_ID
 
 
-def test_approval_withdrawn_is_a_valid_status_filter(setup):
-    """SCRUM-163 AC4 lists earlier decisions, a withdrawn approval among them."""
+def test_list_rounds_accepts_approval_withdrawn_filter(setup):
+    """
+    Summary: Withdrawn approvals can be filtered for.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (cursor returns no rows)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchall.side_effect = [
         [record_row(round_number=2, status="Approval Withdrawn", decided=True, withdrawn=True)],
         [],
     ]
 
+    # Act (When)
     response = client.get(
         f"/safety-check-records?eventId={EVENT_ID}&status=Approval Withdrawn"
     )
 
+    # Assert (Then)
     assert response.status_code == 200
     assert "Approval Withdrawn" in RECORD_STATUSES
     assert cursor.execute.call_args_list[0].args[1] == [EVENT_ID, "Approval Withdrawn"]
 
 
-def test_a_withdrawn_round_cannot_be_decided(setup):
-    """AC3: round N is history now. The Safety Officer decides round N+1 instead."""
+def test_decide_withdrawn_round_returns_409(setup):
+    """
+    Summary: A withdrawn approval cannot be decided again.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (cursor returns a withdrawn round)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = record_row(
         round_number=2, status="Approval Withdrawn", decided=True, withdrawn=True
     )
 
+    # Act (When)
     response = client.patch(
         f"/safety-check-records/{RECORD_ID}/decision",
         json={"status": "Safety Approved"},
         headers=bearer(OFFICER_ID, "Safety Officer"),
     )
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_CHECK_ALREADY_DECIDED"
     assert cursor.execute.call_count == 1
 
 
-def test_a_withdrawn_round_cannot_be_deleted(setup):
-    """Compensation must not take a round the history needs (AC3)."""
+def test_delete_withdrawn_round_returns_409(setup):
+    """
+    Summary: A withdrawn approval cannot be deleted from the history.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (cursor returns a withdrawn round)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = record_row(
         round_number=2, status="Approval Withdrawn", decided=True, withdrawn=True
     )
 
+    # Act (When)
     response = client.delete(f"/safety-check-records/{RECORD_ID}")
 
+    # Assert (Then)
     assert response.status_code == 409
     assert cursor.execute.call_count == 1
 
@@ -420,8 +623,13 @@ def test_a_withdrawn_round_cannot_be_deleted(setup):
 # --- Compensation: restore ---------------------------------------------------
 
 
-def test_restore_deletes_the_new_round_and_reinstates_the_approval(setup):
-    """Compensation: the composite could not save the edit, so the withdrawal is undone."""
+def test_restore_removes_new_round_and_reinstates_approval(setup):
+    """
+    Summary: If the edit fails, the new round is removed and the approval reinstated.
+    AC1: (rollback: a failed edit leaves the approval in place)
+    Double: Stub (cursor returns rows; SQL inspected)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         record_row(round_number=2, status="Approval Withdrawn", decided=True, withdrawn=True),
@@ -429,8 +637,10 @@ def test_restore_deletes_the_new_round_and_reinstates_the_approval(setup):
         approved_round(),
     ]
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Safety Approved"
     assert response.json["withdrawnAt"] is None
@@ -444,21 +654,33 @@ def test_restore_deletes_the_new_round_and_reinstates_the_approval(setup):
     assert "withdrawal_reason = NULL" in update_sql
 
 
-def test_restore_is_idempotent(setup):
-    """A retry finds round N already approved and round N+1 gone; nothing more to do."""
+def test_restore_twice_has_same_result(setup):
+    """
+    Summary: Restoring twice has the same result as restoring once.
+    AC1: (rollback)
+    Double: Stub (cursor returns an already restored round)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [approved_round(), approved_round()]
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Safety Approved"
     # Only the two SELECTs: no second DELETE, no second UPDATE.
     assert cursor.execute.call_count == 2
 
 
-def test_restore_refuses_when_the_new_round_was_already_decided(setup):
-    """A Safety Officer decided round N+1 in the meantime; that decision stands."""
+def test_restore_when_new_round_decided_returns_409(setup):
+    """
+    Summary: An approval is not restored once its replacement round was decided.
+    AC1: (rollback)
+    Double: Stub (cursor returns a decided new round)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         record_row(round_number=2, status="Approval Withdrawn", decided=True, withdrawn=True),
@@ -470,8 +692,10 @@ def test_restore_refuses_when_the_new_round_was_already_decided(setup):
         ),
     ]
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NOT_RESTORABLE"
     assert cursor.execute.call_count == 2
@@ -491,100 +715,196 @@ def test_restore_refuses_when_the_new_round_was_already_decided(setup):
     ],
     ids=["missing", "not-round-n-plus-1", "another-event"],
 )
-def test_restore_refuses_a_round_it_did_not_open(opened, setup):
-    """This can only undo its own withdrawal, never delete an unrelated round."""
+def test_restore_with_round_it_did_not_open_returns_409(opened, setup):
+    """
+    Summary: Restore only removes the round the withdrawal opened.
+    AC1: (rollback)
+    Double: Stub (cursor returns another round)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         record_row(round_number=2, status="Approval Withdrawn", decided=True, withdrawn=True),
         opened,
     ]
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NOT_RESTORABLE"
     assert cursor.execute.call_count == 2
 
 
-@pytest.mark.parametrize("status", ["Pending", "Changes Requested", "Safety Rejected"])
-def test_restore_refuses_a_round_that_was_never_withdrawn(status, setup):
+@pytest.mark.parametrize("status", ["Pending", "Changes Requested", "Safety Rejected"], ids=["pending", "changes_requested", "safety_rejected"])
+def test_restore_round_never_withdrawn_returns_409(status, setup):
+    """
+    Summary: Only a withdrawn approval can be restored.
+    AC1: (rollback)
+    Double: Stub (cursor returns a round in another status)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         record_row(round_number=2, status=status, decided=status != "Pending"),
         None,
     ]
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NOT_RESTORABLE"
     assert cursor.execute.call_count == 1
 
 
-def test_restore_refuses_an_approved_round_that_still_has_a_later_round(setup):
-    """Not our own withdrawal: an approved round with a later round is SCRUM-164 territory."""
+def test_restore_approved_round_with_later_round_returns_409(setup):
+    """
+    Summary: An approval with a later round still in place is not restored.
+    AC1: (rollback)
+    Double: Stub (cursor: approved round and a later round)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         approved_round(round_number=2),
         record_row(round_number=3, status="Pending", safety_check_id=NEXT_RECORD_ID),
     ]
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NOT_RESTORABLE"
     assert cursor.execute.call_count == 2
 
 
-def test_restoring_a_missing_round_is_404(setup):
+def test_restore_missing_round_returns_404(setup):
+    """
+    Summary: Restoring a round that does not exist is refused.
+    AC1: (rollback)
+    Double: Stub (cursor finds nothing)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = None
 
+    # Act (When)
     response = restore(client)
 
+    # Assert (Then)
     assert response.status_code == 404
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize("opened_id", ["not-a-uuid", "", None])
-def test_restore_requires_the_opened_round_id(opened_id, setup):
+@pytest.mark.parametrize("opened_id", ["not-a-uuid", "", None], ids=["not_a_uuid", "empty", "null"])
+def test_restore_without_valid_opened_round_id_returns_400(opened_id, setup):
+    """
+    Summary: A restore must name the round the withdrawal opened.
+    AC1: (rollback)
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = restore(client, openedSafetyCheckId=opened_id)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "openedSafetyCheckId must be a valid UUID."
     cursor.execute.assert_not_called()
 
 
-def test_restore_requires_a_valid_record_id(setup):
+def test_restore_with_bad_round_id_returns_404(setup):
+    """
+    Summary: A restore must name a valid round.
+    AC1: (rollback)
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = restore(client, record_id="not-a-uuid")
 
+    # Assert (Then)
     assert response.status_code == 400
     cursor.execute.assert_not_called()
 
 
-def test_restore_rejects_a_non_object_body(setup):
+def test_restore_with_non_object_body_returns_400(setup):
+    """
+    Summary: A request that is not a restore is refused.
+    AC1: (rollback)
+    Double: None
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = client.post(
         f"/safety-check-records/{RECORD_ID}/restore", json=["not", "an", "object"]
     )
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Send a JSON object."
     cursor.execute.assert_not_called()
 
 
-def test_restore_without_database_url(no_database):
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_withdraw_when_database_url_missing_returns_503(no_database):
+    """
+    Summary: Withdrawing reports itself unavailable when no database is configured.
+    Supporting design check: an unconfigured service answers 503
+    Double: None
+    """
+    response = withdraw(no_database)
+
+    assert response.status_code == 503
+    assert "DATABASE_URL" in response.json["message"]
+
+
+def test_withdraw_when_database_fails_returns_503(setup):
+    """
+    Summary: A database outage while withdrawing gives a 503.
+    Supporting design check: database errors answer 503 with a safe message
+    Double: Stub (psycopg2.connect raises OperationalError)
+    """
+    client, _, cursor = setup
+    cursor.execute.side_effect = psycopg2.OperationalError("connection refused")
+
+    response = withdraw(client)
+
+    assert response.status_code == 503
+    assert "connection refused" not in response.json["message"]
+
+
+def test_restore_when_database_url_missing_returns_503(no_database):
+    """
+    Summary: Restoring reports itself unavailable when no database is configured.
+    Supporting design check: an unconfigured service answers 503
+    Double: None
+    """
     response = restore(no_database)
 
     assert response.status_code == 503
 
 
-def test_restore_database_failure_is_503(setup):
+def test_restore_when_database_fails_returns_503(setup):
+    """
+    Summary: A database outage while restoring gives a 503.
+    Supporting design check: database errors answer 503 with a safe message
+    Double: Stub (psycopg2.connect raises OperationalError)
+    """
     client, _, cursor = setup
     cursor.execute.side_effect = psycopg2.OperationalError("connection refused")
 

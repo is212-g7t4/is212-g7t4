@@ -1,21 +1,47 @@
-"""SCRUM-168 Safety Check Notifications: event-workflow-service unit tests.
+"""
+SCRUM-168: Safety Check Notifications
 
-Story:      As a Safety Officer or Event Coordinator, I want to receive notifications when a safety review requires my action or a safety decision is recorded, so that I can respond promptly.
-Real:       Workflow dispatcher, OutboxAPI and HTTP request construction.
-Doubled:    Event/User HTTP responses via httpx.MockTransport; broker publisher.
-Not proven: authentication, hosted permissions, live inbox delivery or browser navigation.
+User Story
+----------
+As an Event Coordinator, I want to be notified of the Safety Officer's decision
+on my event, so that I can act on it straight away.
 
-AC1  Given an event is submitted or resubmitted for a safety check, then Safety Officers receive an in-app notification with the event name, date and a link to the review.
-Coverage: Role lookup, review formatting and broker handoff; not inbox receipt.
-AC2  Given a decision is recorded, the assigned Event Coordinator receives an in-app notification containing the event name and decision (approval, rejection, or requested changes). Rejection and requested-changes notifications include the reason. Requested-changes notifications include the affected areas. Approval notifications include remarks when provided.
-Coverage: Formatting/freeze/publication only; locked coordinator and persistence belong to Event integration.
-AC3  Given notification delivery fails, then the decision remains recorded and is not rolled back.
-Coverage: Publisher failure retries frozen work; committed decision is verified in Event integration.
-AC4  Given a notification is sent, then it records the event, recipient, type and timestamp.
-Coverage: Envelope metadata only; inbox INSERT contract belongs to Notification unit tests.
+Acceptance Criteria
+-------------------
+AC1: Given an event is submitted or resubmitted for a safety check, then Safety
+     Officers receive an in-app notification with the event name, date and a
+     link to the review.
+AC2: Given a decision is recorded, then the assigned Event Coordinator receives
+     an in-app notification with the event name, the decision and, for
+     rejection or requested changes, the reason and affected areas.
+AC3: Given notification delivery fails, then the decision remains recorded and
+     is not rolled back.
+AC4: Given a notification is sent, then it records the event, recipient, type
+     and timestamp.
 
-AC = acceptance criterion; DR = supporting design rule. Automatic rechecks and
-fixed coordinator recipients are agreed DRs, not extra ACs or switching scenarios.
+Real
+----
+- The event-workflow notification workers: they claim jobs from the owning
+  service's outbox over HTTP, look up current recipients and display facts, ask
+  the owner to freeze the envelope, publish the frozen envelope to RabbitMQ and
+  mark it published, retrying or holding on failure.
+- Assertions are on the envelopes frozen and published, call order, and
+  retry/hold decisions.
+
+Doubled
+-------
+- Owner outbox and lookup HTTP (Event, User, Registration, Venue Availability):
+  Stub (respx / monkeypatched httpx fixtures) - canned replies; requests
+  inspected.
+- RabbitMQ publisher (pika): Mock - publish arguments, confirms and persistence
+  inspected.
+
+Not proven
+----------
+- That the owner freezes the envelope in the same transaction as the change (->
+  the owning service's notification tests and integration tests).
+- That Notification Service stores and shows the inbox item (->
+  notification-service consumer tests and frontend NotificationCenter tests).
 """
 import json
 from unittest.mock import Mock, patch
@@ -33,9 +59,15 @@ JOB = dict(id=ID, type='safety.review-fanout', source=SOURCE, envelope=None,
            createdAt='2026-10-28T00:00:00+00:00', leaseToken=ID, attempts=1)
 
 
-# AC1 ---- officer fanout and review envelope
-def test_ac1_review_looks_up_all_officers_and_publishes_the_saved_review(monkeypatch):
-    """Normal: AC1/AC4: role lookup supplies every officer; review publication retains date/link/metadata."""
+def test_safety_review_alert_goes_to_every_safety_officer(monkeypatch):
+    """
+    Summary: A safety review alert goes to every Safety Officer.
+    AC1: Given an event is submitted or resubmitted for a safety check, then
+        Safety Officers receive an in-app notification with the event name,
+        date and a link to the review.
+    Double: Stub (user lookup returns officers), Mock (publish)
+    """
+    # Arrange (Given)
     monkeypatch.setenv('EVENT_SERVICE_URL', 'http://event.test')
     monkeypatch.setenv('USER_SERVICE_URL', 'http://user.test')
     monkeypatch.setenv('INTERNAL_SERVICE_TOKEN', 'synthetic')
@@ -66,6 +98,8 @@ def test_ac1_review_looks_up_all_officers_and_publishes_the_saved_review(monkeyp
         return httpx.Response(200, json=dict(id=ID, status='published'))
 
     broker = Mock()
+
+    # Act (When)
     with httpx.Client(transport=httpx.MockTransport(transport)) as client, patch('httpx.request', side_effect=client.request):
         dispatch_once(OutboxAPI(), broker)
         expansion = next(r for r in requests if r.url.path.endswith('/expand'))
@@ -73,6 +107,8 @@ def test_ac1_review_looks_up_all_officers_and_publishes_the_saved_review(monkeyp
         broker.assert_not_called()
         current[:] = [{**JOB, 'type': 'safety.review-submitted', 'source': expected['details']}]
         dispatch_once(OutboxAPI(), broker)
+
+    # Assert (Then)
     broker.assert_called_once_with(expected)
     assert requests[-1].url.path.endswith('/published')
 
@@ -84,8 +120,15 @@ def test_ac1_review_looks_up_all_officers_and_publishes_the_saved_review(monkeyp
      dict(user_id=OTHER, username='Synthetic organiser', email='organiser@example.com',
           role='Event Organiser', organization='', contact_details='')],
 ], ids=['malformed-user-list', 'wrong-role-after-valid-officer'])
-def test_dr_invalid_officer_lookup_retries_without_partial_expansion_or_publication(safety_outbox_http, caplog, users):
-    """Failure: invalid lookup data retries the whole fanout without sending to a partial recipient list."""
+def test_safety_review_alert_with_bad_officer_lookup_retries(safety_outbox_http, caplog, users):
+    """
+    Summary: A bad Safety Officer lookup is retried rather than alerting only some officers.
+    AC1: Given an event is submitted or resubmitted for a safety check, then
+        Safety Officers receive an in-app notification with the event name,
+        date and a link to the review.
+    Double: Stub (user lookup invalid), Mock (no publish)
+    """
+    # Arrange (Given)
     # Arrange: malformed responses deliberately violate User's /users contract
     # (services/user-service/app/__init__.py::users, app/models.py::serialize).
     api, http = safety_outbox_http
@@ -95,6 +138,7 @@ def test_dr_invalid_officer_lookup_retries_without_partial_expansion_or_publicat
     retry = http.post(f'http://event.test/internal/notification-outbox/{ID}/retry').respond(200, json={'id': ID, 'status': 'retry'})
     broker = Mock()
 
+    # Act + Assert (When / Then)
     # Act: the worker uses its real HTTP adapter, not a mocked recipient method.
     assert dispatch_once(api, broker) == 1
 
@@ -110,8 +154,15 @@ def test_dr_invalid_officer_lookup_retries_without_partial_expansion_or_publicat
     ]
 
 
-def test_dr_no_safety_officers_completes_empty_expansion_with_warning(safety_outbox_http, caplog):
-    """Boundary: no officers completes an empty fanout with a warning, not a retry or publication."""
+def test_safety_review_alert_with_no_officers_completes_with_warning(safety_outbox_http, caplog):
+    """
+    Summary: With no Safety Officers, the job completes with a warning and sends nothing.
+    AC1: Given an event is submitted or resubmitted for a safety check, then
+        Safety Officers receive an in-app notification with the event name,
+        date and a link to the review.
+    Double: Stub (user lookup returns none)
+    """
+    # Arrange (Given)
     # Arrange: User's /users returns an empty list when its role filter has no
     # matches (services/user-service/app/__init__.py::users).
     api, http = safety_outbox_http
@@ -123,6 +174,7 @@ def test_dr_no_safety_officers_completes_empty_expansion_with_warning(safety_out
     )
     broker = Mock()
 
+    # Act + Assert (When / Then)
     # Act / Assert: complete through the owner's public HTTP expansion boundary.
     assert dispatch_once(api, broker) == 1
     assert [call.request for call in http.calls] == [claim.calls[0].request, lookup.calls[0].request, expansion.calls[0].request]
@@ -136,7 +188,6 @@ def test_dr_no_safety_officers_completes_empty_expansion_with_warning(safety_out
     ]
 
 
-# AC2 ---- decision content; AC3 retry; AC4 envelope metadata
 @pytest.mark.parametrize('decision,reason,areas,message', [
     ('Approved', 'Exit plan agreed.', [], 'Workshop safety review: Approved (round 1). Exit plan agreed.'),
     ('Approved', None, [], 'Workshop safety review: Approved (round 1).'),
@@ -144,8 +195,17 @@ def test_dr_no_safety_officers_completes_empty_expansion_with_warning(safety_out
     ('Changes Requested', 'Revise the plan.', ['venue arrangement', 'event details'],
      'Workshop safety review: Changes Requested (round 1). Revise the plan. Affected areas: venue arrangement, event details.'),
 ], ids=['approval-remarks', 'approval-no-remarks', 'rejection-reason', 'changes-reason-areas'])
-def test_ac2_decision_content_is_frozen_before_publish_and_ac3_failed_delivery_retries(decision, reason, areas, message):
-    """Normal: AC2/AC3: publish complete saved content; broker failure retries the same frozen recipient."""
+def test_safety_decision_alert_freezes_then_retries_failed_delivery(decision, reason, areas, message):
+    """
+    Summary: A decision alert is frozen before sending, and a failed send is retried.
+    AC2: Given a decision is recorded, then the assigned Event Coordinator
+        receives an in-app notification with the event name, the decision and,
+        for rejection or requested changes, the reason and affected areas.
+    AC3: Given notification delivery fails, then the decision remains recorded
+        and is not rolled back.
+    Double: Stub (owner outbox), Mock (publish fails then succeeds)
+    """
+    # Arrange (Given)
     source = dict(eventId=ID, eventName='Workshop', round=1, recipientId=OTHER,
                   decision=decision, reason=reason, areas=areas)
     job = {**JOB, 'type': 'safety.review-decision', 'source': source}
@@ -173,10 +233,14 @@ def test_ac2_decision_content_is_frozen_before_publish_and_ac3_failed_delivery_r
 
     api.freeze.side_effect = freeze
     dispatch_once(api, publish)
+
+    # Act (When)
     if reason == 'Exit plan agreed.':
         api.retry.assert_called_once_with(job, 'RuntimeError')
         api.published.assert_not_called()
         api.claim.return_value = [{**job, 'envelope': frozen}]
         dispatch_once(api, publish)
+
+    # Assert (Then)
     api.freeze.assert_called_once()
     api.published.assert_called_once()

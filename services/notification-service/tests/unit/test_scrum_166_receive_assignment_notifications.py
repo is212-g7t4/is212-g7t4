@@ -1,22 +1,53 @@
-"""SCRUM-166 — Receive assignment notifications.
+"""
+SCRUM-166: Receive assignment notifications
 
-As an Event Coordinator, I want to receive in-app notifications when I am assigned to or removed from an event, so that I know which events I am responsible for.
+User Story
+----------
+As an Event Coordinator, I want to receive in-app notifications when I am
+assigned to or removed from an event, so that I know which events I am
+responsible for.
 
-- **AC1:** Given the Lead Coordinator successfully assigns an Event Coordinator to an event that previously had no assigned coordinator, the assigned coordinator receives an in-app assignment notification.
-- **AC2:** Given the Lead Coordinator successfully reassigns an event from one coordinator to a different coordinator:
-  - The new coordinator receives an in-app notification that they have been assigned.
-  - The previous coordinator receives an in-app notification that they have been removed.
-- **AC3:** Assignment notifications include the event name, Event Organiser name, proposed event date/time, and a link to view the newly assigned event.
-- **AC4:** Removal notifications include the event name, Event Organiser name, proposed event date/time, and a clear statement that the recipient is no longer assigned to the event.
-- **AC5:** Saving an assignment without changing the assigned coordinator does not create new assignment or removal notifications.
+Acceptance Criteria
+-------------------
+AC1: Given the Lead Coordinator successfully assigns an Event Coordinator to an
+     event that previously had no assigned coordinator, the assigned
+     coordinator receives an in-app assignment notification.
+AC2: Given the Lead Coordinator successfully reassigns an event from one
+     coordinator to a different coordinator:
+     1. The new coordinator receives an in-app notification that they have been
+     assigned.
+     2. The previous coordinator receives an in-app notification that they have
+     been removed.
+AC3: Assignment notifications include the event name, Event Organiser name,
+     proposed event date/time, and a link to view the newly assigned event.
+AC4: Removal notifications include the event name, Event Organiser name,
+     proposed event date/time, and a clear statement that the recipient is no
+     longer assigned to the event.
+AC5: Saving an assignment without changing the assigned coordinator does not
+     create new assignment or removal notifications.
 
-AC = acceptance criterion; DR = supporting design rule.
-Real: consumer validation and SQL-building storage adapter.
-Doubled: PostgreSQL connection/cursor and ACK channel.
-Not proven: committed persistence, upstream assignment or broker transport.
-AC1/AC2: storage contract only; committed private inboxes are covered by this
-service's integration story module. AC3/AC4: display/destination validation.
-AC5: not covered here; Event owns no-op suppression and tests it at both layers.
+Real
+----
+- app.consumer.process(): JSON validation, the story's display-contract
+  validator and the inbox/quarantine SQL, with the broker ACK only after the
+  database commit.
+- Assertions are on the SQL and parameters sent, and the ACK and its order.
+
+Doubled
+-------
+- psycopg2.connect: Stub - fresh MagicMock connection and cursor per test; SQL
+  inspected.
+- Broker channel: Mock - asserts basic_ack after the commit.
+
+Not proven
+----------
+- That the inbox row is committed and de-duplicated in real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the producer publishes this envelope and the UI shows it with a working
+  link (-> the producing service dispatcher tests and the frontend
+  NotificationCenter tests).
+- That no notice is created when the assignment does not change (AC5) (->
+  event-service unit tests for SCRUM-166).
 """
 
 import json
@@ -59,12 +90,29 @@ def consume(value):
 
 # AC1/AC2 — Both coordinator delivery types retain their recipient and event reference
 
-@pytest.mark.parametrize("removed,scheduled", [(False, True), (True, True), (False, False), (True, False)])
-def test_ac1_ac2_coordinator_delivery_retains_payload_before_ack(removed, scheduled):
-    """Accept assignment/removal with a valid or absent schedule, retaining full payload."""
+@pytest.mark.parametrize("removed,scheduled", [(False, True), (True, True), (False, False), (True, False)], ids=["assigned_scheduled", "removed_scheduled", "assigned_unscheduled", "removed_unscheduled"])
+def test_process_assignment_or_removal_alert_stores_before_ack(removed, scheduled):
+    """
+    Summary: Assignment and removal notices, with or without a scheduled date, are stored for the coordinator before acknowledging.
+    AC1: Given the Lead Coordinator successfully assigns an Event Coordinator
+        to an event that previously had no assigned coordinator, the assigned
+        coordinator receives an in-app assignment notification.
+    AC2: Given the Lead Coordinator successfully reassigns an event from one
+        coordinator to a different coordinator:
+        1. The new coordinator receives an in-app notification that they have
+        been assigned.
+        2. The previous coordinator receives an in-app notification that they
+        have been removed.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     value = envelope(removed, scheduled)
     calls = consume(value)
+
+    # Act (When)
     inserts = [call.args[1] for call in calls if call.args[0].startswith('INSERT INTO public."Notification" ')]
+
+    # Assert (Then)
     assert len(inserts) == 1
     assert inserts[0][2] == RECIPIENT
     assert inserts[0][4] == EVENT
@@ -77,9 +125,17 @@ def test_ac1_ac2_coordinator_delivery_retains_payload_before_ack(removed, schedu
 @pytest.mark.parametrize("defect", [
     "details", "event-name", "organiser-name", "recipient", "event-link", "assignment-null",
     "removal-link", "naive-start", "naive-end", "reversed-period", "half-period", "invalid-id",
-])
-def test_ac3_ac4_invalid_coordinator_display_contract_is_quarantined(defect):
-    """Reject incomplete identity, content, interval or destination without an inbox INSERT."""
+], ids=["no_details", "no_event_name", "no_organiser_name", "wrong_recipient", "no_event_link", "null_assignment", "removal_with_link", "naive_start", "naive_end", "reversed_period", "half_period", "invalid_id"])
+def test_process_assignment_alert_missing_required_content_is_quarantined(defect):
+    """
+    Summary: A notice missing the event, organiser, recipient, link or a valid period is kept aside.
+    AC3: Assignment notifications include the event name, Event Organiser name,
+        proposed event date/time, and a link to view the newly assigned event.
+    AC4: Removal notifications include the event name, Event Organiser name,
+        proposed event date/time, and a clear statement that the recipient is
+        no longer assigned to the event.
+    Double: Stub (connection), Mock (channel ACK)
+    """
     value = envelope(removed=defect == "removal-link")
     if defect == "details":
         value["details"] = None
@@ -120,8 +176,16 @@ def test_ac3_ac4_invalid_coordinator_display_contract_is_quarantined(defect):
     ("2030-03-01T08:00:00+08:00", "2030-03-01T00:00:00+00:00", False),
 ], ids=["local-text-reversed-but-instants-increase", "local-text-increases-but-instants-reverse",
         "different-offsets-same-instant"])
-def test_ac3_ac4_offset_period_uses_actual_instant_order(removed, start, end, accepted):
-    """Store forward instants; quarantine reversed or equal instants despite local clock order."""
+def test_process_assignment_alert_compares_period_by_actual_instant(removed, start, end, accepted):
+    """
+    Summary: A start and end in different time zones are ordered by the real moment, not the clock text.
+    AC3: Assignment notifications include the event name, Event Organiser name,
+        proposed event date/time, and a link to view the newly assigned event.
+    AC4: Removal notifications include the event name, Event Organiser name,
+        proposed event date/time, and a clear statement that the recipient is
+        no longer assigned to the event.
+    Double: Stub (connection), Mock (channel ACK)
+    """
     value = envelope(removed)
     value["details"].update(startDateTime=start, endDateTime=end)
     calls = consume(value)

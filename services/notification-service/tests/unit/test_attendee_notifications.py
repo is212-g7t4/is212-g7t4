@@ -1,14 +1,41 @@
-"""SCRUM-46 Attendee Registration and Update Notifications: Notification unit tests.
+"""
+SCRUM-46: Attendee Registration and Update Notifications
 
-Story: As an Attendee, I want to receive notifications about my registration status, so that I can confirm my place and stay updated on event changes.
+User Story
+----------
+As an Attendee, I want to receive notifications about my registration status,
+so that I can confirm my place and stay updated on event changes.
 
-Real: wire parser. Doubled: no storage exercised.
-Not proven: inbox SQL/dedup, broker delivery, or authentication.
-AC1 Given an Attendee successfully registers for an event, the system sends an in-app notification confirming their registration with the event name, date, time, venue, and registration reference number.
-AC2 Given an Attendee successfully withdraws their registration, the system sends an in-app notification confirming the withdrawal with the event name.
-AC3 Given an event cancellation takes effect, or a change to its date, time or venue is approved and applied, all currently registered Attendees receive an in-app notification with the event name and cancellation status or updated details, as applicable.
-AC1-3 wire acceptance is covered here; business mutations belong to their owners.
-AC = acceptance criterion; DR = supporting design rule.
+Acceptance Criteria
+-------------------
+AC1: Given an Attendee successfully registers for an event, the system sends an
+     in-app notification confirming their registration with the event name,
+     date, time, venue, and registration reference number.
+AC2: Given an Attendee successfully withdraws their registration, the system
+     sends an in-app notification confirming the withdrawal with the event
+     name.
+AC3: Given an event cancellation takes effect, or a change to its date, time or
+     venue is approved and applied, all currently registered Attendees receive
+     an in-app notification with the event name and cancellation status or
+     updated details, as applicable.
+
+Real
+----
+- app.consumer envelope parsing and the attendee notification validators
+  (registration confirmed/withdrawn, event cancelled/updated) run for real.
+- Assertions are on whether an envelope is accepted or rejected.
+
+Doubled
+-------
+- Nothing: the parser is called directly; no storage is exercised.
+
+Not proven
+----------
+- That the inbox row is committed and de-duplicated in real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the producer publishes this envelope to RabbitMQ and the UI shows it
+  with a working link (-> the producing service's dispatcher tests and the
+  frontend NotificationCenter tests).
 """
 
 import json
@@ -16,7 +43,6 @@ import pytest
 from app.consumer import parse
 
 
-# AC1 / AC2 / AC3 ---- consumer wire acceptance
 @pytest.mark.parametrize(
     "kind",
     [
@@ -25,14 +51,24 @@ from app.consumer import parse
         "attendee.event-cancelled",
         "attendee.event-updated",
     ],
+    ids=["registration_confirmed", "registration_withdrawn", "event_cancelled", "event_updated"],
 )
-def test_ac1_ac2_ac3_attendee_envelopes_accept_only_matching_registration_targets(kind):
-    """Normal/conflict: parse each of the four attendee message types with a UUID registration link.
-    Require unchanged wire content, then replace that link with an internal event
-    page and require rejection. Types mean confirmation (AC1), withdrawal (AC2), and
-    cancellation/update (AC3). The actual JSON parser runs without storage or broker;
-    this checks destination validation, not producer wording or inbox persistence.
+def test_parse_attendee_envelope_accepts_each_kind_for_its_registration(kind):
     """
+    Summary: Registration, withdrawal, cancellation and change notices are accepted only when they point at the attendee's registration.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: None
+    """
+    # Arrange (Given)
     ref = "33333333-3333-4333-8333-333333333333"
     value = dict(
         version=1,
@@ -52,6 +88,8 @@ def test_ac1_ac2_ac3_attendee_envelopes_accept_only_matching_registration_target
             changes={"venueName": ["Hall A", "Hall C"]},
         ),
     )
+
+    # Act + Assert (When / Then)
     assert parse(json.dumps(value)) == value
     value["destination"] = {
         "kind": "event-details",
@@ -61,19 +99,24 @@ def test_ac1_ac2_ac3_attendee_envelopes_accept_only_matching_registration_target
         parse(json.dumps(value))
 
 
-# Supporting DR ---- reject incomplete wire content before storage
 @pytest.mark.parametrize(
     "defect",
     ["no-name", "wrong-recipient", "missing-venue", "empty-changes", "invalid-pair"],
+    ids=["no_event_name", "wrong_recipient", "missing_venue", "empty_changes", "invalid_pair"],
 )
-def test_dr_malformed_attendee_content_is_rejected_before_storage(defect):
-    """Failure: corrupt one required field in an otherwise independent attendee envelope.
-    no-name blanks the event name; wrong-recipient disagrees with top-level identity;
-    missing-venue removes confirmation context; empty-changes removes an update's
-    delta; invalid-pair makes before and after identical. The real wire parser must
-    raise before storage can be called, avoiding incomplete/misdirected alerts.
-    No broker or SQL runs, so durable quarantine is outside this case's evidence.
+def test_parse_attendee_envelope_with_malformed_content_is_rejected(defect):
     """
+    Summary: An attendee notice missing its event name, venue or changes, or for someone else, is rejected.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: None
+    """
+    # Arrange (Given)
     from tests.unit.factories import attendee_envelope
 
     value = attendee_envelope(
@@ -91,5 +134,7 @@ def test_dr_malformed_attendee_content_is_rejected_before_storage(defect):
         value["details"]["changes"] = {}
     else:
         value["details"]["changes"] = {"venueName": ["Hall A", "Hall A"]}
+
+    # Act + Assert (When / Then)
     with pytest.raises(ValueError):
         parse(json.dumps(value))
