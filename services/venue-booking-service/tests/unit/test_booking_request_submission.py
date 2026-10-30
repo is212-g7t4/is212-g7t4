@@ -306,3 +306,120 @@ def test_staff_review_uses_the_same_reviewable_statuses(event_status, expected):
 
     assert response.status_code == expected
     assert REVIEWABLE_EVENT_STATUSES == ("Under Review", "Approved", "Safety Changes Requested")
+
+
+# Booking window: a request must be in the future and on the event's dates ----
+
+
+def submit_window(event, **times):
+    with (
+        patch("app.routes.get_event", return_value=event),
+        patch("app.routes.get_venues", return_value=VENUES) as get_venues,
+        patch("app.routes.create_booking", return_value=BOOKING) as create_booking,
+    ):
+        response = signed_in(create_app().test_client()).post(
+            "/booking-requests", json=REQUEST | times
+        )
+    return response, get_venues, create_booking
+
+
+def update_window(event, **times):
+    with (
+        patch("app.routes.get_event", return_value=event),
+        patch("app.routes.get_venues", return_value=VENUES) as get_venues,
+        patch("app.routes.update_booking", return_value=BOOKING) as update_booking,
+    ):
+        response = signed_in(create_app().test_client()).patch(
+            "/booking-requests/booking-1", json=REQUEST | times
+        )
+    return response, get_venues, update_booking
+
+
+@pytest.mark.parametrize("send", [submit_window, update_window])
+def test_request_starting_in_the_past_is_refused(send):
+    """Failure: a slot that has already started can't be booked, on submit or edit."""
+    response, get_venues, save = send(
+        {**EVENT, "preferredStartDate": "2020-03-01T09:00:00", "preferredEndDate": "2020-03-01T17:00:00"},
+        requestedStartTime="2020-03-01T13:00",
+        requestedEndTime="2020-03-01T15:00",
+    )
+
+    assert response.status_code == 422
+    assert response.json["code"] == "BOOKING_IN_PAST"
+    get_venues.assert_not_called()
+    save.assert_not_called()
+
+
+@pytest.mark.parametrize("send", [submit_window, update_window])
+@pytest.mark.parametrize(
+    "start, end",
+    [
+        ("2030-02-28T13:00", "2030-02-28T15:00"),  # the day before the event
+        ("2030-03-02T09:00", "2030-03-02T11:00"),  # the day after the event
+        ("2030-02-28T23:00", "2030-03-01T10:00"),  # starts the day before
+        ("2030-03-01T16:00", "2030-03-02T01:00"),  # runs past the last day
+    ],
+)
+def test_request_outside_event_dates_is_refused(send, start, end):
+    """Boundary: any part of the booking falling off the event's dates is refused."""
+    response, get_venues, save = send(EVENT, requestedStartTime=start, requestedEndTime=end)
+
+    assert response.status_code == 422
+    assert response.json["code"] == "BOOKING_OUTSIDE_EVENT_DATES"
+    assert "2030-03-01 to 2030-03-01" in response.json["message"]
+    get_venues.assert_not_called()
+    save.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "start, end",
+    [
+        ("2030-03-01T07:00", "2030-03-01T09:00"),  # setup before the event starts, same day
+        ("2030-03-01T00:00", "2030-03-01T23:59"),  # the whole of the event's day
+    ],
+)
+def test_request_on_event_day_outside_event_hours_is_accepted(start, end):
+    """Boundary: the rule is by day, so setup or teardown on the event's day still goes through."""
+    response, _, create_booking = submit_window(EVENT, requestedStartTime=start, requestedEndTime=end)
+
+    assert response.status_code == 201
+    create_booking.assert_called_once()
+
+
+def test_request_on_any_day_of_a_multi_day_event_is_accepted():
+    """Normal: a later day of a multi-day event is within the event's dates."""
+    response, _, create_booking = submit_window(
+        {**EVENT, "preferredEndDate": "2030-03-03T17:00:00"},
+        requestedStartTime="2030-03-03T10:00",
+        requestedEndTime="2030-03-03T12:00",
+    )
+
+    assert response.status_code == 201
+    create_booking.assert_called_once()
+
+
+@pytest.mark.parametrize("dates", [{"preferredStartDate": "", "preferredEndDate": ""}, {}])
+def test_event_without_dates_only_checks_the_request_is_in_the_future(dates):
+    """Normal: with no event dates to compare against, Venue Staff still get the request."""
+    event = {key: value for key, value in EVENT.items() if not key.startswith("preferred")}
+    response, _, create_booking = submit_window(event | dates)
+
+    assert response.status_code == 201
+    create_booking.assert_called_once()
+
+
+def test_booking_window_check_uses_the_given_time():
+    """Boundary: a request starting exactly now is already in the past."""
+    from datetime import datetime
+
+    from app.routes import _booking_window_invalid
+
+    now = datetime(2030, 3, 1, 13, 0)
+    with create_app().app_context():
+        refused = _booking_window_invalid(EVENT, now, datetime(2030, 3, 1, 15, 0), now=now)
+        accepted = _booking_window_invalid(
+            EVENT, datetime(2030, 3, 1, 13, 1), datetime(2030, 3, 1, 15, 0), now=now
+        )
+
+    assert refused[1] == 422
+    assert accepted is None

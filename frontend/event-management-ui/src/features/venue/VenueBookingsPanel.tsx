@@ -14,6 +14,7 @@ import type { VenueBooking } from './venueBookings'
 import {
   SAFETY_WITHDRAWAL_WARNING,
   VENUE_REQUEST_CLOSED_NOTICE,
+  bookingWindowError,
   canChangeVenueBooking,
   canSubmitVenueRequest,
   describeVenueConflicts,
@@ -178,6 +179,11 @@ export function VenueBookingsPanel({
     }
     if (end <= start) {
       setSubmitError('Booking end date and time must be after the start.')
+      return false
+    }
+    const windowError = bookingWindowError(start, end, localDateTime(eventStart), localDateTime(eventEnd))
+    if (windowError) {
+      setSubmitError(windowError)
       return false
     }
     return true

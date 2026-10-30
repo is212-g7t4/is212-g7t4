@@ -69,3 +69,24 @@ export const VENUE_CONFLICT_MESSAGES: Record<string, string> = {
 export const describeVenueConflicts = (types: readonly string[]) => types
   .map((type) => Object.hasOwn(VENUE_CONFLICT_MESSAGES, type) ? VENUE_CONFLICT_MESSAGES[type] : '')
   .filter(Boolean).join(' ')
+
+const singaporeNow = (now: Date) => {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Singapore', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now)
+  const part = (type: string) => parts.find(p => p.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`
+}
+
+/** SCRUM-28: a booking must start in the future and fall on the event's dates
+ *  (by day, so setup on the event's morning is fine). All values are SGT
+ *  `YYYY-MM-DDTHH:mm`. Mirrors _booking_window_invalid in
+ *  services/venue-booking-service/app/routes.py. Returns '' when valid. */
+export function bookingWindowError(start: string, end: string, eventStart: string, eventEnd: string, now = new Date()): string {
+  if (start <= singaporeNow(now)) return 'Booking start must be in the future.'
+  if (!eventStart || !eventEnd) return ''
+  const firstDay = eventStart.slice(0, 10)
+  const lastDay = eventEnd.slice(0, 10)
+  if (start.slice(0, 10) < firstDay || end.slice(0, 10) > lastDay) {
+    return `Booking must fall within the event's dates (${firstDay} to ${lastDay}).`
+  }
+  return ''
+}
