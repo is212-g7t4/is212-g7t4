@@ -679,6 +679,7 @@ def test_timestamptz_values_serialize_as_singapore_local():
 
 def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator Lead")
     cursor.fetchall.return_value = [saved_row()]
     response = client.get("/events/unassigned")
     assert response.status_code == 200
@@ -690,7 +691,7 @@ def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
 
 
 def test_unassigned_queue_needs_database(monkeypatch):
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client(), role="Event Coordinator Lead")
     assert client.get("/events/unassigned").status_code == 503
 
 
@@ -698,6 +699,7 @@ def test_active_events_include_unassigned_and_exclude_confirmed_rejected_cancell
     """The Lead's workload view lists active events, assigned or
     not; Confirmed, Rejected and Cancelled events are left out."""
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator Lead")
     assigned = {**saved_row(), "status": "Under Review", "coordinator_id": COORDINATOR_ID}
     cursor.fetchall.return_value = [saved_row(), assigned]
     response = client.get("/events/active")
@@ -711,7 +713,7 @@ def test_active_events_include_unassigned_and_exclude_confirmed_rejected_cancell
 
 
 def test_active_events_need_database(monkeypatch):
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client(), role="Event Coordinator Lead")
     assert client.get("/events/active").status_code == 503
 
 

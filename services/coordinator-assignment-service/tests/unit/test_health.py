@@ -19,7 +19,7 @@ def test_get_coordinators_returns_available_event_coordinators(mock_get_coordina
     ]
     mock_get_coordinators.return_value = mock_coordinators
 
-    client = signed_in(create_app().test_client())
+    client = signed_in(create_app().test_client(), role="Event Coordinator Lead")
     response = client.get("/coordinators")
 
     assert response.status_code == 200
@@ -44,7 +44,6 @@ def test_assign_coordinator_success_for_new_assignment(mock_get_user, mock_get_c
 
     assert response.status_code == 200
     assert response.json == {"eventId": "EVT-001", "assignedCoordinatorId": "user-123"}
-    mock_get_user.assert_called_once_with("user-lead")
     mock_assign.assert_called_once_with("EVT-001", "user-123")
 
 
@@ -199,19 +198,15 @@ def test_lead_sees_assigned_and_unassigned_submitted_requests(mock_get_user, moc
         {"id": "EVT-001", "coordinatorId": None, "status": "Submitted"},
         {"id": "EVT-002", "coordinatorId": "user-coordinator", "status": "Under Review"},
     ]}
-    mock_get_user.assert_called_once_with("user-lead")
     mock_get_assignments.assert_called_once_with()
 
 
-@pytest.mark.parametrize("acting_user", [COORDINATOR, ORGANISER, None])
+@pytest.mark.parametrize("role", ["Event Coordinator", "Event Organiser", "Attendee"])
 @patch("app.routes.get_assignment_events")
-@patch("app.routes.get_user")
-def test_only_the_lead_can_see_the_queue(mock_get_user, mock_get_assignments, acting_user):
-    """Event Coordinators, other roles and unknown users get 403 and no events."""
-    mock_get_user.return_value = acting_user
-
+def test_only_the_lead_can_see_the_queue(mock_get_assignments, role):
+    """SCRUM-9: the role comes from the token; every other role gets 403 and no events."""
     client = create_app().test_client()
-    response = client.get("/queue", headers=bearer("someone", "Event Coordinator Lead"))
+    response = client.get("/queue", headers=bearer("someone", role))
 
     assert response.status_code == 403
     mock_get_assignments.assert_not_called()
@@ -220,14 +215,6 @@ def test_only_the_lead_can_see_the_queue(mock_get_user, mock_get_assignments, ac
 def test_queue_requires_a_signed_in_user():
     response = create_app().test_client().get("/queue")
     assert response.status_code == 401
-
-
-@patch("app.routes.get_user")
-def test_queue_handles_acting_user_lookup_error(mock_get_user):
-    mock_get_user.side_effect = Exception("User Service unreachable")
-    response = create_app().test_client().get("/queue", headers=bearer("user-lead", "Event Coordinator Lead"))
-    assert response.status_code == 500
-    assert "Failed to validate acting user" in response.json["error"]
 
 
 @patch("app.routes.get_assignment_events")
@@ -261,7 +248,6 @@ def test_lead_sees_every_coordinator_with_their_active_events(mock_get_user, moc
         "unassigned": [unassigned],
         "otherAssigned": [],
     }
-    mock_get_user.assert_called_once_with("user-lead")
 
 
 @patch("app.routes.get_active_events")
@@ -281,13 +267,11 @@ def test_workload_keeps_events_whose_coordinator_is_no_longer_listed(mock_get_us
     assert response.json["coordinators"] == [{**COORDINATOR, "events": []}]
 
 
-@pytest.mark.parametrize("acting_user", [COORDINATOR, ORGANISER, None])
+@pytest.mark.parametrize("role", ["Event Coordinator", "Event Organiser", "Attendee"])
 @patch("app.routes.get_active_events")
-@patch("app.routes.get_user")
-def test_only_the_lead_can_see_the_workload(mock_get_user, mock_get_active, acting_user):
-    """Workload AC6: Event Coordinators, other roles and unknown users get 403 and no events."""
-    mock_get_user.return_value = acting_user
-    response = create_app().test_client().get("/workload", headers=bearer("someone", "Event Coordinator Lead"))
+def test_only_the_lead_can_see_the_workload(mock_get_active, role):
+    """Workload AC6 / SCRUM-9: the role comes from the token; every other role gets 403 and no events."""
+    response = create_app().test_client().get("/workload", headers=bearer("someone", role))
     assert response.status_code == 403
     mock_get_active.assert_not_called()
 
@@ -295,14 +279,6 @@ def test_only_the_lead_can_see_the_workload(mock_get_user, mock_get_active, acti
 def test_workload_requires_a_signed_in_user():
     response = create_app().test_client().get("/workload")
     assert response.status_code == 401
-
-
-@patch("app.routes.get_user")
-def test_workload_handles_acting_user_lookup_error(mock_get_user):
-    mock_get_user.side_effect = Exception("User Service unreachable")
-    response = create_app().test_client().get("/workload", headers=bearer("user-lead", "Event Coordinator Lead"))
-    assert response.status_code == 500
-    assert "Failed to validate acting user" in response.json["error"]
 
 
 @patch("app.routes.get_active_events")

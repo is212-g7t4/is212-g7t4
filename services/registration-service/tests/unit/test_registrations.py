@@ -52,6 +52,7 @@ def setup(monkeypatch):
 
 def test_list_registrations_returns_all_rows_for_event(setup):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")
     cursor.fetchall.return_value = [
         registration_row(),
         registration_row(registration_id="1eec36d7-3c51-4981-8f80-ae62f7f99b7f", status="Withdrawn"),
@@ -70,6 +71,7 @@ def test_list_registrations_returns_all_rows_for_event(setup):
 
 def test_list_registrations_returns_empty_list_when_none_exist(setup):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")
     cursor.fetchall.return_value = []
 
     response = client.get(f"/registrations?eventId={EVENT_ID}")
@@ -103,6 +105,7 @@ def test_attendee_registration_list_can_be_empty(setup):
 
 def test_registration_date_serializes_to_isoformat(setup):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")
     cursor.fetchall.return_value = [registration_row()]
 
     response = client.get(f"/registrations?eventId={EVENT_ID}")
@@ -113,6 +116,7 @@ def test_registration_date_serializes_to_isoformat(setup):
 def test_registration_rows_carry_no_attendee_details(setup):
     """Name, email and organisation live on User; the composite adds them."""
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")
     cursor.fetchall.return_value = [registration_row(attendee_id=ATTENDEE_ID)]
 
     response = client.get(f"/registrations?eventId={EVENT_ID}")
@@ -126,6 +130,7 @@ def test_registration_rows_carry_no_attendee_details(setup):
 
 def test_null_registration_date_serializes_to_none(setup):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")
     cursor.fetchall.return_value = [registration_row(registration_date=None)]
 
     response = client.get(f"/registrations?eventId={EVENT_ID}")
@@ -136,6 +141,7 @@ def test_null_registration_date_serializes_to_none(setup):
 @pytest.mark.parametrize("query_string", ["?eventId=", "?eventId=not-a-uuid"])
 def test_requires_valid_event_id(query_string, setup):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")
     response = client.get(f"/registrations{query_string}")
     assert response.status_code == 400
     cursor.execute.assert_not_called()
@@ -160,7 +166,7 @@ def test_background_worker_must_name_an_event(setup, monkeypatch):
 
 
 def test_missing_database_configuration():
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), ATTENDEE_ID)
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), ATTENDEE_ID, "Event Coordinator")
     response = client.get(f"/registrations?eventId={EVENT_ID}")
     assert response.status_code == 503
 
