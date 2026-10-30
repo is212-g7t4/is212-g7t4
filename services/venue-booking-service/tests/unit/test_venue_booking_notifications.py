@@ -1,20 +1,38 @@
-"""SCRUM-47 Venue booking notification and decision alerts: dispatcher unit tests.
+"""
+SCRUM-47: Venue Booking Notification and Decision Alerts
 
-Story: As an Event Coordinator and Venue Staff, I want to receive notifications
-about venue booking requests and decisions, so that I can coordinate venue
+User Story
+----------
+As an Event Coordinator and Venue Staff, I want to receive notifications about
+venue booking requests and decisions, so that I can coordinate venue
 arrangements efficiently.
-AC1 Given an Event Coordinator submits a venue booking request, system sends
-an in-app notification to Venue Staff with event name, requested venue,
-date/time and link to review.
-AC2 Given booking approved/rejected, sends an in-app notification to Event
-Coordinator with event name, venue, decision.
 
-Real: dispatch_once, HTTP adapter, recipient deduplication, content and freeze ordering.
-Doubled: owner/User/Event/Venue HTTP and recording publisher. Owner expansion is
-simulated, not tested here; owner PostgreSQL tests prove committed source snapshots.
-Not proven: broker/inbox delivery, authentication, real HTTP or concurrent retries.
-AC means acceptance criterion; fanout and frozen history are supporting design
-rules (DR), not additional ACs. Frontend review-link/fallback cases remain separate.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator submits a venue booking request, the system
+     sends an in-app notification to Venue Staff with the event name, requested
+     venue, date/time, and a link to review the request.
+AC2: Given a venue booking request is approved or rejected, the system sends an
+     in-app notification to the Event Coordinator with the event name, venue,
+     and decision.
+
+Real
+----
+- app.dispatcher for booking alerts: Venue Staff fan-out from User Service, the
+  requested period and review link, freezing before publish, and the original
+  submitter as decision recipient.
+- Assertions are on the frozen and published envelopes and retries.
+
+Doubled
+-------
+- Venue Availability outbox and User/Event/Venue lookups: Stub (patched httpx)
+  - canned replies; requests inspected.
+- pika (RabbitMQ): Mock - publish inspected.
+
+Not proven
+----------
+- That Notification Service shows the alert with a working link (->
+  notification-service consumer tests and frontend NotificationCenter tests).
 """
 from copy import deepcopy
 from unittest.mock import patch
@@ -184,10 +202,20 @@ def failed_dispatch(monkeypatch):
     return run
 
 
-# AC1 -------------------------------------------------------------------------
-def test_ac1_submission_alerts_venue_staff_with_requested_period_and_review_link(dispatch):
-    """Normal: two distinct staff each receive one request alert, despite duplicate lookup rows."""
+def test_submission_alert_reaches_each_staff_member_with_period_and_link(dispatch):
+    """
+    Summary: Each Venue Staff member gets one alert with the event, venue, period and review link.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    Double: Stub (staff lookup with duplicates), Mock (publish)
+    """
+    # Arrange (Given): dispatch, from fixtures
+
+    # Act (When)
     alerts = dispatch("venue.booking-submission-fanout", SOURCE)
+
+    # Assert (Then)
     assert {alert["recipientId"] for alert in alerts} == {STAFF, OTHER_STAFF}
     for alert in alerts:
         recipient = alert["recipientId"]
@@ -202,7 +230,6 @@ def test_ac1_submission_alerts_venue_staff_with_requested_period_and_review_link
         )
 
 
-# AC1/AC2 supporting DR — bad preparation must remain retryable, never publish.
 @pytest.mark.parametrize("scenario,steps", [
     pytest.param("invalid-users", ["claim", "users", "retry"], id="staff-collection-not-list"),
     pytest.param("wrong-role", ["claim", "users", "retry"], id="lookup-returned-non-staff"),
@@ -210,10 +237,23 @@ def test_ac1_submission_alerts_venue_staff_with_requested_period_and_review_link
     pytest.param("unknown-type", ["claim", "retry"], id="unsupported-job-type"),
     pytest.param("invalid-decision", ["claim", "retry"], id="unsupported-decision"),
 ])
-def test_ac1_ac2_invalid_preparation_retries_without_publication(failed_dispatch, scenario, steps):
-    """Failure: unusable recipients, job type or decision cause retry without expansion or completion."""
+def test_alert_with_bad_recipients_or_type_retries_without_publishing(failed_dispatch, scenario, steps):
+    """
+    Summary: Unusable recipients, type or decision lead to a retry, not a publish.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (bad lookups), Mock (no publish)
+    """
+    # Arrange (Given): failed_dispatch, scenario, steps, from fixtures
+
+    # Act (When)
     count, requests, publications = failed_dispatch(scenario)
 
+    # Assert (Then)
     assert count == 1
     assert [url.rsplit("/", 1)[-1] for _, url, _ in requests] == steps
     assert requests[-1] == ("POST", f"http://owner.invalid/internal/notification-outbox/{JOB}/retry", {
@@ -222,11 +262,20 @@ def test_ac1_ac2_invalid_preparation_retries_without_publication(failed_dispatch
     assert publications == []
 
 
-# AC1 DR — failed recipient lookup retains the unexpanded submission intent.
-def test_ac1_user_lookup_outage_retries_without_expansion_or_publication(failed_dispatch):
-    """Failure: User transport outage keeps the submission retryable without partial fanout."""
+def test_submission_alert_when_user_service_down_retries(failed_dispatch):
+    """
+    Summary: A User Service outage keeps the submission alert waiting.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    Double: Stub (User Service unreachable), Mock (no publish)
+    """
+    # Arrange (Given): failed_dispatch, from fixtures
+
+    # Act (When)
     count, requests, publications = failed_dispatch("user-outage")
 
+    # Assert (Then)
     assert count == 1
     assert [url.rsplit("/", 1)[-1] for _, url, _ in requests] == ["claim", "users", "retry"]
     assert requests[-1][2]["json"] == {"leaseToken": JOB, "error": "ConnectError"}
@@ -234,11 +283,20 @@ def test_ac1_user_lookup_outage_retries_without_expansion_or_publication(failed_
     assert publications == []
 
 
-# AC1/AC2 DR — owner freeze must succeed before any publication.
-def test_ac1_freeze_refusal_never_publishes_or_completes_the_job(failed_dispatch):
-    """Failure: owner refusal to freeze a staff alert prevents publication and schedules recovery."""
+def test_submission_alert_when_freeze_refused_publishes_nothing(failed_dispatch):
+    """
+    Summary: If the owner refuses to freeze an alert, nothing is published.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    Double: Stub (freeze refused), Mock (no publish)
+    """
+    # Arrange (Given): failed_dispatch, from fixtures
+
+    # Act (When)
     count, requests, publications = failed_dispatch("freeze-refused")
 
+    # Assert (Then)
     assert count == 1
     assert [url.rsplit("/", 1)[-1] for _, url, _ in requests] == ["claim", "freeze", "retry"]
     assert requests[-1][2]["json"] == {"leaseToken": JOB, "error": "HTTPStatusError"}
@@ -246,10 +304,20 @@ def test_ac1_freeze_refusal_never_publishes_or_completes_the_job(failed_dispatch
     assert publications == []
 
 
-# AC2 -------------------------------------------------------------------------
-def test_ac2_approved_booking_alerts_original_submitter_with_decision_and_link(dispatch):
-    """Normal: approval alerts the original submitter, not the reassigned coordinator."""
+def test_approval_alert_reaches_original_submitter_with_decision_and_link(dispatch):
+    """
+    Summary: An approval alert goes to the coordinator who asked, with the decision and link.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (owner outbox), Mock (publish)
+    """
+    # Arrange (Given): dispatch, from fixtures
+
+    # Act (When)
     [alert] = dispatch("venue.booking-decision", {**SOURCE, "decision": "Approved"})
+
+    # Assert (Then)
     assert alert == dict(
         version=1, id=JOB, type="venue.booking-decision", recipientId=SUBMITTER,
         createdAt=CREATED_AT, message="Community Fair: venue booking for Grand Hall approved.",
@@ -258,9 +326,20 @@ def test_ac2_approved_booking_alerts_original_submitter_with_decision_and_link(d
     )
 
 
-def test_ac2_rejected_booking_produces_corresponding_alert(dispatch):
-    """Normal: rejection alerts the original submitter with its decision and booking link."""
+def test_rejection_alert_reaches_original_submitter_with_decision(dispatch):
+    """
+    Summary: A rejection alert goes to the coordinator who asked, with the decision.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (owner outbox), Mock (publish)
+    """
+    # Arrange (Given): dispatch, from fixtures
+
+    # Act (When)
     [alert] = dispatch("venue.booking-decision", {**SOURCE, "decision": "Rejected"})
+
+    # Assert (Then)
     assert alert == dict(
         version=1, id=JOB, type="venue.booking-decision", recipientId=SUBMITTER,
         createdAt=CREATED_AT, message="Community Fair: venue booking for Grand Hall rejected.",

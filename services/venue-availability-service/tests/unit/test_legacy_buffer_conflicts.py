@@ -1,11 +1,62 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-155: Identify Legacy Scheduling Conflicts
 
-- **SCRUM-155 regression; no direct SCRUM-171 AC:** buffer-only conflict detection, half-open effective windows, original booking information, owned-marker cleanup, buffer validation, lookup and route contracts. Existing AC labels below belong to SCRUM-155.
-- **SCRUM-171 integration compatibility:** stale-marker cleanup still makes exactly two booking queries, excluding the newly required advisory gate. The marker predicate and venue parameter assertions remain unchanged. This is not AC2 closure-time preservation.
+User Story
+----------
+As a Venue Staff member, I want the system to identify existing venue bookings
+that now have scheduling conflicts due to the new setup and turnaround rules so
+that I can resolve them manually without losing the original bookings.
 
-## Existing test contract
+Acceptance Criteria
+-------------------
+AC1: The system must evaluate existing bookings against the newly applied setup
+     and turnaround time rules to identify any overlapping schedules.
+AC2: Existing bookings that become problematic under the new time padding rules
+     must be explicitly flagged or identified by the system.
+AC3: The system must preserve the original event information and must not
+     silently remove or automatically cancel these conflicting existing
+     bookings.
+AC4: If the calculated total occupied time overlaps with any existing booking's
+     total occupied time, the system must detect the conflict and flag the
+     venue as unavailable
 
-SCRUM-155: identify legacy conflicts without altering bookings."""
+SCRUM-154: Configure Venue Buffer Times
+
+User Story
+----------
+As a Venue Staff member, I want to configure specific setup and turnaround
+times for each venue so that the system accurately reflects the total
+operational time required around an event
+
+Acceptance Criteria
+-------------------
+AC1: The system must allow Venue Staff to input and save a configurable setup
+     time and turnaround time (e.g., in minutes) when creating or editing a
+     venue profile.
+AC2: These buffer durations must be configurable on a per-venue basis, allowing
+     different spaces to have unique time requirements.
+AC3: The saved setup and turnaround times must be persistently associated with
+     the specific venue in the catalogue.
+
+Real
+----
+- app.buffers and the reconcile route: setup/turnaround padding of existing
+  bookings, half-open comparison, flagging both sides of a new conflict while
+  keeping their original data, clearing only its own stale markers, the buffer
+  parser, and the buffered calendar and conflict reads.
+- Assertions are on the conflicts found, markers written and SQL sent.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
+
+Not proven
+----------
+- That the SQL, locks and constraints behave the same on real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+"""
 
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -32,8 +83,15 @@ def approved(**overrides):
     return booking_row(status="Approved", conflict_reason=None, **overrides)
 
 
-def test_padding_identifies_non_overlapping_existing_bookings():
-    """AC1-2: raw windows are safe, but effective occupancy overlaps."""
+def test_padding_flags_bookings_that_overlap_only_with_buffers():
+    """
+    Summary: Bookings that do not overlap on their own but do once buffers are added are found.
+    AC1: The system must evaluate existing bookings against the newly applied
+        setup and turnaround time rules to identify any overlapping schedules.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: None
+    """
     first = approved(
         requested_start_time=datetime(2026, 10, 1, 10),
         requested_end_time=datetime(2026, 10, 1, 12),
@@ -52,7 +110,12 @@ def test_padding_identifies_non_overlapping_existing_bookings():
     assert pairs[0][3] == (datetime(2026, 10, 1, 12), datetime(2026, 10, 1, 14, 45))
 
 
-def test_half_open_touching_boundaries_are_not_conflicts():
+def test_padding_with_touching_buffered_windows_is_not_conflict():
+    """
+    Summary: Buffered windows that only touch are not a conflict.
+    AC4: (boundary: touching windows)
+    Double: None
+    """
     first = approved(requested_end_time=datetime(2026, 10, 1, 12))
     second = approved(
         booking_id=SECOND_BOOKING_ID,
@@ -64,7 +127,13 @@ def test_half_open_touching_boundaries_are_not_conflicts():
     assert _legacy_conflict_pairs([first, second], 0, 30) == []
 
 
-def test_raw_overlap_is_not_mislabelled_as_new_legacy_conflict():
+def test_padding_does_not_label_real_overlap_as_new_conflict():
+    """
+    Summary: A real overlap is not mislabelled as one caused by the new buffers.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: None
+    """
     first = approved(requested_end_time=datetime(2026, 10, 1, 12))
     second = approved(
         booking_id=SECOND_BOOKING_ID,
@@ -76,8 +145,16 @@ def test_raw_overlap_is_not_mislabelled_as_new_legacy_conflict():
     assert _legacy_conflict_pairs([first, second], 30, 45) == []
 
 
-def test_reconciliation_flags_both_and_preserves_original_information(monkeypatch):
-    """AC2-3: markers change; event, time, and status fields remain untouched."""
+def test_reconcile_flags_both_bookings_and_keeps_their_details(monkeypatch):
+    """
+    Summary: Both bookings in a new conflict are flagged and their details left untouched.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    AC3: The system must preserve the original event information and must not
+        silently remove or automatically cancel these conflicting existing
+        bookings.
+    Double: Stub (cursor; updates inspected)
+    """
     first = approved(
         requested_start_time=datetime(2026, 10, 1, 10),
         requested_end_time=datetime(2026, 10, 1, 12),
@@ -108,7 +185,14 @@ def test_reconciliation_flags_both_and_preserves_original_information(monkeypatc
     assert all("SET status" not in sql and "event_id =" not in sql for sql in statements)
 
 
-def test_reconciliation_clears_only_its_own_stale_marker(monkeypatch):
+def test_reconcile_clears_only_its_own_stale_markers(monkeypatch):
+    """
+    Summary: Reconciliation clears only the conflict markers it set before.
+    AC3: The system must preserve the original event information and must not
+        silently remove or automatically cancel these conflicting existing
+        bookings.
+    Double: Stub (cursor; SQL inspected)
+    """
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchall.return_value = []
@@ -124,7 +208,14 @@ def test_reconciliation_clears_only_its_own_stale_marker(monkeypatch):
     assert len(booking_queries) == 2
 
 
-def test_buffer_parser_rejects_every_invalid_shape():
+def test_buffer_parser_rejects_invalid_values():
+    """
+    Summary: Invalid buffer values are refused.
+    SCRUM-154 AC1: The system must allow Venue Staff to input and save a
+        configurable setup time and turnaround time (e.g., in minutes) when
+        creating or editing a venue profile.
+    Double: None
+    """
     class BadText:
         def __str__(self):
             raise TypeError
@@ -136,12 +227,25 @@ def test_buffer_parser_rejects_every_invalid_shape():
     assert _parse_buffer_minutes(BadText()) is None
 
 
-def test_datetime_shift_clamps_both_python_boundaries():
+def test_buffer_shift_clamps_at_earliest_and_latest_datetime():
+    """
+    Summary: Padding near the earliest or latest possible time is clamped, not crashed.
+    AC1: The system must evaluate existing bookings against the newly applied
+        setup and turnaround time rules to identify any overlapping schedules.
+    Double: None
+    """
     assert _shift(datetime.max, 1) == datetime.max
     assert _shift(datetime.min, -1) == datetime.min
 
 
-def test_buffered_calendar_read_returns_original_and_effective_times(monkeypatch):
+def test_buffered_calendar_returns_original_and_padded_times(monkeypatch):
+    """
+    Summary: The calendar shows both a booking's own time and its padded occupied time.
+    AC4: If the calculated total occupied time overlaps with any existing
+        booking's total occupied time, the system must detect the conflict and
+        flag the venue as unavailable
+    Double: Stub (cursor returns bookings with buffers)
+    """
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     cursor.fetchall.return_value = [approved(hold_expires_at=None)]
@@ -157,7 +261,14 @@ def test_buffered_calendar_read_returns_original_and_effective_times(monkeypatch
     assert len(cursor.execute.call_args.args[1]) == 5
 
 
-def test_buffered_conflict_query_expands_events_but_not_hold_interval():
+def test_buffered_conflict_query_pads_bookings_but_not_holds():
+    """
+    Summary: Conflict checks pad bookings by their venue's buffers but not holds.
+    AC4: If the calculated total occupied time overlaps with any existing
+        booking's total occupied time, the system must detect the conflict and
+        flag the venue as unavailable
+    Double: Stub (cursor; SQL inspected)
+    """
     cursor = MagicMock()
     cursor.fetchall.return_value = [
         {"conflict_type": "TENTATIVE_HOLD"},
@@ -193,7 +304,13 @@ def test_buffered_conflict_query_expands_events_but_not_hold_interval():
     assert "booking_id <> %s" not in cursor.execute.call_args.args[0]
 
 
-def test_single_booking_lookup_found_and_missing(monkeypatch):
+def test_single_booking_lookup_returns_row_or_none(monkeypatch):
+    """
+    Summary: A single booking lookup returns the booking, or none.
+    AC1: The system must evaluate existing bookings against the newly applied
+        setup and turnaround time rules to identify any overlapping schedules.
+    Double: Stub (cursor returns a row or nothing)
+    """
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
@@ -223,7 +340,13 @@ def _booking_payload(**overrides):
     return payload
 
 
-def test_buffer_route_validation_and_internal_lookup_contract(monkeypatch):
+def test_buffer_route_validates_input_and_internal_lookup(monkeypatch):
+    """
+    Summary: The buffer routes validate their input and serve the internal lookup.
+    SCRUM-154 AC3: The saved setup and turnaround times must be persistently
+        associated with the specific venue in the catalogue.
+    Double: Stub (cursor)
+    """
     client = signed_in(create_app(
         {"TESTING": True, "DATABASE_URL": "test"}
     ).test_client())
@@ -253,6 +376,12 @@ def test_buffer_route_validation_and_internal_lookup_contract(monkeypatch):
 
 
 def test_reconcile_route_validates_configuration_and_returns_result(monkeypatch):
+    """
+    Summary: The reconcile route checks its configuration and returns what it flagged.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: Stub (cursor)
+    """
     path = f"/venues/{VENUE_ID}/legacy-conflicts/reconcile"
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": "test"}).test_client())
     assert client.post(path, json=[]).status_code == 400
@@ -270,7 +399,17 @@ def test_reconcile_route_validates_configuration_and_returns_result(monkeypatch)
     ).status_code == 503
 
 
-def test_empty_frontend_origin_skips_cors_alias_expansion():
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_blank_frontend_origin_allows_no_browser_origin():
+    """
+    Summary: Blanking the frontend origin turns browser access off.
+    Supporting design check: CORS for the configured frontend origin
+    Double: None
+    """
     response = signed_in(create_app({"TESTING": True, "FRONTEND_ORIGIN": ""}).test_client()).get(
         "/health", headers={"Origin": "http://localhost:5174"}
     )

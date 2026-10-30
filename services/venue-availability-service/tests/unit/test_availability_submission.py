@@ -1,16 +1,44 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-30: Check Venue Availability
 
-- **SCRUM-30 submission regression (no direct SCRUM-171 AC):** real route/model SQL rejects approved/hold/closure blockers, preserves no-insert failure behavior, half-open boundaries, venue isolation and UTC-equivalent instants.
-- **SCRUM-171 compatibility only:** closure snapshot columns and the transaction gate are accommodated without weakening these original assertions. Submission overlap is not closure-triggered AC1/AC2 evidence.
+User Story
+----------
+As an Event Coordinator, I want to check availability for a selected venue and
+booking period, so that I can avoid submitting a venue request that conflicts
+with an existing event or closure.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given no conflicting confirmed bookings exist for the selected valid venue
+     and booking start/end times, when the Event Coordinator submits the
+     booking request, then the request is created with status Pending Review.
+AC2: Given the selected date and time interval overlaps an approved booking,
+     applicable tentative hold, or recorded closure for that venue, then the
+     system reports the conflict type and indicates that the venue request
+     cannot be submitted for that interval.
 
-The named test functions/cases below implement the groups above; their existing
-names and assertions specify the scenario. No group is credited with all five ACs.
+Real
+----
+- POST /venue-bookings and the conflict checker: half-open overlap against
+  approved bookings, active holds and recorded closures for the same venue,
+  each reported by type without inserting, and the insert as Pending Review
+  when nothing conflicts.
+- Assertions are on the status, the conflict types and the SQL sent.
 
-## Existing test contract and detailed cases
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
 
-SCRUM-30: exercise submission through Flask, models and actual SQL."""
+Not proven
+----------
+- That the overlap SQL, locks and constraints behave the same on real
+  PostgreSQL (-> tests/integration/, throwaway postgres:17.6, and the opt-in
+  tests/live/test_calendar.py).
+- That the coordinator sees the conflict message (-> frontend
+  venueBookings.test.ts).
+"""
 
 from datetime import datetime
 
@@ -49,8 +77,21 @@ def submit(monkeypatch):
         db.db.close()
 
 
-def test_approved_overlap_returns_type_without_insert(submit):
+def test_create_booking_overlapping_approved_booking_reports_type_without_saving(submit):
+    """
+    Summary: A request overlapping an approved booking is refused with the conflict type and not saved.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (overlap query finds an approved booking), Mock (no insert)
+    """
+    # Arrange (Given): submit, from fixtures
+
+    # Act (When)
     response, db = submit([booking_row(status="Approved")])
+
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "VENUE_UNAVAILABLE"
     assert response.json["conflictTypes"] == ["APPROVED_BOOKING"]
@@ -59,10 +100,23 @@ def test_approved_overlap_returns_type_without_insert(submit):
     assert "FOR UPDATE" in db.statements[1]
 
 
-def test_active_tentative_hold_returns_its_type_without_insert(submit):
+def test_create_booking_overlapping_active_hold_reports_type_without_saving(submit):
+    """
+    Summary: A request overlapping an active hold is refused with the conflict type.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (overlap query finds a hold), Mock (no insert)
+    """
+    # Arrange (Given): submit, from fixtures
+
+    # Act (When)
     response, db = submit(
         [booking_row(status="On Hold", hold_expires_at=datetime(2026, 10, 1, 12))]
     )
+
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["conflictTypes"] == ["TENTATIVE_HOLD"]
     assert db.count() == 1
@@ -70,19 +124,46 @@ def test_active_tentative_hold_returns_its_type_without_insert(submit):
 
 
 @pytest.mark.parametrize(
-    "expiry", [datetime(2026, 10, 1, 9), datetime(2026, 10, 1, 10), None]
+    "expiry", [datetime(2026, 10, 1, 9), datetime(2026, 10, 1, 10), None],
+    ids=["expired_before", "expires_now", "no_expiry"],
 )
-def test_stale_on_hold_does_not_block_even_before_expiry_worker(submit, expiry):
+def test_create_booking_with_expired_hold_is_not_blocked(submit, expiry):
+    """
+    Summary: A hold past its expiry does not block, even before the expiry job runs.
+    AC1: Given no conflicting confirmed bookings exist for the selected valid
+        venue and booking start/end times, when the Event Coordinator submits
+        the booking request, then the request is created with status Pending
+        Review.
+    Double: Stub (hold with expiry at or before now)
+    """
+    # Arrange (Given): submit, expiry, from fixtures
+
+    # Act (When)
     response, db = submit([booking_row(status="On Hold", hold_expires_at=expiry)])
+
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["status"] == "Pending Review"
     assert db.count() == 2
 
 
-def test_recorded_closure_returns_type_without_insert(submit):
+def test_create_booking_during_closure_reports_type_without_saving(submit):
+    """
+    Summary: A request during a recorded closure is refused with the conflict type.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (overlap query finds a closure), Mock (no insert)
+    """
+    # Arrange (Given): submit, from fixtures
+
+    # Act (When)
     response, db = submit(
         closures=[(VENUE_ID, datetime(2026, 10, 1, 10), datetime(2026, 10, 1, 11))]
     )
+
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "VENUE_UNAVAILABLE"
     assert response.json["conflictTypes"] == ["VENUE_CLOSURE"]
@@ -90,8 +171,16 @@ def test_recorded_closure_returns_type_without_insert(submit):
     assert not any("INSERT" in sql for sql in db.statements)
 
 
-@pytest.mark.parametrize("action", ["edit", "approve"])
-def test_existing_edit_and_approval_report_closure_type(monkeypatch, action):
+@pytest.mark.parametrize("action", ["edit", "approve"], ids=["edit", "approve"])
+def test_edit_or_approve_during_closure_reports_closure_type(monkeypatch, action):
+    """
+    Summary: Editing or approving into a closure reports the closure.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (overlap query finds a closure)
+    """
     from tests.unit.factories import BOOKING_ID
 
     db = AvailabilityDB(
@@ -120,12 +209,26 @@ def test_existing_edit_and_approval_report_closure_type(monkeypatch, action):
 
 
 @pytest.mark.parametrize(
-    "status", ["Pending", "Pending Review", "Rejected", "Cancelled", "Expired"]
+    "status", ["Pending", "Pending Review", "Rejected", "Cancelled", "Expired"],
+    ids=["pending", "pending_review", "rejected", "cancelled", "expired"],
 )
-def test_nonblocking_statuses_allow_pending_review(submit, status):
+def test_create_booking_next_to_non_blocking_status_is_saved_pending_review(submit, status):
+    """
+    Summary: Pending, rejected, cancelled or expired bookings do not block; the request is saved as Pending Review.
+    AC1: Given no conflicting confirmed bookings exist for the selected valid
+        venue and booking start/end times, when the Event Coordinator submits
+        the booking request, then the request is created with status Pending
+        Review.
+    Double: Stub (overlap query finds a non-blocking row), Mock (insert)
+    """
+    # Arrange (Given): submit, status, from fixtures
+
+    # Act (When)
     response, db = submit(
         [booking_row(status=status, hold_expires_at=datetime(2026, 10, 1, 12))]
     )
+
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["status"] == "Pending Review"
     assert response.json["requiredCapacity"] == 80
@@ -134,7 +237,8 @@ def test_nonblocking_statuses_allow_pending_review(submit, status):
 
 
 @pytest.mark.parametrize(
-    "kind", ["APPROVED_BOOKING", "TENTATIVE_HOLD", "VENUE_CLOSURE"]
+    "kind", ["APPROVED_BOOKING", "TENTATIVE_HOLD", "VENUE_CLOSURE"],
+    ids=["approved_booking", "tentative_hold", "venue_closure"],
 )
 @pytest.mark.parametrize(
     "start,end,blocked",
@@ -150,8 +254,15 @@ def test_nonblocking_statuses_allow_pending_review(submit, status):
         ("2026-10-01T08:00", "2026-10-01T13:00", True),  # containing
         ("2026-09-30T23:00", "2026-10-01T10:00", True),  # overnight
     ],
+    ids=["2026_10_01t08_00_2026_10_01t09_00_false", "2026_10_01t12_00_2026_10_01t13_00_false", "2026_10_01t07_00_2026_10_01t08_00_false", "2026_10_01t13_00_2026_10_01t14_00_false", "2026_10_01t08_00_2026_10_01t10_00_true", "2026_10_01t11_00_2026_10_01t13_00_true", "2026_10_01t09_00_2026_10_01t12_00_true", "2026_10_01t10_00_2026_10_01t11_00_true", "2026_10_01t08_00_2026_10_01t13_00_true", "2026_09_30t23_00_2026_10_01t10_00_true"],
 )
-def test_raw_half_open_sql_for_each_blocker(submit, kind, start, end, blocked):
+def test_conflict_sql_uses_half_open_overlap_for_each_blocker(submit, kind, start, end, blocked):
+    """
+    Summary: Touching end-to-start times never conflict; any real overlap does, for every kind of blocker.
+    AC2: (boundary: touching and overlapping intervals)
+    Double: Stub (cursor; SQL inspected)
+    """
+    # Arrange (Given)
     start, end = datetime.fromisoformat(start), datetime.fromisoformat(end)
     bookings, closures = [], []
     if kind == "VENUE_CLOSURE":
@@ -165,7 +276,11 @@ def test_raw_half_open_sql_for_each_blocker(submit, kind, start, end, blocked):
                 hold_expires_at=datetime(2026, 10, 2),
             )
         ]
+
+    # Act (When)
     response, db = submit(bookings, closures)
+
+    # Assert (Then)
     assert response.status_code == (409 if blocked else 201)
     assert db.count() == len(bookings) + (0 if blocked else 1)
     if blocked:
@@ -173,8 +288,17 @@ def test_raw_half_open_sql_for_each_blocker(submit, kind, start, end, blocked):
         assert not any("INSERT" in sql for sql in db.statements)
 
 
-@pytest.mark.parametrize("kind", ["Approved", "On Hold", "closure"])
-def test_other_venue_does_not_block_same_event(submit, kind):
+@pytest.mark.parametrize("kind", ["Approved", "On Hold", "closure"], ids=["approved", "on_hold", "closure"])
+def test_create_booking_at_other_venue_is_not_blocked_by_same_event(submit, kind):
+    """
+    Summary: Another venue's booking, hold or closure never blocks this venue.
+    AC1: Given no conflicting confirmed bookings exist for the selected valid
+        venue and booking start/end times, when the Event Coordinator submits
+        the booking request, then the request is created with status Pending
+        Review.
+    Double: Stub (overlap query scoped to the venue)
+    """
+    # Arrange (Given)
     other = "00000000-0000-0000-0000-000000000002"
     bookings, closures = [], []
     if kind == "closure":
@@ -185,13 +309,28 @@ def test_other_venue_does_not_block_same_event(submit, kind):
                 venue_id=other, status=kind, hold_expires_at=datetime(2026, 10, 2)
             )
         ]
+
+    # Act (When)
     response, db = submit(bookings, closures)
+
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["eventId"] == EVENT_ID
     assert db.count() == len(bookings) + 1
 
 
-def test_all_conflict_types_return_once_in_stable_order(submit):
+def test_create_booking_with_several_blockers_reports_each_type_once_in_order(submit):
+    """
+    Summary: Several conflicts are each reported once, in a stable order.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (overlap query finds all three)
+    """
+    # Arrange (Given): submit, from fixtures
+
+    # Act (When)
     response, db = submit(
         [
             booking_row(status="Approved"),
@@ -200,6 +339,8 @@ def test_all_conflict_types_return_once_in_stable_order(submit):
         ],
         [(VENUE_ID, datetime(2026, 10, 1, 9), datetime(2026, 10, 1, 12))] * 2,
     )
+
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["conflictTypes"] == [
         "APPROVED_BOOKING",
@@ -209,7 +350,18 @@ def test_all_conflict_types_return_once_in_stable_order(submit):
     assert db.count() == 3
 
 
-def test_overnight_request_is_not_split_or_clipped(submit):
+def test_create_booking_overnight_checks_whole_interval(submit):
+    """
+    Summary: An overnight booking is checked as one interval, not split at midnight.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (cursor; SQL inspected)
+    """
+    # Arrange (Given): submit, from fixtures
+
+    # Act (When)
     response, db = submit(
         closures=[(VENUE_ID, datetime(2026, 10, 2), datetime(2026, 10, 2, 1))],
         payload=PAYLOAD
@@ -218,13 +370,23 @@ def test_overnight_request_is_not_split_or_clipped(submit):
             "requestedEndTime": "2026-10-02T02:00",
         },
     )
+
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["conflictTypes"] == ["VENUE_CLOSURE"]
     assert db.count() == 0
 
 
-@pytest.mark.parametrize("stage", ["connect", "check", "insert"])
-def test_database_failure_never_reports_availability_or_persists(monkeypatch, stage):
+@pytest.mark.parametrize("stage", ["connect", "check", "insert"], ids=["connect", "check", "insert"])
+def test_create_booking_when_database_fails_never_reports_available(monkeypatch, stage):
+    """
+    Summary: A database failure never reports the venue as available or saves anything.
+    AC1: Given no conflicting confirmed bookings exist for the selected valid
+        venue and booking start/end times, when the Event Coordinator submits
+        the booking request, then the request is created with status Pending
+        Review.
+    Double: Stub (connect, check or insert raises)
+    """
     import psycopg2
 
     db = AvailabilityDB()
@@ -256,7 +418,15 @@ def test_database_failure_never_reports_availability_or_persists(monkeypatch, st
         db.db.close()
 
 
-def test_conflict_helper_keeps_boolean_contract_and_self_exclusion():
+def test_conflict_helper_returns_bool_and_excludes_the_booking_itself():
+    """
+    Summary: The conflict check ignores the booking being edited.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (cursor; SQL inspected)
+    """
     from app.models import _has_conflict
     from tests.unit.factories import BOOKING_ID
 
@@ -269,7 +439,15 @@ def test_conflict_helper_keeps_boolean_contract_and_self_exclusion():
         db.db.close()
 
 
-def test_aware_times_keep_same_instant_at_sql_boundary():
+def test_create_booking_with_offset_times_keeps_same_instant():
+    """
+    Summary: Times sent with a time zone are compared at the same real instant.
+    AC2: Given the selected date and time interval overlaps an approved
+        booking, applicable tentative hold, or recorded closure for that venue,
+        then the system reports the conflict type and indicates that the venue
+        request cannot be submitted for that interval.
+    Double: Stub (cursor; parameters inspected)
+    """
     from datetime import timezone
 
     from app.models import _has_conflict
@@ -289,6 +467,16 @@ def test_aware_times_keep_same_instant_at_sql_boundary():
         db.db.close()
 
 
-def test_event_bookings_without_database_configuration_returns_503():
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_event_bookings_when_database_url_missing_returns_503():
+    """
+    Summary: Reading an event's bookings reports itself unavailable when no database is configured.
+    Supporting design check: an unconfigured service answers 503
+    Double: None
+    """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     assert client.get(f"/events/{EVENT_ID}/venue-bookings").status_code == 503

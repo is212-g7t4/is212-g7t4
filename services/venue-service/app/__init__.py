@@ -132,13 +132,6 @@ def create_app(config=None):
         catalogue = list_venues(app.config["DATABASE_URL"])
         return jsonify(venues=[v for v in catalogue if matches(v, criteria)])
 
-    @app.route("/venues", methods=["OPTIONS"])
-    def venues_options():
-        # Explicitly respond to CORS preflight requests for the collection path.
-        resp = jsonify({})
-        resp.status_code = 200
-        return resp
-
     @app.route("/venues", methods=["POST"])
     def add_venue():
         if (forbidden := _venue_staff_only()):
@@ -155,13 +148,8 @@ def create_app(config=None):
             ), 400
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Venue Service."), 503
-        # Be defensive: callers may send numbers for capacity instead of strings.
-        raw_capacity = data.get("capacity", "")
-        capacity_str = str(raw_capacity).strip()
-        try:
-            capacity_val = int(capacity_str)
-        except Exception:
-            return jsonify(message="Please correct the venue details.", missingFields=[], errors=["Capacity must be a positive whole number (maximum 2147483647)."]), 400
+        # validate() has already checked capacity is a whole number in range.
+        capacity_val = int(data["capacity"].strip())
 
         details = {
             "name": data["name"].strip(),
@@ -275,17 +263,5 @@ def create_app(config=None):
 
     # Log the URL map at startup to help runtime debugging (visible in container logs).
     app.logger.info("Registered routes:\n%s", app.url_map)
-
-    @app.route("/__routes", methods=["GET"])
-    def dump_routes():
-        # Diagnostic endpoint: returns registered URL rules.
-        rules = []
-        for rule in app.url_map.iter_rules():
-            rules.append({
-                "rule": str(rule),
-                "methods": sorted(list(rule.methods)),
-                "endpoint": rule.endpoint,
-            })
-        return jsonify(routes=rules)
 
     return app

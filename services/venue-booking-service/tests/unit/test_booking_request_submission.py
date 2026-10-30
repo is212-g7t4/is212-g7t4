@@ -1,13 +1,57 @@
-"""SCRUM-28 Venue Booking Request Submission: Venue Booking Service unit tests.
+"""
+SCRUM-28: Venue Booking Request Submission
 
-Story: As an Event Coordinator, I want to submit a venue booking request for an
-event, so that Venue Staff can assess whether the requested venue arrangement
-can be accepted.
+User Story
+----------
+As an Event Coordinator, I want to submit a venue booking request for an event,
+so that Venue Staff can assess whether the requested venue arrangement can be
+accepted.
 
-This composite owns the event-status gate (AC2), the forwarding of the request
-(AC1, AC2) and the Venue Staff queue (AC3, AC4, AC5). The overlap rule behind
-AC6 runs in Venue Availability Service; here AC6 only proves its answer is
-passed through. Every downstream call is patched where app.routes looks it up.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator is preparing a venue booking request for an
+     event, when they enter the booking information, then they can provide the
+     relevant event timing and venue requirements needed for Venue Staff to
+     assess the booking.
+AC2: Given the relevant event timing and venue requirements have been provided,
+     when the Event Coordinator submits the venue booking request, then the
+     request is recorded and made available to Venue Staff for review.
+AC3: Given a venue booking request has been submitted, when Venue Staff access
+     the request, then they can view the event to which the request relates
+     together with the relevant event timing and venue requirements.
+AC4: Given a venue booking request has been submitted and has not yet received
+     a booking decision, when Venue Staff view requests requiring action, then
+     the request can be identified as awaiting Venue Staff review.
+AC5: Given an Event Coordinator submits a venue booking request for an event,
+     when the request is recorded, then it remains associated with that event
+     so that the booking can be assessed in the context of the corresponding
+     event requirements.
+AC6: Given an Event Coordinator submits a venue booking request for a venue and
+     time slot, when the same venue has already been requested or booked for
+     another event, and the requested event timing does not overlap with that
+     other event's timing, then the request is accepted for Venue Staff review
+     as normal, so the same venue can be booked for multiple events across
+     non-overlapping time slots.
+
+Real
+----
+- POST /booking-requests and the staff queue: forwarding the booking's own
+  timing, capacity and requirements, the event-status gate, the time rules (not
+  in the past, within the event's dates by day), and the queue order and
+  awaiting filter.
+- Assertions are on the status, what is sent and the queue returned.
+
+Doubled
+-------
+- Event, Venue, Venue Availability, Safety Check Record and Safety Check
+  Services: Stub (unittest.mock.patch / monkeypatch on app.routes and
+  app.clients, or respx for client tests) - canned answers or raised client
+  errors; calls recorded so tests assert what was (or was not) called.
+
+Not proven
+----------
+- That the atomic services behave as stubbed (-> their own unit and integration
+  tests, and tests/integration/ here with respx).
 """
 
 from unittest.mock import patch
@@ -82,10 +126,19 @@ def staff_queue(events, bookings_by_event, query=""):
 # AC1 ----
 
 
-def test_ac1_submission_forwards_booking_timing_capacity_and_requirements():
-    """Normal: the booking's own timing, capacity and trimmed requirements reach Venue Availability."""
+def test_create_request_forwards_booking_timing_capacity_and_requirements():
+    """
+    Summary: A request carries its own timing, capacity and requirements to Venue Availability.
+    AC1: Given an Event Coordinator is preparing a venue booking request for an
+        event, when they enter the booking information, then they can provide
+        the relevant event timing and venue requirements needed for Venue Staff
+        to assess the booking.
+    Double: Stub (event, venues), Mock (create_booking inspected)
+    """
+    # Act (When)
     response, get_event, _, create_booking = submit(EVENT)
 
+    # Assert (Then)
     assert response.status_code == 201
     get_event.assert_called_once_with("evt-1")
     create_booking.assert_called_once_with(
@@ -98,28 +151,58 @@ def test_ac1_submission_forwards_booking_timing_capacity_and_requirements():
 
 
 @pytest.mark.parametrize("status", SUBMITTABLE_EVENT_STATUSES)
-def test_ac2_request_for_submittable_event_is_recorded_as_pending_review(status):
-    """Normal: before, during and after review the request is recorded for Venue Staff."""
+def test_create_request_for_submittable_event_is_pending_review(status):
+    """
+    Summary: A request for an event in a submittable status is recorded for Venue Staff review.
+    AC2: Given the relevant event timing and venue requirements have been
+        provided, when the Event Coordinator submits the venue booking request,
+        then the request is recorded and made available to Venue Staff for
+        review.
+    Double: Stub (event in the status), Mock (create_booking)
+    """
+    # Arrange (Given): status, from fixtures
+
+    # Act (When)
     response, _, _, create_booking = submit({**EVENT, "status": status})
 
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["status"] == "Pending Review"
     assert response.json["requestedAt"] == "2030-02-01T10:00:00+08:00"
     create_booking.assert_called_once()
 
 
-def test_ac2_submittable_statuses_are_exactly_the_agreed_four():
-    """Normal: the gate matches the statuses agreed for SCRUM-28 (Clarice, 25 Oct)."""
+def test_submittable_statuses_are_exactly_the_agreed_four():
+    """
+    Summary: Requests are accepted for exactly the four statuses agreed for SCRUM-28.
+    AC2: Given the relevant event timing and venue requirements have been
+        provided, when the Event Coordinator submits the venue booking request,
+        then the request is recorded and made available to Venue Staff for
+        review.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert SUBMITTABLE_EVENT_STATUSES == (
         "Submitted", "Under Review", "Approved", "Safety Changes Requested",
     )
 
 
 @pytest.mark.parametrize("status", NOT_SUBMITTABLE)
-def test_ac2_request_for_event_not_under_review_is_refused(status):
-    """Conflict: a request Venue Staff could never review is not recorded, and nothing else is called."""
+def test_create_request_for_event_not_submittable_returns_409(status):
+    """
+    Summary: A request Venue Staff could never review is not recorded.
+    AC2: Given the relevant event timing and venue requirements have been
+        provided, when the Event Coordinator submits the venue booking request,
+        then the request is recorded and made available to Venue Staff for
+        review.
+    Double: Stub (event in the status), Mock (no create)
+    """
+    # Arrange (Given): status, from fixtures
+
+    # Act (When)
     response, _, get_venues, create_booking = submit({**EVENT, "status": status})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "EVENT_NOT_ACCEPTING_VENUE_REQUESTS"
     assert response.json["eventStatus"] == status
@@ -127,12 +210,22 @@ def test_ac2_request_for_event_not_under_review_is_refused(status):
     create_booking.assert_not_called()
 
 
-def test_ac2_event_without_status_is_refused():
-    """Failure: an event whose status is unknown fails closed."""
+def test_create_request_for_event_without_status_returns_409():
+    """
+    Summary: An event with an unknown status fails closed.
+    AC2: Given the relevant event timing and venue requirements have been
+        provided, when the Event Coordinator submits the venue booking request,
+        then the request is recorded and made available to Venue Staff for
+        review.
+    Double: Stub (event without status)
+    """
+    # Arrange (Given)
     event = {key: value for key, value in EVENT.items() if key != "status"}
 
+    # Act (When)
     response, _, get_venues, create_booking = submit(event)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "EVENT_NOT_ACCEPTING_VENUE_REQUESTS"
     assert response.json["eventStatus"] is None
@@ -143,10 +236,18 @@ def test_ac2_event_without_status_is_refused():
 # AC3 ----
 
 
-def test_ac3_staff_queue_shows_event_timing_with_each_request():
-    """Normal: Venue Staff see the event's dates next to the booking's own schedule and needs."""
+def test_staff_queue_shows_event_dates_with_each_request():
+    """
+    Summary: Venue Staff see the event's dates next to each request.
+    AC3: Given a venue booking request has been submitted, when Venue Staff
+        access the request, then they can view the event to which the request
+        relates together with the relevant event timing and venue requirements.
+    Double: Stub (bookings and events)
+    """
+    # Act (When)
     response = staff_queue([EVENT], {"evt-1": [dict(BOOKING)]})
 
+    # Assert (Then)
     assert response.status_code == 200
     [event] = response.json["events"]
     assert event["eventName"] == "Spring Fair"
@@ -162,8 +263,15 @@ def test_ac3_staff_queue_shows_event_timing_with_each_request():
 
 
 @pytest.mark.parametrize("missing", ["", None], ids=["event-service-blank", "absent"])
-def test_ac3_staff_queue_tolerates_event_without_dates(missing):
-    """Boundary: an event with no preferred dates still lists its requests, with null timing."""
+def test_staff_queue_with_event_without_dates_still_lists_requests(missing):
+    """
+    Summary: An event with no dates still has its requests listed.
+    AC3: Given a venue booking request has been submitted, when Venue Staff
+        access the request, then they can view the event to which the request
+        relates together with the relevant event timing and venue requirements.
+    Double: Stub (event without dates)
+    """
+    # Arrange (Given)
     if missing is None:
         event = {key: value for key, value in EVENT.items() if not key.startswith("preferred")}
     else:
@@ -171,8 +279,10 @@ def test_ac3_staff_queue_tolerates_event_without_dates(missing):
         event = {**EVENT, "preferredStartDate": "", "preferredEndDate": ""}
     legacy = {key: value for key, value in BOOKING.items() if key != "requestedAt"}
 
+    # Act (When)
     response = staff_queue([event], {"evt-1": [legacy]})
 
+    # Assert (Then)
     assert response.status_code == 200
     [listed] = response.json["events"]
     assert listed["eventStart"] is None
@@ -183,8 +293,16 @@ def test_ac3_staff_queue_tolerates_event_without_dates(missing):
 # AC4 ----
 
 
-def test_ac4_pending_and_pending_review_are_both_awaiting_review():
-    """Normal: both spellings need a decision; decided or withdrawn requests do not."""
+def test_staff_queue_counts_pending_and_pending_review_as_awaiting():
+    """
+    Summary: Both spellings of pending count as awaiting review.
+    AC4: Given a venue booking request has been submitted and has not yet
+        received a booking decision, when Venue Staff view requests requiring
+        action, then the request can be identified as awaiting Venue Staff
+        review.
+    Double: Stub (bookings in each status)
+    """
+    # Arrange (Given)
     bookings = [
         {**BOOKING, "id": "new", "status": "Pending Review"},
         {**BOOKING, "id": "legacy", "status": "Pending"},
@@ -197,14 +315,24 @@ def test_ac4_pending_and_pending_review_are_both_awaiting_review():
 
     [event] = response.json["events"]
     flags = {booking["id"]: booking["awaitingReview"] for booking in event["bookings"]}
+
+    # Act + Assert (When / Then)
     assert flags == {
         "new": True, "legacy": True, "approved": False, "rejected": False, "cancelled": False,
     }
     assert event["awaitingReviewCount"] == 2
 
 
-def test_ac4_awaiting_filter_counts_only_awaiting_requests():
-    """Normal: the "Pending" filter returns both spellings and counts them."""
+def test_staff_queue_pending_filter_returns_only_awaiting():
+    """
+    Summary: The Pending filter returns and counts only requests awaiting review.
+    AC4: Given a venue booking request has been submitted and has not yet
+        received a booking decision, when Venue Staff view requests requiring
+        action, then the request can be identified as awaiting Venue Staff
+        review.
+    Double: Stub (bookings in each status)
+    """
+    # Arrange (Given)
     bookings = [
         {**BOOKING, "id": "new", "status": "Pending Review"},
         {**BOOKING, "id": "legacy", "status": "Pending"},
@@ -214,12 +342,22 @@ def test_ac4_awaiting_filter_counts_only_awaiting_requests():
     response = staff_queue([EVENT], {"evt-1": bookings}, "?status=Pending")
 
     [event] = response.json["events"]
+
+    # Act + Assert (When / Then)
     assert sorted(booking["id"] for booking in event["bookings"]) == ["legacy", "new"]
     assert event["awaitingReviewCount"] == 2
 
 
-def test_ac4_awaiting_requests_are_listed_first_oldest_first():
-    """Normal: staff work the queue in submission order; legacy rows without a time go last."""
+def test_staff_queue_lists_awaiting_first_oldest_first():
+    """
+    Summary: Awaiting requests come first, oldest first.
+    AC4: Given a venue booking request has been submitted and has not yet
+        received a booking decision, when Venue Staff view requests requiring
+        action, then the request can be identified as awaiting Venue Staff
+        review.
+    Double: Stub (bookings with submission times)
+    """
+    # Arrange (Given)
     bookings = [
         {**BOOKING, "id": "approved", "status": "Approved", "requestedAt": "2030-01-01T09:00:00+08:00"},
         {**BOOKING, "id": "legacy-late", "status": "Pending", "requestedAt": None,
@@ -233,14 +371,24 @@ def test_ac4_awaiting_requests_are_listed_first_oldest_first():
     response = staff_queue([EVENT], {"evt-1": bookings})
 
     order = [booking["id"] for booking in response.json["events"][0]["bookings"]]
+
+    # Act + Assert (When / Then)
     assert order == ["older", "newer", "legacy-early", "legacy-late", "approved"]
 
 
 # AC5 ----
 
 
-def test_ac5_request_is_listed_under_its_own_event():
-    """Normal: each request appears only under the event it was submitted for."""
+def test_event_requests_list_only_that_events_requests():
+    """
+    Summary: Each request appears only under the event it was submitted for.
+    AC5: Given an Event Coordinator submits a venue booking request for an
+        event, when the request is recorded, then it remains associated with
+        that event so that the booking can be assessed in the context of the
+        corresponding event requirements.
+    Double: Stub (bookings of two events)
+    """
+    # Arrange (Given)
     other = {**EVENT, "id": "evt-2", "eventName": "Autumn Gala"}
     response = staff_queue(
         [EVENT, other],
@@ -254,29 +402,49 @@ def test_ac5_request_is_listed_under_its_own_event():
         event["eventId"]: [booking["id"] for booking in event["bookings"]]
         for event in response.json["events"]
     }
+
+    # Act + Assert (When / Then)
     assert grouped == {"evt-1": ["for-spring"], "evt-2": ["for-autumn"]}
 
 
 # AC6 ----
 
 
-def test_ac6_venue_booked_by_another_event_at_other_time_is_accepted():
-    """Normal: when Venue Availability accepts the slot, so does the composite.
-
-    This only proves the composite passes the atomic's answer through. The
-    non-overlap rule itself is proven in Venue Availability's integration tests.
+def test_create_request_for_venue_booked_at_other_time_is_accepted():
     """
+    Summary: A venue booked by another event at a different time can still be requested.
+    AC6: Given an Event Coordinator submits a venue booking request for a venue
+        and time slot, when the same venue has already been requested or booked
+        for another event, and the requested event timing does not overlap with
+        that other event's timing, then the request is accepted for Venue Staff
+        review as normal, so the same venue can be booked for multiple events
+        across non-overlapping time slots.
+    Double: Stub (Venue Availability accepts)
+    """
+    # Act (When)
     response, _, _, create_booking = submit(EVENT)
 
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json == BOOKING
     create_booking.assert_called_once()
 
 
-def test_ac6_overlap_reported_by_availability_is_a_409():
-    """Conflict: an overlap found by Venue Availability is reported with its conflict types."""
+def test_create_request_overlapping_other_booking_returns_409():
+    """
+    Summary: An overlap found by Venue Availability is reported as a conflict.
+    AC6: Given an Event Coordinator submits a venue booking request for a venue
+        and time slot, when the same venue has already been requested or booked
+        for another event, and the requested event timing does not overlap with
+        that other event's timing, then the request is accepted for Venue Staff
+        review as normal, so the same venue can be booked for multiple events
+        across non-overlapping time slots.
+    Double: Stub (Venue Availability reports a conflict)
+    """
+    # Act (When)
     response, _, _, _ = submit(EVENT, BookingConflictError(["APPROVED_BOOKING"]))
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "VENUE_UNAVAILABLE"
     assert response.json["conflictTypes"] == ["APPROVED_BOOKING"]
@@ -290,8 +458,18 @@ def test_ac6_overlap_reported_by_availability_is_a_409():
     [(status, 200) for status in REVIEWABLE_EVENT_STATUSES]
     + [("Submitted", 409), ("Pending Safety Check", 409), ("Confirmed", 409)],
 )
-def test_staff_review_uses_the_same_reviewable_statuses(event_status, expected):
-    """Boundary: a Submitted event accepts new requests but staff can't decide until Under Review."""
+def test_staff_review_allows_only_reviewable_event_statuses(event_status, expected):
+    """
+    Summary: Venue Staff can decide only for events in a reviewable status.
+    AC4: Given a venue booking request has been submitted and has not yet
+        received a booking decision, when Venue Staff view requests requiring
+        action, then the request can be identified as awaiting Venue Staff
+        review.
+    Double: Stub (event in each status)
+    """
+    # Arrange (Given): event_status, expected, from fixtures
+
+    # Act (When)
     with (
         patch("app.routes.get_booking", return_value=BOOKING),
         patch("app.routes.get_event_for_internal_viewer", return_value={"status": event_status}),
@@ -304,6 +482,7 @@ def test_staff_review_uses_the_same_reviewable_statuses(event_status, expected):
             json={"reviewedBy": STAFF_ID, "status": "Approved"},
         )
 
+    # Assert (Then)
     assert response.status_code == expected
     assert REVIEWABLE_EVENT_STATUSES == ("Under Review", "Approved", "Safety Changes Requested")
 
@@ -336,14 +515,25 @@ def update_window(event, **times):
 
 
 @pytest.mark.parametrize("send", [submit_window, update_window])
-def test_request_starting_in_the_past_is_refused(send):
-    """Failure: a slot that has already started can't be booked, on submit or edit."""
+def test_request_starting_in_past_returns_400(send):
+    """
+    Summary: A slot that has already started cannot be requested or moved to.
+    AC1: Given an Event Coordinator is preparing a venue booking request for an
+        event, when they enter the booking information, then they can provide
+        the relevant event timing and venue requirements needed for Venue Staff
+        to assess the booking.
+    Double: Stub (event), Mock (no create)
+    """
+    # Arrange (Given): send, from fixtures
+
+    # Act (When)
     response, get_venues, save = send(
         {**EVENT, "preferredStartDate": "2020-03-01T09:00:00", "preferredEndDate": "2020-03-01T17:00:00"},
         requestedStartTime="2020-03-01T13:00",
         requestedEndTime="2020-03-01T15:00",
     )
 
+    # Assert (Then)
     assert response.status_code == 422
     assert response.json["code"] == "BOOKING_IN_PAST"
     get_venues.assert_not_called()
@@ -359,11 +549,23 @@ def test_request_starting_in_the_past_is_refused(send):
         ("2030-02-28T23:00", "2030-03-01T10:00"),  # starts the day before
         ("2030-03-01T16:00", "2030-03-02T01:00"),  # runs past the last day
     ],
+    ids=["2030_02_28t13_00_2030_02_28t15_00", "2030_03_02t09_00_2030_03_02t11_00", "2030_02_28t23_00_2030_03_01t10_00", "2030_03_01t16_00_2030_03_02t01_00"],
 )
-def test_request_outside_event_dates_is_refused(send, start, end):
-    """Boundary: any part of the booking falling off the event's dates is refused."""
+def test_request_outside_event_dates_returns_400(send, start, end):
+    """
+    Summary: Any part of a booking outside the event's dates is refused.
+    AC1: Given an Event Coordinator is preparing a venue booking request for an
+        event, when they enter the booking information, then they can provide
+        the relevant event timing and venue requirements needed for Venue Staff
+        to assess the booking.
+    Double: Stub (event with dates)
+    """
+    # Arrange (Given): send, start, end, from fixtures
+
+    # Act (When)
     response, get_venues, save = send(EVENT, requestedStartTime=start, requestedEndTime=end)
 
+    # Assert (Then)
     assert response.status_code == 422
     assert response.json["code"] == "BOOKING_OUTSIDE_EVENT_DATES"
     assert "2030-03-01 to 2030-03-01" in response.json["message"]
@@ -377,49 +579,89 @@ def test_request_outside_event_dates_is_refused(send, start, end):
         ("2030-03-01T07:00", "2030-03-01T09:00"),  # setup before the event starts, same day
         ("2030-03-01T00:00", "2030-03-01T23:59"),  # the whole of the event's day
     ],
+    ids=["2030_03_01t07_00_2030_03_01t09_00", "2030_03_01t00_00_2030_03_01t23_59"],
 )
 def test_request_on_event_day_outside_event_hours_is_accepted(start, end):
-    """Boundary: the rule is by day, so setup or teardown on the event's day still goes through."""
+    """
+    Summary: Setup or teardown on the event's day outside its hours is allowed.
+    AC1: Given an Event Coordinator is preparing a venue booking request for an
+        event, when they enter the booking information, then they can provide
+        the relevant event timing and venue requirements needed for Venue Staff
+        to assess the booking.
+    Double: Stub (event with dates), Mock (create_booking)
+    """
+    # Arrange (Given): start, end, from fixtures
+
+    # Act (When)
     response, _, create_booking = submit_window(EVENT, requestedStartTime=start, requestedEndTime=end)
 
+    # Assert (Then)
     assert response.status_code == 201
     create_booking.assert_called_once()
 
 
-def test_request_on_any_day_of_a_multi_day_event_is_accepted():
-    """Normal: a later day of a multi-day event is within the event's dates."""
+def test_request_on_later_day_of_multi_day_event_is_accepted():
+    """
+    Summary: A later day of a multi-day event counts as within its dates.
+    AC1: Given an Event Coordinator is preparing a venue booking request for an
+        event, when they enter the booking information, then they can provide
+        the relevant event timing and venue requirements needed for Venue Staff
+        to assess the booking.
+    Double: Stub (multi-day event), Mock (create_booking)
+    """
+    # Act (When)
     response, _, create_booking = submit_window(
         {**EVENT, "preferredEndDate": "2030-03-03T17:00:00"},
         requestedStartTime="2030-03-03T10:00",
         requestedEndTime="2030-03-03T12:00",
     )
 
+    # Assert (Then)
     assert response.status_code == 201
     create_booking.assert_called_once()
 
 
-@pytest.mark.parametrize("dates", [{"preferredStartDate": "", "preferredEndDate": ""}, {}])
-def test_event_without_dates_only_checks_the_request_is_in_the_future(dates):
-    """Normal: with no event dates to compare against, Venue Staff still get the request."""
+@pytest.mark.parametrize("dates", [{"preferredStartDate": "", "preferredEndDate": ""}, {}], ids=["only_start_date", "no_dates"])
+def test_request_for_event_without_dates_only_checks_future(dates):
+    """
+    Summary: With no event dates, only "not in the past" is checked.
+    AC1: Given an Event Coordinator is preparing a venue booking request for an
+        event, when they enter the booking information, then they can provide
+        the relevant event timing and venue requirements needed for Venue Staff
+        to assess the booking.
+    Double: Stub (event without dates), Mock (create_booking)
+    """
+    # Arrange (Given)
     event = {key: value for key, value in EVENT.items() if not key.startswith("preferred")}
+
+    # Act (When)
     response, _, create_booking = submit_window(event | dates)
 
+    # Assert (Then)
     assert response.status_code == 201
     create_booking.assert_called_once()
 
 
-def test_booking_window_check_uses_the_given_time():
-    """Boundary: a request starting exactly now is already in the past."""
+def test_booking_window_check_starting_now_is_in_past():
+    """
+    Summary: A request starting exactly now is already in the past.
+    AC1: (boundary: start = now)
+    Double: None
+    """
+    # Arrange (Given)
     from datetime import datetime
 
     from app.routes import _booking_window_invalid
 
     now = datetime(2030, 3, 1, 13, 0)
+
+    # Act (When)
     with create_app().app_context():
         refused = _booking_window_invalid(EVENT, now, datetime(2030, 3, 1, 15, 0), now=now)
         accepted = _booking_window_invalid(
             EVENT, datetime(2030, 3, 1, 13, 1), datetime(2030, 3, 1, 15, 0), now=now
         )
 
+    # Assert (Then)
     assert refused[1] == 422
     assert accepted is None

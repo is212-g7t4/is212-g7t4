@@ -1,23 +1,38 @@
-"""SCRUM-47 Venue booking notification and decision alerts: owner unit tests.
+"""
+SCRUM-47: Venue Booking Notification and Decision Alerts
 
-Story: As an Event Coordinator and Venue Staff, I want to receive notifications
-about venue booking requests and decisions, so that I can coordinate venue
+User Story
+----------
+As an Event Coordinator and Venue Staff, I want to receive notifications about
+venue booking requests and decisions, so that I can coordinate venue
 arrangements efficiently.
-AC1 Given an Event Coordinator submits a venue booking request, system sends
-an in-app notification to Venue Staff with event name, requested venue,
-date/time and link to review.
-AC2 Given booking approved/rejected, sends an in-app notification to Event
-Coordinator with event name, venue, decision.
 
-AC = acceptance criterion; DR = supporting design rule, not an extra AC.
-Real: Flask/authentication, owner expansion/freeze validation, mutation routes/models.
-Doubled: native psycopg2 connection/cursor, including transaction-exit protocol.
-AC1: owner fans out a captured submission; AC2: owner freezes original-recipient
-approval/rejection history. Dispatcher tests own enriched content/SGT/link building;
-Notification tests own consumption. Existing mutation successes/refusals stay in
-submission/review modules. DR: invalid input cannot write, failed intent rolls back.
-Not proven: PostgreSQL persistence/rollback, concurrent leases, user lookup, broker
-or inbox delivery; these require the separate integration/E2E tiers.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator submits a venue booking request, the system
+     sends an in-app notification to Venue Staff with the event name, requested
+     venue, date/time, and a link to review the request.
+AC2: Given a venue booking request is approved or rejected, the system sends an
+     in-app notification to the Event Coordinator with the event name, venue,
+     and decision.
+
+Real
+----
+- The booking notification outbox: Venue Staff fan-out (one child per distinct
+  staff member), freezing each outcome's exact recipient, content and link, and
+  rollback of the business change when the intent cannot be saved.
+- Assertions are on the SQL sent, the frozen envelope and the rollback.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
+
+Not proven
+----------
+- That the SQL, locks and constraints behave the same on real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
 """
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -74,15 +89,23 @@ def booking_envelope(outcome) -> dict:
                 details=source)
 
 
-# AC1 — expansion; DR: stable child identities and captured historical source.
-def test_ac1_duplicate_staff_expand_to_one_historical_child_each(owner):
-    """Normal: two distinct staff receive stable children while duplicate lookup rows collapse."""
+def test_submission_alert_fans_out_once_per_staff_member(owner):
+    """
+    Summary: A submission alert goes to each Venue Staff member once, even if they are listed twice.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    Double: Stub (staff lookup with duplicates; inserts inspected)
+    """
+    # Arrange (Given)
     # Arrange: isolate the driver while retaining the real route and owner logic.
     client, cursor, row, connection = owner
 
+    # Act (When)
     # Act: enter through the public HTTP boundary.
     result = operate(client, "expand", **EXPANSION)
 
+    # Assert (Then)
     # Assert: response and write/transaction outcomes, not just executed lines.
     assert result.status_code == 200
     assert result.json == {"id": JOB, "status": "expanded", "recipients": 2}
@@ -115,13 +138,22 @@ def test_ac1_duplicate_staff_expand_to_one_historical_child_each(owner):
     pytest.param("venue.booking-submission-fanout", {"eventName": 42}, id="invalid-event-name"),
     pytest.param("venue.booking-submission-fanout", {"venueName": " "}, id="blank-venue-name"),
 ])
-def test_ac1_invalid_expansion_never_creates_children_or_completes_parent(owner, kind, change):
-    """Failure: invalid fanout inputs leave the parent retryable without any child/completion write."""
+def test_submission_alert_with_bad_staff_list_stays_retryable(owner, kind, change):
+    """
+    Summary: A bad staff list creates no alerts and leaves the job to retry.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    Double: Stub (invalid staff lookup), Mock (no inserts)
+    """
+    # Arrange (Given)
     client, cursor, row, connection = owner
     row["type"] = kind
 
+    # Act (When)
     result = operate(client, "expand", **(EXPANSION | change))
 
+    # Assert (Then)
     assert result.status_code == 400
     assert result.json == {"message": "Invalid outbox input."}
     assert len(cursor.execute.call_args_list) == 1
@@ -129,19 +161,30 @@ def test_ac1_invalid_expansion_never_creates_children_or_completes_parent(owner,
     assert connection.__exit__.call_args.args[0] in (ValueError, TypeError, AttributeError)
 
 
-# AC1/AC2 — freeze; DR: retain recipient and original decision, not current ownership.
-@pytest.mark.parametrize("outcome", ["submission", "Approved", "Rejected"])
-def test_ac1_ac2_valid_booking_history_is_frozen_and_returned_exactly(owner, outcome):
-    """Normal: each supported booking outcome freezes the exact recipient, content and destination."""
+@pytest.mark.parametrize("outcome", ["submission", "Approved", "Rejected"], ids=["submission", "approved", "rejected"])
+def test_booking_alert_freezes_exact_recipient_content_and_link(owner, outcome):
+    """
+    Summary: Each booking alert is frozen with its exact recipient, content and link.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (cursor returns the job; update inspected)
+    """
+    # Arrange (Given)
     # Arrange: isolate the driver while retaining the real route and owner logic.
     client, cursor, row, connection = owner
     envelope = booking_envelope(outcome)
     row.update(type=envelope["type"], source=deepcopy(envelope["details"]))
     cursor.fetchone.side_effect = [row, {**row, "envelope": deepcopy(envelope)}]
 
+    # Act (When)
     # Act: enter through the public HTTP boundary.
     result = operate(client, "freeze", envelope=envelope)
 
+    # Assert (Then)
     # Assert: response and write/transaction outcomes, not just executed lines.
     assert result.status_code == 200
     assert result.json == dict(id=JOB, type=envelope["type"], source=envelope["details"],
@@ -159,8 +202,18 @@ def test_ac1_ac2_valid_booking_history_is_frozen_and_returned_exactly(owner, out
     pytest.param("Approved", STAFF, None, id="decision-recipient-mismatch"),
     pytest.param("Approved", USER_ID, "Pending Review", id="unsupported-decision"),
 ])
-def test_ac1_ac2_inconsistent_booking_contract_is_never_frozen(owner, outcome, recipient, decision):
-    """Failure: changing the captured recipient or using an unsupported decision cannot freeze history."""
+def test_booking_alert_with_changed_recipient_or_decision_is_not_frozen(owner, outcome, recipient, decision):
+    """
+    Summary: An alert whose recipient or decision changed is never frozen.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (cursor returns the job)
+    """
+    # Arrange (Given)
     client, cursor, row, connection = owner
     envelope = booking_envelope(outcome)
     if decision is not None:
@@ -168,18 +221,29 @@ def test_ac1_ac2_inconsistent_booking_contract_is_never_frozen(owner, outcome, r
     row.update(type=envelope["type"], source=deepcopy(envelope["details"]))
     envelope["recipientId"] = recipient
 
+    # Act (When)
     result = operate(client, "freeze", envelope=envelope)
 
+    # Assert (Then)
     assert result.status_code == 400
     assert result.json == {"message": "Invalid outbox input."}
     assert len(cursor.execute.call_args_list) == 1
     assert connection.__exit__.call_args.args[0] is ValueError
 
 
-# DR supporting AC1/AC2 — mutation and intent share the failing transaction.
-@pytest.mark.parametrize("action", ["submit", "approve", "reject"])
-def test_ac1_ac2_failed_intent_rolls_back_the_business_transaction(setup, action):
-    """Failure: intent insertion failure refuses submission or decision and requests rollback, never commit."""
+@pytest.mark.parametrize("action", ["submit", "approve", "reject"], ids=["submit", "approve", "reject"])
+def test_booking_change_when_alert_cannot_be_queued_rolls_back(setup, action):
+    """
+    Summary: If the alert cannot be queued, the submission or decision is rolled back too.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (outbox insert raises), Mock (rollback)
+    """
+    # Arrange (Given)
     # Arrange: isolate the driver while retaining the real route and owner logic.
     client, cursor = setup
     connection = cursor.connection
@@ -203,6 +267,7 @@ def test_ac1_ac2_failed_intent_rolls_back_the_business_transaction(setup, action
     cursor.execute.side_effect = execute
     connection.__exit__.side_effect = finish_transaction
 
+    # Act (When)
     # Act: enter through the public HTTP boundary.
     if action == "submit":
         result = client.post("/venue-bookings", json=dict(
@@ -215,6 +280,7 @@ def test_ac1_ac2_failed_intent_rolls_back_the_business_transaction(setup, action
                               json={"reviewedBy": STAFF, "rejectionReason": "Fixture input"},
                               headers=bearer(USER_ID, "Venue Staff"))
 
+    # Assert (Then)
     # Assert: response and write/transaction outcomes, not just executed lines.
     assert result.status_code == 503
     connection.__exit__.assert_called_once()

@@ -1,22 +1,52 @@
-"""SCRUM-173: venue disruptions tell the assigned coordinator to rearrange bookings.
+"""
+SCRUM-173: Receive Venue Disruption Notifications
 
-Story: As an Event Coordinator, I want an in-app notification when a venue booking
-for my assigned event is affected, so I know alternative arrangements are needed.
-AC1: notify the coordinator assigned when the notification is prepared.
-AC2: include event, venue, closure interval, reason and rejection destination.
-AC3: recover from temporary dispatch failure without duplicate alerts.
-AC = acceptance criterion; DR = design rule (supporting behaviour, not an extra AC).
+User Story
+----------
+As an Event Coordinator, I want to receive an in-app notification when a venue
+booking for an event assigned to me is affected, so that I know that
+alternative arrangements are required.
 
-Real: consumer validation, storage adapters, Flask routes and command-loop logic.
-Mocked: database/broker I/O, time delays and selected route storage calls.
-Identity: DEV headers exercise caller scoping, not JWT login or production auth.
-Not proven: durable database writes, broker restart/redelivery, producer recipient
-selection, deployed authentication or browser navigation; isolated suites cover
-those boundaries separately. Quarantine means the mocked SQL write was requested.
+Acceptance Criteria
+-------------------
+AC1: Given a rejection is ready for notification, then the notification is
+     addressed to the coordinator assigned to that event when the notification
+     is created.
+AC2: The notification contains the event name, affected venue, closure
+     start/end, rejection reason, and a link to the venue rejection.
+AC3: Given a temporary system failure occurs during notification dispatch, the
+     system must ensure the notification is eventually delivered to the
+     assigned coordinator without generating multiple duplicate alerts.
 
-Classes group recovery, inbox access and validation. Security, diagnostics and
-legacy compatibility support the story; they are not additional acceptance criteria.
-Historical checks are regression evidence, not a claim of test-first chronology."""
+Real
+----
+- app.consumer: envelope validation (strict JSON, version, type, message,
+  destination, the venue-disruption details contract), process() with ACK only
+  after commit, quarantine of malformed bodies, and the consumer command's
+  reconnect/back-off loop; app.diagnostics list/replay; the inbox routes (list
+  with cursor pagination and unread filter, mark read, unread count) scoped to
+  the signed-in user.
+- Assertions are on SQL sent, ACK and its order, quarantine contents, retry
+  delays and HTTP responses.
+
+Doubled
+-------
+- psycopg2.connect: Stub - MagicMock connection and cursor (or raising
+  OperationalError / ProgrammingError); SQL inspected.
+- Broker channel and pika connection: Mock - ACK, close and consume calls
+  inspected.
+- time.sleep: Stub - skips back-off waits; delays recorded.
+- Inbox storage functions: Stub (`setup` fixture) in route tests.
+
+Not proven
+----------
+- That a real broker redelivers after a restart and the inbox de-duplicates it
+  (AC3) (-> tests/integration/; NOT COVERED against a live broker).
+- That the producer addresses the coordinator assigned at preparation time
+  (AC1) (-> venue-booking-service dispatcher tests).
+- The inbox routes have no story of their own; they are mapped to AC1 (the
+  coordinator receives the notification) and raised as a finding.
+"""
 
 # test_consumer_recovery.py — original fixture and scenario group
 import json
@@ -73,67 +103,112 @@ def row(**changes):
 class TestConsumerRecovery:
     """SCRUM-173 AC3 — consumer process/startup and commit/ack seam. Hermetic broker and database adapters, including outage backoff and CLI diagnostics. Real restart/ack redelivery is in the disposable harness, not inferred here."""
 
-    def test_delivered_only_after_database_commit(self):
-        """AC3: processing exits the mocked transaction, closes it and requests ACK.
-        Checks expected calls, not a real commit or their relative call order."""
+    def test_process_alert_acks_only_after_database_commit(self, mocker):
+        """
+        Summary: A notification is acknowledged to the broker only after it is safely stored.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connection), Mock (commit then ACK order)
+        """
+        # Arrange (Given)
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
         channel = Mock()
         method = Mock(delivery_tag=9)
-        with patch("psycopg2.connect", return_value=connection):
-            process("synthetic", channel, method, json.dumps(envelope()).encode())
+
+        # Act (When)
+        mocker.patch("psycopg2.connect", return_value=connection)
+        process("synthetic", channel, method, json.dumps(envelope()).encode())
+
+        # Assert (Then)
         connection.__exit__.assert_called_once()
         channel.basic_ack.assert_called_once_with(delivery_tag=9)
         connection.close.assert_called_once()
 
 
-    def test_database_commit_failure_leaves_delivery_unacknowledged(self):
-        """## AC3
-        A database commit failure propagates without acknowledging; redelivery remains possible.
+    def test_process_alert_when_commit_fails_leaves_message_for_redelivery(self, mocker):
         """
+        Summary: If storing fails, the message is left on the queue to be delivered later.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (commit raises), Mock (no ACK)
+        """
+        # Arrange (Given)
         connection = MagicMock()
         connection.__exit__.side_effect = RuntimeError("commit failed")
         channel = Mock()
         method = Mock(delivery_tag=9)
-        with patch("psycopg2.connect", return_value=connection):
-            with pytest.raises(RuntimeError):
-                process("synthetic", channel, method, json.dumps(envelope()).encode())
+
+        # Act (When)
+        mocker.patch("psycopg2.connect", return_value=connection)
+        with pytest.raises(RuntimeError):
+            process("synthetic", channel, method, json.dumps(envelope()).encode())
+
+        # Assert (Then)
         channel.basic_ack.assert_not_called()
         connection.close.assert_called_once()
 
 
-    def test_malformed_quarantine_commits_before_ack_with_mocked_database(self):
+    def test_process_malformed_alert_quarantines_then_acks(self, mocker):
         # Alias: test_malformed_saved_in_real_quarantine_adapter and
         # test_delivery::test_malformed_is_persisted_before_ack (consolidated).
-        """## AC3 supporting poison recovery
-        Malformed bytes commit to quarantine before ACK; the mocked adapter is not real persistence evidence.
         """
+        Summary: A malformed message is stored aside first and only then acknowledged.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connection), Mock (commit then ACK order)
+        """
+        # Arrange (Given)
         connection = MagicMock()
         channel = Mock()
         events = []
         connection.__exit__.side_effect = lambda *_: events.append("commit")
         channel.basic_ack.side_effect = lambda **_: events.append("ack")
-        with patch("psycopg2.connect", return_value=connection):
-            process("synthetic", channel, Mock(delivery_tag=7), b"broken")
+
+        # Act (When)
+        mocker.patch("psycopg2.connect", return_value=connection)
+        process("synthetic", channel, Mock(delivery_tag=7), b"broken")
+
+        # Assert (Then)
         connection.__exit__.assert_called_once()
         connection.close.assert_called_once()
         assert events == ["commit", "ack"]
         channel.basic_ack.assert_called_once_with(delivery_tag=7)
 
 
-    def test_connection_parameters_are_usable_without_network(self):
-        """## Supporting infrastructure
-        Broker connection parameters construct a connection through a mocked transport, with no real network.
+    def test_connection_parameters_build_from_url_without_network(self, mocker):
         """
-        with patch("app.consumer.pika.BlockingConnection") as connection:
-            result = connect("amqp://synthetic:synthetic@127.0.0.1:5672/%2F")
+        Summary: The broker connection settings can be built from the configured URL without connecting.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: None
+        """
+        # Act (When)
+        connection = mocker.patch("app.consumer.pika.BlockingConnection")
+        result = connect("amqp://synthetic:synthetic@127.0.0.1:5672/%2F")
+
+        # Assert (Then)
         assert result is connection.return_value
 
 
-    def test_consumer_command_recovers_outage_then_stops_cleanly(self, monkeypatch):
-        """## AC3 supporting process recovery
-        A startup connection outage backs off, then consumes through the recovered channel and closes cleanly.
+    def test_consumer_command_after_outage_reconnects_then_stops_cleanly(self, monkeypatch, mocker):
         """
+        Summary: After a broker or database outage the consumer reconnects, and it stops cleanly on interrupt.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connect fails then succeeds), Mock (sleep)
+        """
+        # Arrange (Given)
         monkeypatch.setenv("RABBITMQ_URL", "amqp://synthetic:synthetic@127.0.0.1:5672/%2F")
         monkeypatch.setenv("DATABASE_URL", "synthetic")
         connection = MagicMock()
@@ -145,60 +220,86 @@ class TestConsumerRecovery:
             raise KeyboardInterrupt()
 
         channel.start_consuming.side_effect = consume
-        with (
-            patch(
+
+        # Act (When)
+        mocker.patch(
                 "pika.BlockingConnection", side_effect=[RuntimeError("outage"), connection]
-            ),
-            patch("time.sleep") as sleep,
-            patch("app.store.quarantine"),
-        ):
-            runpy.run_path(str(Path(consumer.__file__)), run_name="__main__")
+            )
+        sleep = mocker.patch("time.sleep")
+        mocker.patch("app.store.quarantine")
+        runpy.run_path(str(Path(consumer.__file__)), run_name="__main__")
+
+        # Assert (Then)
         sleep.assert_called_once_with(1)
         connection.close.assert_called_once()
 
 
-    def test_consumer_handles_closed_connection_and_normal_return(self, monkeypatch):
-        """## AC3 supporting process recovery
-        A closed broker connection and normal return back off safely without closing twice.
+    def test_consumer_command_when_connection_closes_reconnects(self, monkeypatch, mocker):
         """
+        Summary: A closed broker connection is treated as a reason to reconnect, not to stop.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (pika raises ConnectionClosed), Mock (sleep)
+        """
+        # Arrange (Given)
         monkeypatch.setenv("RABBITMQ_URL", "amqp://synthetic:synthetic@127.0.0.1:5672/%2F")
         connection = MagicMock()
         connection.is_open = False
-        with (
-            patch("app.consumer.connect", side_effect=[connection, KeyboardInterrupt()]),
-            patch("time.sleep") as sleep,
-        ):
-            run()
+
+        # Act (When)
+        mocker.patch("app.consumer.connect", side_effect=[connection, KeyboardInterrupt()])
+        sleep = mocker.patch("time.sleep")
+        run()
+
+        # Assert (Then)
         sleep.assert_called_once_with(1)
         connection.close.assert_not_called()
 
 
-    def test_diagnostic_list_and_replay_command(self, monkeypatch, capsys):
-        """## Supporting diagnostics
-        CLI listing exposes retained failure IDs; replay reads saved bytes; an absent failure is explicit.
+    def test_diagnostics_command_lists_and_replays_quarantined_messages(self, monkeypatch, capsys, mocker):
         """
+        Summary: Quarantined messages can be listed and replayed into delivery.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (storage), Mock (output captured)
+        """
+        # Arrange (Given)
         monkeypatch.setenv("DATABASE_URL", "synthetic")
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
         cursor.fetchall.return_value = [{"failure_id": ID, "error": "unsupported version"}]
         cursor.fetchone.return_value = {"body": memoryview(json.dumps(envelope()).encode())}
-        with patch("psycopg2.connect", return_value=connection):
-            with patch("sys.argv", ["diagnostics", "list"]):
-                runpy.run_path(str(Path(diagnostics.__file__)), run_name="__main__")
-            assert ID in capsys.readouterr().out
-            with patch("sys.argv", ["diagnostics", "replay", ID]):
-                main()
+
+        # Act (When)
+        mocker.patch("psycopg2.connect", return_value=connection)
+        with patch("sys.argv", ["diagnostics", "list"]):
+            runpy.run_path(str(Path(diagnostics.__file__)), run_name="__main__")
+        assert ID in capsys.readouterr().out
+        with patch("sys.argv", ["diagnostics", "replay", ID]):
+            main()
+
+        # Assert (Then)
         assert connection.close.call_count == 4
         cursor.fetchone.return_value = None
-        with patch("psycopg2.connect", return_value=connection):
-            with pytest.raises(ValueError, match="not found"):
-                replay("synthetic", ID)
+        mocker.patch("psycopg2.connect", return_value=connection)
+        with pytest.raises(ValueError, match="not found"):
+            replay("synthetic", ID)
 
 
-    def test_repeated_storage_failure_increases_reconnect_delay(self, monkeypatch):
-        """## AC3
-        Repeated storage outages increase reconnect delay instead of busy-looping or dropping delivery.
+    def test_consumer_command_when_storage_keeps_failing_backs_off_longer(self, monkeypatch, mocker):
         """
+        Summary: Repeated storage failures wait longer before each retry.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (storage keeps failing), Mock (sleep durations)
+        """
+        # Arrange (Given)
         monkeypatch.setenv("RABBITMQ_URL", "amqp://synthetic:synthetic@127.0.0.1:5672/%2F")
         connection = MagicMock()
         connection.channel.return_value.start_consuming.side_effect = [
@@ -206,18 +307,26 @@ class TestConsumerRecovery:
             RuntimeError("still down"),
             KeyboardInterrupt(),
         ]
-        with (
-            patch("app.consumer.connect", return_value=connection),
-            patch("time.sleep") as sleep,
-        ):
-            run()
+
+        # Act (When)
+        mocker.patch("app.consumer.connect", return_value=connection)
+        sleep = mocker.patch("time.sleep")
+        run()
+
+        # Assert (Then)
         assert [call.args[0] for call in sleep.call_args_list] == [1, 2]
 
 
-    def test_connection_close_failure_does_not_kill_recovery_loop(self, monkeypatch):
-        """## AC3
-        A failed connection close does not prevent the following reconnect attempt.
+    def test_consumer_command_when_close_fails_keeps_recovering(self, monkeypatch, mocker):
         """
+        Summary: An error while closing a broken connection does not stop recovery.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (close raises), Mock (sleep)
+        """
+        # Arrange (Given)
         monkeypatch.setenv("RABBITMQ_URL", "amqp://synthetic:synthetic@127.0.0.1:5672/%2F")
         connection = MagicMock()
         connection.channel.return_value.start_consuming.side_effect = [
@@ -225,11 +334,13 @@ class TestConsumerRecovery:
             KeyboardInterrupt(),
         ]
         connection.close.side_effect = [RuntimeError("close failed"), None]
-        with (
-            patch("app.consumer.connect", return_value=connection) as connect_again,
-            patch("time.sleep"),
-        ):
-            run()
+
+        # Act (When)
+        connect_again = mocker.patch("app.consumer.connect", return_value=connection)
+        mocker.patch("time.sleep")
+        run()
+
+        # Assert (Then)
         assert connect_again.call_count == 2
 
 
@@ -241,15 +352,25 @@ from app.consumer import process
 class TestDelivery:
     """SCRUM-173 AC3 — consumer acknowledgement boundary (hermetic). Commit failure must leave delivery unacknowledged; malformed messages are retained."""
 
-    def test_storage_failure_does_not_ack(self):
-        """## AC3 supporting poison recovery
-        Quarantine failure leaves malformed delivery unacknowledged, retaining the broker recovery path.
+    def test_process_alert_when_storage_fails_does_not_ack(self, mocker):
         """
+        Summary: A storage failure leaves the message unacknowledged so it is redelivered.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (cursor raises), Mock (no ACK)
+        """
+        # Arrange (Given)
         channel = Mock()
         method = Mock(delivery_tag=7)
-        with patch("app.consumer.store.quarantine", side_effect=RuntimeError("db down")):
-            with pytest.raises(RuntimeError):
-                process("synthetic", channel, method, b"broken")
+
+        # Act (When)
+        mocker.patch("app.consumer.store.quarantine", side_effect=RuntimeError("db down"))
+        with pytest.raises(RuntimeError):
+            process("synthetic", channel, method, b"broken")
+
+        # Assert (Then)
         channel.basic_ack.assert_not_called()
 
 
@@ -268,34 +389,47 @@ class TestDelivery:
             {"id": None},
             {"recipientId": "broken"},
         ],
+        ids=["bool_version", "wrong_version", "empty_type", "type_too_long", "empty_message", "null_message", "naive_time", "untrusted_link", "link_not_object", "missing_id", "bad_recipient"],
     )
-    def test_malformed_envelopes_are_retained_instead_of_delivered(self, changes):
-        """## AC3 supporting validation
-        Each distinct invalid envelope contract is retained and ACKed, never inserted into the inbox.
+    def test_process_alert_with_malformed_envelope_quarantines_it(self, changes, mocker):
+        """
+        Summary: An envelope with a bad version, type, message, time, link or recipient is kept aside, not delivered.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        Double: Stub (connection), Mock (channel ACK)
         """
         import json
 
         channel = Mock()
         method = Mock(delivery_tag=3)
-        with (
-            patch("app.consumer.store.deliver") as deliver,
-            patch("app.consumer.store.quarantine") as quarantine,
-        ):
-            process("synthetic", channel, method, json.dumps(envelope() | changes).encode())
+        deliver = mocker.patch("app.consumer.store.deliver")
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", channel, method, json.dumps(envelope() | changes).encode())
         deliver.assert_not_called()
         quarantine.assert_called_once()
         channel.basic_ack.assert_called_once_with(delivery_tag=3)
 
 
-    def test_excessively_nested_malformed_json_is_durably_quarantined(self):
-        """AC3 supporting poison recovery: excessive JSON nesting requests quarantine
-        and ACK instead of crashing. Mocked SQL is not durable storage evidence."""
+    def test_process_alert_with_deeply_nested_json_quarantines_it(self, mocker):
+        """
+        Summary: A pathologically nested message is quarantined rather than crashing the consumer.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connection), Mock (channel ACK)
+        """
+        # Arrange (Given)
         channel = Mock()
         method = Mock(delivery_tag=4)
         depth = 100000
         body = b"[" * depth + b"0" + b"]" * depth
-        with patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", channel, method, body)
+
+        # Act (When)
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", channel, method, body)
+
+        # Assert (Then)
         quarantine.assert_called_once()
         channel.basic_ack.assert_called_once_with(delivery_tag=4)
 
@@ -308,19 +442,26 @@ INBOX_USER = "10000000-0000-0000-0000-000000000001"
 class TestInbox:
     """SCRUM-173 AC1/AC3 — hermetic inbox API ownership seam. No real persistence here; SQL/broker integration is separately exercised."""
 
-    def test_inbox_uses_authenticated_identity_not_query_recipient(self, monkeypatch):
-        """## AC1 supporting ownership
-        The signed-in caller (SCRUM-8), not an attacker-supplied recipient query, scopes inbox access.
+    def test_inbox_lists_signed_in_users_notifications_not_query_recipient(self, monkeypatch, mocker):
         """
+        Summary: The inbox shows the signed-in user's own notifications; a recipient in the query is ignored.
+        AC1: (inbox: the assigned coordinator sees their own notifications)
+        Double: Mock (storage records which user is asked about)
+        """
+        # Arrange (Given)
         monkeypatch.setenv("DATABASE_URL", "synthetic-not-a-real-dsn")
         client = create_app().test_client()
-        with patch(
+
+        # Act (When)
+        listing = mocker.patch(
             "app.store.list_inbox", return_value={"notifications": [], "nextCursor": None}
-        ) as listing:
-            response = client.get(
-                "/notifications?recipientId=someone-else",
-                headers=bearer(INBOX_USER, "Event Coordinator"),
-            )
+        )
+        response = client.get(
+            "/notifications?recipientId=someone-else",
+            headers=bearer(INBOX_USER, "Event Coordinator"),
+        )
+
+        # Assert (Then)
         assert response.status_code == 200
         assert listing.call_args.args[1] == INBOX_USER
 
@@ -337,23 +478,30 @@ class TestInboxBehavior:
     """SCRUM-173 AC1/AC3 — inbox HTTP seam (hermetic database driver). Own listing, keyset pagination, unread filtering, read/unread, CORS and denials. Actual SQL ownership/filter/order/dedup is verified separately in PostgreSQL."""
 
     @pytest.fixture
-    def setup(self, monkeypatch):
+    def setup(self, monkeypatch, mocker):
         monkeypatch.setenv("DATABASE_URL", "synthetic")
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
         cursor.fetchall.return_value = [row()]
         cursor.fetchone.return_value = row()
-        with patch("psycopg2.connect", return_value=connection):
-            yield create_app().test_client(), cursor
+        mocker.patch("psycopg2.connect", return_value=connection)
+        yield create_app().test_client(), cursor
 
 
-    def test_pagination_filter_read_and_unread(self, setup):
-        """## Supporting inbox UI contract
-        Keyset pagination/filtering, individual read/unread, absent-row response and unread count have explicit HTTP outcomes.
+    def test_inbox_pages_filters_unread_and_marks_read(self, setup):
         """
+        Summary: The inbox pages through notifications, filters unread ones and marks them read or unread.
+        AC1: (inbox: the assigned coordinator sees their own notifications)
+        Double: Stub (`setup` storage)
+        """
+        # Arrange (Given)
         client, cursor = setup
         cursor.fetchall.return_value = [row(), row()]
+
+        # Act (When)
         first = client.get("/notifications?limit=1", headers=HEADERS)
+
+        # Assert (Then)
         assert (
             first.status_code == 200
             and len(first.json["notifications"]) == 1
@@ -393,21 +541,32 @@ class TestInboxBehavior:
             "cursor=WyJub3QtYS10aW1lIiwiaWQiXQ==",
             "cursor=WyIyMDI2LTEwLTE3VDAwOjAwOjAwIiwiMjAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAxIl0=",
         ],
+        ids=["limit_zero", "limit_above_100", "limit_text", "unread_text", "cursor_broken", "cursor_bad_time", "cursor_bad_id"],
     )
-    def test_bad_query_is_client_error(self, setup, query):
-        """## Supporting API validation
-        Invalid limits, unread values and cursors return 400 rather than silently changing the inbox window.
+    def test_inbox_with_bad_page_or_filter_returns_400(self, setup, query):
         """
+        Summary: A bad page size, unread filter or cursor is refused.
+        AC1: (inbox)
+        Double: Stub (`setup` storage)
+        """
+        # Arrange (Given)
         client, _ = setup
+
+        # Act + Assert (When / Then)
         assert client.get("/notifications?" + query, headers=HEADERS).status_code == 400
 
 
-    @pytest.mark.parametrize("body", [None, [], {}, {"read": "true"}, {"read": 1}])
-    def test_bad_read_input_is_client_error(self, setup, body):
-        """## Supporting API validation
-        Malformed read bodies return 400, never coercing strings or numbers into a read mutation.
+    @pytest.mark.parametrize("body", [None, [], {}, {"read": "true"}, {"read": 1}], ids=["no_body", "list_body", "empty_object", "read_as_text", "read_as_number"])
+    def test_mark_read_with_bad_body_returns_400(self, setup, body):
         """
+        Summary: Marking read needs a true or false value.
+        AC1: (inbox)
+        Double: Stub (`setup` storage)
+        """
+        # Arrange (Given)
         client, _ = setup
+
+        # Act + Assert (When / Then)
         assert (
             client.patch("/notifications/" + ID, json=body, headers=HEADERS).status_code
             == 400
@@ -417,19 +576,57 @@ class TestInboxBehavior:
     @pytest.mark.parametrize(
         "headers",
         [{}, {"X-Dev-User-Id": USER, "X-Dev-Role": "Event Coordinator"}, {"X-Internal-Token": "internal-test-token"}],
+        ids=["no_headers", "dev_headers", "internal_token"],
     )
-    def test_identity_required(self, setup, headers, monkeypatch):
-        """## AC1 supporting ownership
-        Without a signed-in user (SCRUM-8) access is denied before any recipient-scoped read.
+    def test_inbox_without_signed_in_user_returns_401(self, setup, headers, monkeypatch):
         """
+        Summary: The inbox needs a signed-in user; old developer headers or the internal token do not count.
+        AC1: (inbox)
+        Double: None
+        """
+        # Arrange (Given)
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal-test-token")
         client, _ = setup
+
+        # Act + Assert (When / Then)
         assert client.get("/notifications", headers=headers).status_code == 401
 
 
-    def test_disabled_missing_database_cors_and_health(self, setup):
-        """## Supporting infrastructure/security
-        Missing storage fails closed; trusted CORS and process-health semantics remain explicit.
+    def test_inbox_when_storage_down_returns_503_and_reads_legacy_rows(self, setup):
+        """
+        Summary: A storage outage is reported as retryable, and older rows with missing fields still display.
+        AC1: (inbox)
+        Double: Stub (storage raises, then returns a legacy row)
+        """
+        # Arrange (Given)
+        client, cursor = setup
+        legacy = row()
+        legacy.update(
+            event_id=None,
+            created_at=None,
+            read_at=datetime(2026, 10, 17, tzinfo=timezone.utc),
+        )
+        cursor.fetchall.return_value = [legacy]
+
+        # Act (When)
+        response = client.get("/notifications", headers=HEADERS)
+
+        # Assert (Then)
+        assert response.json["notifications"][0]["eventId"] is None
+        assert response.json["notifications"][0]["createdAt"] is None
+        cursor.execute.side_effect = psycopg2.OperationalError("synthetic outage")
+        assert client.get("/notifications", headers=HEADERS).status_code == 503
+
+    # --- Supporting/supplementary design checks ----------------------------------
+    # No Jira acceptance criterion covers these. They check design decisions the
+    # stories rely on (health check, CORS, configuration and failure handling).
+
+    def test_inbox_when_unconfigured_returns_503_and_health_still_answers(self, setup):
+        """
+        Summary: An unconfigured inbox reports itself unavailable while health and browser access still work.
+        Supporting design check: an unconfigured Notification Service answers
+            503
+        Double: Stub (`setup` storage)
         """
         client, _ = setup
         assert client.get("/health").json == {"status": "ok"}
@@ -449,25 +646,6 @@ class TestInboxBehavior:
         assert client.get("/notifications", headers=HEADERS).status_code == 503
 
 
-    def test_storage_outage_is_retryable_and_nullable_legacy_row_survives(self, setup):
-        """## AC3 + cross-ticket legacy compatibility
-        Legacy nullable fields serialize unchanged; storage outage yields retryable 503, not an empty successful inbox.
-        """
-        client, cursor = setup
-        legacy = row()
-        legacy.update(
-            event_id=None,
-            created_at=None,
-            read_at=datetime(2026, 10, 17, tzinfo=timezone.utc),
-        )
-        cursor.fetchall.return_value = [legacy]
-        response = client.get("/notifications", headers=HEADERS)
-        assert response.json["notifications"][0]["eventId"] is None
-        assert response.json["notifications"][0]["createdAt"] is None
-        cursor.execute.side_effect = psycopg2.OperationalError("synthetic outage")
-        assert client.get("/notifications", headers=HEADERS).status_code == 503
-
-
 # test_review_validation.py — original fixture and scenario group
 import json
 from unittest.mock import MagicMock, Mock, patch
@@ -479,65 +657,110 @@ from app import store
 class TestReviewValidation:
     """SCRUM-173 review R1/R2: poison retention and known-type contract at consumer seam."""
 
-    @pytest.mark.parametrize("extra", [float("nan"), float("inf"), float("-inf"), "nul\x00text", "\ud800", {"\udfff": "value"}, {"nul\x00key": ["value"]}, [0, {"nested": "\udfff"}]])
-    def test_r1_jsonb_poison_in_unknown_fields_is_retained_before_ack(self, extra):
-        """## AC3 supporting JSONB safety
-        Nonfinite numbers and NUL/surrogate text at nested values/keys retain original bytes and cannot poison inbox persistence.
+    @pytest.mark.parametrize("extra", [float("nan"), float("inf"), float("-inf"), "nul\x00text", "\ud800", {"\udfff": "value"}, {"nul\x00key": ["value"]}, [0, {"nested": "\udfff"}]], ids=["nan", "infinity", "negative_infinity", "nul_in_text", "lone_surrogate", "surrogate_key", "nul_in_key", "nested_surrogate"])
+    def test_process_alert_with_unstorable_extra_values_quarantines_it(self, extra, mocker):
         """
+        Summary: Values the database cannot store in extra fields send the message to quarantine instead of failing.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connection), Mock (channel ACK)
+        """
+        # Arrange (Given)
         body = json.dumps(envelope() | {"future": extra}).encode()
         ch = Mock()
-        with patch("app.consumer.store.deliver") as deliver, patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", ch, Mock(delivery_tag=1), body)
+
+        # Act (When)
+        deliver = mocker.patch("app.consumer.store.deliver")
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", ch, Mock(delivery_tag=1), body)
+
+        # Assert (Then)
         deliver.assert_not_called()
         assert quarantine.call_args.args[1] == body
         ch.basic_ack.assert_called_once_with(delivery_tag=1)
 
 
-    @pytest.mark.parametrize("body", [b'{"extra":NaN}', b'{"extra":1e999}', b'\xff'])
-    def test_r1_strict_wire_json_is_quarantined(self, body):
-        """## AC3 supporting JSON safety
-        Nonstandard constants, overflowing numbers and invalid UTF-8 retain exact input bytes.
+    @pytest.mark.parametrize("body", [b'{"extra":NaN}', b'{"extra":1e999}', b'\xff'], ids=["nan_literal", "overflowing_number", "invalid_bytes"])
+    def test_process_alert_with_non_standard_json_quarantines_it(self, body, mocker):
         """
-        with patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", Mock(), Mock(), body)
+        Summary: Non-standard JSON (NaN, overflowing numbers, bad bytes) is quarantined.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connection), Mock (channel ACK)
+        """
+        # Arrange (Given): body, from fixtures
+
+        # Act (When)
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", Mock(), Mock(), body)
+
+        # Assert (Then)
         assert quarantine.call_args.args[1] == body
 
 
-    @pytest.mark.parametrize("error", [psycopg2.OperationalError("outage"), psycopg2.ProgrammingError("missing table")])
-    def test_r1_database_failures_are_not_misclassified_as_poison(self, error):
-        """## AC3
-        Real driver error classes propagate without quarantine or ACK; temporary infrastructure failure remains retryable.
+    @pytest.mark.parametrize("error", [psycopg2.OperationalError("outage"), psycopg2.ProgrammingError("missing table")], ids=["outage", "missing_table"])
+    def test_process_alert_when_database_fails_retries_instead_of_quarantining(self, error, mocker):
         """
+        Summary: A database failure is retried, never mistaken for a bad message.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (cursor raises), Mock (no ACK)
+        """
+        # Arrange (Given)
         ch = Mock()
-        with patch("app.consumer.store.deliver", side_effect=error), patch("app.consumer.store.quarantine") as quarantine:
-            with pytest.raises(type(error)):
-                process("synthetic", ch, Mock(), json.dumps(envelope()).encode())
+
+        # Act (When)
+        mocker.patch("app.consumer.store.deliver", side_effect=error)
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        with pytest.raises(type(error)):
+            process("synthetic", ch, Mock(), json.dumps(envelope()).encode())
+
+        # Assert (Then)
         quarantine.assert_not_called()
         ch.basic_ack.assert_not_called()
 
 
-    def test_r1_missing_event_reference_is_quarantined_before_ack(self):
-        """A delayed message for a removed fixture event must not block later notifications."""
+    def test_process_disruption_alert_without_event_quarantines_it(self, mocker):
+        """
+        Summary: A disruption notice that names no event is kept aside.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        Double: Stub (connection), Mock (channel ACK)
+        """
         body = json.dumps(envelope()).encode()
         ch = Mock()
         error = psycopg2.errors.ForeignKeyViolation("event no longer exists")
-        with patch("app.consumer.store.deliver", side_effect=error) as deliver, \
-                patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", ch, Mock(delivery_tag=31), body)
+        deliver = mocker.patch("app.consumer.store.deliver", side_effect=error)
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", ch, Mock(delivery_tag=31), body)
         deliver.assert_called_once()
         assert quarantine.call_args.args[1] == body
         ch.basic_ack.assert_called_once_with(delivery_tag=31)
 
 
-    def test_r1_quarantine_keeps_bytes_and_sanitizes_untrusted_error_text(self):
-        """## Supporting diagnostics/security
-        Quarantine keeps original binary bytes while escaping unsafe diagnostic text.
+    def test_quarantine_keeps_original_bytes_and_sanitises_error_text(self, mocker):
         """
+        Summary: Quarantine keeps the exact message bytes and stores only a sanitised error.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (connection; insert inspected)
+        """
+        # Arrange (Given)
         con = MagicMock()
         body = b"original\x00\xff"
-        with patch("psycopg2.connect", return_value=con):
-            store.quarantine("synthetic", body, ValueError("bad\x00\ud800\nvalue"))
+        mocker.patch("psycopg2.connect", return_value=con)
+        store.quarantine("synthetic", body, ValueError("bad\x00\ud800\nvalue"))
         args = con.cursor.return_value.__enter__.return_value.execute.call_args.args[1]
+
+        # Act + Assert (When / Then)
         assert args[0].adapted == body
         assert args[1] == r"bad\x00\ud800\nvalue"
 
@@ -548,29 +771,37 @@ class TestReviewValidation:
             "venueName", "startDateTime", "endDateTime", "reason",
         )
     ] + [("eventName", bad) for bad in ("", " ", False, [])])
-    def test_r2_known_contract_requires_complete_details(self, field, bad):
-        """## AC2 supporting validation
-        Each required detail rejects absence; representative shared-text invalid types/blank values are rejected without redundant cross-products.
+    def test_process_disruption_alert_missing_any_detail_quarantines_it(self, field, bad, mocker):
+        """
+        Summary: A disruption notice missing the event, venue, closure period, reason or ids is kept aside.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        Double: Stub (connection), Mock (channel ACK)
         """
         value = envelope()
         value["details"][field] = bad
         ch = Mock()
-        with patch("app.consumer.store.deliver") as deliver, patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", ch, Mock(), json.dumps(value).encode())
+        deliver = mocker.patch("app.consumer.store.deliver")
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", ch, Mock(), json.dumps(value).encode())
         deliver.assert_not_called()
         quarantine.assert_called_once()
         ch.basic_ack.assert_called_once()
 
 
-    @pytest.mark.parametrize("details", [None, {}, {"eventId": "broken"}])
-    def test_r2_minimal_known_message_is_not_delivered(self, details):
-        """## AC2 supporting validation
-        Known closure notifications reject missing/non-object/incomplete details rather than delivering misleading content.
+    @pytest.mark.parametrize("details", [None, {}, {"eventId": "broken"}], ids=["null_details", "empty_details", "broken_event_id"])
+    def test_process_disruption_alert_with_no_details_is_not_delivered(self, details, mocker):
+        """
+        Summary: A disruption notice with no details is not delivered.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        Double: Stub (connection), Mock (channel ACK)
         """
         value = envelope()
         value["details"] = details
-        with patch("app.consumer.store.deliver") as deliver, patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", Mock(), Mock(), json.dumps(value).encode())
+        deliver = mocker.patch("app.consumer.store.deliver")
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", Mock(), Mock(), json.dumps(value).encode())
         deliver.assert_not_called()
         quarantine.assert_called_once()
 
@@ -584,27 +815,38 @@ class TestReviewValidation:
         {"startDateTime": "broken"},
         {"endDateTime": "2026-10-18T08:00:00+08:00"},
         {"endDateTime": "2026-10-17T08:00:00+08:00"},
-    ])
-    def test_r2_details_interval_and_destination_references_are_consistent(self, changes):
-        """## AC2
-        Invalid identifiers, mismatched destinations and invalid/reversed intervals are quarantined, not delivered.
+    ], ids=["other_event", "other_booking", "broken_closure", "broken_venue", "naive_start", "end_after_window", "broken_start", "end_mismatch", "end_before_start"])
+    def test_process_disruption_alert_with_inconsistent_ids_or_period_quarantines_it(self, changes, mocker):
+        """
+        Summary: A disruption notice whose ids, link or closure period disagree is kept aside.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        Double: Stub (connection), Mock (channel ACK)
         """
         value = envelope()
         value["details"].update(changes)
-        with patch("app.consumer.store.deliver") as deliver, patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", Mock(), Mock(), json.dumps(value).encode())
+        deliver = mocker.patch("app.consumer.store.deliver")
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", Mock(), Mock(), json.dumps(value).encode())
         deliver.assert_not_called()
         quarantine.assert_called_once()
 
 
-    def test_r2_future_type_remains_extensible_without_closure_details(self):
-        """## Supporting extensibility
-        A future notification type can use the common envelope without closure-specific details.
+    # --- Supporting/supplementary design checks ----------------------------------
+    # No Jira acceptance criterion covers these. They check design decisions the
+    # stories rely on (health check, CORS, configuration and failure handling).
+
+    def test_process_unknown_future_type_stores_without_closure_details(self, mocker):
+        """
+        Summary: A notification type added later can be delivered without the disruption details.
+        Supporting design check: new notification types stay deliverable
+        Double: Stub (connection), Mock (channel ACK)
         """
         value = envelope()
         value["type"] = "future.type"
         del value["details"]
-        with patch("app.consumer.store.deliver") as deliver, patch("app.consumer.store.quarantine") as quarantine:
-            process("synthetic", Mock(), Mock(), json.dumps(value).encode())
+        deliver = mocker.patch("app.consumer.store.deliver")
+        quarantine = mocker.patch("app.consumer.store.quarantine")
+        process("synthetic", Mock(), Mock(), json.dumps(value).encode())
         deliver.assert_called_once_with("synthetic", value)
         quarantine.assert_not_called()

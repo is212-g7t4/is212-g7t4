@@ -1,12 +1,56 @@
-"""SCRUM-26 Venue Search and Filtering — the filters on GET /venues.
+"""
+SCRUM-26: Venue Search and Filtering
 
-Venue Service owns the suitability check: given an event's requirements, which
-venues in the catalogue meet them? Venue Booking Service (composite) calls this
-with the coordinator's search criteria, then merges the result with bookings
-from Venue Availability Service.
+User Story
+----------
+As an Event Coordinator, I want to search and filter potential venues by event
+requirements, so that I can shortlist venues that meet my specific event
+requirements.
 
-AC3 is "venues matching all active criteria", so each criterion gets a test and
-the combination gets one of its own. Database calls are mocked.
+Acceptance Criteria
+-------------------
+AC1: Event Coordinator must be able to input the following criteria: Date and
+     time (required), Expected attendance (required), Location (optional),
+     Minimum capacity (optional), Accessibility requirements (optional),
+     Supported layout (optional), and Required facilities (optional).
+AC2: Given the Event Coordinator submits a search without the mandatory fields,
+     when they click the search button, the system displays a message informing
+     the user to input the required fields.
+AC3: Given the Event Coordinator provides all required fields, when they click
+     search, then the system must return a list of venues matching all active
+     criteria within 3 seconds.
+AC4: The search results must display the following for each matching venue:
+     name, location, capacity, accessibility, supported layouts, available
+     facilities, and availability status for the requested date/time.
+AC5: Given no venues match the selected criteria, when the search completes,
+     then the system must display a message informing the user that no venues
+     are available.
+AC6: The Event Coordinator must be able to clear all search and filter criteria
+     with a single button click, resetting the form to its initial empty state.
+
+Real
+----
+- GET /venues with minCapacity, location, layout, facility and accessibility
+  filters: parameter validation and app.venues matching (capacity fit,
+  case-insensitive location, required layouts and every facility, accessibility
+  synonyms) run for real over a fixed catalogue.
+- Assertions are on the names of the venues returned and the status.
+
+Doubled
+-------
+- list_venues: Stub (`client` fixture) - returns a fixed in-memory catalogue
+  instead of reading the database.
+
+Not proven
+----------
+- Required date/time and attendance fields, the "fill required fields" and "no
+  venues" messages, clear-all and the 3-second limit (AC1, AC2, AC5, AC6, AC3
+  timing) (-> frontend venueSearch.test.ts and e2e
+  scrum-26-venue-search.spec.mjs).
+- Availability for the requested date/time (AC4) (-> venue-booking-service
+  search tests, which join Venue Availability).
+- Hiding Booked / Under Maintenance venues: these filters do not look at status
+  (-> venue-booking-service search tests).
 """
 from unittest.mock import MagicMock
 
@@ -63,54 +107,132 @@ def names(response):
     return [venue["name"] for venue in response.json["venues"]]
 
 
-def test_ac3_no_filters_returns_full_catalogue(client):
-    """Regression (SCRUM-114, SCRUM-24): the catalogue page is unaffected."""
+def test_search_venues_without_filters_returns_whole_catalogue(client):
+    """
+    Summary: With no filters set, the whole catalogue is returned.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act (When)
     response = client.get("/venues")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert names(response) == ["Grand Ballroom", "Seminar Room C", "Community Hall"]
 
 
-def test_ac3_capacity_at_limit_matches(client):
-    """AC3 boundary: attendance exactly equal to max_capacity still fits."""
+def test_search_venues_when_attendance_equals_capacity_includes_venue(client):
+    """
+    Summary: A venue whose capacity exactly equals the attendance still fits.
+    AC3: (boundary: minCapacity = capacity)
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?minCapacity=60")) == ["Grand Ballroom", "Seminar Room C"]
 
 
-def test_ac3_capacity_one_over_limit_excluded(client):
-    """AC3 boundary: one person over max_capacity does not fit."""
+def test_search_venues_when_attendance_one_over_capacity_excludes_venue(client):
+    """
+    Summary: A venue one place too small is left out.
+    AC3: (boundary: minCapacity = capacity + 1)
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?minCapacity=61")) == ["Grand Ballroom"]
 
 
-def test_ac3_min_capacity_stricter_than_attendance(client):
-    """AC3: the composite sends max(attendance, minCapacity) as one number."""
+def test_search_venues_with_min_capacity_uses_the_stricter_number(client):
+    """
+    Summary: The stricter of attendance and minimum capacity decides which venues fit.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?minCapacity=200")) == ["Grand Ballroom"]
 
 
-def test_ac3_null_capacity_excluded(client):
-    """AC3 boundary: a venue with no stated capacity can't be confirmed to fit."""
+def test_search_venues_when_venue_has_no_capacity_excludes_it(client):
+    """
+    Summary: A venue with no stated capacity is not offered for an attendance filter.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert "Community Hall" not in names(client.get("/venues?minCapacity=1"))
 
 
-def test_ac3_location_contains_case_insensitive(client):
-    """AC3: 'main tower' matches 'Level 3, Main Tower'."""
+def test_search_venues_by_location_matches_part_of_name_any_case(client):
+    """
+    Summary: Location matches part of the venue's location, in any letter case.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?location=main+tower")) == [
         "Grand Ballroom",
         "Community Hall",
     ]
 
 
-def test_ac3_layout_must_be_supported(client):
-    """AC3: only venues whose supported_layouts contain the choice."""
+def test_search_venues_by_layout_returns_only_venues_supporting_it(client):
+    """
+    Summary: Only venues that support the chosen layout are returned.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?layout=banquet")) == ["Grand Ballroom", "Community Hall"]
 
 
-def test_ac3_all_required_facilities_needed(client):
-    """AC3: every selected facility is required, not just one of them."""
+def test_search_venues_by_facilities_requires_every_one(client):
+    """
+    Summary: A venue must have every selected facility, not just one.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?facility=wifi&facility=stage")) == ["Grand Ballroom"]
 
 
-def test_ac3_false_facility_does_not_match(client):
-    """AC3 boundary: a facilities key stored as false is not a facility."""
+def test_search_venues_by_facility_ignores_facility_marked_false(client):
+    """
+    Summary: A facility recorded as absent does not count.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get("/venues?facility=kitchen")) == []
 
 
@@ -123,48 +245,96 @@ def test_ac3_false_facility_does_not_match(client):
         ("accessible_washroom", ["Seminar Room C"]),
         ("step_free", ["Community Hall"]),
     ],
+    ids=["lift", "wheelchair", "hearing_loop", "accessible_washroom", "step_free"],
 )
-def test_ac3_accessibility_synonyms(client, key, expected):
-    """AC3: 'lift' matches both 'Elevator access' and 'Lift access'."""
+def test_search_venues_by_accessibility_matches_common_wordings(client, key, expected):
+    """
+    Summary: Accessibility needs match the different ways venues describe them.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, key, expected, from fixtures
+
+    # Act + Assert (When / Then)
     assert names(client.get(f"/venues?accessibility={key}")) == expected
 
 
-def test_ac3_all_active_criteria_combined(client):
-    """AC3: every optional criterion at once narrows to one venue."""
+def test_search_venues_with_every_criterion_returns_only_full_match(client):
+    """
+    Summary: Every criterion applied together narrows the results to the venues matching all of them.
+    AC3: Given the Event Coordinator provides all required fields, when they
+        click search, then the system must return a list of venues matching all
+        active criteria within 3 seconds.
+    Double: Stub (fixed catalogue)
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act (When)
     response = client.get(
         "/venues?minCapacity=100&location=Main+Tower&layout=theatre"
         "&facility=wifi&facility=stage&accessibility=wheelchair&accessibility=lift"
     )
 
+    # Assert (Then)
     assert names(response) == ["Grand Ballroom"]
 
 
-def test_blank_filters_are_treated_as_unset(client):
-    """An untouched form field is the same as an absent parameter."""
+def test_search_venues_with_blank_filters_treats_them_as_unset(client):
+    """
+    Summary: A filter left blank is ignored rather than matching nothing.
+    AC6: a cleared form searches with no criteria
+    Double: Stub (fixed catalogue)
+    """
     response = client.get("/venues?minCapacity=&location=+&layout=&facility=&accessibility=")
 
     assert names(response) == ["Grand Ballroom", "Seminar Room C", "Community Hall"]
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "abc", "2.5"])
-def test_invalid_min_capacity_returns_400(client, value):
-    """Failure: minCapacity must be a whole number of at least 1."""
+@pytest.mark.parametrize("value", ["0", "-5", "abc", "2.5"], ids=["zero", "negative", "text", "fractional"])
+def test_search_venues_with_invalid_min_capacity_returns_400(client, value):
+    """
+    Summary: Minimum capacity must be a whole number of at least 1.
+    AC1: Event Coordinator must be able to input the following criteria: Date
+        and time (required), Expected attendance (required), Location
+        (optional), Minimum capacity (optional), Accessibility requirements
+        (optional), Supported layout (optional), and Required facilities
+        (optional).
+    Double: Stub (fixed catalogue)
+    """
     response = client.get(f"/venues?minCapacity={value}")
 
     assert response.status_code == 400
     assert "minCapacity" in response.json["message"]
 
 
-def test_unknown_accessibility_key_returns_400(client):
-    """Failure: an accessibility key the service can't match is rejected."""
+def test_search_venues_with_unknown_accessibility_need_returns_400(client):
+    """
+    Summary: An accessibility need the service cannot match is refused.
+    AC1: Event Coordinator must be able to input the following criteria: Date
+        and time (required), Expected attendance (required), Location
+        (optional), Minimum capacity (optional), Accessibility requirements
+        (optional), Supported layout (optional), and Required facilities
+        (optional).
+    Double: Stub (fixed catalogue)
+    """
     response = client.get("/venues?accessibility=teleporter")
 
     assert response.status_code == 400
     assert "accessibility" in response.json["message"]
 
 
-def test_invalid_filter_is_rejected_before_the_database(monkeypatch):
-    """Failure: a bad parameter is a 400 even when the service is unconfigured."""
+def test_search_venues_with_invalid_filter_returns_400_even_unconfigured(monkeypatch):
+    """
+    Summary: A bad filter is refused before the database is needed.
+    AC1: Event Coordinator must be able to input the following criteria: Date
+        and time (required), Expected attendance (required), Location
+        (optional), Minimum capacity (optional), Accessibility requirements
+        (optional), Supported layout (optional), and Required facilities
+        (optional).
+    Double: None
+    """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
 
     assert client.get("/venues?minCapacity=0").status_code == 400

@@ -4,6 +4,8 @@ import time
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from tests.unit import fakes
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -91,3 +93,23 @@ def signed_in(client, user_id="00000000-0000-4000-8000-000000000001", role="Even
     """Send every request from this test client with a signed-in user's token."""
     client.environ_base["HTTP_AUTHORIZATION"] = bearer(user_id, role)["Authorization"]
     return client
+
+
+# Review/create headers for the fake world in tests/unit/fakes.py (its USER, TARGET and MIC,
+# not the SCRUM-48 identifiers above).
+TS = bearer(fakes.USER, "Technical Support")
+COORDINATOR = bearer(fakes.USER, "Event Coordinator")
+LEAD = bearer(fakes.USER, "Event Coordinator Lead")
+CREATE_URL = f"/equipment-reservations/events/{fakes.TARGET}/requests"
+
+
+def rows(client, **query):
+    """The Technical Support review list, asserting it loaded."""
+    response = client.get("/equipment-reservations", headers=TS, query_string=query)
+    assert response.status_code == 200
+    return response.json["events"]
+
+
+def new_item(equipment_id=fakes.MIC, quantity=3, requirements=" Two handheld "):
+    """One line of an equipment request submission."""
+    return {"equipmentId": equipment_id, "quantityRequested": quantity, "technicalRequirements": requirements}

@@ -1,13 +1,168 @@
-"""SCRUM-149: each downstream wrapper's request shape and status mapping.
+"""
+SCRUM-149: Submit Event for Operational Safety Check
 
-A composite is the only service allowed to call other services, so these are
-the calls that make the submit workflow work — and the one place where another
-service's status codes become this service's own exceptions. `httpx` is mocked
-(unit tests are hermetic; `pytest-socket` would block a real call anyway).
+User Story
+----------
+As an Event Coordinator, I want to submit my event for an Operational Safety
+Check once its venue and technical arrangements are confirmed, so that the
+Safety Officer can review it before preparation begins.
 
-Every failure maps to `DownstreamError`/`DownstreamTimeout` with no downstream
-URL or error text attached: the routes must not be able to leak our topology
-into a browser response.
+Acceptance Criteria
+-------------------
+AC1: Given an event assigned to the Event Coordinator has at least one approved
+     venue booking, and none of its venue bookings or equipment requests is
+     still pending, when the Event Coordinator submits it for a safety check,
+     then its status changes to 'Pending Safety Check' and the submission time
+     is recorded. Rejected, cancelled or expired venue bookings and rejected
+     equipment requests are no longer part of the event's arrangements and do
+     not block submission.
+AC2: Given any venue booking or equipment request for the event is still
+     pending, or the event has no approved venue booking, when the Event
+     Coordinator tries to submit, then submission is blocked and the
+     outstanding arrangements are listed.
+AC3: Given the Event Coordinator is submitting, when they enter equipment
+     placement and expected crowd movement notes, then the notes are saved with
+     the safety check.
+AC4: Given the event is already 'Pending Safety Check', when the Event
+     Coordinator submits it again, then no duplicate safety check is created.
+AC5: Given the Event Coordinator is not the assigned coordinator, then the
+     submit action is not available and an API call is rejected.
+
+SCRUM-150: Approve Operational Safety Check
+
+User Story
+----------
+As a Safety Officer, I want to approve an event's operational safety
+arrangements, so that the event can proceed to preparation.
+
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+     status changes to 'Confirmed'.
+AC2: Given I approve an event, then the safety check is recorded with the
+     status 'Safety Approved', together with my identity, the approval
+     timestamp and any optional remarks, in the event's history.
+AC3: Given an event is not 'Pending Safety Check', then the approve action is
+     not available and an API call is rejected without changing the event.
+AC4: Given the safety check I approve follows a high-impact change, when I
+     approve it, then the changed details become visible to registered
+     Attendees.
+
+SCRUM-151: Reject or Request Changes to Safety Arrangements
+
+User Story
+----------
+As a Safety Officer, I want to reject an event's safety arrangement or request
+changes, stating which planning area must be revisited, so that the Event
+Coordinator knows exactly what to fix before the event can proceed.
+
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Pending Safety Check', when I request changes, then I
+     must select at least one affected area (venue arrangement,
+     technical/equipment arrangement, event details) and describe the change
+     needed; otherwise the decision is not saved.
+AC2: Given changes are requested, then the event status changes to 'Safety
+     Changes Requested', the event returns to the planning stage for each
+     selected area, and its existing arrangements are preserved.
+AC3: Given an event is 'Pending Safety Check', when I reject it, then a reason
+     is required and I must confirm the rejection before it is saved.
+AC4: Given I confirm a rejection, then the event status changes to 'Cancelled',
+     and the event cannot be resubmitted for a safety check or moved to any
+     further stage.
+AC5: Given an event is cancelled by a safety rejection, then its venue bookings
+     and equipment reservations are released so they no longer block other
+     events, while their records remain in the event's history.
+AC6: Given either decision, then the safety check is recorded with the status
+     'Changes Requested' or 'Safety Rejected' respectively, together with my
+     identity, the timestamp and the reason (plus the selected areas for a
+     change request), and the original event information is retained.
+AC7: Given an event is not 'Pending Safety Check', then these actions are not
+     available and an API call is rejected without changing the event.
+
+SCRUM-153: Re-check Safety After High-Impact Changes
+
+User Story
+----------
+As an Event Coordinator, I want a safety approval to be withdrawn when a
+high-impact detail changes afterwards, so that the event is never prepared on
+the basis of an outdated safety review.
+
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Confirmed', when its date/time, expected attendance,
+     venue requirements, equipment requirements or accessibility needs change,
+     then its status returns to 'Pending Safety Check' and the coordinator is
+     told why.
+AC2: Given only a low-impact field changes (name, description, purpose,
+     registration needs), then the event stays 'Confirmed'.
+AC3: Given a safety approval is withdrawn, then it stays visible in the event's
+     safety history.
+AC4: Given a high-impact change to a 'Confirmed' event is waiting for its new
+     safety check, when a registered Attendee views the event, then they still
+     see the previously approved details, and the changed details are shown to
+     them only after the Safety Officer approves the new safety check.
+AC5: Given the new safety check ends without approval (changes requested or the
+     event is cancelled), then registered Attendees are never shown the
+     unapproved change, and they continue to see the last approved details or
+     the cancellation.
+
+SCRUM-162: View Safety Check Queue
+
+User Story
+----------
+As a Safety Officer, I want to view a list of events awaiting an Operational
+Safety Check, so that I know which events I need to review.
+
+Acceptance Criteria
+-------------------
+AC1: The queue shows only events with status 'Pending Safety Check'.
+AC2: Each entry shows event name, event date/time, venue(s), expected
+     attendance and submission date, with the nearest event date first.
+AC3: Given an event was resubmitted after an earlier decision, then it is
+     labelled as a resubmission.
+AC4: Given a decision is recorded for an event, then it no longer appears in
+     the queue.
+
+SCRUM-164: Revise Arrangements and Resubmit for Safety Check
+
+User Story
+----------
+As an Event Coordinator, I want to see the Safety Officer's feedback and revise
+the affected arrangements, so that I can resubmit the event for a safety check
+without redoing unaffected planning.
+
+Acceptance Criteria
+-------------------
+AC1: Given my event is 'Safety Changes Requested', when I open it, then I see
+     the decision, reason, requested changes and affected areas.
+AC2: Given the venue arrangement is flagged, then the affected venue booking
+     must be reviewed again by Venue Staff (revised booking or replacement
+     request) before the event can be resubmitted.
+AC3: Given the technical arrangement is flagged, then the affected equipment
+     request must be reviewed again by Technical Support Staff before the event
+     can be resubmitted.
+AC4: Given an arrangement was not flagged, then it stays confirmed and does not
+     need to be reviewed again.
+AC5: Given all flagged arrangements are confirmed again, when I resubmit, then
+     the status returns to 'Pending Safety Check' as a new review round, and
+     earlier rounds remain in the history.
+
+Real
+----
+- app.clients: each downstream wrapper's request (URL, token, viewer role,
+  body) and its mapping of statuses, codes and transport errors to typed
+  exceptions.
+- Assertions are on the request sent and the exception or value returned.
+
+Doubled
+-------
+- httpx: Stub (respx) - canned responses or raised errors; requests inspected.
+
+Not proven
+----------
+- That the real services accept these requests (-> tests/integration/ with
+  respx and E2E journey J6b).
 """
 import httpx
 import pytest
@@ -68,7 +223,14 @@ def sent(monkeypatch):
 # --- Event Service -----------------------------------------------------------
 
 
-def test_reset_equipment_safety_requests_scopes_ids_and_uses_internal_auth(sent, monkeypatch):
+def test_reset_equipment_client_sends_scoped_ids_with_internal_auth(sent, monkeypatch):
+    """
+    Summary: Equipment resets name only the flagged requests and use internal credentials.
+    SCRUM-164 AC3: Given the technical arrangement is flagged, then the
+        affected equipment request must be reviewed again by Technical Support
+        Staff before the event can be resubmitted.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "test-token")
     queue.append(Response(200, {"requests": [equipment_request("Pending")]}))
@@ -78,7 +240,14 @@ def test_reset_equipment_safety_requests_scopes_ids_and_uses_internal_auth(sent,
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "test-token"}
 
 
-def test_reset_venue_safety_bookings_uses_owner_and_internal_auth(sent, monkeypatch):
+def test_reset_venue_client_uses_owner_with_internal_auth(sent, monkeypatch):
+    """
+    Summary: Venue resets go to Venue Availability with internal credentials.
+    SCRUM-164 AC2: Given the venue arrangement is flagged, then the affected
+        venue booking must be reviewed again by Venue Staff (revised booking or
+        replacement request) before the event can be resubmitted.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "test-token")
     queue.append(Response(200, {"bookings": []}))
@@ -88,8 +257,13 @@ def test_reset_venue_safety_bookings_uses_owner_and_internal_auth(sent, monkeypa
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "test-token"}
 
 
-def test_get_event_scopes_the_read_to_the_coordinator(sent):
-    """Event Service does AC5's check against the coordinator in the forwarded token (SCRUM-8)."""
+def test_get_event_client_reads_as_the_coordinator(sent):
+    """
+    Summary: The event is read as the coordinator, so Event Service checks their assignment.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, event("Approved")))
 
@@ -100,8 +274,13 @@ def test_get_event_scopes_the_read_to_the_coordinator(sent):
     assert calls[0]["timeout"] == clients.TIMEOUT
 
 
-def test_get_event_passes_viewer_role_when_given(sent):
-    """SCRUM-150: the Safety Officer reads with viewerRole, not as the coordinator."""
+def test_get_event_client_sends_viewer_role_when_given(sent):
+    """
+    Summary: A Safety Officer reads the event with their viewer role.
+    SCRUM-150 AC1: Given an event is 'Pending Safety Check', when I approve it,
+        then its status changes to 'Confirmed'.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, event("Pending Safety Check")))
 
@@ -110,7 +289,13 @@ def test_get_event_passes_viewer_role_when_given(sent):
     assert calls[0]["params"] == {"viewerRole": "Safety Officer"}
 
 
-def test_get_event_without_viewer_role_omits_it(sent):
+def test_get_event_client_without_viewer_role_omits_it(sent):
+    """
+    Summary: No viewer role is sent when none is given.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, event("Approved")))
 
@@ -129,7 +314,13 @@ def test_get_event_without_viewer_role_omits_it(sent):
         (503, clients.DownstreamError),
     ],
 )
-def test_get_event_status_mapping(status, expected, sent):
+def test_get_event_client_maps_statuses(status, expected, sent):
+    """
+    Summary: Event read failures are mapped to typed errors.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(status, {"message": "postgres://secret@host/db"}))
 
@@ -137,7 +328,18 @@ def test_get_event_status_mapping(status, expected, sent):
         clients.get_event(EVENT_ID)
 
 
-def test_set_event_safety_status_sends_the_round(sent, monkeypatch):
+def test_set_safety_status_client_sends_the_round(sent, monkeypatch):
+    """
+    Summary: Moving the event's safety status names the round.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "shared-secret")
     calls, queue = sent
     queue.append(Response(200, event("Pending Safety Check")))
@@ -160,8 +362,14 @@ def test_set_event_safety_status_sends_the_round(sent, monkeypatch):
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "shared-secret"}
 
 
-def test_set_event_safety_status_sends_decided_by_and_remarks_for_approve(sent):
-    """SCRUM-150: approving sends the remarks; Event Service takes the decider from the token."""
+def test_set_safety_status_client_sends_remarks_on_approve(sent):
+    """
+    Summary: Approving sends the remarks with the move.
+    SCRUM-150 AC2: Given I approve an event, then the safety check is recorded
+        with the status 'Safety Approved', together with my identity, the
+        approval timestamp and any optional remarks, in the event's history.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, event("Confirmed")))
 
@@ -181,8 +389,14 @@ def test_set_event_safety_status_sends_decided_by_and_remarks_for_approve(sent):
     }
 
 
-def test_set_event_safety_status_sends_areas_when_given(sent):
-    """SCRUM-151: a change request's areas travel with the move."""
+def test_set_safety_status_client_sends_areas_for_changes(sent):
+    """
+    Summary: A change request's areas travel with the move.
+    SCRUM-151 AC2: Given changes are requested, then the event status changes
+        to 'Safety Changes Requested', the event returns to the planning stage
+        for each selected area, and its existing arrangements are preserved.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, event("Safety Changes Requested")))
 
@@ -204,7 +418,14 @@ def test_set_event_safety_status_sends_areas_when_given(sent):
     }
 
 
-def test_set_event_safety_status_omits_areas_when_not_given(sent):
+def test_set_safety_status_client_omits_absent_areas(sent):
+    """
+    Summary: No areas are sent when there are none.
+    SCRUM-151 AC2: Given changes are requested, then the event status changes
+        to 'Safety Changes Requested', the event returns to the planning stage
+        for each selected area, and its existing arrangements are preserved.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, event("Cancelled")))
 
@@ -222,7 +443,18 @@ def test_set_event_safety_status_omits_areas_when_not_given(sent):
         (500, clients.DownstreamError),
     ],
 )
-def test_set_event_safety_status_mapping(status, expected, sent):
+def test_set_safety_status_client_maps_statuses(status, expected, sent):
+    """
+    Summary: Move failures are mapped to typed errors.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(status, {"message": "nope"}))
 
@@ -232,8 +464,13 @@ def test_set_event_safety_status_mapping(status, expected, sent):
         )
 
 
-def test_set_event_safety_status_403_without_internal_only_code_is_not_assigned(sent):
-    """A plain 403 (AC5) is still EventNotAssignedError, not a credentials error."""
+def test_set_safety_status_client_plain_403_is_not_assigned(sent):
+    """
+    Summary: A plain refusal means the coordinator is not assigned.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(403, {"message": "nope"}))
 
@@ -243,8 +480,18 @@ def test_set_event_safety_status_403_without_internal_only_code_is_not_assigned(
         )
 
 
-def test_set_event_safety_status_403_internal_only_is_a_credentials_error(sent):
-    """SCRUM-150: Event Service refusing our token is our problem, not the caller's."""
+def test_set_safety_status_client_internal_only_403_is_credentials_error(sent):
+    """
+    Summary: A refusal of our own service token is reported as our misconfiguration.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(403, {"code": "INTERNAL_ONLY", "message": "nope"}))
 
@@ -257,8 +504,14 @@ def test_set_event_safety_status_403_internal_only_is_a_credentials_error(sent):
 @pytest.mark.parametrize(
     "code", ["SAFETY_CHECK_ALREADY_PENDING", "INVALID_SAFETY_TRANSITION", "STALE_SAFETY_CHECK"]
 )
-def test_event_conflicts_keep_their_code(code, sent):
-    """The routes branch on the code, so it has to survive the trip."""
+def test_event_client_conflicts_keep_their_code(code, sent):
+    """
+    Summary: Event Service's conflict codes survive the trip.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(409, {"code": code, "currentStatus": "Cancelled"}))
 
@@ -271,8 +524,14 @@ def test_event_conflicts_keep_their_code(code, sent):
     assert raised.value.body["currentStatus"] == "Cancelled"
 
 
-def test_event_conflict_without_a_json_body(sent):
-    """Boundary: a 409 that isn't JSON still becomes a transition error, not a 500."""
+def test_event_client_conflict_without_json_is_transition_error(sent):
+    """
+    Summary: A conflict without a readable body is still a transition error.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(409, None))
 
@@ -288,8 +547,15 @@ def test_event_conflict_without_a_json_body(sent):
 # --- Venue Availability Service ---------------------------------------------
 
 
-def test_bookings_are_read_for_the_whole_event(sent):
-    """Every booking, all statuses: an event can have several (SCRUM-156)."""
+def test_bookings_client_reads_every_booking_of_event(sent):
+    """
+    Summary: Every booking of the event is read, in every status.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"bookings": [booking("Approved")]}))
 
@@ -299,7 +565,15 @@ def test_bookings_are_read_for_the_whole_event(sent):
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/venue-bookings")
 
 
-def test_booking_read_failure_is_a_downstream_error(sent):
+def test_bookings_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed booking read is a downstream error.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "DATABASE_URL is not configured"}))
 
@@ -307,8 +581,15 @@ def test_booking_read_failure_is_a_downstream_error(sent):
         clients.get_event_venue_bookings(EVENT_ID)
 
 
-def test_cancel_venue_booking_sends_the_event_id(sent):
-    """SCRUM-151 AC5: releasing a booking on a safety rejection."""
+def test_cancel_booking_client_sends_event_id(sent):
+    """
+    Summary: Releasing a booking on rejection names the event.
+    SCRUM-151 AC5: Given an event is cancelled by a safety rejection, then its
+        venue bookings and equipment reservations are released so they no
+        longer block other events, while their records remain in the event's
+        history.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, booking("Cancelled")))
 
@@ -320,7 +601,15 @@ def test_cancel_venue_booking_sends_the_event_id(sent):
     assert calls[0]["json"] == {"eventId": EVENT_ID}
 
 
-def test_cancel_venue_booking_missing_is_not_found(sent):
+def test_cancel_booking_client_missing_is_not_found(sent):
+    """
+    Summary: Releasing a missing booking is reported as not found.
+    SCRUM-151 AC5: Given an event is cancelled by a safety rejection, then its
+        venue bookings and equipment reservations are released so they no
+        longer block other events, while their records remain in the event's
+        history.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "no"}))
 
@@ -328,7 +617,15 @@ def test_cancel_venue_booking_missing_is_not_found(sent):
         clients.cancel_venue_booking(BOOKING_ID, EVENT_ID)
 
 
-def test_cancel_venue_booking_failure_is_a_downstream_error(sent):
+def test_cancel_booking_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed release is a downstream error.
+    SCRUM-151 AC5: Given an event is cancelled by a safety rejection, then its
+        venue bookings and equipment reservations are released so they no
+        longer block other events, while their records remain in the event's
+        history.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -339,8 +636,15 @@ def test_cancel_venue_booking_failure_is_a_downstream_error(sent):
 # --- Equipment Request Service ----------------------------------------------
 
 
-def test_equipment_requests_are_read_with_the_callers_token(sent):
-    """SCRUM-8: READ_ROLES allow coordinators and Safety Officers, so the caller's own token is sent."""
+def test_equipment_client_reads_with_callers_token(sent):
+    """
+    Summary: Equipment requests are read as the signed-in user.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"requests": [equipment_request("Approved")]}))
 
@@ -351,8 +655,15 @@ def test_equipment_requests_are_read_with_the_callers_token(sent):
     assert calls[0]["headers"] == {"Authorization": "Bearer caller-token"}
 
 
-def test_equipment_read_rejection_is_a_downstream_error(sent):
-    """A 403 here is a misconfiguration, not the caller's fault — so not AC5's 403."""
+def test_equipment_client_refusal_is_downstream_error(sent):
+    """
+    Summary: A refused equipment read is a misconfiguration, reported as a downstream error.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(403, {"message": "Only Technical Support ..."}))
 
@@ -360,7 +671,18 @@ def test_equipment_read_rejection_is_a_downstream_error(sent):
         clients.get_event_equipment_requests(EVENT_ID)
 
 
-def test_equipment_catalogue_is_read_for_review(sent):
+def test_equipment_catalogue_client_reads_catalogue(sent):
+    """
+    Summary: The equipment catalogue is read for the review.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"equipment": [{"id": "fixture", "type": "Table"}]}))
 
@@ -369,7 +691,18 @@ def test_equipment_catalogue_is_read_for_review(sent):
     assert calls[0]["url"].endswith("/equipment")
 
 
-def test_equipment_catalogue_failure_is_a_downstream_error(sent):
+def test_equipment_catalogue_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed catalogue read is a downstream error.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "database unavailable"}))
 
@@ -380,7 +713,14 @@ def test_equipment_catalogue_failure_is_a_downstream_error(sent):
 # --- Safety Check Record Service --------------------------------------------
 
 
-def test_create_record_sends_the_notes(sent):
+def test_create_record_client_sends_notes(sent):
+    """
+    Summary: A new round carries the coordinator's notes.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(201, record()))
 
@@ -397,7 +737,14 @@ def test_create_record_sends_the_notes(sent):
     }
 
 
-def test_create_record_omits_absent_notes_as_null(sent):
+def test_create_record_client_sends_null_for_absent_notes(sent):
+    """
+    Summary: Notes not given are sent as nothing.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(201, record()))
 
@@ -407,8 +754,14 @@ EVENT_ID)
     assert queue == []
 
 
-def test_create_record_conflict_carries_the_open_round(sent):
-    """AC4: the open round comes back so the route can say when it was submitted."""
+def test_create_record_client_conflict_returns_open_round(sent):
+    """
+    Summary: A duplicate submission returns the round already open.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(
         Response(409, {"code": "SAFETY_CHECK_ALREADY_PENDING", "safetyCheck": record()})
@@ -421,7 +774,14 @@ EVENT_ID)
     assert raised.value.existing["roundNumber"] == 1
 
 
-def test_create_record_conflict_without_a_body(sent):
+def test_create_record_client_conflict_without_body_still_conflicts(sent):
+    """
+    Summary: A duplicate answer without a body is still a conflict.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(409, None))
 
@@ -432,7 +792,18 @@ EVENT_ID)
     assert raised.value.existing is None
 
 
-def test_create_record_failure_is_a_downstream_error(sent):
+def test_create_record_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed round creation is a downstream error.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(400, {"message": "eventId must be a valid UUID."}))
 
@@ -441,7 +812,18 @@ def test_create_record_failure_is_a_downstream_error(sent):
 EVENT_ID)
 
 
-def test_list_records_filters_by_status(sent):
+def test_list_records_client_filters_by_status(sent):
+    """
+    Summary: Rounds can be read by status.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"safetyChecks": [record()]}))
 
@@ -451,7 +833,18 @@ def test_list_records_filters_by_status(sent):
     assert calls[0]["params"] == {"eventId": EVENT_ID, "status": "Pending"}
 
 
-def test_list_records_without_a_status_filter(sent):
+def test_list_records_client_without_status_reads_all(sent):
+    """
+    Summary: Without a status, every round is read.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"safetyChecks": []}))
 
@@ -459,7 +852,18 @@ def test_list_records_without_a_status_filter(sent):
     assert calls[0]["params"] == {"eventId": EVENT_ID}
 
 
-def test_list_records_failure_is_a_downstream_error(sent):
+def test_list_records_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed round read is a downstream error.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -467,8 +871,12 @@ def test_list_records_failure_is_a_downstream_error(sent):
         clients.list_safety_check_records(EVENT_ID)
 
 
-def test_delete_record_accepts_204(sent):
-    """Compensation: 204 is the success case, with no body to parse."""
+def test_delete_record_client_accepts_no_content(sent):
+    """
+    Summary: Undoing a round accepts an empty success answer.
+    AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(204, None))
 
@@ -485,7 +893,12 @@ def test_delete_record_accepts_204(sent):
         (503, clients.DownstreamError),
     ],
 )
-def test_delete_record_mapping(status, expected, sent):
+def test_delete_record_client_maps_failures(status, expected, sent):
+    """
+    Summary: Undo failures are mapped to typed errors.
+    AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(status, {"message": "no"}))
 
@@ -493,7 +906,14 @@ def test_delete_record_mapping(status, expected, sent):
         clients.delete_safety_check_record(RECORD_ID)
 
 
-def test_decide_record_sends_the_decision(sent):
+def test_decide_record_client_sends_decision(sent):
+    """
+    Summary: The decision is sent to the record service.
+    SCRUM-150 AC2: Given I approve an event, then the safety check is recorded
+        with the status 'Safety Approved', together with my identity, the
+        approval timestamp and any optional remarks, in the event's history.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, record(status="Safety Approved", decidedBy=OFFICER_ID)))
 
@@ -510,8 +930,16 @@ def test_decide_record_sends_the_decision(sent):
     }
 
 
-def test_decide_record_sends_flags_when_given(sent):
-    """SCRUM-151: a change request's flags travel with the decision."""
+def test_decide_record_client_sends_flags(sent):
+    """
+    Summary: A change request's flags travel with the decision.
+    SCRUM-151 AC6: Given either decision, then the safety check is recorded
+        with the status 'Changes Requested' or 'Safety Rejected' respectively,
+        together with my identity, the timestamp and the reason (plus the
+        selected areas for a change request), and the original event
+        information is retained.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, record(status="Changes Requested")))
 
@@ -527,7 +955,16 @@ def test_decide_record_sends_flags_when_given(sent):
     }
 
 
-def test_decide_record_omits_flags_when_not_given(sent):
+def test_decide_record_client_omits_absent_flags(sent):
+    """
+    Summary: No flags are sent when there are none.
+    SCRUM-151 AC6: Given either decision, then the safety check is recorded
+        with the status 'Changes Requested' or 'Safety Rejected' respectively,
+        together with my identity, the timestamp and the reason (plus the
+        selected areas for a change request), and the original event
+        information is retained.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, record(status="Safety Approved")))
 
@@ -536,7 +973,14 @@ def test_decide_record_omits_flags_when_not_given(sent):
     assert "flags" not in calls[0]["json"]
 
 
-def test_decide_record_conflict_carries_the_existing_round(sent):
+def test_decide_record_client_conflict_returns_existing_round(sent):
+    """
+    Summary: A lost race returns the round as already decided.
+    SCRUM-150 AC3: Given an event is not 'Pending Safety Check', then the
+        approve action is not available and an API call is rejected without
+        changing the event.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(
         Response(
@@ -551,7 +995,14 @@ def test_decide_record_conflict_carries_the_existing_round(sent):
     assert raised.value.existing["status"] == "Safety Approved"
 
 
-def test_decide_record_missing_round_is_not_found(sent):
+def test_decide_record_client_missing_round_is_not_found(sent):
+    """
+    Summary: Deciding a missing round is reported as not found.
+    SCRUM-150 AC3: Given an event is not 'Pending Safety Check', then the
+        approve action is not available and an API call is rejected without
+        changing the event.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "no"}))
 
@@ -559,7 +1010,14 @@ def test_decide_record_missing_round_is_not_found(sent):
         clients.decide_safety_check_record(RECORD_ID, "Safety Approved")
 
 
-def test_decide_record_failure_is_a_downstream_error(sent):
+def test_decide_record_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed decision is a downstream error.
+    SCRUM-150 AC2: Given I approve an event, then the safety check is recorded
+        with the status 'Safety Approved', together with my identity, the
+        approval timestamp and any optional remarks, in the event's history.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -567,7 +1025,12 @@ def test_decide_record_failure_is_a_downstream_error(sent):
         clients.decide_safety_check_record(RECORD_ID, "Safety Approved")
 
 
-def test_reopen_record_sends_decided_at(sent):
+def test_reopen_record_client_sends_decision_time(sent):
+    """
+    Summary: Reopening names the exact decision to undo.
+    SCRUM-150 AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, record(status="Pending")))
 
@@ -578,7 +1041,12 @@ def test_reopen_record_sends_decided_at(sent):
     assert calls[0]["json"] == {"decidedAt": "2026-11-02T03:00:00+00:00"}
 
 
-def test_reopen_record_missing_round_is_not_found(sent):
+def test_reopen_record_client_missing_round_is_not_found(sent):
+    """
+    Summary: Reopening a missing round is reported as not found.
+    SCRUM-150 AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "no"}))
 
@@ -586,7 +1054,12 @@ def test_reopen_record_missing_round_is_not_found(sent):
         clients.reopen_safety_check_record(RECORD_ID, "2026-11-02T03:00:00+00:00")
 
 
-def test_reopen_record_failure_is_a_downstream_error(sent):
+def test_reopen_record_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed reopen is a downstream error.
+    SCRUM-150 AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(409, {"message": "nope"}))
 
@@ -597,7 +1070,14 @@ def test_reopen_record_failure_is_a_downstream_error(sent):
 # --- User Service -------------------------------------------------------------
 
 
-def test_get_user_returns_the_role(sent):
+def test_get_user_client_returns_role(sent):
+    """
+    Summary: A user's role is read from User Service.
+    SCRUM-150 AC3: Given an event is not 'Pending Safety Check', then the
+        approve action is not available and an API call is rejected without
+        changing the event.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, user(role="Safety Officer")))
 
@@ -608,7 +1088,14 @@ def test_get_user_returns_the_role(sent):
     assert calls[0]["url"].endswith(f"/users/{OFFICER_ID}")
 
 
-def test_get_user_not_found(sent):
+def test_get_user_client_missing_is_not_found(sent):
+    """
+    Summary: A missing user is reported as not found.
+    SCRUM-150 AC3: Given an event is not 'Pending Safety Check', then the
+        approve action is not available and an API call is rejected without
+        changing the event.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "User not found."}))
 
@@ -616,7 +1103,14 @@ def test_get_user_not_found(sent):
         clients.get_user(OFFICER_ID)
 
 
-def test_get_user_failure_is_a_downstream_error(sent):
+def test_get_user_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed user read is a downstream error.
+    SCRUM-150 AC3: Given an event is not 'Pending Safety Check', then the
+        approve action is not available and an API call is rejected without
+        changing the event.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -627,8 +1121,13 @@ def test_get_user_failure_is_a_downstream_error(sent):
 # --- SCRUM-162: the queue's reads ----------------------------------------------
 
 
-def test_list_events_by_status_reads_as_the_viewer_role(sent):
-    """The officer isn't anyone's coordinator, so viewerRole lets them see all events."""
+def test_list_events_client_reads_as_viewer_role(sent):
+    """
+    Summary: The queue's events are read in the Safety Officer's view.
+    SCRUM-162 AC1: The queue shows only events with status 'Pending Safety
+        Check'.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"events": [event("Pending Safety Check")]}))
 
@@ -644,7 +1143,13 @@ def test_list_events_by_status_reads_as_the_viewer_role(sent):
 
 
 @pytest.mark.parametrize("status", [400, 403, 503])
-def test_list_events_by_status_failure_is_a_downstream_error(status, sent):
+def test_list_events_client_failure_is_downstream_error(status, sent):
+    """
+    Summary: A failed event list is a downstream error.
+    SCRUM-162 AC1: The queue shows only events with status 'Pending Safety
+        Check'.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(status, {"message": "no"}))
 
@@ -652,7 +1157,14 @@ def test_list_events_by_status_failure_is_a_downstream_error(status, sent):
         clients.list_events_by_status("Pending Safety Check", "Safety Officer")
 
 
-def test_list_venues_reads_the_whole_catalogue(sent):
+def test_list_venues_client_reads_whole_catalogue(sent):
+    """
+    Summary: The whole venue catalogue is read.
+    SCRUM-162 AC2: Each entry shows event name, event date/time, venue(s),
+        expected attendance and submission date, with the nearest event date
+        first.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, {"venues": [{"id": "v1", "name": "Main Hall"}]}))
 
@@ -662,7 +1174,14 @@ def test_list_venues_reads_the_whole_catalogue(sent):
     assert "params" not in calls[0]
 
 
-def test_list_venues_failure_is_a_downstream_error(sent):
+def test_list_venues_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed venue read is a downstream error.
+    SCRUM-162 AC2: Each entry shows event name, event date/time, venue(s),
+        expected attendance and submission date, with the nearest event date
+        first.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -673,8 +1192,15 @@ def test_list_venues_failure_is_a_downstream_error(sent):
 # --- SCRUM-153: the re-check's three wrappers --------------------------------
 
 
-def test_update_event_details_sends_the_edit_and_both_round_ids(sent, monkeypatch):
-    """The token is what lets Event Service accept `safetyRecheck` at all."""
+def test_update_details_client_sends_edit_and_both_round_ids(sent, monkeypatch):
+    """
+    Summary: A re-check edit carries both round ids so Event Service can verify it.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     monkeypatch.setattr("app.clients.INTERNAL_SERVICE_TOKEN", "shared-secret")
     calls, queue = sent
     queue.append(Response(200, event("Pending Safety Check")))
@@ -700,10 +1226,17 @@ def test_update_event_details_sends_the_edit_and_both_round_ids(sent, monkeypatc
     assert calls[0]["headers"] == {"X-Internal-Service-Token": "shared-secret"}
 
 
-def test_update_event_details_sends_an_empty_token_when_none_is_configured(
+def test_update_details_client_sends_empty_token_when_unconfigured(
     sent, monkeypatch
 ):
-    """The lock is opt-in on both sides; an unconfigured setup still works."""
+    """
+    Summary: An unconfigured token is sent empty rather than omitted.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     monkeypatch.setattr("app.clients.INTERNAL_SERVICE_TOKEN", None)
     calls, queue = sent
     queue.append(Response(200, event("Pending Safety Check")))
@@ -714,8 +1247,15 @@ def test_update_event_details_sends_an_empty_token_when_none_is_configured(
 
 
 @pytest.mark.parametrize("status", [400, 409])
-def test_update_event_details_refusals_carry_their_status(status, sent):
-    """Both are definite refusals the route passes straight back to the caller."""
+def test_update_details_client_refusals_keep_status(status, sent):
+    """
+    Summary: Event Service's refusals keep their status.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(status, {"code": "STALE_SAFETY_CHECK", "message": "no"}))
 
@@ -727,7 +1267,15 @@ def test_update_event_details_refusals_carry_their_status(status, sent):
     assert raised.value.body["message"] == "no"
 
 
-def test_update_event_details_maps_404_and_403(sent):
+def test_update_details_client_maps_not_found_and_forbidden(sent):
+    """
+    Summary: Not-found and forbidden answers are mapped to typed errors.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "gone"}))
     with pytest.raises(clients.EventNotFoundError):
@@ -738,8 +1286,15 @@ def test_update_event_details_maps_404_and_403(sent):
         clients.update_event_details(EVENT_ID, {}, {})
 
 
-def test_update_event_details_maps_a_refused_token(sent):
-    """Our own misconfiguration, not the caller's fault."""
+def test_update_details_client_maps_refused_token(sent):
+    """
+    Summary: A refused service token is reported as our misconfiguration.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(403, {"code": "INTERNAL_ONLY"}))
 
@@ -747,7 +1302,15 @@ def test_update_event_details_maps_a_refused_token(sent):
         clients.update_event_details(EVENT_ID, {}, {})
 
 
-def test_update_event_details_other_failures_are_downstream_errors(sent):
+def test_update_details_client_other_failures_are_downstream_errors(sent):
+    """
+    Summary: Other failures are downstream errors.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -755,8 +1318,13 @@ def test_update_event_details_other_failures_are_downstream_errors(sent):
         clients.update_event_details(EVENT_ID, {}, {})
 
 
-def test_withdraw_returns_both_rounds(sent):
-    """One call, because the record service does both writes in one transaction."""
+def test_withdraw_client_returns_withdrawn_and_new_round(sent):
+    """
+    Summary: A withdrawal returns both the withdrawn and the new round.
+    SCRUM-153 AC3: Given a safety approval is withdrawn, then it stays visible
+        in the event's safety history.
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(
         Response(
@@ -781,8 +1349,15 @@ def test_withdraw_returns_both_rounds(sent):
     }
 
 
-def test_withdraw_conflict_carries_the_round(sent):
-    """The race's loser learns the approval was already withdrawn."""
+def test_withdraw_client_conflict_returns_the_round(sent):
+    """
+    Summary: A lost race returns the round as already withdrawn.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(
         Response(
@@ -801,7 +1376,15 @@ def test_withdraw_conflict_carries_the_round(sent):
     assert raised.value.body["safetyCheck"]["status"] == "Approval Withdrawn"
 
 
-def test_withdraw_missing_round_is_not_found(sent):
+def test_withdraw_client_missing_round_is_not_found(sent):
+    """
+    Summary: Withdrawing a missing round is reported as not found.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "gone"}))
 
@@ -809,7 +1392,15 @@ def test_withdraw_missing_round_is_not_found(sent):
         clients.withdraw_safety_approval(RECORD_ID, "why")
 
 
-def test_withdraw_failure_is_a_downstream_error(sent):
+def test_withdraw_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed withdrawal is a downstream error.
+    SCRUM-153 AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(503, {"message": "down"}))
 
@@ -817,7 +1408,12 @@ def test_withdraw_failure_is_a_downstream_error(sent):
         clients.withdraw_safety_approval(RECORD_ID, "why")
 
 
-def test_restore_names_the_round_to_remove(sent):
+def test_restore_client_names_round_to_remove(sent):
+    """
+    Summary: A restore names the round to remove.
+    SCRUM-153 AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     calls, queue = sent
     queue.append(Response(200, record(round_number=2, status="Safety Approved")))
 
@@ -829,7 +1425,12 @@ def test_restore_names_the_round_to_remove(sent):
     assert calls[0]["json"] == {"openedSafetyCheckId": NEXT_RECORD_ID}
 
 
-def test_restore_missing_round_is_not_found(sent):
+def test_restore_client_missing_round_is_not_found(sent):
+    """
+    Summary: Restoring a missing round is reported as not found.
+    SCRUM-153 AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(404, {"message": "gone"}))
 
@@ -837,7 +1438,12 @@ def test_restore_missing_round_is_not_found(sent):
         clients.restore_safety_approval(RECORD_ID, NEXT_RECORD_ID)
 
 
-def test_restore_failure_is_a_downstream_error(sent):
+def test_restore_client_failure_is_downstream_error(sent):
+    """
+    Summary: A failed restore is a downstream error.
+    SCRUM-153 AC1: (rollback)
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(Response(409, {"code": "NOT_RESTORABLE"}))
 
@@ -856,9 +1462,20 @@ def test_restore_failure_is_a_downstream_error(sent):
         (httpx.ConnectError("refused"), clients.DownstreamError),
         (httpx.RemoteProtocolError("garbage"), clients.DownstreamError),
     ],
+    ids=["read_timeout", "connect_timeout", "connect_error", "protocol_error"],
 )
-def test_transport_failures_are_mapped(raised, expected, sent):
-    """A timeout becomes a 504 upstream and anything else a 502 — never a 500."""
+def test_clients_map_transport_failures_to_502_or_504(raised, expected, sent):
+    """
+    Summary: A timeout becomes a 504 and any other transport failure a 502.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (respx; request inspected)
+    """
     _, queue = sent
     queue.append(raised)
 
@@ -866,8 +1483,17 @@ def test_transport_failures_are_mapped(raised, expected, sent):
         clients.get_event(EVENT_ID)
 
 
-def test_default_urls_are_the_host_ports():
-    """`uv run flask run` outside Docker must work without an .env."""
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_clients_default_to_local_host_ports():
+    """
+    Summary: Without configuration, the clients use the local development ports.
+    Supporting design check: downstream URLs default for local runs
+    Double: Stub (respx; request inspected)
+    """
     assert clients.EVENT_SERVICE_URL.endswith((":5003", ":5000"))
     assert clients.VENUE_AVAILABILITY_SERVICE_URL.endswith((":5008", ":5000"))
     assert clients.EQUIPMENT_REQUEST_SERVICE_URL.endswith((":5011", ":5000"))

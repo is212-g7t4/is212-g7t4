@@ -1,45 +1,122 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-149: Submit Event for Operational Safety Check
 
-- **SCRUM-149 submission/readiness regression; no direct SCRUM-171 AC:** original numbered criteria below belong to SCRUM-149, not SCRUM-171.
-- **Separately approved venue-only compatibility:** `test_rejected_venue_history_uses_live_replacement_readiness` checks GET readiness and POST with approved replacement (allowed), no replacement (blocked), and pending replacement (blocked). Mocked downstreams do not prove real safety/database integration.
-- **SCRUM-149 dead-end fix (29 Oct 2026):** rejected equipment no longer blocks submit, readiness or resubmit; pending equipment beside it still does.
+User Story
+----------
+As an Event Coordinator, I want to submit my event for an Operational Safety
+Check once its venue and technical arrangements are confirmed, so that the
+Safety Officer can review it before preparation begins.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given an event assigned to the Event Coordinator has at least one approved
+     venue booking, and none of its venue bookings or equipment requests is
+     still pending, when the Event Coordinator submits it for a safety check,
+     then its status changes to 'Pending Safety Check' and the submission time
+     is recorded. Rejected, cancelled or expired venue bookings and rejected
+     equipment requests are no longer part of the event's arrangements and do
+     not block submission.
+AC2: Given any venue booking or equipment request for the event is still
+     pending, or the event has no approved venue booking, when the Event
+     Coordinator tries to submit, then submission is blocked and the
+     outstanding arrangements are listed.
+AC3: Given the Event Coordinator is submitting, when they enter equipment
+     placement and expected crowd movement notes, then the notes are saved with
+     the safety check.
+AC4: Given the event is already 'Pending Safety Check', when the Event
+     Coordinator submits it again, then no duplicate safety check is created.
+AC5: Given the Event Coordinator is not the assigned coordinator, then the
+     submit action is not available and an API call is rejected.
 
-The named test functions/cases below implement the groups above; their existing
-names and assertions specify the scenario. No group is credited with all five ACs.
+SCRUM-164: Revise Arrangements and Resubmit for Safety Check
 
-## Existing test contract and detailed cases
+User Story
+----------
+As an Event Coordinator, I want to see the Safety Officer's feedback and revise
+the affected arrangements, so that I can resubmit the event for a safety check
+without redoing unaffected planning.
 
-SCRUM-149: POST /safety-checks and GET /safety-checks/readiness.
+Acceptance Criteria
+-------------------
+AC1: Given my event is 'Safety Changes Requested', when I open it, then I see
+     the decision, reason, requested changes and affected areas.
+AC2: Given the venue arrangement is flagged, then the affected venue booking
+     must be reviewed again by Venue Staff (revised booking or replacement
+     request) before the event can be resubmitted.
+AC3: Given the technical arrangement is flagged, then the affected equipment
+     request must be reviewed again by Technical Support Staff before the event
+     can be resubmitted.
+AC4: Given an arrangement was not flagged, then it stays confirmed and does not
+     need to be reviewed again.
+AC5: Given all flagged arrangements are confirmed again, when I resubmit, then
+     the status returns to 'Pending Safety Check' as a new review round, and
+     earlier rounds remain in the history.
 
-AC1 Given an event assigned to the Event Coordinator has at least one
-    approved venue booking, and none of its venue bookings or equipment
-    requests is still pending, when the Event Coordinator submits it for a
-    safety check, then its status changes to 'Pending Safety Check' and the
-    submission time is recorded. Rejected, cancelled or expired venue bookings
-    and rejected equipment requests are no longer part of the event's
-    arrangements and do not block submission.
-AC2 Given any venue booking or equipment request for the event is still
-    pending, or the event has no approved venue booking, when the Event
-    Coordinator tries to submit, then submission is blocked and the
-    outstanding arrangements are listed.
+SCRUM-28: Venue Booking Request Submission
 
-Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end fix).
+User Story
+----------
+As an Event Coordinator, I want to submit a venue booking request for an event,
+so that Venue Staff can assess whether the requested venue arrangement can be
+accepted.
 
-SCRUM-171 authorised compatibility exception: rejected VENUE requests are
-immutable history; require a live approved replacement.
-AC3 Given the Event Coordinator is submitting, when they enter equipment
-    placement and expected crowd movement notes, then the notes are saved with
-    the safety check.
-AC4 Given the event is already 'Pending Safety Check', when the Event
-    Coordinator submits it again, then no duplicate safety check is created.
-AC5 Given the Event Coordinator is not the assigned coordinator, then the
-    submit action is not available and an API call is rejected.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator is preparing a venue booking request for an
+     event, when they enter the booking information, then they can provide the
+     relevant event timing and venue requirements needed for Venue Staff to
+     assess the booking.
+AC2: Given the relevant event timing and venue requirements have been provided,
+     when the Event Coordinator submits the venue booking request, then the
+     request is recorded and made available to Venue Staff for review.
+AC3: Given a venue booking request has been submitted, when Venue Staff access
+     the request, then they can view the event to which the request relates
+     together with the relevant event timing and venue requirements.
+AC4: Given a venue booking request has been submitted and has not yet received
+     a booking decision, when Venue Staff view requests requiring action, then
+     the request can be identified as awaiting Venue Staff review.
+AC5: Given an Event Coordinator submits a venue booking request for an event,
+     when the request is recorded, then it remains associated with that event
+     so that the booking can be assessed in the context of the corresponding
+     event requirements.
+AC6: Given an Event Coordinator submits a venue booking request for a venue and
+     time slot, when the same venue has already been requested or booked for
+     another event, and the requested event timing does not overlap with that
+     other event's timing, then the request is accepted for Venue Staff review
+     as normal, so the same venue can be booked for multiple events across
+     non-overlapping time slots.
+AC7: Given an event is 'Confirmed' after passing its Operational Safety Check,
+     when the Event Coordinator edits or cancels one of its venue bookings,
+     then the event's safety approval is withdrawn without opening a new safety
+     check round, the event returns to 'Approved', and an edited booking
+     returns to awaiting Venue Staff review, so the event must be submitted for
+     a safety check again. If the booking change cannot be saved, the safety
+     approval is restored and the event stays 'Confirmed'. While the event is
+     'Pending Safety Check', its venue bookings cannot be edited or cancelled.
 
-Every downstream call is a monkeypatched `app.clients` wrapper, so these tests
-exercise the orchestration and the error mapping, not HTTP (`test_clients.py`
-covers that).
+Real
+----
+- POST /safety-checks, POST /safety-checks/resubmit and GET
+  /safety-checks/readiness: the assigned-coordinator check, the readiness
+  rules, note validation, the duplicate-round guard, the order of writes and
+  the compensating delete when a later step fails.
+- /health and the CORS hook of the real create_app().
+- Assertions are on the status, the body and the downstream calls made.
+
+Doubled
+-------
+- Event, Venue Availability, Equipment Request and Safety Check Record
+  Services: Stub (Downstream fixture monkeypatches app.clients) - canned rows
+  or raised client errors; calls are recorded so tests assert what was (or was
+  not) written and in which order.
+
+Not proven
+----------
+- That the atomic services behave as stubbed, and that the compensating delete
+  really removes the round (-> tests/integration/ here with respx, and Safety
+  Check Record Service's own tests).
+- That the UI hides the submit action from other coordinators (-> frontend
+  Vitest suite).
 """
 import logging
 
@@ -166,14 +243,24 @@ def resubmit(client, **overrides):
     })
 
 
-# Safety revision AC5 (mocked orchestration): approved arrangements open round 2 and move to Pending Safety Check.
-# The old stub round remains unchanged; database history persistence is covered by Record Service tests.
-def test_resubmission_opens_next_round_only_with_approved_arrangements(client, downstream):
+def test_resubmit_with_approved_arrangements_opens_next_round(client, downstream):
+    """
+    Summary: With every flagged arrangement approved again, resubmitting opens a new round.
+    SCRUM-164 AC5: Given all flagged arrangements are confirmed again, when I
+        resubmit, then the status returns to 'Pending Safety Check' as a new
+        review round, and earlier rounds remain in the history.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.rounds = [record(1, "Changes Requested")]
     downstream.created = record(2)
     downstream.requests = [equipment_request("Approved")]
+
+    # Act (When)
     response = resubmit(client, equipmentPlacementNotes=PLACEMENT, crowdMovementNotes=CROWD)
+
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["safetyCheck"]["roundNumber"] == 2
     assert response.json["event"]["status"] == "Pending Safety Check"
@@ -183,48 +270,91 @@ def test_resubmission_opens_next_round_only_with_approved_arrangements(client, d
     assert downstream.rounds[0]["status"] == "Changes Requested"
 
 
-# Safety revision AC3: pending equipment blocks resubmission before a new review round can be written.
-def test_resubmission_with_pending_equipment_is_blocked_before_writes(client, downstream):
+def test_resubmit_with_pending_equipment_is_blocked_before_writes(client, downstream):
+    """
+    Summary: A pending equipment request blocks resubmission before anything is written.
+    SCRUM-164 AC3: Given the technical arrangement is flagged, then the
+        affected equipment request must be reviewed again by Technical Support
+        Staff before the event can be resubmitted.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.requests = [equipment_request("Pending")]
+
+    # Act (When)
     response = resubmit(client)
+
+    # Assert (Then)
     assert response.status_code == 422
     assert response.json["outstanding"][0]["status"] == "Pending"
     assert "create" not in downstream.names()
     assert "bookings" in downstream.names()
 
 
-# Safety revision AC5 (readiness): approved venue plus approved equipment, or no equipment, permits resubmission.
-@pytest.mark.parametrize("requests", [[], [equipment_request("Approved")]])
-def test_resubmission_readiness_requires_both_approved_arrangements(client, downstream, requests):
+@pytest.mark.parametrize("requests", [[], [equipment_request("Approved")]], ids=["empty", "equipment_request_approved"])
+def test_resubmit_readiness_with_approved_arrangements_is_ready(client, downstream, requests):
+    """
+    Summary: Resubmission readiness is true with an approved venue and no or approved equipment.
+    SCRUM-164 AC5: Given all flagged arrangements are confirmed again, when I
+        resubmit, then the status returns to 'Pending Safety Check' as a new
+        review round, and earlier rounds remain in the history.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.requests = requests
+
+    # Act (When)
     response = client.get("/safety-checks/resubmit/readiness", query_string={"eventId": EVENT_ID, "coordinatorId": COORDINATOR_ID})
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json == {"ready": True, "eventStatus": "Safety Changes Requested", "outstanding": []}
     assert "bookings" in downstream.names()
 
 
-# Safety revision AC2/AC3: unresolved venue or equipment arrangements block both readiness and submission.
 @pytest.mark.parametrize("venue_status,equipment_status", [("Pending Review", "Approved"), ("Rejected", "Approved")])
-def test_resubmission_blocks_unready_venue_or_equipment(client, downstream, venue_status, equipment_status):
+def test_resubmit_with_unready_venue_is_blocked(client, downstream, venue_status, equipment_status):
+    """
+    Summary: A venue booking that is not approved again blocks resubmission.
+    SCRUM-164 AC2: Given the venue arrangement is flagged, then the affected
+        venue booking must be reviewed again by Venue Staff (revised booking or
+        replacement request) before the event can be resubmitted.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.bookings = [booking(venue_status)]
+
+    # Act (When)
     downstream.requests = [equipment_request(equipment_status)]
+
+    # Assert (Then)
     assert resubmit(client).status_code == 422
     response = client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}")
     assert response.json["ready"] is False
     assert "create" not in downstream.names()
 
 
-# Safety revision AC3: "reviewed again" is satisfied by a rejection as much as an
-# approval, so a rejected request no longer blocks resubmission (dead-end fix).
-def test_resubmission_ignores_rejected_equipment(client, downstream):
+def test_resubmit_ignores_rejected_equipment(client, downstream):
+    """
+    Summary: A rejected equipment request no longer blocks resubmission.
+    SCRUM-164 AC3: Given the technical arrangement is flagged, then the
+        affected equipment request must be reviewed again by Technical Support
+        Staff before the event can be resubmitted.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.rounds = [record(1, "Changes Requested")]
     downstream.created = record(2)
     downstream.requests = [equipment_request("Rejected")]
+
+    # Act (When)
     response = client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}")
+
+    # Assert (Then)
     assert response.json == {"ready": True, "eventStatus": "Safety Changes Requested", "outstanding": []}
     assert "create" not in downstream.names()
     response = resubmit(client)
@@ -233,10 +363,20 @@ def test_resubmission_ignores_rejected_equipment(client, downstream):
     assert "patch_event" in downstream.names()
 
 
-def test_resubmission_readiness_blocks_pending_equipment_and_other_event_stages(client, downstream):
+def test_resubmit_readiness_with_pending_equipment_or_wrong_stage_is_not_ready(client, downstream):
+    """
+    Summary: Resubmission readiness is false with pending equipment or outside 'Safety Changes Requested'.
+    SCRUM-164 AC3: Given the technical arrangement is flagged, then the
+        affected equipment request must be reviewed again by Technical Support
+        Staff before the event can be resubmitted.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.requests = [equipment_request("Pending")]
     url = f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}"
+
+    # Act + Assert (When / Then)
     assert client.get(url).json["ready"] is False
     downstream.event = event("Approved")
     downstream.requests = []
@@ -244,23 +384,53 @@ def test_resubmission_readiness_blocks_pending_equipment_and_other_event_stages(
     assert resubmit(client).status_code == 409
 
 
-def test_resubmission_readiness_rejects_invalid_identifiers(client, downstream):
+def test_resubmit_readiness_with_bad_ids_returns_400(client, downstream):
+    """
+    Summary: Resubmission readiness needs valid event and coordinator ids.
+    SCRUM-164 AC5: Given all flagged arrangements are confirmed again, when I
+        resubmit, then the status returns to 'Pending Safety Check' as a new
+        review round, and earlier rounds remain in the history.
+    Double: None
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act + Assert (When / Then)
     assert client.get("/safety-checks/resubmit/readiness?eventId=bad").status_code == 400
     assert downstream.calls == []
 
 
-@pytest.mark.parametrize("error,code", [(clients.EventNotAssignedError(), 403), (clients.EventNotFoundError(), 404)])
-def test_resubmission_access_denied_before_equipment_read(client, downstream, error, code):
+@pytest.mark.parametrize("error,code", [(clients.EventNotAssignedError(), 403), (clients.EventNotFoundError(), 404)], ids=["clients_eventnotassignederror_403", "clients_eventnotfounderror_404"])
+def test_resubmit_when_not_assigned_is_refused_before_equipment_read(client, downstream, error, code):
+    """
+    Summary: A coordinator who is not assigned, or a missing event, stops resubmission before equipment is read.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (get_event raises EventNotAssignedError or EventNotFoundError)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = error
+
+    # Act + Assert (When / Then)
     assert resubmit(client).status_code == code
     assert client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}").status_code == code
     assert "requests" not in downstream.names()
 
 
-@pytest.mark.parametrize("error,code", [(clients.DownstreamError(), 502), (clients.DownstreamTimeout(), 504)])
-def test_resubmission_equipment_failure_is_closed(client, downstream, error, code):
+@pytest.mark.parametrize("error,code", [(clients.DownstreamError(), 502), (clients.DownstreamTimeout(), 504)], ids=["clients_downstreamerror_502", "clients_downstreamtimeout_504"])
+def test_resubmit_when_equipment_unreadable_fails_closed(client, downstream, error, code):
+    """
+    Summary: If equipment requests cannot be read, resubmission fails closed.
+    SCRUM-164 AC3: Given the technical arrangement is flagged, then the
+        affected equipment request must be reviewed again by Technical Support
+        Staff before the event can be resubmitted.
+    Double: Stub (get_event_equipment_requests raises DownstreamError or
+        DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.event = event("Safety Changes Requested")
     downstream.fail["requests"] = error
+
+    # Act + Assert (When / Then)
     assert resubmit(client).status_code == code
     assert client.get(f"/safety-checks/resubmit/readiness?eventId={EVENT_ID}&coordinatorId={COORDINATOR_ID}").status_code == code
     assert "create" not in downstream.names()
@@ -272,12 +442,23 @@ def test_resubmission_equipment_failure_is_closed(client, downstream, error, cod
 @pytest.mark.parametrize("replacement, ready, status", [
     ("Approved", True, 201), (None, False, 422), ("Pending Review", False, 422),
 ])
-def test_rejected_venue_history_uses_live_replacement_readiness(client, downstream, replacement, ready, status):
-    """Separately approved SCRUM-171 compatibility rule, not a sixth ticket AC."""
+def test_resubmit_after_rejected_venue_uses_replacement_booking(client, downstream, replacement, ready, status):
+    """
+    Summary: After a rejected venue, readiness follows the replacement booking's live status.
+    SCRUM-164 AC2: Given the venue arrangement is flagged, then the affected
+        venue booking must be reviewed again by Venue Staff (revised booking or
+        replacement request) before the event can be resubmitted.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.bookings = [booking("Rejected")]
     if replacement:
         downstream.bookings.append(booking(replacement, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+
+    # Act (When)
     result = readiness(client)
+
+    # Assert (Then)
     assert result.json["ready"] is ready
     if replacement is None:
         assert result.json["outstanding"][0]["label"] == "No venue booking"
@@ -291,10 +472,24 @@ def test_rejected_venue_history_uses_live_replacement_readiness(client, downstre
         assert "patch_event" not in downstream.names()
 
 
-def test_submission_creates_a_round_and_moves_the_event(client, downstream):
-    """AC1: the event becomes 'Pending Safety Check' and the round is created."""
+def test_submit_when_ready_creates_round_and_moves_event(client, downstream):
+    """
+    Summary: Submitting a ready event records a round and moves the event to 'Pending Safety Check'.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["event"]["status"] == "Pending Safety Check"
     assert response.json["safetyCheck"]["roundNumber"] == 1
@@ -302,16 +497,25 @@ def test_submission_creates_a_round_and_moves_the_event(client, downstream):
     assert response.json["safetyCheck"]["submittedAt"] == "2026-11-01T02:30:00+00:00"
 
 
-def test_notes_are_sent_to_the_record_service(client, downstream):
-    """AC3: both notes are saved with the safety check."""
+def test_submit_with_notes_saves_them_with_the_round(client, downstream):
+    """
+    Summary: Placement and crowd movement notes are saved with the safety check.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.created = record(
         equipmentPlacementNotes=PLACEMENT, crowdMovementNotes=CROWD
     )
 
+    # Act (When)
     response = submit(
         client, equipmentPlacementNotes=PLACEMENT, crowdMovementNotes=CROWD
     )
 
+    # Assert (Then)
     assert response.status_code == 201
     assert downstream.call("create") == (
         "create",
@@ -332,21 +536,45 @@ def test_notes_are_sent_to_the_record_service(client, downstream):
         {"equipmentPlacementNotes": "  ", "crowdMovementNotes": "\n"},
         {"equipmentPlacementNotes": None, "crowdMovementNotes": None},
     ],
+    ids=["empty", "equipmentplacementnotes_crowdmovementnotes", "equipmentplacementnotes_crowdmovementnotes_n", "equipmentplacementnotes_none_crowdmovementnotes"],
 )
-def test_notes_are_optional(notes, client, downstream):
-    """AC3: the notes are optional, and blank is not stored as an empty string."""
+def test_submit_without_notes_saves_none(notes, client, downstream):
+    """
+    Summary: Missing, blank or null notes are saved as no notes.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): notes, client, downstream, from fixtures
+
+    # Act (When)
     response = submit(client, **notes)
 
+    # Assert (Then)
     assert response.status_code == 201
     assert downstream.call("create")[3:] == (None, None)
 
 
-def test_the_round_number_is_passed_to_event_service(client, downstream):
-    """AC1: the event's history records which round it was submitted for."""
+def test_submit_passes_round_number_to_event_service(client, downstream):
+    """
+    Summary: The new round's number is recorded on the event.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.created = record(round_number=3)
 
+    # Act (When)
     submit(client)
 
+    # Assert (Then)
     assert downstream.call("patch_event") == (
         "patch_event",
         EVENT_ID,
@@ -357,17 +585,39 @@ def test_the_round_number_is_passed_to_event_service(client, downstream):
     )
 
 
-def test_the_record_is_created_before_the_event_moves(client, downstream):
-    """The record service is the duplicate guard, so it must go first (AC4)."""
+def test_submit_creates_record_before_moving_event(client, downstream):
+    """
+    Summary: The round is written before the event moves, so a failure can be rolled back.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     submit(client)
 
+    # Act + Assert (When / Then)
     assert downstream.names().index("create") < downstream.names().index("patch_event")
 
 
-def test_notes_at_the_limit_are_accepted(client, downstream):
-    """AC3 boundary: 2000 characters is the limit."""
+def test_submit_with_notes_at_limit_is_accepted(client, downstream):
+    """
+    Summary: Notes exactly at the length limit are saved.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = submit(client, equipmentPlacementNotes="x" * 2000)
 
+    # Assert (Then)
     assert response.status_code == 201
 
 
@@ -378,10 +628,20 @@ def test_notes_at_the_limit_are_accepted(client, downstream):
         ("crowdMovementNotes", "Expected crowd movement notes"),
     ],
 )
-def test_notes_over_the_limit_write_nothing(field, label, client, downstream):
-    """AC3 boundary: 2001 characters is refused before anything is read or written."""
+def test_submit_with_notes_over_limit_returns_400(field, label, client, downstream):
+    """
+    Summary: Notes over the length limit are refused and nothing is written.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): field, label, client, downstream, from fixtures
+
+    # Act (When)
     response = submit(client, **{field: "x" * 2001})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == f"{label} must be 2000 characters or fewer."
     assert downstream.calls == []
@@ -394,34 +654,60 @@ def test_notes_over_the_limit_write_nothing(field, label, client, downstream):
         ("crowdMovementNotes", "Expected crowd movement notes"),
     ],
 )
-def test_non_text_notes_are_rejected(field, label, client, downstream):
+def test_submit_with_non_text_notes_returns_400(field, label, client, downstream):
+    """
+    Summary: Notes that are not text are refused.
+    AC3: Given the Event Coordinator is submitting, when they enter equipment
+        placement and expected crowd movement notes, then the notes are saved
+        with the safety check.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): field, label, client, downstream, from fixtures
+
+    # Act (When)
     response = submit(client, **{field: 42})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == f"{label} must be text."
     assert downstream.calls == []
 
 
-def test_equipment_requests_are_read_as_the_submitting_coordinator(client, downstream):
-    """Contract: Equipment Request Service's READ_ROLES allow Event Coordinators.
-
-    The composite passes the caller's own identity rather than inventing a
-    service account — see `clients.get_event_equipment_requests`.
+def test_submit_reads_equipment_as_submitting_coordinator(client, downstream):
     """
+    Summary: Equipment requests are read with the submitting coordinator's identity.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     submit(client)
 
+    # Assert (Then)
     assert downstream.call("requests") == ("requests", EVENT_ID, COORDINATOR_ID)
 
 
 # --- AC2: outstanding arrangements block ------------------------------------
 
 
-def test_pending_booking_blocks_the_submission(client, downstream):
-    """AC2: blocked, with the outstanding arrangements listed and nothing written."""
+def test_submit_with_pending_booking_is_blocked(client, downstream):
+    """
+    Summary: A pending venue booking blocks submission and is listed.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.bookings = [booking("Pending Review")]
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 422
     assert response.json["code"] == "ARRANGEMENTS_OUTSTANDING"
     assert len(response.json["outstanding"]) == 1
@@ -433,30 +719,50 @@ def test_pending_booking_blocks_the_submission(client, downstream):
     assert "patch_event" not in downstream.names()
 
 
-def test_rejected_equipment_request_does_not_block_the_submission(client, downstream):
-    """AC1: a rejected equipment request is no longer an arrangement.
-
-    Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end fix).
+def test_submit_ignores_rejected_equipment(client, downstream):
     """
+    Summary: A rejected equipment request does not block submission.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.requests = [equipment_request("Rejected")]
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 201
     assert response.json["event"]["status"] == "Pending Safety Check"
     assert "create" in downstream.names()
     assert "patch_event" in downstream.names()
 
 
-def test_pending_equipment_beside_rejected_still_blocks_submission(client, downstream):
-    """AC2: only rejections stop blocking; the pending request is still listed."""
+def test_submit_with_pending_and_rejected_equipment_is_blocked(client, downstream):
+    """
+    Summary: A pending equipment request still blocks beside a rejected one.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.requests = [
         equipment_request("Rejected"),
         equipment_request("Pending", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
     ]
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 422
     assert response.json["message"] == (
         "This event can't be submitted for a safety check until it has an "
@@ -468,12 +774,22 @@ def test_pending_equipment_beside_rejected_still_blocks_submission(client, downs
     assert "patch_event" not in downstream.names()
 
 
-def test_event_with_no_booking_blocks_the_submission(client, downstream):
-    """AC2 boundary: an event with nowhere to happen isn't ready."""
+def test_submit_without_booking_is_blocked(client, downstream):
+    """
+    Summary: An event with no approved venue booking cannot be submitted.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.bookings = []
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 422
     assert response.json["outstanding"] == [
         {
@@ -489,13 +805,22 @@ def test_event_with_no_booking_blocks_the_submission(client, downstream):
 # --- AC4: no duplicate safety check ------------------------------------------
 
 
-def test_already_pending_event_is_refused_with_its_open_round(client, downstream):
-    """AC4: a second submission creates nothing and says when the first was."""
+def test_submit_when_already_pending_returns_open_round(client, downstream):
+    """
+    Summary: Submitting an event already pending returns the open round and creates no duplicate.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Pending Safety Check")
     downstream.rounds = [record()]
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_CHECK_ALREADY_PENDING"
     assert response.json["message"] == (
@@ -509,13 +834,22 @@ def test_already_pending_event_is_refused_with_its_open_round(client, downstream
     assert "bookings" not in downstream.names()
 
 
-def test_already_pending_without_a_findable_round_still_refuses(client, downstream):
-    """AC4 edge: the event says pending but no open round came back. Still no duplicate."""
+def test_submit_when_pending_without_open_round_still_refuses(client, downstream):
+    """
+    Summary: A pending event is refused even when its open round cannot be found.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Pending Safety Check")
     downstream.rounds = []
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_CHECK_ALREADY_PENDING"
     assert response.json["message"] == (
@@ -524,12 +858,21 @@ def test_already_pending_without_a_findable_round_still_refuses(client, downstre
     assert response.json["safetyCheck"] is None
 
 
-def test_record_service_conflict_is_the_same_conflict(client, downstream):
-    """AC4's race: two submits at once, and the record service refuses the second."""
+def test_submit_when_record_service_conflicts_returns_409(client, downstream):
+    """
+    Summary: A duplicate round refused by the record service is reported as the same conflict.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (create_safety_check_record raises a conflict)
+    """
+    # Arrange (Given)
     downstream.fail["create"] = clients.SafetyCheckAlreadyPendingError(record())
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_CHECK_ALREADY_PENDING"
     assert response.json["safetyCheck"]["roundNumber"] == 1
@@ -537,19 +880,24 @@ def test_record_service_conflict_is_the_same_conflict(client, downstream):
     assert "patch_event" not in downstream.names()
 
 
-def test_event_service_conflict_rolls_the_round_back(client, downstream):
-    """AC4's other race: Event Service's own lock catches the duplicate.
-
-    The round we created is then deleted, so the event isn't left with an open
-    round nobody is reviewing.
+def test_submit_when_event_service_conflicts_rolls_round_back(client, downstream):
     """
+    Summary: If Event Service refuses the move as a conflict, the new round is deleted.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (set_event_safety_status raises a conflict)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.EventTransitionError(
         "SAFETY_CHECK_ALREADY_PENDING", {"code": "SAFETY_CHECK_ALREADY_PENDING"}
     )
     downstream.rounds = [record(round_number=2)]
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_CHECK_ALREADY_PENDING"
     assert downstream.call("delete") == ("delete", RECORD_ID)
@@ -558,12 +906,20 @@ def test_event_service_conflict_rolls_the_round_back(client, downstream):
 # --- AC5: only the assigned coordinator -------------------------------------
 
 
-def test_another_coordinator_is_refused_before_anything_is_read(client, downstream):
-    """AC5: an API call from anyone but the assigned coordinator is rejected."""
+def test_submit_by_another_coordinator_returns_403_before_reads(client, downstream):
+    """
+    Summary: A coordinator not assigned to the event is refused before anything is read.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (get_event raises EventNotAssignedError)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = clients.EventNotAssignedError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "NOT_ASSIGNED_COORDINATOR"
     assert response.json["message"] == (
@@ -573,16 +929,20 @@ def test_another_coordinator_is_refused_before_anything_is_read(client, downstre
     assert downstream.names() == ["get_event"]
 
 
-def test_reassignment_mid_flight_rolls_the_round_back(client, downstream):
-    """AC5 under a race: Event Service re-checks assignment inside its row lock.
-
-    Our step-2 read can be stale, so a reassignment between the two is caught
-    there — and the round we already created is removed again.
+def test_submit_when_reassigned_mid_flight_rolls_round_back(client, downstream):
     """
+    Summary: If the event is reassigned during submission, the new round is deleted.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (set_event_safety_status raises EventNotAssignedError)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.EventNotAssignedError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "NOT_ASSIGNED_COORDINATOR"
     assert downstream.call("delete") == ("delete", RECORD_ID)
@@ -602,12 +962,22 @@ def test_reassignment_mid_flight_rolls_the_round_back(client, downstream):
         "Cancelled",
     ],
 )
-def test_only_an_approved_event_can_be_submitted(status, client, downstream):
-    """An event that hasn't been approved yet, or is already past this point."""
+def test_submit_when_event_not_approved_returns_409(status, client, downstream):
+    """
+    Summary: Only an event in the approved stage can be submitted.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event(status)
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "EVENT_NOT_READY_FOR_SAFETY_CHECK"
     assert response.json["currentStatus"] == status
@@ -618,8 +988,19 @@ def test_only_an_approved_event_can_be_submitted(status, client, downstream):
     assert downstream.names() == ["get_event"]
 
 
-def test_event_service_rejecting_the_transition_is_reported(client, downstream):
-    """A status change between step 2 and step 6 — rare, but it must not 500."""
+def test_submit_when_transition_rejected_rolls_back_with_message(client, downstream):
+    """
+    Summary: Event Service's reason for refusing the move is passed back and the round deleted.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (set_event_safety_status raises a transition error)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.EventTransitionError(
         "INVALID_SAFETY_TRANSITION",
         {
@@ -629,51 +1010,104 @@ def test_event_service_rejecting_the_transition_is_reported(client, downstream):
         },
     )
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "EVENT_NOT_READY_FOR_SAFETY_CHECK"
     assert response.json["currentStatus"] == "Cancelled"
     assert downstream.call("delete") == ("delete", RECORD_ID)
 
 
-def test_transition_error_without_a_message_still_reads_sensibly(client, downstream):
+def test_submit_when_transition_rejected_without_message_uses_default(client, downstream):
+    """
+    Summary: A refusal with no reason still gives a readable message.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (set_event_safety_status raises a transition error without a
+        message)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.EventTransitionError(
         "INVALID_SAFETY_TRANSITION", {}
     )
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["message"] == (
         "Only an Approved event can be submitted for a safety check."
     )
 
 
-def test_missing_event_is_404(client, downstream):
+def test_submit_for_missing_event_returns_404(client, downstream):
+    """
+    Summary: Submitting an event that does not exist returns 404.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (get_event raises EventNotFoundError)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = clients.EventNotFoundError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 404
     assert response.json["message"] == "Event request not found."
 
 
-def test_event_deleted_mid_flight_rolls_the_round_back(client, downstream):
+def test_submit_when_event_deleted_mid_flight_rolls_round_back(client, downstream):
+    """
+    Summary: If the event disappears during submission, the new round is deleted.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (set_event_safety_status raises EventNotFoundError)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.EventNotFoundError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 404
     assert downstream.call("delete") == ("delete", RECORD_ID)
 
 
-def test_service_credentials_error_rolls_the_round_back(client, downstream):
-    """SCRUM-150: Event Service refusing our internal token is our problem."""
+def test_submit_when_service_credentials_fail_rolls_round_back(client, downstream):
+    """
+    Summary: A service credentials failure on the move deletes the new round.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (set_event_safety_status raises a credentials error)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.ServiceCredentialsError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 502
     assert response.json["message"] == "Event Service refused this service's credentials."
     assert downstream.call("delete") == ("delete", RECORD_ID)
@@ -683,12 +1117,22 @@ def test_service_credentials_error_rolls_the_round_back(client, downstream):
 
 
 @pytest.mark.parametrize("failing", ["bookings", "requests"])
-def test_unreadable_arrangements_block_the_submission(failing, client, downstream):
-    """Fail closed: "couldn't check" must never be treated as "nothing outstanding"."""
+def test_submit_when_arrangements_unreadable_returns_502(failing, client, downstream):
+    """
+    Summary: If bookings or requests cannot be read, nothing is submitted.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (bookings or requests raise DownstreamError)
+    """
+    # Arrange (Given)
     downstream.fail[failing] = clients.DownstreamError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 502
     assert response.json["message"] == (
         "Unable to check the event's arrangements right now."
@@ -698,11 +1142,22 @@ def test_unreadable_arrangements_block_the_submission(failing, client, downstrea
 
 
 @pytest.mark.parametrize("failing", ["bookings", "requests"])
-def test_arrangement_timeouts_are_504(failing, client, downstream):
+def test_submit_when_arrangements_time_out_returns_504(failing, client, downstream):
+    """
+    Summary: Timeouts reading bookings or requests return 504 and nothing is submitted.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (bookings or requests raise DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.fail[failing] = clients.DownstreamTimeout
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 504
     assert "create" not in downstream.names()
 
@@ -711,11 +1166,25 @@ def test_arrangement_timeouts_are_504(failing, client, downstream):
     ("error", "status"),
     [(clients.DownstreamError, 502), (clients.DownstreamTimeout, 504)],
 )
-def test_event_read_failure_is_reported_without_writing(error, status, client, downstream):
+def test_submit_when_event_unreadable_writes_nothing(error, status, client, downstream):
+    """
+    Summary: If the event cannot be read, the failure is reported and nothing is written.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (get_event raises DownstreamError or DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = error
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == status
     assert downstream.names() == ["get_event"]
 
@@ -724,11 +1193,26 @@ def test_event_read_failure_is_reported_without_writing(error, status, client, d
     ("error", "status"),
     [(clients.DownstreamError, 502), (clients.DownstreamTimeout, 504)],
 )
-def test_record_creation_failure_is_reported(error, status, client, downstream):
+def test_submit_when_record_creation_fails_is_reported(error, status, client, downstream):
+    """
+    Summary: If the round cannot be recorded, the failure is reported and the event does not move.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (create_safety_check_record raises DownstreamError or
+        DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.fail["create"] = error
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == status
     assert "patch_event" not in downstream.names()
     # Nothing was created, so there is nothing to compensate for.
@@ -739,50 +1223,92 @@ def test_record_creation_failure_is_reported(error, status, client, downstream):
     ("error", "status"),
     [(clients.DownstreamError, 502), (clients.DownstreamTimeout, 504)],
 )
-def test_event_update_failure_rolls_the_round_back(error, status, client, downstream):
+def test_submit_when_event_update_fails_rolls_round_back(error, status, client, downstream):
+    """
+    Summary: If the event cannot be moved, the new round is deleted.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (set_event_safety_status raises DownstreamError or
+        DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = error
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == status
     assert downstream.call("delete") == ("delete", RECORD_ID)
 
 
-def test_failed_compensation_is_logged_with_the_record_id(client, downstream, caplog):
-    """The one case with no clean recovery: say which round was left behind.
-
-    The event then reads 'Approved' while the next submit gets
-    ALREADY_PENDING; the README says how to clear it.
+def test_submit_when_rollback_fails_logs_record_id(client, downstream, caplog):
     """
+    Summary: If deleting the new round also fails, its id is logged for clean-up.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (set_event_safety_status and delete_safety_check_record raise)
+    """
+    # Arrange (Given)
     downstream.fail["patch_event"] = clients.DownstreamError
     downstream.fail["delete"] = clients.DownstreamError
 
+    # Act (When)
     with caplog.at_level(logging.ERROR):
         response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 502
     assert RECORD_ID in caplog.text
     assert "must be removed by hand" in caplog.text
 
 
-def test_looking_up_the_open_round_can_fail_closed(client, downstream):
-    """AC4's message needs the open round; if that read fails, say so rather than
-    reporting a successful submission that never happened."""
+def test_submit_when_open_round_lookup_fails_returns_502(client, downstream):
+    """
+    Summary: If the open round cannot be looked up, the submission fails closed.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (list_safety_check_records raises DownstreamError)
+    """
+    # Arrange (Given)
     downstream.event = event("Pending Safety Check")
     downstream.fail["list_records"] = clients.DownstreamError
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 502
     assert "create" not in downstream.names()
 
 
-def test_open_round_lookup_timeout_is_504(client, downstream):
+def test_submit_when_open_round_lookup_times_out_returns_504(client, downstream):
+    """
+    Summary: A timeout looking up the open round returns 504.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (list_safety_check_records raises DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.event = event("Pending Safety Check")
     downstream.fail["list_records"] = clients.DownstreamTimeout
 
+    # Act (When)
     response = submit(client)
 
+    # Assert (Then)
     assert response.status_code == 504
 
 
@@ -796,18 +1322,49 @@ def test_open_round_lookup_timeout_is_504(client, downstream):
         {"coordinatorId": COORDINATOR_ID},
         {},
     ],
+    ids=["eventid_not_a_uuid_coordinatorid_coordinator_id", "coordinatorid_coordinator_id", "empty"],
 )
-def test_bad_identifiers_are_rejected(body, client, downstream):
+def test_submit_with_bad_ids_returns_400(body, client, downstream):
+    """
+    Summary: A submission needs a valid event id.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Arrange (Given): body, client, downstream, from fixtures
+
+    # Act (When)
     response = client.post("/safety-checks", json=body)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "eventId must be a valid UUID."
     assert downstream.calls == []
 
 
-def test_non_object_body_is_rejected(client, downstream):
+def test_submit_with_non_object_body_returns_400(client, downstream):
+    """
+    Summary: A body that is not a JSON object is refused.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = client.post("/safety-checks", json="just a string")
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Send a JSON object."
     assert downstream.calls == []
@@ -822,10 +1379,24 @@ def readiness(client, event_id=EVENT_ID, coordinator_id=COORDINATOR_ID):
     )
 
 
-def test_readiness_reports_a_ready_event(client, downstream):
-    """AC1 ahead of the click: the panel can enable its submit button."""
+def test_readiness_for_ready_event_reports_ready(client, downstream):
+    """
+    Summary: Readiness says an event with everything confirmed can be submitted.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = readiness(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json == {
         "ready": True,
@@ -838,13 +1409,23 @@ def test_readiness_reports_a_ready_event(client, downstream):
     assert "patch_event" not in downstream.names()
 
 
-def test_readiness_lists_what_is_outstanding(client, downstream):
-    """AC2 ahead of the click: the coordinator sees what's missing before submitting."""
+def test_readiness_lists_outstanding_arrangements(client, downstream):
+    """
+    Summary: Readiness lists the arrangements still outstanding.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.bookings = [booking("Pending Review")]
     downstream.requests = [equipment_request("Pending")]
 
+    # Act (When)
     response = readiness(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["ready"] is False
     assert [item["type"] for item in response.json["outstanding"]] == [
@@ -855,11 +1436,24 @@ def test_readiness_lists_what_is_outstanding(client, downstream):
 
 
 def test_readiness_ignores_rejected_equipment(client, downstream):
-    """AC1 ahead of the click: a rejected request doesn't disable the button."""
+    """
+    Summary: Rejected equipment is not listed as outstanding.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.requests = [equipment_request("Rejected")]
 
+    # Act (When)
     response = readiness(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json == {
         "ready": True,
@@ -871,13 +1465,22 @@ def test_readiness_ignores_rejected_equipment(client, downstream):
     assert "patch_event" not in downstream.names()
 
 
-def test_readiness_on_a_pending_event_returns_the_open_round(client, downstream):
-    """AC4 in the UI: once submitted, the panel shows the round instead of a button."""
+def test_readiness_for_pending_event_returns_open_round(client, downstream):
+    """
+    Summary: For an event already pending, readiness points at the open round.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event("Pending Safety Check")
     downstream.rounds = [record()]
 
+    # Act (When)
     response = readiness(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["ready"] is False
     assert response.json["eventStatus"] == "Pending Safety Check"
@@ -885,30 +1488,57 @@ def test_readiness_on_a_pending_event_returns_the_open_round(client, downstream)
 
 
 @pytest.mark.parametrize("status", ["Submitted", "Under Review", "Confirmed"])
-def test_readiness_is_false_for_a_non_approved_event(status, client, downstream):
+def test_readiness_for_non_approved_event_is_not_ready(status, client, downstream):
+    """
+    Summary: An event outside the approved stage is not ready.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
     downstream.event = event(status)
 
+    # Act (When)
     response = readiness(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["ready"] is False
     assert response.json["eventStatus"] == status
     assert response.json["openSafetyCheck"] is None
 
 
-def test_readiness_refuses_another_coordinator(client, downstream):
-    """AC5: the panel is hidden in the UI, and the API says no as well."""
+def test_readiness_for_another_coordinator_returns_403(client, downstream):
+    """
+    Summary: Readiness is refused to a coordinator not assigned to the event.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (get_event raises EventNotAssignedError)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = clients.EventNotAssignedError
 
+    # Act (When)
     response = readiness(client)
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "NOT_ASSIGNED_COORDINATOR"
 
 
-def test_readiness_for_a_missing_event_is_404(client, downstream):
+def test_readiness_for_missing_event_returns_404(client, downstream):
+    """
+    Summary: Readiness for an event that does not exist returns 404.
+    AC5: Given the Event Coordinator is not the assigned coordinator, then the
+        submit action is not available and an API call is rejected.
+    Double: Stub (get_event raises EventNotFoundError)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = clients.EventNotFoundError
 
+    # Act + Assert (When / Then)
     assert readiness(client).status_code == 404
 
 
@@ -916,9 +1546,19 @@ def test_readiness_for_a_missing_event_is_404(client, downstream):
     ("error", "status"),
     [(clients.DownstreamError, 502), (clients.DownstreamTimeout, 504)],
 )
-def test_readiness_fails_closed(error, status, client, downstream):
+def test_readiness_when_downstream_fails_fails_closed(error, status, client, downstream):
+    """
+    Summary: If arrangements cannot be read, readiness fails closed.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: Stub (Downstream raises DownstreamError or DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.fail["bookings"] = error
 
+    # Act + Assert (When / Then)
     assert readiness(client).status_code == status
 
 
@@ -926,10 +1566,20 @@ def test_readiness_fails_closed(error, status, client, downstream):
     ("error", "status"),
     [(clients.DownstreamError, 502), (clients.DownstreamTimeout, 504)],
 )
-def test_readiness_open_round_failure_is_reported(error, status, client, downstream):
+def test_readiness_when_open_round_lookup_fails_is_reported(error, status, client, downstream):
+    """
+    Summary: If the open round cannot be looked up, readiness reports the failure.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (list_safety_check_records raises DownstreamError or
+        DownstreamTimeout)
+    """
+    # Arrange (Given)
     downstream.event = event("Pending Safety Check")
     downstream.fail["list_records"] = error
 
+    # Act + Assert (When / Then)
     assert readiness(client).status_code == status
 
 
@@ -939,10 +1589,26 @@ def test_readiness_open_round_failure_is_reported(error, status, client, downstr
         f"?eventId=nope&coordinatorId={COORDINATOR_ID}",
         "",
     ],
+    ids=["f_eventid_nope_coordinatorid_coordinator_id", "empty"],
 )
-def test_readiness_needs_a_valid_event(query, client, downstream):
+def test_readiness_with_bad_event_id_returns_400(query, client, downstream):
+    """
+    Summary: Readiness needs a valid event id.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Arrange (Given): query, client, downstream, from fixtures
+
+    # Act (When)
     response = client.get(f"/safety-checks/readiness{query}")
 
+    # Assert (Then)
     assert response.status_code == 400
     assert downstream.calls == []
 
@@ -950,27 +1616,79 @@ def test_readiness_needs_a_valid_event(query, client, downstream):
 # --- Service plumbing --------------------------------------------------------
 
 
-def test_health(client):
+def test_submit_after_booking_change_withdrawal_opens_next_round(client, downstream):
+    """
+    Summary: An event sent back to Approved by a booking change can be submitted again as the next round.
+    SCRUM-28 AC7: Given an event is 'Confirmed' after passing its Operational
+        Safety Check, when the Event Coordinator edits or cancels one of its
+        venue bookings, then the event's safety approval is withdrawn without
+        opening a new safety check round, the event returns to 'Approved', and
+        an edited booking returns to awaiting Venue Staff review, so the event
+        must be submitted for a safety check again. If the booking change
+        cannot be saved, the safety approval is restored and the event stays
+        'Confirmed'. While the event is 'Pending Safety Check', its venue
+        bookings cannot be edited or cancelled.
+    Double: Stub (Downstream: canned event, bookings and requests)
+    """
+    # Arrange (Given)
+    downstream.event = event("Approved")
+    downstream.rounds = [record(round_number=2, status="Approval Withdrawn")]
+    downstream.created = record(round_number=3)
+
+    # Act (When)
+    response = submit(client)
+
+    # Assert (Then)
+    assert response.status_code == 201
+    assert downstream.call("create")[1] == EVENT_ID
+    assert downstream.call("patch_event")[2:] == ("Pending Safety Check", COORDINATOR_ID, RECORD_ID, 3)
+
+
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_health_without_token_returns_ok(client):
+    """
+    Summary: Anyone can check the service is up without signing in.
+    Supporting design check: /health answers without a token
+    Double: None
+    """
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
 
 
-def test_cors_allows_the_frontend_origin(client):
+def test_cors_for_frontend_origin_returns_allow_origin(client):
+    """
+    Summary: The configured frontend may call the service from a browser.
+    Supporting design check: the configured frontend origin gets a CORS grant
+    Double: None
+    """
     response = client.get("/health", headers={"Origin": "http://localhost:5174"})
 
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
 
 
-def test_cors_rejects_another_origin(client):
+def test_cors_for_other_origin_sends_no_grant(client):
+    """
+    Summary: Other websites are not granted browser access.
+    Supporting design check: other origins get no CORS grant
+    Double: None
+    """
     response = client.get("/health", headers={"Origin": "http://evil.example"})
 
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
-def test_cors_with_no_configured_origin_allows_nothing(monkeypatch):
-    """A blank FRONTEND_ORIGIN must not become a wildcard."""
+def test_cors_with_blank_origin_allows_nothing(monkeypatch):
+    """
+    Summary: Blanking FRONTEND_ORIGIN switches browser access off.
+    Supporting design check: an empty FRONTEND_ORIGIN grants no origin
+    Double: None
+    """
     monkeypatch.setenv("FRONTEND_ORIGIN", "")
     blank = signed_in(create_app().test_client())
 
@@ -979,7 +1697,12 @@ def test_cors_with_no_configured_origin_allows_nothing(monkeypatch):
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
-def test_preflight_returns_200(client):
+def test_preflight_without_token_returns_200(client):
+    """
+    Summary: The browser's preflight is answered without a token.
+    Supporting design check: preflight requests answer without a token
+    Double: None
+    """
     response = client.options(
         "/safety-checks", headers={"Origin": "http://localhost:5174"}
     )
