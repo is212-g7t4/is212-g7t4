@@ -162,9 +162,21 @@ def health():
     return jsonify(status="ok")
 
 
+BOOKING_REQUESTER_ROLES = ("Event Coordinator", "Event Coordinator Lead")
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change this information, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing. A caller
+    with no user passes here and meets the handler's own sign-in check.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
+
+
 def _venue_staff():
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     if g.role != "Venue Staff":
         return jsonify(message="Only Venue Staff can review venue requests."), 403
     return None
@@ -423,8 +435,8 @@ def create_booking_request():
       the event's total expected attendance
     - venueRequirements: this booking's own free-text requirements
     """
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
+    if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -547,8 +559,6 @@ def create_booking_request():
 @bp.get("/events/<event_id>/booking-requests")
 def list_booking_requests(event_id):
     """Return each venue request for an event as a separate record."""
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     try:
         if g.role == "Event Coordinator":
             get_event(event_id)
@@ -591,8 +601,8 @@ def list_booking_requests(event_id):
 @bp.patch("/booking-requests/<booking_id>")
 def update_booking_request(booking_id):
     """Modify and resubmit only the selected booking."""
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
+    if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -732,8 +742,8 @@ def _save_booking_update(
 @bp.patch("/booking-requests/<booking_id>/cancel")
 def cancel_booking_request(booking_id):
     """Cancel only the selected booking and retain its event association."""
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
+    if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     event_id = data.get("eventId") if isinstance(data, dict) else None
     if not event_id:
@@ -894,6 +904,8 @@ def _decide(booking_id, booking, status, rejection_reason=None):
 @bp.put("/venues/<uuid:venue_id>")
 def update_venue_and_reconcile(venue_id):
     """Save a venue profile, then identify conflicts introduced by buffers."""
+    if (forbidden := _cannot_modify(("Venue Staff",))):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400

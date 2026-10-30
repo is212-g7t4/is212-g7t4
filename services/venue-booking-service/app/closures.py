@@ -9,8 +9,6 @@ bp = Blueprint("closures", __name__)
 def staff_only():
     if request.method == "OPTIONS":
         return None
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     if g.role != "Venue Staff":
         return jsonify(message="Venue Staff role is required."), 403
 

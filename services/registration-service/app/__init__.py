@@ -24,6 +24,20 @@ from app.auth import authenticate
 EVENT_TEAM_ROLES = ("Event Organiser", "Event Coordinator", "Event Coordinator Lead")
 
 
+ATTENDEE_ROLES = ("Attendee",)
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change registrations, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing.
+    A caller with no user passes and meets the handler's own sign-in check.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.before_request(authenticate)
@@ -99,6 +113,8 @@ def create_app(config=None):
 
     @app.post("/registrations")
     def add_registration():
+        if (forbidden := _cannot_modify(ATTENDEE_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -131,6 +147,8 @@ def create_app(config=None):
 
     @app.patch("/registrations/<uuid:registration_id>/withdraw")
     def withdraw(registration_id):
+        if (forbidden := _cannot_modify(ATTENDEE_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400

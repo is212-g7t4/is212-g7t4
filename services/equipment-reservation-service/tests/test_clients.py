@@ -105,7 +105,7 @@ def test_create_event_requests_posts_items_with_the_callers_token(sent):
     method, url, kwargs = calls[0]
     assert (method, url) == ("POST", "http://localhost:5011/events/ev/equipment-requests")
     assert kwargs["json"] == {"items": items, "notificationContext": {"eventId": "ev"}}
-    assert kwargs["headers"] == {"Authorization": "Bearer user-token", "X-Internal-Token": "synthetic"}
+    assert kwargs["headers"] == {"Authorization": "Bearer user-token"}
 
 
 # Review AC1 / Reservation AC2 (supporting lookup): resolve summaries for the requested event IDs.

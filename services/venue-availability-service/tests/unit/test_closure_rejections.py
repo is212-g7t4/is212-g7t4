@@ -18,7 +18,7 @@ SCRUM-171: closure rejection and immutable historical requests."""
 import pytest
 from datetime import datetime
 from app import models
-from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row
+from tests.unit.factories import BOOKING_ID, bearer, EVENT_ID, USER_ID, VENUE_ID, booking_row
 
 
 @pytest.mark.parametrize("action", ["edit", "cancel", "approve", "reject"])
@@ -37,7 +37,11 @@ def test_all_rejected_requests_are_immutable(setup, action):
         rejectionReason="Venue unsuitable",
     )
     suffix = "" if action == "edit" else "/" + action
-    response = client.patch(f"/venue-bookings/{BOOKING_ID}{suffix}", json=payload)
+    # Decisions are Venue Staff's (SCRUM-10); edit and cancel are the coordinator's.
+    role = "Venue Staff" if action in ("approve", "reject") else "Event Coordinator"
+    response = client.patch(
+        f"/venue-bookings/{BOOKING_ID}{suffix}", json=payload, headers=bearer(USER_ID, role)
+    )
     assert response.status_code == 409
     assert response.json["code"] == "BOOKING_IMMUTABLE"
     assert not any(

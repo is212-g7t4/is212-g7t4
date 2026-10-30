@@ -185,6 +185,9 @@ def create_app(config=None):
 
     @app.post("/events/<event_id>/equipment-requests/safety-reset")
     def event_requests_safety_reset(event_id):
+        # SCRUM-10: Safety Check Service resets requests on behalf of the Safety Officer who asked for changes.
+        if g.user_id is not None and g.role != "Safety Officer":
+            return jsonify(message="Your role cannot change this information."), 403
         configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
         if not configured_token:
             return jsonify(message="Internal service authentication is not configured."), 503

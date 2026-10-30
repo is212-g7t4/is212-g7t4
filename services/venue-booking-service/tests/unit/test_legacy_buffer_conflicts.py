@@ -33,7 +33,7 @@ def test_venue_edit_saves_then_reconciles_without_changing_bookings(monkeypatch)
         or {"venueId": VENUE_ID, "conflictCount": 1, "conflicts": []},
     )
 
-    response = signed_in(create_app().test_client()).put(
+    response = signed_in(create_app().test_client(), role="Venue Staff").put(
         f"/venues/{VENUE_ID}", json={"setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
     )
 
@@ -141,7 +141,7 @@ def test_downstream_validation_error_is_preserved(monkeypatch):
         ),
     )
 
-    result = signed_in(create_app().test_client()).put(f"/venues/{VENUE_ID}", json={})
+    result = signed_in(create_app().test_client(), role="Venue Staff").put(f"/venues/{VENUE_ID}", json={})
 
     assert result.status_code == 400
     assert result.json["errors"] == ["Bad buffer"]
@@ -274,7 +274,7 @@ def test_booking_create_and_edit_forward_catalogue_buffers(monkeypatch):
 
 
 def test_venue_edit_failure_paths_are_explicit(monkeypatch):
-    client = signed_in(create_app().test_client())
+    client = signed_in(create_app().test_client(), role="Venue Staff")
     path = f"/venues/{VENUE_ID}"
     assert client.put(path, json=[]).status_code == 400
 

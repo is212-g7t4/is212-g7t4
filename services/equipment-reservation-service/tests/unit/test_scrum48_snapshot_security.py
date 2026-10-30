@@ -52,8 +52,10 @@ def upstream(monkeypatch):
 @pytest.mark.parametrize("operation", ["submit", "single-approve", "single-reject", "bulk-approve", "bulk-reject"])
 def test_mutations_replace_attacker_context_with_trusted_lookup_and_token(upstream, operation):
     """AC1/AC2/AC3 + security DR: Arrange spoofed identity-adjacent headers;
-    call adapter; assert fresh trusted context, configured token and no attacker
-    cookie/context header forwarded; rejection reason only in workflow payload.
+    call adapter; assert fresh trusted context, only the caller's token on the
+    mutation (the internal token goes solely on the internal event read), and no
+    attacker cookie/token/context header forwarded; rejection reason only in
+    workflow payload.
 
     Why: Trusted snapshot selection must not be delegated to an untrusted caller.
     """
@@ -74,8 +76,9 @@ def test_mutations_replace_attacker_context_with_trusted_lookup_and_token(upstre
     kwargs = request.call_args.kwargs
     assert method == ("POST" if operation == "submit" else "PATCH")
     assert url.startswith("http://owner.invalid/")
-    assert kwargs["headers"] == {"Authorization": "Bearer coordinator-token",
-                                 "X-Internal-Token": "trusted-config-token"}
+    # SCRUM-10: Equipment Request authenticates the forwarded user and never reads an internal token on
+    # create/review, so the mutation carries only the caller's token, not the attacker's or the configured one.
+    assert kwargs["headers"] == {"Authorization": "Bearer coordinator-token"}
     expected = dict(eventId=EVENT, eventName="Community Fair", equipmentNames={MIC: "Microphone"})
     if operation == "submit":
         expected["recipientIds"] = [TSS1, TSS2]
