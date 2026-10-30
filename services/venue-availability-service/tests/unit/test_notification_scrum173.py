@@ -1,28 +1,42 @@
-"""# SCRUM-173 — Receive Venue Disruption Notifications
+"""
+SCRUM-173: Receive Venue Disruption Notifications
 
-As an Event Coordinator, I want to receive an in-app notification when a venue booking for an event assigned to me is affected, so that I know that alternative arrangements are required.
-AC1: Given a rejection is ready for notification, then the notification is addressed to the coordinator assigned to that event when the notification is created.
-AC2: The notification contains the event name, affected venue, closure start/end, rejection reason, and a link to the venue rejection.
-AC3: Given a temporary system failure occurs during notification dispatch, the system must ensure the notification is eventually delivered to the assigned coordinator without generating multiple duplicate alerts.
+User Story
+----------
+As an Event Coordinator, I want to receive an in-app notification when a venue
+booking for an event assigned to me is affected, so that I know that
+alternative arrangements are required.
 
-## Layer and scope
-# SCRUM-173 AC1/AC2/AC3 — owning-service HTTP lease/freeze seam.
-Hermetic SQL driver controls responses; no persistence/concurrency claim here.
-Real lease fencing, rollback and freeze-once recovery are verified in PostgreSQL.
+Acceptance Criteria
+-------------------
+AC1: Given a rejection is ready for notification, then the notification is
+     addressed to the coordinator assigned to that event when the notification
+     is created.
+AC2: The notification contains the event name, affected venue, closure
+     start/end, rejection reason, and a link to the venue rejection.
+AC3: Given a temporary system failure occurs during notification dispatch, the
+     system must ensure the notification is eventually delivered to the
+     assigned coordinator without generating multiple duplicate alerts.
 
+Real
+----
+- The /internal disruption-notification outbox: claim, freeze once, retry and
+  publish with lease fencing; validation of frozen content; and rollback of the
+  closure and its rejections when the outbox insert fails.
+- Assertions are on the HTTP status, SQL sent and rollback.
 
-## AC groups
-AC1: current coordinator at preparation; recipient frozen across retries.
-AC2: complete frozen content and structured rejection destination.
-AC3: eventual delivery without duplicate inbox alerts.
-Security, diagnostics, process adapters, fixtures and legacy compatibility are
-explicit supporting/cross-ticket checks, not separate direct AC scenarios.
-FIRST: unit I/O/clocks are mocked; real integration owns setup/finally teardown.
-Historical tests are retrospective evidence, not a blanket test-first claim.
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
 
-
-Consolidated story unit tests. Each class preserves an original module scope;
-class-local fixtures never leak into another acceptance/supporting group.
+Not proven
+----------
+- That the SQL, locks and constraints behave the same on real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the dispatcher delivers to the coordinator assigned at preparation time
+  (AC1) (-> venue-booking-service dispatcher tests).
 """
 
 # test_notification_leases.py — original fixture and scenario group
@@ -67,7 +81,7 @@ class TestNotificationLeases:
     """SCRUM-173 AC1/AC2/AC3 — owning-service HTTP lease/freeze seam. Hermetic SQL driver controls responses; no persistence/concurrency claim here. Real lease fencing, rollback and freeze-once recovery are verified in PostgreSQL."""
 
     @pytest.fixture
-    def setup(self, monkeypatch):
+    def setup(self, monkeypatch, mocker):
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic-token")
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
@@ -83,18 +97,33 @@ class TestNotificationLeases:
         )
         cursor.fetchone.return_value = row
         cursor.fetchall.return_value = [row]
-        with patch("psycopg2.connect", return_value=connection):
-            yield signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client()), cursor, row
+        mocker.patch("psycopg2.connect", return_value=connection)
+        yield signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client()), cursor, row
 
 
-    def test_claim_freeze_once_retry_and_publish(self, setup):
-        """## AC1/AC2/AC3
-        Owning HTTP operations claim, freeze once, retry and publish while fencing stale tokens and retaining the original envelope.
+    def test_disruption_outbox_claims_freezes_once_retries_and_publishes(self, setup):
         """
+        Summary: A disruption alert is claimed, frozen once, retried and published without duplicates.
+        AC1: Given a rejection is ready for notification, then the notification
+            is addressed to the coordinator assigned to that event when the
+            notification is created.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (cursor returns jobs; SQL inspected)
+        """
+        # Arrange (Given)
         client, cursor, row = setup
+
+        # Act (When)
         result = client.post(
             "/internal/notification-outbox/claim", json={}, headers=HEADERS
         )
+
+        # Assert (Then)
         assert result.json["jobs"][0]["id"] == ID
         frozen = row | {"envelope": ENVELOPE}
         cursor.fetchone.side_effect = [row, frozen]
@@ -147,10 +176,14 @@ class TestNotificationLeases:
             {"details": SOURCE | dict(eventName="", venueName="Hall")},
             {"details": SOURCE | dict(eventName="Conference", venueName=123)},
         ],
+        ids=["version_2", "version_true", "id_token", "type_other", "recipientid_bad", "createdat_changed", "destination_kind_external_url", "message", "details_none", "details_source_dict_eventname_conference_venuena", "details_source_dict_eventname_conference_venuena_2", "details_source_dict_eventname_conference_venuena_3", "details_source_dict_eventname_venuename_hall", "details_source_dict_eventname_conference_venuena_4"],
     )
-    def test_freeze_rejects_malformed_or_changed_historical_content(self, setup, change):
-        """## AC1/AC2 supporting validation
-        Invalid or changed frozen content is rejected rather than silently rewriting recipient/history.
+    def test_freeze_disruption_alert_with_bad_or_changed_content_returns_400(self, setup, change):
+        """
+        Summary: Malformed or changed alert content is refused rather than frozen.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        Double: Stub (cursor returns the job)
         """
         client, _, _ = setup
         assert (
@@ -159,11 +192,19 @@ class TestNotificationLeases:
         )
 
 
-    def test_invalid_operations_missing_database_and_storage_failure(self, setup, monkeypatch):
-        """## AC3 supporting recovery/validation
-        Malformed internal operations, absent database and driver failures expose explicit failures without false publication.
+    def test_disruption_outbox_with_bad_action_or_storage_failure_fails_safely(self, setup, monkeypatch):
         """
+        Summary: Bad actions, a missing database or a storage failure fail safely and can be retried.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (cursor raises)
+        """
+        # Arrange (Given)
         client, cursor, _ = setup
+
+        # Act (When)
         for body in (None, [], {}, {"leaseToken": 123}):
             assert (
                 client.post(
@@ -171,6 +212,8 @@ class TestNotificationLeases:
                 ).status_code
                 == 400
             )
+
+        # Assert (Then)
         assert operation(client, "unknown").status_code == 404
         cursor.execute.side_effect = psycopg2.OperationalError("outage")
         assert operation(client, "published").status_code == 503
@@ -197,31 +240,47 @@ from unittest.mock import patch
 class TestNotificationOutbox:
     """SCRUM-173 AC3 — authenticated owning-service outbox API (hermetic). Lease/transaction semantics are exercised separately on disposable PostgreSQL."""
 
-    def test_internal_claim_rejects_unconfigured_and_wrong_token(self, monkeypatch):
-        """## Supporting security
-        Internal claim denies unconfigured or incorrect service tokens before database access.
+    def test_disruption_outbox_without_valid_service_token_returns_401(self, monkeypatch, mocker):
         """
+        Summary: Only a caller with the configured service token can claim alerts.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: None
+        """
+        # Arrange (Given)
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic-internal-token")
         client = signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client())
+
+        # Act + Assert (When / Then)
         assert (
             client.post("/internal/notification-outbox/claim", json={}).status_code == 401
         )
-        with patch("app.outbox.claim", return_value=[]):
-            response = client.post(
-                "/internal/notification-outbox/claim",
-                json={},
-                headers={"X-Internal-Token": "synthetic-internal-token"},
-            )
+        mocker.patch("app.outbox.claim", return_value=[])
+        response = client.post(
+            "/internal/notification-outbox/claim",
+            json={},
+            headers={"X-Internal-Token": "synthetic-internal-token"},
+        )
         assert response.status_code == 200
         assert response.json == {"jobs": []}
 
 
-    def test_non_ascii_internal_token_is_denied_without_crashing(self, monkeypatch):
-        """## Supporting security
-        An untrusted non-ASCII token is denied safely rather than causing a comparison exception.
+    def test_disruption_outbox_with_non_ascii_token_is_refused(self, monkeypatch):
         """
+        Summary: An odd service token is refused safely.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: None
+        """
+        # Arrange (Given)
         monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "synthetic-token")
         client = signed_in(create_app({"DATABASE_URL": "synthetic"}).test_client())
+
+        # Act + Assert (When / Then)
         assert (
             client.post(
                 "/internal/notification-outbox/claim", headers={"X-Internal-Token": "é"}
@@ -239,10 +298,16 @@ from app import create_app
 class TestNotificationTransaction:
     """SCRUM-173 AC3 — closure HTTP transaction seam, hermetic SQL failure. Outbox write failure must surface failure and roll back the same transaction. Real row preservation is verified by the isolated integration harness."""
 
-    def test_outbox_failure_rolls_back_closure_and_rejections(self):
-        """## AC3
-        An outbox insert error rolls back the closure transaction and returns failure, not a successful lost notification.
+    def test_closure_when_alert_cannot_be_queued_rolls_back(self, mocker):
         """
+        Summary: If the alert cannot be queued, the closure and its rejections are rolled back too.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (outbox insert raises), Mock (rollback)
+        """
+        # Arrange (Given)
         from tests.unit.factories import VENUE_ID, USER_ID, booking_row
 
         row = booking_row()
@@ -278,14 +343,18 @@ class TestNotificationTransaction:
             endDateTime="2099-01-02T08:00:00+08:00",
             reason="Maintenance",
         )
-        with patch("psycopg2.connect", return_value=connection):
-            preview = client.post("/venue-closures/preview", json=data, headers=headers)
-            response = client.post(
-                "/venue-closures",
-                json=data
-                | dict(confirmed=True, confirmationToken=preview.json["confirmationToken"]),
-                headers=headers,
-            )
+
+        # Act (When)
+        mocker.patch("psycopg2.connect", return_value=connection)
+        preview = client.post("/venue-closures/preview", json=data, headers=headers)
+        response = client.post(
+            "/venue-closures",
+            json=data
+            | dict(confirmed=True, confirmationToken=preview.json["confirmationToken"]),
+            headers=headers,
+        )
+
+        # Assert (Then)
         assert response.status_code == 503
         connection.rollback.assert_called_once()
         connection.commit.assert_not_called()

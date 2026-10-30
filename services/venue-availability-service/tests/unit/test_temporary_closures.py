@@ -1,17 +1,46 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-170: Record Temporary Venue Unavailability
 
-- **SCRUM-170 closure regressions:** staff/configuration/CORS guards, validation, ongoing and offset dates, parameterized reason, pagination, nullable legacy data and controlled database errors. These retain SCRUM-170 scope.
-- **SCRUM-171 AC4 backend support:** a signed zero-impact confirmation preserves the existing closure contract; no full-list UI claim.
-- **Supporting AC5 failure handling:** mocked connection rollback/close checks do not prove real all-row atomicity; that is tested in the PostgreSQL harness.
+User Story
+----------
+As a Venue Staff, I want to mark a venue as temporarily unavailable for a
+specific time period and provide a reason, so that the venue cannot be booked
+during maintenance, equipment failure, renovation, safety concerns, or other
+operational issues.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given an existing venue, Venue Staff can view an existing venue and enter
+     a start date/time, a later end date/time, and a nonblank operational
+     reason and save, then the closure is persisted and its venue, period, and
+     reason are displayed.
+AC2: Given required information is missing or the end is not later than the
+     start, when Venue Staff save, then the system identifies the invalid input
+     and does not create a closure.
+AC3: Given the closure cannot be saved, then the system displays a failure
+     message and does not report successful creation.
 
-The named test functions/cases below implement the groups above; their existing
-names and assertions specify the scenario. No group is credited with all five ACs.
+Real
+----
+- POST /venue-closures, GET /venue-closures and GET /venue-closures/<id>: the
+  Venue Staff guard, input validation (venue, later end, nonblank safe reason),
+  ongoing and offset times, cursor pagination, database failure cleanup and
+  foreign-key mapping run for real.
+- Assertions are on the status, error and SQL sent.
 
-## Existing test contract and detailed cases
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
 
-SCRUM-170 closure contract (independent of booking timestamp contracts)."""
+Not proven
+----------
+- That the SQL, locks and constraints behave the same on real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the closure is shown on the venue page (AC1 UI half) (-> frontend
+  VenueClosuresPanel tests and e2e venue-closures.spec.ts).
+"""
 
 from unittest.mock import MagicMock
 from datetime import datetime, timezone
@@ -40,6 +69,7 @@ def client():
         ({"Authorization": "Bearer not-a-jwt"}, 401),
         (bearer(UID, "Event Coordinator"), 403),
     ],
+    ids=["no_token", "dev_headers", "bad_token", "coordinator"],
 )
 @pytest.mark.parametrize(
     "method,path",
@@ -48,24 +78,21 @@ def client():
         ("get", "/venue-closures"),
         ("get", "/venue-closures/" + UID),
     ],
+    ids=["create", "list", "get"],
 )
-def test_staff_guard(client, headers, code, method, path):
+def test_closure_routes_when_not_venue_staff_are_refused(client, headers, code, method, path):
+    """
+    Summary: Only signed-in Venue Staff can record or read closures.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given): client, headers, code, method, path, from fixtures
+
+    # Act + Assert (When / Then)
     assert getattr(client, method)(path, headers=headers).status_code == code
-
-
-@pytest.mark.parametrize("path", ["/venue-closures", "/venue-closures/" + UID])
-def test_preflight(client, path):
-    r = client.options(
-        path,
-        headers={
-            "Origin": "http://localhost:5174",
-            "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "Authorization, Content-Type",
-        },
-    )
-    assert r.status_code == 200
-    assert r.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
-    assert "Authorization" in r.headers["Access-Control-Allow-Headers"]
 
 
 @pytest.mark.parametrize(
@@ -81,8 +108,20 @@ def test_preflight(client, path):
         "/venue-closures?venueId=" + UID + "&cursor=bad",
         "/venue-closures?venueId=" + UID + "&unknown=1",
     ],
+    ids=["venue_closures_bad", "venue_closures", "venue_closures_venueid_bad", "venue_closures_venueid_uid_limit_0", "venue_closures_venueid_uid_limit_101", "venue_closures_venueid_uid_limit_no", "venue_closures_venueid_uid_limit_1_limit_2", "venue_closures_venueid_uid_cursor_bad", "venue_closures_venueid_uid_unknown_1"],
 )
-def test_invalid_read(client, path):
+def test_read_closures_with_bad_id_or_filter_returns_400(client, path):
+    """
+    Summary: Closure reads need a valid id or venue filter.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: None
+    """
+    # Arrange (Given): client, path, from fixtures
+
+    # Act + Assert (When / Then)
     assert client.get(path, headers=HEADERS).status_code == 400
 
 
@@ -128,8 +167,19 @@ BODY = confirmed(BODY)
         {**BODY, "createdBy": UID},
         {**BODY, "createdAt": "2099-01-01"},
     ],
+    ids=["none", "empty", "text", "empty_2", "body_venueid_12", "body_venueid_bad", "body_reason_none", "body_reason", "body_startdatetime_12", "body_startdatetime_2099_01_01t10_00_00", "body_startdatetime_bad", "body_enddatetime_body_startdatetime", "body_enddatetime_2000_01_01t00_00_00z", "body_createdby_uid", "body_createdat_2099_01_01"],
 )
-def test_invalid_create(client, body):
+def test_create_closure_with_invalid_input_returns_400_without_saving(client, body):
+    """
+    Summary: A closure without a valid venue, reason, start and later end is refused.
+    AC2: Given required information is missing or the end is not later than the
+        start, when Venue Staff save, then the system identifies the invalid
+        input and does not create a closure.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given): client, body, from fixtures
+
+    # Act + Assert (When / Then)
     assert client.post("/venue-closures", json=body, headers=HEADERS).status_code == 400
 
 
@@ -139,8 +189,17 @@ def test_invalid_create(client, body):
         ("0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-12:00"),
         ("2099-01-01T10:00:00+08:00", "2099-01-01T02:00:00Z"),
     ],
+    ids=["extreme_instant", "end_equals_start"],
 )
-def test_unsafe_or_equal_instants(client, start, end):
+def test_create_closure_with_unsafe_or_equal_times_returns_400(client, start, end):
+    """
+    Summary: A closure whose end is not later than its start, or at an unsafe extreme, is refused.
+    AC2: (boundary: end = start)
+    Double: None
+    """
+    # Arrange (Given): client, start, end, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         client.post(
             "/venue-closures",
@@ -151,7 +210,17 @@ def test_unsafe_or_equal_instants(client, start, end):
     )
 
 
-def test_reject_invalid_unicode_reason(client):
+def test_create_closure_with_invalid_unicode_reason_returns_400(client):
+    """
+    Summary: A reason with invalid characters is refused.
+    AC2: Given required information is missing or the end is not later than the
+        start, when Venue Staff save, then the system identifies the invalid
+        input and does not create a closure.
+    Double: None
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         client.post(
             "/venue-closures", json={**BODY, "reason": "\ud800"}, headers=HEADERS
@@ -160,7 +229,17 @@ def test_reject_invalid_unicode_reason(client):
     )
 
 
-def test_reject_nul_reason(client):
+def test_create_closure_with_nul_in_reason_returns_400(client):
+    """
+    Summary: A reason containing a NUL character is refused.
+    AC2: Given required information is missing or the end is not later than the
+        start, when Venue Staff save, then the system identifies the invalid
+        input and does not create a closure.
+    Double: None
+    """
+    # Arrange (Given): client, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         client.post(
             "/venue-closures",
@@ -171,8 +250,19 @@ def test_reject_nul_reason(client):
     )
 
 
-@pytest.mark.parametrize("cursor", ["", "a" * 1025])
-def test_empty_or_excessive_cursor(client, cursor):
+@pytest.mark.parametrize("cursor", ["", "a" * 1025], ids=["empty", "too_long"])
+def test_list_closures_with_empty_or_oversized_cursor_returns_400(client, cursor):
+    """
+    Summary: A page cursor must be present and of a sane length.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: None
+    """
+    # Arrange (Given): client, cursor, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         client.get(
             "/venue-closures",
@@ -183,7 +273,13 @@ def test_empty_or_excessive_cursor(client, cursor):
     )
 
 
-def test_end_equal_server_now(client, monkeypatch):
+def test_create_closure_ending_now_is_refused(client, monkeypatch):
+    """
+    Summary: A closure that ends right now is refused.
+    AC2: (boundary: end = now)
+    Double: None
+    """
+    # Arrange (Given)
     from datetime import datetime, timezone
     import app.closure_contract as contract
 
@@ -193,17 +289,22 @@ def test_end_equal_server_now(client, monkeypatch):
             return cls(2099, 1, 1, 3, tzinfo=timezone.utc)
 
     monkeypatch.setattr(contract, "datetime", Clock)
+
+    # Act + Assert (When / Then)
     assert client.post("/venue-closures", json=BODY, headers=HEADERS).status_code == 400
 
 
-def test_untrusted_origin_gets_no_cors_grant(client):
-    r = client.options(
-        "/venue-closures", headers={"Origin": "https://untrusted.example"}
-    )
-    assert "Access-Control-Allow-Origin" not in r.headers
+def test_create_closure_with_malformed_json_returns_400(client):
+    """
+    Summary: A body that is not valid JSON is refused.
+    AC2: Given required information is missing or the end is not later than the
+        start, when Venue Staff save, then the system identifies the invalid
+        input and does not create a closure.
+    Double: None
+    """
+    # Arrange (Given): client, from fixtures
 
-
-def test_malformed_json(client):
+    # Act + Assert (When / Then)
     assert (
         client.post(
             "/venue-closures",
@@ -236,10 +337,23 @@ def database(monkeypatch):
     return connect, connection, cursor, row
 
 
-def test_confirmed_zero_impact_preserves_closure_contract(client, database):
+def test_create_closure_with_no_affected_requests_returns_saved_closure(client, database):
+    """
+    Summary: A confirmed closure that affects no requests is saved and returned in full.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor returns the saved closure)
+    """
+    # Arrange (Given)
     connect, conn, cur, row = database
     client.application.config["DATABASE_URL"] = "fake-dsn"
+
+    # Act (When)
     response = client.post("/venue-closures", json=BODY, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 201
     result = response.json["closure"]
     assert result == dict(
@@ -269,8 +383,19 @@ def test_confirmed_zero_impact_preserves_closure_contract(client, database):
     conn.cursor.return_value.__exit__.assert_called_once()
 
 
-def test_ongoing_and_offset_create(client, database):
+def test_create_closure_ongoing_or_with_offset_times_is_saved(client, database):
+    """
+    Summary: A closure already in progress, or given with a time zone, is saved correctly.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor; parameters inspected)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
+
+    # Act (When)
     r = client.post(
         "/venue-closures",
         json=confirmed(
@@ -282,16 +407,29 @@ def test_ongoing_and_offset_create(client, database):
         ),
         headers=HEADERS,
     )
+
+    # Assert (Then)
     assert r.status_code == 201
 
 
-@pytest.mark.parametrize("stage", ["connect", "execute", "commit"])
-def test_create_db_failure_rolls_back_and_closes(client, database, stage):
+@pytest.mark.parametrize("stage", ["connect", "execute", "commit"], ids=["connect", "execute", "commit"])
+def test_create_closure_when_database_fails_rolls_back_and_reports_failure(client, database, stage):
+    """
+    Summary: A database failure rolls back and reports failure, not success.
+    AC3: Given the closure cannot be saved, then the system displays a failure
+        message and does not report successful creation.
+    Double: Stub (connect, execute or commit raises)
+    """
+    # Arrange (Given)
     connect, conn, cur, _ = database
     client.application.config["DATABASE_URL"] = "fake-dsn"
     target = {"connect": connect, "execute": cur.execute, "commit": conn.commit}[stage]
     target.side_effect = psycopg2.OperationalError("private database details")
+
+    # Act (When)
     r = client.post("/venue-closures", json=BODY, headers=HEADERS)
+
+    # Assert (Then)
     assert r.status_code == 503 and "private" not in r.text
     if stage != "connect":
         conn.rollback.assert_called_once()
@@ -302,14 +440,24 @@ def test_create_db_failure_rolls_back_and_closes(client, database, stage):
 @pytest.mark.parametrize(
     "constraint,code",
     [("VenueClosure_venue_id_fkey", 404), ("VenueClosure_created_by_fkey", 400)],
+    ids=["unknown_venue", "unknown_creator"],
 )
-def test_fk_failure(client, database, constraint, code):
+def test_create_closure_with_unknown_venue_or_user_returns_error(client, database, constraint, code):
+    """
+    Summary: A closure for an unknown venue or by an unknown user is refused.
+    AC3: Given the closure cannot be saved, then the system displays a failure
+        message and does not report successful creation.
+    Double: Stub (insert raises ForeignKeyViolation)
+    """
+    # Arrange (Given)
     class FK(psycopg2.IntegrityError):
         pgcode = "23503"
         diag = type("Diag", (), {"constraint_name": constraint})()
 
     client.application.config["DATABASE_URL"] = "fake-dsn"
     database[2].execute.side_effect = FK()
+
+    # Act + Assert (When / Then)
     assert (
         client.post("/venue-closures", json=BODY, headers=HEADERS).status_code == code
     )
@@ -317,13 +465,26 @@ def test_fk_failure(client, database, constraint, code):
     database[1].close.assert_called_once()
 
 
-def test_overlapping_creates_are_not_rejected(client, database):
+def test_create_overlapping_closures_are_both_saved(client, database):
+    """
+    Summary: Overlapping closures can both be recorded.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
+
+    # Act (When)
     for _ in range(2):
         assert (
             client.post("/venue-closures", json=BODY, headers=HEADERS).status_code
             == 201
         )
+
+    # Assert (Then)
     assert (
         sum(
             'INSERT INTO public."VenueClosure"' in call.args[0]
@@ -333,9 +494,20 @@ def test_overlapping_creates_are_not_rejected(client, database):
     )
 
 
-def test_reason_is_parameterized(client, database):
+def test_create_closure_sends_reason_as_parameter(client, database):
+    """
+    Summary: The reason is sent as a query parameter, never pasted into SQL.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor; SQL inspected)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
     reason = '\'); DROP TABLE public."VenueClosure"; --'
+
+    # Act + Assert (When / Then)
     assert (
         client.post(
             "/venue-closures",
@@ -348,15 +520,22 @@ def test_reason_is_parameterized(client, database):
     assert reason not in sql and params[3] == reason
 
 
-def test_no_database_config(client, database):
-    client.application.config["DATABASE_URL"] = None
-    assert client.post("/venue-closures", json=BODY, headers=HEADERS).status_code == 503
-    database[0].assert_not_called()
-
-
-def test_get_closure_and_missing(client, database):
+def test_get_closure_returns_it_or_404(client, database):
+    """
+    Summary: One closure can be read with its venue, period and reason, or reported missing.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor returns a row or nothing)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
+
+    # Act (When)
     r = client.get("/venue-closures/" + UID, headers=HEADERS)
+
+    # Assert (Then)
     assert r.status_code == 200 and r.json["closure"]["closureId"] == UID
     assert database[2].execute.call_args.args[1] == (UID,)
     database[2].fetchone.return_value = None
@@ -364,16 +543,29 @@ def test_get_closure_and_missing(client, database):
     assert database[1].close.call_count == 2
 
 
-def test_list_paginates_with_lookahead_and_foreign_cursor(client, database):
+def test_list_closures_paginates_and_rejects_other_venues_cursor(client, database):
+    """
+    Summary: Closures are listed a page at a time, and another venue's cursor is refused.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor returns rows)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
     _, conn, cur, row = database
     cur.fetchall.return_value = [
         row,
         {**row, "closure_id": "00000000-0000-0000-0000-000000000002"},
     ]
+
+    # Act (When)
     r = client.get(
         "/venue-closures", query_string={"venueId": UID, "limit": 1}, headers=HEADERS
     )
+
+    # Assert (Then)
     assert r.status_code == 200 and len(r.json["closures"]) == 1
     cursor = r.json["nextCursor"]
     assert cursor
@@ -412,12 +604,24 @@ def test_list_paginates_with_lookahead_and_foreign_cursor(client, database):
         [UID, "2099-01-01T00:00:00Z", "bad"],
         [UID, "2099-01-01T00:00:00Z", UID, 1],
     ],
+    ids=["empty", "empty_2", "uid_bad_uid", "uid_2099_01_01t00_00_00z_bad", "uid_2099_01_01t00_00_00z_uid_1"],
 )
-def test_malformed_cursor_payload(client, payload):
+def test_list_closures_with_malformed_cursor_returns_400(client, payload):
+    """
+    Summary: A tampered page cursor is refused.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: None
+    """
+    # Arrange (Given)
     import base64
     import json
 
     cursor = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+    # Act + Assert (When / Then)
     assert (
         client.get(
             "/venue-closures",
@@ -429,24 +633,47 @@ def test_malformed_cursor_payload(client, payload):
 
 
 @pytest.mark.parametrize(
-    "path", ["/venue-closures/" + UID, "/venue-closures?venueId=" + UID]
+    "path", ["/venue-closures/" + UID, "/venue-closures?venueId=" + UID],
+    ids=["single_closure", "venue_list"],
 )
-def test_read_failure_cleanup(client, database, path):
+def test_read_closures_when_database_fails_closes_connection(client, database, path):
+    """
+    Summary: A failed read still closes its connection.
+    AC3: Given the closure cannot be saved, then the system displays a failure
+        message and does not report successful creation.
+    Double: Stub (cursor raises), Mock (close)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
     database[2].execute.side_effect = psycopg2.OperationalError()
+
+    # Act + Assert (When / Then)
     assert client.get(path, headers=HEADERS).status_code == 503
     database[1].rollback.assert_called_once()
     database[1].close.assert_called_once()
 
 
-def test_legacy_nullable_metadata(client, database):
+def test_read_closure_with_missing_metadata_returns_nulls(client, database):
+    """
+    Summary: Older closures without creator or time still read.
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor returns a legacy row)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
     database[2].fetchone.return_value = {
         **database[3],
         "created_at": None,
         "created_by": None,
     }
+
+    # Act (When)
     r = client.get("/venue-closures/" + UID, headers=HEADERS)
+
+    # Assert (Then)
     assert r.status_code == 200
     assert (
         r.json["closure"]["createdAt"] is None
@@ -454,15 +681,85 @@ def test_legacy_nullable_metadata(client, database):
     )
 
 
-def test_legacy_null_venue_is_not_string_none(client, database):
+def test_read_closure_with_null_venue_returns_null_not_text(client, database):
+    """
+    Summary: A missing venue is returned as nothing, not the text "None".
+    AC1: Given an existing venue, Venue Staff can view an existing venue and
+        enter a start date/time, a later end date/time, and a nonblank
+        operational reason and save, then the closure is persisted and its
+        venue, period, and reason are displayed.
+    Double: Stub (cursor returns a row without venue)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
     database[2].fetchone.return_value = {**database[3], "venue_id": None}
+
+    # Act (When)
     response = client.get("/venue-closures/" + UID, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["closure"]["venueId"] is None
 
 
-def test_other_integrity_error_is_controlled(client, database):
+def test_create_closure_with_other_integrity_error_returns_controlled_error(client, database):
+    """
+    Summary: Any other database integrity error is reported as a controlled failure.
+    AC3: Given the closure cannot be saved, then the system displays a failure
+        message and does not report successful creation.
+    Double: Stub (insert raises IntegrityError)
+    """
+    # Arrange (Given)
     client.application.config["DATABASE_URL"] = "fake-dsn"
     database[2].execute.side_effect = psycopg2.IntegrityError()
+
+    # Act + Assert (When / Then)
     assert client.post("/venue-closures", json=BODY, headers=HEADERS).status_code == 503
+
+
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+@pytest.mark.parametrize("path", ["/venue-closures", "/venue-closures/" + UID], ids=["collection", "single_closure"])
+def test_closure_preflight_from_frontend_is_allowed(client, path):
+    """
+    Summary: The frontend may manage closures from a browser.
+    Supporting design check: CORS for the configured frontend origin
+    Double: None
+    """
+    r = client.options(
+        path,
+        headers={
+            "Origin": "http://localhost:5174",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers["Access-Control-Allow-Origin"] == "http://localhost:5174"
+    assert "Authorization" in r.headers["Access-Control-Allow-Headers"]
+
+
+def test_closure_preflight_from_other_origin_gets_no_grant(client):
+    """
+    Summary: Other websites get no browser access.
+    Supporting design check: CORS for the configured frontend origin
+    Double: None
+    """
+    r = client.options(
+        "/venue-closures", headers={"Origin": "https://untrusted.example"}
+    )
+    assert "Access-Control-Allow-Origin" not in r.headers
+
+
+def test_closures_when_database_url_missing_return_503(client, database):
+    """
+    Summary: Closures report themselves unavailable when no database is configured.
+    Supporting design check: an unconfigured service answers 503
+    Double: None
+    """
+    client.application.config["DATABASE_URL"] = None
+    assert client.post("/venue-closures", json=BODY, headers=HEADERS).status_code == 503
+    database[0].assert_not_called()

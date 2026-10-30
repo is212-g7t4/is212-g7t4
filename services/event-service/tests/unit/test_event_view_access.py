@@ -1,27 +1,55 @@
-"""SCRUM-9 Role-based viewing control for events: Event Service unit tests.
+"""
+SCRUM-9: Role-Based Access Control for Events
 
-Story:      As a registered user, I want to view only information appropriate to my
-            role and relationship to an event, so that I can access the information
-            relevant to my responsibilities without viewing restricted information.
-Real:       Flask app, routes, token verification and role checks, row serialisation.
-Doubled:    psycopg2 (mocked cursor).
-Not proven: SQL scoping against a real database (see tests/integration/test_event_view_access.py);
-            which events an Attendee registered for (Attendee Registration Service).
-            Modification of events is not covered here (SCRUM-10).
+User Story
+----------
+As a registered user, I want to view only information appropriate to my role
+and relationship to an event, so that I can access the information relevant to
+my responsibilities without viewing restricted information.
 
-AC1  Given an authenticated user is permitted to view information based on their role and
-     relationship to the event, when they access that information, then the information
-     is made available to them.
-AC2  Given an authenticated user's role does not permit them to view particular information,
-     when they attempt to access that information, then access is denied.
-AC3  Given an authenticated user's relationship to an event does not permit them to view that
-     event's information, when they attempt to access the information, then access is denied.
-AC4  Given a user is permitted to view information for one event but does not have the
-     required relationship to another event, when they attempt to view information for both
-     events, then they can only view the information for which they have the required access.
-AC5  Given two authenticated users have different roles or relationships to the same event,
-     when they access information relating to that event, then each user can only view the
-     information permitted by their own role and relationship to the event.
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to view information based on
+     their role and relationship to the event, when they access that
+     information, then the information is made available to them.
+AC2: Given an authenticated user's role does not permit them to view particular
+     information, when they attempt to access that information, then access is
+     denied.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to view that event's information, when they attempt to access the
+     information, then access is denied.
+AC4: Given a user is permitted to view information for one event but does not
+     have the required relationship to another event, when they attempt to view
+     information for both events, then they can only view the information for
+     which they have the required access.
+AC5: Given two authenticated users have different roles or relationships to the
+     same event, when they access information relating to that event, then each
+     user can only view the information permitted by their own role and
+     relationship to the event.
+
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 import json
 from datetime import UTC, datetime
@@ -68,24 +96,42 @@ def event_row(event_id=EVENT_ID, coordinator_id=COORDINATOR_ID):
 
 # AC1 ----
 
-def test_ac1_assigned_coordinator_sees_their_event(setup):
-    """Normal: the coordinator assigned to an event may open it."""
+def test_assigned_coordinator_sees_their_event(setup):
+    """
+    Summary: The coordinator assigned to an event may open it.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = signed_in(client, COORDINATOR_ID, "Event Coordinator").get(f"/events/{EVENT_ID}")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["id"] == EVENT_ID
 
 
-def test_ac1_lead_sees_the_unassigned_queue(setup):
-    """Normal: the Lead's role permits the unassigned queue."""
+def test_lead_sees_the_unassigned_queue(setup):
+    """
+    Summary: The Lead's role permits the unassigned queue.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchall.return_value = [event_row(coordinator_id=None)]
 
+    # Act (When)
     response = signed_in(client, role=LEAD).get("/events/unassigned")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert len(response.json["events"]) == 1
 
@@ -103,65 +149,114 @@ def test_ac1_lead_sees_the_unassigned_queue(setup):
         ("/events/overlapping", "Attendee"),
     ],
 )
-def test_ac2_a_role_outside_the_routes_allowlist_is_denied(setup, path, role):
-    """Failure: routes that were open to any signed-in user now refuse the wrong role."""
+def test_a_role_outside_the_routes_allowlist_is_denied(setup, path, role):
+    """
+    Summary: Routes that were open to any signed-in user now refuse the wrong role.
+    AC2: Given an authenticated user's role does not permit them to view
+        particular information, when they attempt to access that information,
+        then access is denied.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
 
+    # Act (When)
     response = signed_in(client, role=role).get(path)
 
+    # Assert (Then)
     assert response.status_code == 403
     cursor.execute.assert_not_called()
 
 
 # AC3 ----
 
-def test_ac3_coordinator_not_assigned_to_the_event_is_denied(setup):
-    """Failure: a coordinator's relationship to the event decides access."""
+def test_coordinator_not_assigned_to_the_event_is_denied(setup):
+    """
+    Summary: A coordinator's relationship to the event decides access.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
 
+    # Act (When)
     response = signed_in(client, COORDINATOR_ID, "Event Coordinator").get(f"/events/{EVENT_ID}")
 
+    # Assert (Then)
     assert response.status_code == 403
 
 
-def test_ac3_organiser_cannot_open_an_event_someone_else_created(setup):
-    """Failure: an organiser sees only the events they created."""
+def test_organiser_cannot_open_an_event_someone_else_created(setup):
+    """
+    Summary: An organiser sees only the events they created.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = signed_in(client, OTHER_ORGANISER_ID, "Event Organiser").get(
         f"/events/{EVENT_ID}?organiserId={OTHER_ORGANISER_ID}"
     )
 
+    # Assert (Then)
     assert response.status_code == 403
 
 
 # AC4 ----
 
-def test_ac4_coordinator_gets_only_the_event_they_are_assigned_to(setup):
-    """Conflict: asking for both events returns one and refuses the other."""
+def test_coordinator_gets_only_the_event_they_are_assigned_to(setup):
+    """
+    Summary: Asking for both events returns one and refuses the other.
+    AC4: Given a user is permitted to view information for one event but does
+        not have the required relationship to another event, when they attempt
+        to view information for both events, then they can only view the
+        information for which they have the required access.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
     coordinator = signed_in(client, COORDINATOR_ID, "Event Coordinator")
     cursor.fetchone.side_effect = [event_row(), event_row(OTHER_EVENT_ID, OTHER_COORDINATOR_ID)]
 
     allowed = coordinator.get(f"/events/{EVENT_ID}")
+
+    # Act (When)
     refused = coordinator.get(f"/events/{OTHER_EVENT_ID}")
 
+    # Assert (Then)
     assert (allowed.status_code, refused.status_code) == (200, 403)
 
 
 # AC5 ----
 
-def test_ac5_lead_and_venue_staff_get_different_views_of_the_same_event(setup):
-    """Normal: staff see the event but not the organiser or internal action history."""
+def test_lead_and_venue_staff_get_different_views_of_the_same_event(setup):
+    """
+    Summary: Staff see the event but not the organiser or internal action history.
+    AC5: Given two authenticated users have different roles or relationships to
+        the same event, when they access information relating to that event,
+        then each user can only view the information permitted by their own
+        role and relationship to the event.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor = setup
     cursor.fetchone.return_value = event_row()
     url = f"/events/{EVENT_ID}?viewerRole=1"
 
     lead = signed_in(client, role=LEAD).get(url).json
+
+    # Act (When)
     staff = signed_in(client, role="Venue Staff").get(url).json
 
+    # Assert (Then)
     assert lead["organiserId"] == ORGANISER_ID and lead["actionHistory"]
     assert staff["id"] == EVENT_ID
     for hidden in ("organiserId", "actionHistory", "decision", "decisionHistory"):

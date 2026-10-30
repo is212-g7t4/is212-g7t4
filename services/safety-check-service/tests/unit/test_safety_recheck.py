@@ -1,24 +1,53 @@
-"""SCRUM-153: POST /safety-checks/recheck.
+"""
+SCRUM-153: Re-check Safety After High-Impact Changes
 
-AC1 Given an event is 'Confirmed', when its date/time, expected attendance,
-    venue requirements, equipment requirements or accessibility needs change,
-    then its status returns to 'Pending Safety Check' and the coordinator is
-    told why.
-AC2 Given only a low-impact field changes (name, description, purpose,
-    registration needs), then the event stays 'Confirmed' — so this route
-    refuses to withdraw anything for such an edit.
-AC3 Given a safety approval is withdrawn, then it stays visible in the event's
-    safety history — round N is withdrawn, not deleted, and comes back in the
-    response next to the new round.
+User Story
+----------
+As an Event Coordinator, I want a safety approval to be withdrawn when a
+high-impact detail changes afterwards, so that the event is never prepared on
+the basis of an outdated safety review.
 
-The withdrawal writes two entities owned by two atomics (`Event` and
-`SafetyCheck`), and atomics never call each other, so the workflow is a
-composite (AGENTS.md). Record first, then event, as in SCRUM-149 to 151: the
-record service's row lock is the race guard.
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Confirmed', when its date/time, expected attendance,
+     venue requirements, equipment requirements or accessibility needs change,
+     then its status returns to 'Pending Safety Check' and the coordinator is
+     told why.
+AC2: Given only a low-impact field changes (name, description, purpose,
+     registration needs), then the event stays 'Confirmed'.
+AC3: Given a safety approval is withdrawn, then it stays visible in the event's
+     safety history.
+AC4: Given a high-impact change to a 'Confirmed' event is waiting for its new
+     safety check, when a registered Attendee views the event, then they still
+     see the previously approved details, and the changed details are shown to
+     them only after the Safety Officer approves the new safety check.
+AC5: Given the new safety check ends without approval (changes requested or the
+     event is cancelled), then registered Attendees are never shown the
+     unapproved change, and they continue to see the last approved details or
+     the cancellation.
 
-Every downstream call is a monkeypatched `app.clients` wrapper, so these tests
-exercise the orchestration and the error mapping, not HTTP (`test_clients.py`
-covers that).
+Real
+----
+- POST /safety-checks/recheck: the assigned-coordinator read, the Confirmed
+  gate, deciding whether a high-impact field really changes, withdrawing round
+  N and opening N+1, saving the edit with both round ids, and restoring on
+  failure.
+- Assertions are on the status, reason and order of downstream calls.
+
+Doubled
+-------
+- Event, Safety Check Record, Venue Availability, Venue, Equipment Request,
+  Equipment and User Services: Stub (monkeypatched app.clients functions) -
+  canned answers or raised client errors; calls recorded so tests assert the
+  order and what was (or was not) called.
+
+Not proven
+----------
+- That the atomic services behave as stubbed, and that a compensation really
+  restores state in the database (-> each atomic service's unit and integration
+  tests, and tests/integration/ here with respx).
+- That attendees keep seeing the approved details meanwhile (AC4, AC5) (->
+  event-service and attendee-registration-service tests).
 """
 import logging
 
@@ -164,10 +193,23 @@ def assert_no_writes(downstream):
 # --- AC1, AC3: the happy path -------------------------------------------------
 
 
-def test_a_recheck_withdraws_the_approval_and_saves_the_edit(client, downstream):
-    """AC1/AC3: round N is withdrawn, round N+1 opens, the event moves back."""
+def test_recheck_withdraws_approval_and_saves_edit(client, downstream):
+    """
+    Summary: A high-impact change withdraws the approval, opens a new round and saves the edit.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["event"]["status"] == "Pending Safety Check"
     assert response.json["safetyCheck"]["roundNumber"] == 3
@@ -186,21 +228,42 @@ def test_a_recheck_withdraws_the_approval_and_saves_the_edit(client, downstream)
     ]
 
 
-def test_the_event_is_read_as_the_assigned_coordinator(client, downstream):
-    """Event Service answers 403 for a stranger, so this needn't check itself."""
+def test_recheck_reads_event_as_assigned_coordinator(client, downstream):
+    """
+    Summary: The event is read as the coordinator, so a stranger is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     recheck(client)
 
+    # Assert (Then)
     assert downstream.call("get_event") == ("get_event", EVENT_ID, COORDINATOR_ID, None)
 
 
-def test_the_withdrawal_reason_names_the_changed_details(client, downstream):
-    """AC1 "told why": the reason is stored on round N and echoed to the caller."""
+def test_recheck_reason_names_changed_details(client, downstream):
+    """
+    Summary: The coordinator is told which details caused the re-check.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     response = recheck(
         client,
         {"expectedAttendance": "400", "venueRequirements": "Hall B, with a stage"},
     )
 
     reason = "Expected attendance and Venue requirements changed after safety approval."
+
+    # Act + Assert (When / Then)
     assert response.json["reason"] == reason
     assert downstream.call("withdraw") == (
         "withdraw",
@@ -210,8 +273,18 @@ def test_the_withdrawal_reason_names_the_changed_details(client, downstream):
     )
 
 
-def test_both_date_fields_read_as_one_label(client, downstream):
-    """Changing start and end is one "Date/time" change, said once."""
+def test_recheck_reason_counts_start_and_end_as_one_change(client, downstream):
+    """
+    Summary: Changing start and end is one date/time change.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(
         client,
         {
@@ -220,17 +293,29 @@ def test_both_date_fields_read_as_one_label(client, downstream):
         },
     )
 
+    # Assert (Then)
     assert response.json["reason"] == "Date/time changed after safety approval."
 
 
-def test_the_edit_is_sent_with_both_round_ids_for_the_gate(client, downstream):
-    """Event Service re-checks the withdrawn round under its own lock."""
+def test_recheck_sends_edit_with_both_round_ids(client, downstream):
+    """
+    Summary: The edit carries both round ids so Event Service can verify it.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     changes = {"expectedAttendance": "400", "eventName": "Renamed"}
     recheck(client, changes)
 
+    # Act (When)
     _name, event_id, coordinator_id, sent_changes, safety_recheck = downstream.call(
         "patch_details"
     )
+
+    # Assert (Then)
     assert event_id == EVENT_ID
     assert coordinator_id == COORDINATOR_ID
     # The whole edit goes through, low-impact fields included: it is one change.
@@ -243,23 +328,39 @@ def test_the_edit_is_sent_with_both_round_ids_for_the_gate(client, downstream):
 
 
 @pytest.mark.parametrize("field", list(HIGH_IMPACT_FIELDS))
-def test_each_high_impact_field_triggers_a_recheck(field, client, downstream):
-    """AC1: each of the five AC1 details alone invalidates the review."""
+def test_recheck_for_each_high_impact_field_withdraws_approval(field, client, downstream):
+    """
+    Summary: Each high-impact detail on its own triggers a re-check.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given): field, client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client, {field: HIGH_IMPACT_CHANGES[field]})
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["changedFields"] == [field]
     assert "withdraw" in downstream.names()
 
 
-def test_bookings_and_equipment_are_never_touched(client, downstream):
-    """Round N+1 is reviewed as it stands; the officer requests changes if needed.
-
-    Nothing here calls Venue Availability, Equipment Request or User Service,
-    so a re-check can't release an arrangement the event still needs.
+def test_recheck_never_touches_bookings_or_equipment(client, downstream):
     """
+    Summary: A re-check leaves bookings and equipment alone.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     recheck(client)
 
+    # Act + Assert (When / Then)
     assert set(downstream.names()) <= {
         "get_event",
         "list_records",
@@ -276,12 +377,22 @@ def test_bookings_and_equipment_are_never_touched(client, downstream):
     ["Submitted", "Under Review", "Approved", "Pending Safety Check",
      "Safety Changes Requested", "Rejected", "Cancelled"],
 )
-def test_only_a_confirmed_event_can_be_rechecked(status, client, downstream):
-    """Only a 'Confirmed' event holds an approval, so there is nothing else to withdraw."""
+def test_recheck_for_unconfirmed_event_returns_409(status, client, downstream):
+    """
+    Summary: Only a Confirmed event can be re-checked.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.event = event(status)
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "RECHECK_NOT_NEEDED"
     assert response.json["currentStatus"] == status
@@ -289,10 +400,19 @@ def test_only_a_confirmed_event_can_be_rechecked(status, client, downstream):
 
 
 @pytest.mark.parametrize("field", list(LOW_IMPACT_FIELDS))
-def test_a_low_impact_edit_is_refused(field, client, downstream):
-    """AC2: the event stays 'Confirmed', so this route has nothing to do."""
+def test_recheck_with_only_low_impact_change_returns_409(field, client, downstream):
+    """
+    Summary: A low-impact change does not need a re-check; the event stays Confirmed.
+    AC2: Given only a low-impact field changes (name, description, purpose,
+        registration needs), then the event stays 'Confirmed'.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given): field, client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client, {field: LOW_IMPACT_CHANGES[field]})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "RECHECK_NOT_NEEDED"
     assert "approval stands" in response.json["message"]
@@ -309,36 +429,62 @@ def test_a_low_impact_edit_is_refused(field, client, downstream):
         {"preferredStartDate": "2026-11-10T09:00:00.000"},
         {"preferredStartDate": "2026-11-10T01:00:00+00:00"},
     ],
+    ids=["expectedattendance_120", "expectedattendance_120_2", "venuerequirements_hall_a", "preferredstartdate_2026_11_10t09_00", "preferredstartdate_2026_11_10t09_00_00_000", "preferredstartdate_2026_11_10t01_00_00_00_00"],
 )
-def test_resending_unchanged_values_withdraws_nothing(changes, client, downstream):
-    """AC2: "changed" is decided on normalised values, as Event Service decides it.
-
-    Catching this here means a no-op edit never withdraws an approval that
-    then has to be compensated back.
+def test_recheck_with_unchanged_values_withdraws_nothing(changes, client, downstream):
     """
+    Summary: Sending the same values again changes nothing.
+    AC2: Given only a low-impact field changes (name, description, purpose,
+        registration needs), then the event stays 'Confirmed'.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given): changes, client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client, changes)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "RECHECK_NOT_NEEDED"
     assert_no_writes(downstream)
 
 
-def test_filling_in_a_date_the_event_never_had_is_a_change(client, downstream):
-    """A blank stored date is not "the same as" a real one."""
+def test_recheck_setting_a_missing_date_counts_as_change(client, downstream):
+    """
+    Summary: Filling in a date the event never had is a change.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.event = event("Confirmed", preferredStartDate="")
 
+    # Act (When)
     response = recheck(client, {"preferredStartDate": "2026-11-10T08:00:00"})
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["changedFields"] == ["preferredStartDate"]
 
 
-def test_a_malformed_stored_date_is_compared_as_text(client, downstream):
-    """Defensive: an unparseable date is still comparable, so this can't 500."""
+def test_recheck_compares_malformed_stored_date_as_text(client, downstream):
+    """
+    Summary: An unreadable stored date is still compared.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.event = event("Confirmed", preferredStartDate="not-a-date")
 
+    # Act (When)
     response = recheck(client, {"preferredStartDate": "not-a-date"})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "RECHECK_NOT_NEEDED"
 
@@ -346,21 +492,43 @@ def test_a_malformed_stored_date_is_compared_as_text(client, downstream):
 # --- Access and input ---------------------------------------------------------
 
 
-def test_a_stranger_is_refused(client, downstream):
+def test_recheck_by_other_coordinator_returns_403(client, downstream):
+    """
+    Summary: Another coordinator cannot re-check the event.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = clients.EventNotAssignedError()
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "NOT_ASSIGNED_COORDINATOR"
     assert_no_writes(downstream)
 
 
-def test_a_missing_event_is_404(client, downstream):
+def test_recheck_unknown_event_returns_404(client, downstream):
+    """
+    Summary: Re-checking an unknown event is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = clients.EventNotFoundError()
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 404
     assert_no_writes(downstream)
 
@@ -372,21 +540,46 @@ def test_a_missing_event_is_404(client, downstream):
         {"coordinatorId": OTHER_COORDINATOR_ID},
         {},
     ],
+    ids=["eventid_nope_coordinatorid_coordinator_id", "coordinatorid_other_coordinator_id", "empty"],
 )
-def test_bad_identifiers_are_rejected(body, client, downstream):
+def test_recheck_with_bad_ids_returns_400(body, client, downstream):
+    """
+    Summary: A re-check needs valid ids.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given): body, client, downstream, from fixtures
+
+    # Act (When)
     response = client.post(
         "/safety-checks/recheck", json={**body, "changes": {"expectedAttendance": "400"}}
     )
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "eventId must be a valid UUID."
     assert downstream.names() == []
 
 
-@pytest.mark.parametrize("changes", [{}, None, [], "eventName", 7])
-def test_changes_must_be_a_non_empty_object(changes, client, downstream):
+@pytest.mark.parametrize("changes", [{}, None, [], "eventName", 7], ids=["empty", "none", "empty_2", "eventname", "7"])
+def test_recheck_without_changes_returns_400(changes, client, downstream):
+    """
+    Summary: A re-check needs a set of changes.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given): changes, client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client, changes)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == (
         "changes must be a non-empty object of fields to update."
@@ -395,25 +588,61 @@ def test_changes_must_be_a_non_empty_object(changes, client, downstream):
 
 
 @pytest.mark.parametrize("field", ["status", "coordinatorId", "id"])
-def test_fields_that_are_not_editable_are_rejected(field, client, downstream):
+def test_recheck_with_uneditable_field_returns_400(field, client, downstream):
+    """
+    Summary: Fields that cannot be edited are refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given): field, client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client, {field: "whatever"})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert field in response.json["message"]
     assert downstream.names() == []
 
 
-def test_every_change_value_must_be_text(client, downstream):
+def test_recheck_with_non_text_value_returns_400(client, downstream):
+    """
+    Summary: Every changed value must be text.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = recheck(client, {"expectedAttendance": 400})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Every value in changes must be text."
     assert downstream.names() == []
 
 
-def test_a_non_object_body_is_rejected(client, downstream):
+def test_recheck_with_non_object_body_returns_400(client, downstream):
+    """
+    Summary: A request that is not a re-check is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: None
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = client.post("/safety-checks/recheck", json=["not", "an", "object"])
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Send a JSON object."
     assert downstream.names() == []
@@ -425,30 +654,59 @@ def test_a_non_object_body_is_rejected(client, downstream):
 @pytest.mark.parametrize(
     "status", ["Pending", "Changes Requested", "Safety Rejected", "Approval Withdrawn"]
 )
-def test_a_latest_round_that_is_not_approved_is_refused(status, client, downstream):
-    """Data drift: the event says 'Confirmed' but no round is in force."""
+def test_recheck_when_latest_round_not_approved_returns_409(status, client, downstream):
+    """
+    Summary: With no approval in force, there is nothing to withdraw.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.rounds = [record(round_number=2, status=status)]
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NO_APPROVED_SAFETY_CHECK"
     assert_no_writes(downstream)
 
 
-def test_an_event_with_no_rounds_at_all_is_refused(client, downstream):
+def test_recheck_without_rounds_returns_409(client, downstream):
+    """
+    Summary: An event with no rounds cannot be re-checked.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.rounds = []
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NO_APPROVED_SAFETY_CHECK"
     assert response.json["safetyCheck"] is None
     assert_no_writes(downstream)
 
 
-def test_a_concurrent_recheck_wins_the_race(client, downstream):
-    """The record service's lock decides. The loser never touches the event."""
+def test_recheck_losing_race_changes_nothing(client, downstream):
+    """
+    Summary: When two re-checks race, the loser changes nothing.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["withdraw"] = clients.RoundNotApprovedError(
         "ROUND_NOT_APPROVED",
         {
@@ -458,8 +716,10 @@ def test_a_concurrent_recheck_wins_the_race(client, downstream):
         },
     )
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "ROUND_NOT_APPROVED"
     assert response.json["safetyCheck"]["status"] == "Approval Withdrawn"
@@ -467,21 +727,43 @@ def test_a_concurrent_recheck_wins_the_race(client, downstream):
     assert "restore" not in downstream.names()
 
 
-def test_a_withdraw_conflict_with_no_body_still_reports_the_race(client, downstream):
+def test_recheck_conflict_without_body_still_reports_race(client, downstream):
+    """
+    Summary: A conflict without details is still reported as the race.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["withdraw"] = clients.RoundNotApprovedError(None, {})
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "ROUND_NOT_APPROVED"
     assert "already been withdrawn" in response.json["message"]
 
 
-def test_a_round_that_vanished_is_reported_as_no_approval(client, downstream):
+def test_recheck_when_round_vanishes_reports_no_approval(client, downstream):
+    """
+    Summary: A round that vanished is reported as no approval.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["withdraw"] = clients.RecordNotFoundError()
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "NO_APPROVED_SAFETY_CHECK"
     assert "patch_details" not in downstream.names()
@@ -490,12 +772,24 @@ def test_a_round_that_vanished_is_reported_as_no_approval(client, downstream):
 @pytest.mark.parametrize(
     ("error", "status"),
     [(clients.DownstreamTimeout(), 504), (clients.DownstreamError(), 502)],
+    ids=["clients_downstreamtimeout_504", "clients_downstreamerror_502"],
 )
-def test_a_failed_withdrawal_touches_nothing_else(error, status, client, downstream):
+def test_recheck_when_withdrawal_fails_changes_nothing_else(error, status, client, downstream):
+    """
+    Summary: A failed withdrawal leaves the event as it was.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["withdraw"] = error
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == status
     assert "patch_details" not in downstream.names()
     assert "restore" not in downstream.names()
@@ -504,13 +798,24 @@ def test_a_failed_withdrawal_touches_nothing_else(error, status, client, downstr
 @pytest.mark.parametrize(
     ("error", "status"),
     [(clients.DownstreamTimeout(), 504), (clients.DownstreamError(), 502)],
+    ids=["clients_downstreamtimeout_504", "clients_downstreamerror_502"],
 )
-def test_an_unreadable_round_list_blocks_the_recheck(error, status, client, downstream):
-    """Fail closed: an unreadable round is never treated as "nothing approved"."""
+def test_recheck_when_rounds_unreadable_is_refused(error, status, client, downstream):
+    """
+    Summary: Unreadable rounds are never treated as no approval.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["list_records"] = error
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == status
     assert_no_writes(downstream)
 
@@ -518,12 +823,24 @@ def test_an_unreadable_round_list_blocks_the_recheck(error, status, client, down
 @pytest.mark.parametrize(
     ("error", "status"),
     [(clients.DownstreamTimeout(), 504), (clients.DownstreamError(), 502)],
+    ids=["clients_downstreamtimeout_504", "clients_downstreamerror_502"],
 )
-def test_an_unreadable_event_blocks_the_recheck(error, status, client, downstream):
+def test_recheck_when_event_unreadable_is_refused(error, status, client, downstream):
+    """
+    Summary: An unreadable event blocks the re-check.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["get_event"] = error
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == status
     assert_no_writes(downstream)
 
@@ -573,28 +890,48 @@ def test_an_unreadable_event_blocks_the_recheck(error, status, client, downstrea
         "transport",
     ],
 )
-def test_a_failed_edit_restores_the_approval(
+def test_recheck_when_edit_fails_restores_approval(
     error, expected_status, client, downstream
 ):
-    """The withdrawal is undone, so the event never reads 'Confirmed' with no approval."""
+    """
+    Summary: If the edit fails, the approval is restored.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["patch_details"] = error
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == expected_status
     assert downstream.call("restore") == ("restore", RECORD_ID, NEXT_RECORD_ID)
 
 
-def test_event_services_refusal_is_passed_through_verbatim(client, downstream):
-    """Event Service is the authority on the fields, the gate and the status."""
+def test_recheck_passes_event_service_refusal_through(client, downstream):
+    """
+    Summary: Event Service's refusal reaches the coordinator unchanged.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["patch_details"] = clients.EventDetailsRejectedError(
         "EVENT_UNDER_SAFETY_REVIEW",
         {"code": "EVENT_UNDER_SAFETY_REVIEW", "message": "Wait for the decision."},
         409,
     )
 
+    # Act (When)
     response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json == {
         "code": "EVENT_UNDER_SAFETY_REVIEW",
@@ -602,24 +939,41 @@ def test_event_services_refusal_is_passed_through_verbatim(client, downstream):
     }
 
 
-def test_a_failed_restore_is_logged_with_both_ids(client, downstream, caplog):
-    """Nothing left to try: both ids go to the log and the original error is returned."""
+def test_recheck_when_restore_fails_logs_both_ids(client, downstream, caplog):
+    """
+    Summary: When the restore fails too, both round ids are logged for repair.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (downstream clients), Mock (call order recorded)
+    """
+    # Arrange (Given)
     downstream.fail["patch_details"] = clients.DownstreamError()
     downstream.fail["restore"] = clients.DownstreamError()
 
+    # Act (When)
     with caplog.at_level(logging.ERROR):
         response = recheck(client)
 
+    # Assert (Then)
     assert response.status_code == 502
     assert RECORD_ID in caplog.text
     assert NEXT_RECORD_ID in caplog.text
     assert "must be fixed by hand" in caplog.text
 
 
-def test_the_two_field_sets_match_event_services():
-    """They are copied, not shared (AGENTS.md), so pin that they still agree."""
+def test_recheck_field_sets_match_event_service():
+    """
+    Summary: The low and high-impact field lists match Event Service's.
+    AC2: Given only a low-impact field changes (name, description, purpose,
+        registration needs), then the event stays 'Confirmed'.
+    Double: None
+    """
+    # Act (When)
     from app.routes import EDITABLE_FIELDS, FIELD_LABELS
 
+    # Assert (Then)
     assert set(LOW_IMPACT_FIELDS) | set(HIGH_IMPACT_FIELDS) == set(EDITABLE_FIELDS)
     assert not set(LOW_IMPACT_FIELDS) & set(HIGH_IMPACT_FIELDS)
     assert set(FIELD_LABELS) == set(EDITABLE_FIELDS)

@@ -1,14 +1,45 @@
-"""SCRUM-44 submission notifications: Workflow unit checks.
+"""
+SCRUM-44: Event Coordinator Notification and Alert Workflow
 
-Story: As a Lead Coordinator, I want to receive an in-app notification when an Event Organiser submits an event request, so that I can review it and make a decision.
+User Story
+----------
+As a Lead Coordinator, I want to receive an in-app notification when an Event
+Organiser submits an event request, so that I can review it and make a
+decision.
 
-AC1 Given an Event Organiser submits a new event request, the Lead Coordinator receives an in-app notification that a new request requires review.
-AC2 The notification includes the event name, Event Organiser name, proposed event date/time, and a link to review the event request.
-AC3 Saving or editing a draft event request does not trigger a submission notification.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Organiser submits a new event request, the Lead Coordinator
+     receives an in-app notification that a new request requires review.
+AC2: The notification includes the event name, Event Organiser name, proposed
+     event date/time, and a link to review the event request.
+AC3: Saving or editing a draft event request does not trigger a submission
+     notification.
 
-The real worker uses mocked HTTP responses and a mock publisher for lookups.
-Message-saving tests use a mock API and publisher. No real User service,
-Event database, broker, inbox or browser is exercised."""
+Real
+----
+- The event-workflow notification workers: they claim jobs from the owning
+  service's outbox over HTTP, look up current recipients and display facts, ask
+  the owner to freeze the envelope, publish the frozen envelope to RabbitMQ and
+  mark it published, retrying or holding on failure.
+- Assertions are on the envelopes frozen and published, call order, and
+  retry/hold decisions.
+
+Doubled
+-------
+- Owner outbox and lookup HTTP (Event, User, Registration, Venue Availability):
+  Stub (respx / monkeypatched httpx fixtures) - canned replies; requests
+  inspected.
+- RabbitMQ publisher (pika): Mock - publish arguments, confirms and persistence
+  inspected.
+
+Not proven
+----------
+- That the owner freezes the envelope in the same transaction as the change (->
+  the owning service's notification tests and integration tests).
+- That Notification Service stores and shows the inbox item (->
+  notification-service consumer tests and frontend NotificationCenter tests).
+"""
 import json
 from unittest.mock import Mock, patch
 
@@ -37,10 +68,15 @@ JOB = dict(id=ID, type='event.submission-fanout', source=SOURCE, envelope=None,
     (503, None, True),
 ], ids=['two-valid-leads', 'no-leads', 'malformed-user-list', 'wrong-role',
         'blank-organiser-name', 'malformed-organiser', 'user-service-unavailable'])
-def test_dr_lookup_result_is_expanded_or_retried_without_publishing(monkeypatch, caplog, users, name, failed):
-    """AC1: Valid lookup results prepare deliveries for both Leads or none.
-    Invalid data or an unavailable User service requests another attempt.
-    No message is published during this step."""
+def test_submission_alert_expands_to_leads_or_retries(monkeypatch, caplog, users, name, failed):
+    """
+    Summary: A submission alert goes to every Lead found, or is retried if the lookup is bad.
+    AC1: Given an Event Organiser submits a new event request, the Lead
+        Coordinator receives an in-app notification that a new request requires
+        review.
+    Double: Stub (user lookup results)
+    """
+    # Arrange (Given)
     monkeypatch.setenv('EVENT_SERVICE_URL', 'http://event.test')
     monkeypatch.setenv('USER_SERVICE_URL', 'http://user.test')
     monkeypatch.setenv('INTERNAL_SERVICE_TOKEN', 'synthetic-token')
@@ -59,8 +95,12 @@ def test_dr_lookup_result_is_expanded_or_retried_without_publishing(monkeypatch,
             return httpx.Response(200, json={'username': name} if not isinstance(name, list) else name)
         return httpx.Response(200, json={})
     broker = Mock()
+
+    # Act (When)
     with httpx.Client(transport=httpx.MockTransport(transport)) as client, patch('httpx.request', side_effect=client.request):
         assert dispatch_once(OutboxAPI(), broker) == 1
+
+    # Assert (Then)
     broker.assert_not_called()
     final = requests[-1]
     if failed:
@@ -77,10 +117,16 @@ def test_dr_lookup_result_is_expanded_or_retried_without_publishing(monkeypatch,
 # AC2 — Save the message before sending.
 
 @pytest.mark.parametrize('freeze_fails', [False, True], ids=['freeze-succeeds', 'freeze-fails'])
-def test_dr_submission_freezes_before_publish_and_uses_owner_result(freeze_fails):
-    """AC2: Save the full message before publishing, including the overnight period.
-    Publish the owner-returned message, not the unsaved candidate.
-    If saving fails, request another attempt without publishing or marking done."""
+def test_submission_alert_freezes_before_publish(freeze_fails):
+    """
+    Summary: A submission alert is frozen by the owner before it is sent, and nothing is sent if that fails.
+    AC1: Given an Event Organiser submits a new event request, the Lead
+        Coordinator receives an in-app notification that a new request requires
+        review.
+    AC2: The notification includes the event name, Event Organiser name,
+        proposed event date/time, and a link to review the event request.
+    Double: Stub (freeze succeeds or fails), Mock (publish)
+    """
     api = Mock()
     job = {**JOB, 'type': 'event.submission', 'source': {**SOURCE, 'recipientId': SECOND_LEAD, 'organiserName': 'Synthetic Organiser'}}
     api.claim.return_value = [job]

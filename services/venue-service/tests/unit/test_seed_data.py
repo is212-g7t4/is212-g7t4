@@ -1,9 +1,27 @@
-"""SCRUM-24 — the seed catalogue must have the same shape as live Supabase rows.
+"""
+SUPPORTING DESIGN CHECKS: Venue seed catalogue
 
-The seed script lives outside `app/`, so this checks its data rather than
-contributing to `--cov=app`. It guards the SCRUM-114 bug where the seed wrote
-status `Operational` and facilities as an array, neither of which matches the
-live rows the UI actually reads.
+User Story
+----------
+Supporting/supplementary design checks. No story or acceptance
+criterion describes the behaviour these tests check; it is plumbing
+that every story of this service relies on.
+
+Real
+----
+- scripts/seed_venues.py's VENUES are loaded for real and passed through
+  app.models.serialize().
+- Assertions are on the seed rows' statuses, facilities and layouts shapes and
+  name uniqueness.
+
+Doubled
+-------
+- Nothing: the seed module is imported directly; no database is touched.
+
+Not proven
+----------
+- That running the seed script against Supabase inserts these rows (NOT COVERED
+  ANYWHERE).
 """
 import importlib.util
 from pathlib import Path
@@ -18,9 +36,18 @@ spec.loader.exec_module(seed_venues)
 from app.models import serialize
 
 
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
 @pytest.mark.parametrize("venue", seed_venues.VENUES, ids=lambda v: v["venue_name"])
-def test_seed_venues_match_catalogue_shape(venue):
-    """Every seed row uses the live status names, object facilities and list layouts."""
+def test_seed_venue_when_loaded_matches_live_row_shape(venue):
+    """
+    Summary: Every seed venue uses the live status names, facilities object and layouts list.
+    Supporting design check: the seed catalogue is valid catalogue data
+    Double: None
+    """
     assert venue["operational_status"] in seed_venues.STATUSES
 
     assert isinstance(venue["facilities"], dict)
@@ -34,14 +61,22 @@ def test_seed_venues_match_catalogue_shape(venue):
     assert isinstance(venue["max_capacity"], int) and venue["max_capacity"] > 0
 
 
-def test_seed_venue_names_are_unique():
-    """The upsert keys on venue_name, so duplicates would silently overwrite."""
+def test_seed_catalogue_when_loaded_has_unique_names():
+    """
+    Summary: No two seed venues share a name, so the upsert cannot overwrite one with another.
+    Supporting design check: the seed catalogue is valid catalogue data
+    Double: None
+    """
     names = [venue["venue_name"] for venue in seed_venues.VENUES]
     assert len(names) == len(set(names))
 
 
-def test_seed_rows_survive_the_service_serializer():
-    """A seeded row read back through the API produces a clean venue payload."""
+def test_seed_row_when_serialized_gives_clean_venue():
+    """
+    Summary: A seed venue read back through the service gives a clean venue.
+    Supporting design check: the seed catalogue is valid catalogue data
+    Double: None
+    """
     row = {
         "venue_id": "8381b11e-aaae-4d58-bdba-2607e9e2bde2",
         **{

@@ -1,17 +1,44 @@
-"""SCRUM-152 AC1-AC2: an event can't progress to 'Confirmed' without a safety pass.
+"""
+SCRUM-152: Block Preparation Until Safety Approval
 
-'Confirmed' is the preparation stage — an event that has passed its Operational
-Safety Check is the one that may proceed. There is no separate 'In Preparation'
-status. Setting 'Confirmed' belongs to the safety workflow (SCRUM-150); this
-story only stops anything else from doing it.
+User Story
+----------
+As a Safety Officer, I want the system to stop an event moving to preparation
+until it has passed its Operational Safety Check, so that no event proceeds
+with unreviewed safety arrangements.
 
-AC1 Given an event's status is not 'Confirmed', when the assigned Event
-    Coordinator tries to move it to 'Confirmed' (the preparation stage) through
-    either the UI or the API, then the change is blocked and the reason is shown.
-AC2 Given an event has not yet reached the safety check, then the existing
-    status transitions (SCRUM-19) continue to work unchanged.
+Acceptance Criteria
+-------------------
+AC1: Given an event's status is not 'Confirmed', when the assigned Event
+     Coordinator tries to move it to 'Confirmed' (the preparation stage)
+     through either the UI or the API, then the change is blocked and the
+     reason is shown.
+AC2: Given an event has not yet reached the safety check, then the existing
+     status transitions (SCRUM-19) continue to work unchanged.
 
-Database calls are mocked; no live database writes.
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 import json
 from datetime import UTC, datetime
@@ -85,12 +112,24 @@ def patch_progress(client, status, action_details="Recording progress."):
 
 @pytest.mark.parametrize("current_status", UNCONFIRMED_STATUSES)
 def test_coordinator_cannot_confirm_event(current_status, setup):
-    """AC1 / SCRUM-153 AC2: only the safety workflow sets 'Confirmed'."""
+    """
+    Summary: Only the safety workflow sets 'Confirmed'.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    AC2: Given an event has not yet reached the safety check, then the existing
+        status transitions (SCRUM-19) continue to work unchanged.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(current_status)
 
+    # Act (When)
     response = patch_progress(client, "Confirmed", "All arrangements done.")
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_APPROVAL_REQUIRED"
     assert response.json["currentStatus"] == current_status
@@ -132,23 +171,43 @@ def test_coordinator_cannot_confirm_event(current_status, setup):
     ],
 )
 def test_block_message_names_the_reason(current_status, message, setup):
-    """AC1 "the reason is shown": the 409 message explains why, per status."""
+    """
+    Summary: The 409 message explains why, per status.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(current_status)
 
+    # Act (When)
     response = patch_progress(client, "Confirmed")
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["message"] == message
 
 
 def test_approved_event_tells_the_coordinator_to_submit_for_safety_check(setup):
-    """AC1: the actionable case — an approved event's next step is SCRUM-149."""
+    """
+    Summary: The actionable case — an approved event's next step is SCRUM-149.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Approved")
 
+    # Act (When)
     response = patch_progress(client, "Confirmed")
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["message"] == (
         "Submit this event for safety check for it to progress to Confirmed."
@@ -156,40 +215,69 @@ def test_approved_event_tells_the_coordinator_to_submit_for_safety_check(setup):
 
 
 def test_cancelled_event_cannot_progress(setup):
-    """AC1, and SCRUM-151 AC4: a safety rejection ends the lifecycle."""
+    """
+    Summary: A safety rejection ends the lifecycle.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Cancelled")
 
+    # Act (When)
     response = patch_progress(client, "Confirmed")
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_APPROVAL_REQUIRED"
     assert cursor.execute.call_count == 1
 
 
 def test_gate_checks_assignment_first(setup):
-    """AC1 is about the *assigned* coordinator: others get 403, not the reason."""
+    """
+    Summary: Others get 403, not the reason.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Approved", coordinator_id=OTHER_COORDINATOR_ID)
 
+    # Act (When)
     response = patch_progress(client, "Confirmed")
 
+    # Assert (Then)
     assert response.status_code == 403
     assert "code" not in response.json
     assert cursor.execute.call_count == 1
 
 
 def test_confirmed_event_stays_confirmed_and_records_progress(setup):
-    """Boundary: the gate must not over-block. An event already at 'Confirmed'
-    has passed its safety check, so recording progress against it still works."""
+    """
+    Summary: The gate must not over-block.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row("Confirmed"),
         event_row("Confirmed", action_details="Preparation under way."),
     ]
 
+    # Act (When)
     response = patch_progress(client, "Confirmed", "Preparation under way.")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Confirmed"
     assert response.json["actionDetails"] == "Preparation under way."
@@ -202,12 +290,22 @@ def test_confirmed_event_stays_confirmed_and_records_progress(setup):
     "status", ["Pending Safety Check", "Safety Changes Requested", "Cancelled"]
 )
 def test_coordinator_cannot_set_other_safety_status(status, setup):
-    """Guards the safety workflow: only it writes the safety statuses."""
+    """
+    Summary: Guards the safety workflow: only it writes the safety statuses.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Approved")
 
+    # Act (When)
     response = patch_progress(client, status)
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["message"] == (
         "This status change is not allowed for the event's current stage."
@@ -220,15 +318,23 @@ def test_coordinator_cannot_set_other_safety_status(status, setup):
     ["Pending Safety Check", "Confirmed", "Safety Changes Requested", "Cancelled"],
 )
 def test_self_save_on_safety_status_keeps_working(status, setup):
-    """AC2 spirit: recording action details never changes the status, so it's allowed."""
+    """
+    Summary: Recording action details never changes the status, so it's allowed.
+    AC2: Given an event has not yet reached the safety check, then the existing
+        status transitions (SCRUM-19) continue to work unchanged.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row(status),
         event_row(status, action_details="Logged the latest progress."),
     ]
 
+    # Act (When)
     response = patch_progress(client, status, "Logged the latest progress.")
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == status
     assert response.json["actionDetails"] == "Logged the latest progress."
@@ -236,43 +342,63 @@ def test_self_save_on_safety_status_keeps_working(status, setup):
 
 @pytest.mark.parametrize("status", ["In Preparation", "Preparing", "SafetyApproved"])
 def test_unknown_status_is_400(status, setup):
-    """Input validation: only the documented lifecycle statuses are accepted.
-
-    'In Preparation' is deliberately not a status — 'Confirmed' is the
-    preparation stage.
     """
+    Summary: Only the documented lifecycle statuses are accepted.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_progress(client, status)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"].startswith("Status must be one of: ")
     cursor.execute.assert_not_called()
 
 
 def test_gate_runs_under_row_lock(setup):
-    """A concurrent safety decision can't make the gate act on a stale status."""
+    """
+    Summary: A concurrent safety decision can't make the gate act on a stale status.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row("Approved")
 
+    # Act (When)
     patch_progress(client, "Confirmed")
 
+    # Assert (Then)
     assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
 
 
 def test_only_pending_safety_check_leads_into_confirmed():
-    """SCRUM-150: 'Pending Safety Check' is the only route into 'Confirmed'.
-
-    In SAFETY_TRANSITIONS, only 'Pending Safety Check' may move to
-    'Confirmed'. In ALLOWED_TRANSITIONS (this gate's table), nothing but
-    'Confirmed' itself may move there either — this story's AC3 and SCRUM-152
-    AC1 both hold.
     """
+    Summary: 'Pending Safety Check' is the only route into 'Confirmed'.
+    AC1: Given an event's status is not 'Confirmed', when the assigned Event
+        Coordinator tries to move it to 'Confirmed' (the preparation stage)
+        through either the UI or the API, then the change is blocked and the
+        reason is shown.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Act (When)
     sources_in_safety_transitions = {
         source
         for source, targets in SAFETY_TRANSITIONS.items()
         if "Confirmed" in targets
     }
+
+    # Assert (Then)
     assert sources_in_safety_transitions == {"Pending Safety Check"}
 
     sources_in_allowed_transitions = {
@@ -284,7 +410,13 @@ def test_only_pending_safety_check_leads_into_confirmed():
 
 
 def test_pre_safety_transitions_unchanged():
-    """SCRUM-152 AC2: SCRUM-19's transitions keep working unchanged."""
+    """
+    Summary: SCRUM-19's transitions keep working unchanged.
+    AC2: Given an event has not yet reached the safety check, then the existing
+        status transitions (SCRUM-19) continue to work unchanged.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Act + Assert (When / Then)
     assert ALLOWED_TRANSITIONS["Submitted"] == {"Submitted", "Under Review"}
     assert ALLOWED_TRANSITIONS["Under Review"] == {"Under Review", "Approved", "Rejected"}
     assert ALLOWED_TRANSITIONS["Approved"] == {"Approved"}
@@ -292,7 +424,11 @@ def test_pre_safety_transitions_unchanged():
 
 
 def test_safety_workflow_never_starts_before_approval():
-    """SCRUM-152 AC2: the safety workflow can't touch an event that hasn't
-    reached the safety check yet.
     """
+    Summary: The safety workflow can't touch an event that hasn't reached the safety check yet.
+    AC2: Given an event has not yet reached the safety check, then the existing
+        status transitions (SCRUM-19) continue to work unchanged.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Act + Assert (When / Then)
     assert not set(SAFETY_TRANSITIONS) & {"Submitted", "Under Review", "Rejected"}

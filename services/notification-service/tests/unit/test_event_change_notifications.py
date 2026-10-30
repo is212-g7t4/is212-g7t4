@@ -1,15 +1,43 @@
-"""SCRUM-49 Event Change and Modification Notifications: Notification unit tests.
+"""
+SCRUM-49: Event Change and Modification Notifications
 
-Story: As an Event Organiser and Event Coordinator, I want to receive notifications about event changes that affect me, so that I can respond to changes promptly.
-Real: consumer parsing, validation, process and store SQL construction.
-Doubled: PostgreSQL connection/cursor and broker ACK; no DB or broker runs here.
-Not proven: cross-service E2E, live broker delivery, authentication or browser navigation.
-AC = acceptance criterion; DR = supporting design rule, not an extra AC.
+User Story
+----------
+As an Event Organiser and Event Coordinator, I want to receive notifications
+about event changes that affect me, so that I can respond to changes promptly.
 
-AC1 Given an Event Organiser submits a change request, the system sends an in-app notification to the Event Coordinator with the event name, proposed changes, and a link to review the request.
-AC2 Given an approval or rejection of a change request is successfully recorded, the Event Organiser receives an in-app notification with the event name, decision, and reason if rejected.
-AC3 Given an event is cancelled or rejected, the system sends an in-app notification to both the Event Coordinator and Event Organiser confirming the cancellation or rejection respectively with the event name.
-Coverage: AC1-3 valid and malformed consumer write contracts; actual persistence belongs to integration tests, mutation/preparation to Event/Workflow.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Organiser submits a change request, the system sends an
+     in-app notification to the Event Coordinator with the event name, proposed
+     changes, and a link to review the request.
+AC2: Given an approval or rejection of a change request is successfully
+     recorded, the Event Organiser receives an in-app notification with the
+     event name, decision, and reason if rejected.
+AC3: Given an event is cancelled or rejected, the system sends an in-app
+     notification to both the Event Coordinator and Event Organiser confirming
+     the cancellation or rejection, respectively, with the event name.
+
+Real
+----
+- app.consumer.process(): JSON validation, the story's display-contract
+  validator and the inbox/quarantine SQL, with the broker ACK only after the
+  database commit.
+- Assertions are on the SQL and parameters sent, and the ACK and its order.
+
+Doubled
+-------
+- psycopg2.connect: Stub - fresh MagicMock connection and cursor per test; SQL
+  inspected.
+- Broker channel: Mock - asserts basic_ack after the commit.
+
+Not proven
+----------
+- That the inbox row is committed and de-duplicated in real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the producer publishes this envelope and the UI shows it with a working
+  link (-> the producing service dispatcher tests and the frontend
+  NotificationCenter tests).
 """
 import json
 from unittest.mock import MagicMock, Mock, patch
@@ -23,11 +51,22 @@ from tests.unit.factories import make_change_envelope, process_change_at_sql_bou
 # AC1 ---- submitted changes must contain a matching, usable review link
 
 @pytest.mark.parametrize("optional_recipient", ["present", "absent"], ids=["explicit-recipient", "recipient-from-envelope"])
-def test_ac1_valid_submission_is_stored_before_ack(optional_recipient):
-    """Normal: proposed edits and exact review destination are stored before the broker ACK."""
+def test_process_change_request_alert_stores_for_coordinator_before_ack(optional_recipient):
+    """
+    Summary: A change-request notice is stored for the coordinator before acknowledging.
+    AC1: Given an Event Organiser submits a change request, the system sends an
+        in-app notification to the Event Coordinator with the event name,
+        proposed changes, and a link to review the request.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope()
+
+    # Act (When)
     if optional_recipient == "absent":
         del envelope["details"]["recipientId"]
+
+    # Assert (Then)
     assert process_change_at_sql_boundary(envelope) == ["stored", "acknowledged"]
 
 
@@ -51,16 +90,27 @@ def test_ac1_valid_submission_is_stored_before_ack(optional_recipient):
     pytest.param(('details', 'proposedChanges'), 'OMIT', None, id='changes-missing'),
     pytest.param(('details', 'recipientId'), '10000000-0000-4000-8000-000000000002', 'Inconsistent change recipient', id='recipient-mismatch'),
 ])
-def test_ac1_submitted_malformed_content_is_quarantined_before_ack(field_path, invalid_value, rejection_reason):
-    """Failure: malformed submitted content is quarantined, never delivered, before ACK."""
+def test_process_change_request_alert_missing_content_is_quarantined(field_path, invalid_value, rejection_reason):
+    """
+    Summary: A change-request notice missing its event name, changes or review link is kept aside.
+    AC1: Given an Event Organiser submits a change request, the system sends an
+        in-app notification to the Event Coordinator with the event name,
+        proposed changes, and a link to review the request.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope("submitted")
     target = envelope
     for key in field_path[:-1]:
         target = target[key]
+
+    # Act (When)
     if invalid_value == "OMIT":
         del target[field_path[-1]]
     else:
         target[field_path[-1]] = invalid_value
+
+    # Assert (Then)
     assert process_change_at_sql_boundary(
         envelope, quarantined=True, error=rejection_reason
     ) == ["quarantined", "acknowledged"]
@@ -74,14 +124,25 @@ def test_ac1_submitted_malformed_content_is_quarantined_before_ack(field_path, i
     pytest.param("rejected", "present", id="rejected-with-unicode-reason"),
     pytest.param("rejected", "absent", id="rejected-without-optional-fields"),
 ])
-def test_ac2_valid_decision_is_stored_before_ack(kind, optional_fields):
-    """Normal: either decision retains exact content and recipient through storage before ACK."""
+def test_process_change_decision_alert_stores_for_organiser_before_ack(kind, optional_fields):
+    """
+    Summary: An approval or rejection of a change request is stored for the organiser before acknowledging.
+    AC2: Given an approval or rejection of a change request is successfully
+        recorded, the Event Organiser receives an in-app notification with the
+        event name, decision, and reason if rejected.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope(kind)
+
+    # Act (When)
     if optional_fields == "absent":
         envelope["details"].pop("previousEventName", None)
         del envelope["details"]["recipientId"]
         if kind == "approved":
             envelope["message"] = "Change request for Workshop was approved."
+
+    # Assert (Then)
     assert process_change_at_sql_boundary(envelope) == ["stored", "acknowledged"]
 
 
@@ -99,16 +160,27 @@ def test_ac2_valid_decision_is_stored_before_ack(kind, optional_fields):
     pytest.param(('details', 'previousEventName'), 42, 'Invalid previous event name', id='previous-name-not-text'),
     pytest.param(('details', 'previousEventName'), ' ', 'Invalid previous event name', id='previous-name-blank'),
 ])
-def test_ac2_approved_malformed_content_is_quarantined_before_ack(field_path, invalid_value, rejection_reason):
-    """Failure: malformed approved content is quarantined, never delivered, before ACK."""
+def test_process_change_approval_alert_missing_content_is_quarantined(field_path, invalid_value, rejection_reason):
+    """
+    Summary: A change approval notice with missing or malformed content is kept aside.
+    AC2: Given an approval or rejection of a change request is successfully
+        recorded, the Event Organiser receives an in-app notification with the
+        event name, decision, and reason if rejected.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope("approved")
     target = envelope
     for key in field_path[:-1]:
         target = target[key]
+
+    # Act (When)
     if invalid_value == "OMIT":
         del target[field_path[-1]]
     else:
         target[field_path[-1]] = invalid_value
+
+    # Assert (Then)
     assert process_change_at_sql_boundary(
         envelope, quarantined=True, error=rejection_reason
     ) == ["quarantined", "acknowledged"]
@@ -120,16 +192,27 @@ def test_ac2_approved_malformed_content_is_quarantined_before_ack(field_path, in
     pytest.param(('details', 'reason'), ' \n', 'Missing change rejection reason', id='reason-blank'),
     pytest.param(('details', 'reason'), None, 'Missing change rejection reason', id='reason-null'),
 ])
-def test_ac2_rejected_malformed_content_is_quarantined_before_ack(field_path, invalid_value, rejection_reason):
-    """Failure: malformed rejected content is quarantined, never delivered, before ACK."""
+def test_process_change_rejection_alert_with_wrong_decision_is_quarantined(field_path, invalid_value, rejection_reason):
+    """
+    Summary: A change rejection notice with a mismatched decision or bad content is kept aside.
+    AC2: Given an approval or rejection of a change request is successfully
+        recorded, the Event Organiser receives an in-app notification with the
+        event name, decision, and reason if rejected.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope("rejected")
     target = envelope
     for key in field_path[:-1]:
         target = target[key]
+
+    # Act (When)
     if invalid_value == "OMIT":
         del target[field_path[-1]]
     else:
         target[field_path[-1]] = invalid_value
+
+    # Assert (Then)
     assert process_change_at_sql_boundary(
         envelope, quarantined=True, error=rejection_reason
     ) == ["quarantined", "acknowledged"]
@@ -137,8 +220,15 @@ def test_ac2_rejected_malformed_content_is_quarantined_before_ack(field_path, in
 
 # AC2 ---- rejection must retain its reason
 
-def test_ac2_rejection_without_recorded_reason_is_quarantined_not_delivered():
-    """Failure: missing rejection reason cannot silently become an incomplete inbox notification."""
+def test_process_change_rejection_alert_without_reason_is_quarantined(mocker):
+    """
+    Summary: A change rejection notice must carry the reason.
+    AC2: Given an approval or rejection of a change request is successfully
+        recorded, the Event Organiser receives an in-app notification with the
+        event name, decision, and reason if rejected.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     # Arrange
     identifier = "10000000-0000-4000-8000-000000000001"
     envelope = dict(version=1, id=identifier, type="event.change-request-rejected", recipientId=identifier,
@@ -148,10 +238,12 @@ def test_ac2_rejection_without_recorded_reason_is_quarantined_not_delivered():
     connection, channel = MagicMock(), Mock()
     cursor = connection.cursor.return_value.__enter__.return_value
     # Act
-    with patch("psycopg2.connect", return_value=connection):
-        process("unused", channel, Mock(delivery_tag=7), json.dumps(envelope).encode())
+    mocker.patch("psycopg2.connect", return_value=connection)
+    process("unused", channel, Mock(delivery_tag=7), json.dumps(envelope).encode())
     # Assert
     inserts = [call.args[0] for call in cursor.execute.call_args_list]
+
+    # Act + Assert (When / Then)
     assert any('INSERT INTO public."NotificationFailure"' in sql for sql in inserts)
     assert not any('INSERT INTO public."Notification" ' in sql for sql in inserts)
     channel.basic_ack.assert_called_once_with(delivery_tag=7)
@@ -163,15 +255,37 @@ def test_ac2_rejection_without_recorded_reason_is_quarantined_not_delivered():
     pytest.param("10000000-0000-4000-8000-000000000001", id="organiser"),
     pytest.param("10000000-0000-4000-8000-000000000002", id="coordinator"),
 ])
-def test_ac3_cancellation_is_stored_for_each_recipient_before_ack(recipient):
-    """Normal: each cancellation recipient's independent envelope is stored before ACK."""
+def test_process_cancellation_alert_stores_for_organiser_and_coordinator(recipient):
+    """
+    Summary: A cancellation notice is stored for both the organiser and the coordinator.
+    AC3: Given an event is cancelled or rejected, the system sends an in-app
+        notification to both the Event Coordinator and Event Organiser
+        confirming the cancellation or rejection, respectively, with the event
+        name.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope("cancelled", recipientId=recipient)
     envelope["recipientId"] = recipient
+
+    # Act + Assert (When / Then)
     assert process_change_at_sql_boundary(envelope) == ["stored", "acknowledged"]
 
 
-def test_ac3_cancellation_without_optional_recipient_detail_is_stored_before_ack():
-    """Boundary: envelope recipient suffices for cancellation without decision/request fields."""
+def test_process_cancellation_alert_without_optional_detail_still_stores():
+    """
+    Summary: A cancellation notice without its optional recipient detail is still delivered.
+    AC3: Given an event is cancelled or rejected, the system sends an in-app
+        notification to both the Event Coordinator and Event Organiser
+        confirming the cancellation or rejection, respectively, with the event
+        name.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     envelope = make_change_envelope("cancelled")
+
+    # Act (When)
     del envelope["details"]["recipientId"]
+
+    # Assert (Then)
     assert process_change_at_sql_boundary(envelope) == ["stored", "acknowledged"]

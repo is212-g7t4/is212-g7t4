@@ -1,22 +1,73 @@
-"""SCRUM-153: the event-side half of "re-check safety after a high-impact change".
+"""
+SCRUM-153: Re-check Safety After High-Impact Changes
 
-AC1 Given an event is 'Confirmed', when its date/time, expected attendance,
-    venue requirements, equipment requirements or accessibility needs change,
-    then its status returns to 'Pending Safety Check' and the coordinator is
-    told why.
-AC2 Given only a low-impact field changes (name, description, purpose,
-    registration needs), then the event stays 'Confirmed'.
-AC3 Given a safety approval is withdrawn, then it stays visible in the event's
-    safety history — the event-side line lives in `actionHistory` here; the
-    `SafetyCheck` rounds themselves belong to Safety Check Record Service.
+User Story
+----------
+As an Event Coordinator, I want a safety approval to be withdrawn when a
+high-impact detail changes afterwards, so that the event is never prepared on
+the basis of an outdated safety review.
 
-`PATCH /events/<id>/details` is the only endpoint that classifies a change as
-low- or high-impact, and the gate lives here: a high-impact edit of a
-'Confirmed' event is refused unless it arrives from Safety Check Service with
-the approval already withdrawn. So the UI can be skipped and the rule still
-holds.
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Confirmed', when its date/time, expected attendance,
+     venue requirements, equipment requirements or accessibility needs change,
+     then its status returns to 'Pending Safety Check' and the coordinator is
+     told why.
+AC2: Given only a low-impact field changes (name, description, purpose,
+     registration needs), then the event stays 'Confirmed'.
+AC3: Given a safety approval is withdrawn, then it stays visible in the event's
+     safety history.
+AC4: Given a high-impact change to a 'Confirmed' event is waiting for its new
+     safety check, when a registered Attendee views the event, then they still
+     see the previously approved details, and the changed details are shown to
+     them only after the Safety Officer approves the new safety check.
+AC5: Given the new safety check ends without approval (changes requested or the
+     event is cancelled), then registered Attendees are never shown the
+     unapproved change, and they continue to see the last approved details or
+     the cancellation.
 
-Database calls are mocked; no live database writes.
+SCRUM-8: User Authentication and Authorization
+
+User Story
+----------
+As a system user, I want to securely access the system, so that I can use the
+information and functionality available to me.
+
+Acceptance Criteria
+-------------------
+AC1: Given a system user has not been successfully authenticated, when they
+     attempt to access protected information or functionality, then access is
+     denied.
+AC2: Given a system user successfully authenticates, when they access protected
+     information or functionality, then their access is evaluated according to
+     their role and relationship to the relevant event.
+AC3: Given a system user's authentication attempt is unsuccessful, when the
+     authentication attempt is completed, then they remain unable to access
+     protected information or functionality.
+
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 import json
 from datetime import UTC, datetime
@@ -210,16 +261,22 @@ LOW_IMPACT_CHANGES = {
 
 @pytest.mark.parametrize("field", list(HIGH_IMPACT_FIELDS))
 def test_high_impact_change_to_a_confirmed_event_is_gated(field, setup):
-    """AC1: each of the five AC1 details alone is enough to require a re-check.
-
-    Refused without `safetyRecheck`, and nothing is written — the approval has
-    to be withdrawn by the safety workflow first.
     """
+    Summary: Each of the five AC1 details alone is enough to require a re-check.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(client, {field: HIGH_IMPACT_CHANGES[field]})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_RECHECK_REQUIRED"
     assert response.json["highImpactFields"] == [field]
@@ -233,7 +290,15 @@ def test_high_impact_change_to_a_confirmed_event_is_gated(field, setup):
 
 
 def test_a_recheck_saves_the_fields_and_moves_the_event(setup):
-    """AC1: with the approval withdrawn, the edit and the status move land together."""
+    """
+    Summary: With the approval withdrawn, the edit and the status move land together.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row(),
@@ -244,6 +309,7 @@ def test_a_recheck_saves_the_fields_and_moves_the_event(setup):
         ),
     ]
 
+    # Act (When)
     response = patch_details(
         client,
         {"expectedAttendance": "400", "preferredStartDate": "2026-11-10T08:00:00"},
@@ -251,6 +317,7 @@ def test_a_recheck_saves_the_fields_and_moves_the_event(setup):
         safetyRecheck=RECHECK,
     )
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Pending Safety Check"
     assert response.json["expectedAttendance"] == "400"
@@ -267,7 +334,15 @@ def test_a_recheck_saves_the_fields_and_moves_the_event(setup):
 
 
 def test_the_recheck_history_entry_says_why(setup):
-    """AC1 "the coordinator is told why": the history line names the changed details."""
+    """
+    Summary: The history line names the changed details.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row(status="Pending Safety Check")]
 
@@ -278,7 +353,10 @@ def test_the_recheck_history_entry_says_why(setup):
         safetyRecheck=RECHECK,
     )
 
+    # Act (When)
     entry = saved_metadata(cursor)["actionHistory"][-1]
+
+    # Assert (Then)
     assert entry["status"] == "Pending Safety Check"
     assert entry["details"] == (
         "Safety approval withdrawn because Expected attendance and Venue "
@@ -294,7 +372,15 @@ def test_the_recheck_history_entry_says_why(setup):
 
 
 def test_both_date_fields_read_as_one_label(setup):
-    """AC1: changing start and end is one "Date/time" change, said once."""
+    """
+    Summary: Changing start and end is one "Date/time" change, said once.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row(status="Pending Safety Check")]
 
@@ -308,16 +394,28 @@ def test_both_date_fields_read_as_one_label(setup):
         safetyRecheck=RECHECK,
     )
 
+    # Act (When)
     details = saved_metadata(cursor)["actionHistory"][-1]["details"]
+
+    # Assert (Then)
     assert details.count("Date/time") == 1
     assert details.startswith("Safety approval withdrawn because Date/time changed")
 
 
 def test_the_gate_message_lists_both_date_fields_once(setup):
-    """The 409 the confirm step renders reads the same way."""
+    """
+    Summary: The 409 the confirm step renders reads the same way.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(
         client,
         {
@@ -326,17 +424,21 @@ def test_the_gate_message_lists_both_date_fields_once(setup):
         },
     )
 
+    # Assert (Then)
     assert response.json["labels"] == ["Date/time"]
     assert response.json["message"].count("Date/time") == 1
 
 
 def test_the_new_round_is_what_the_safety_officer_decides(setup):
-    """AC1 -> SCRUM-150: the approve path finds round N+1 with no change of its own.
-
-    The re-check entry carries `safetyCheckId` = round N+1, which is exactly
-    what `_stale_safety_check_check` looks for (the latest 'Pending Safety
-    Check' entry with a round id), so approving round N+1 works unchanged.
     """
+    Summary: The approve path finds round N+1 with no change of its own.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from app.models import update_event_safety_status
 
     client, _, cursor = setup
@@ -354,6 +456,7 @@ def test_the_new_round_is_what_the_safety_officer_decides(setup):
     row["description"] = json.dumps(after_recheck)
     cursor.fetchone.side_effect = [row, event_row(status="Confirmed")]
 
+    # Act (When)
     updated = update_event_safety_status(
         "unused-test-url",
         EVENT_ID,
@@ -366,6 +469,7 @@ def test_the_new_round_is_what_the_safety_officer_decides(setup):
         attendee_venue="Grand Hall",
     )
 
+    # Assert (Then)
     assert updated["status"] == "Confirmed"
 
 
@@ -374,16 +478,20 @@ def test_the_new_round_is_what_the_safety_officer_decides(setup):
 
 @pytest.mark.parametrize("field", list(LOW_IMPACT_FIELDS))
 def test_low_impact_change_keeps_a_confirmed_event_confirmed(field, setup):
-    """AC2: name, description, purpose and registration needs never withdraw an approval.
-
-    `description` and `purpose` live inside the `description` JSON rather than
-    in columns of their own, so both are covered here.
     """
+    Summary: Name, description, purpose and registration needs never withdraw an approval.
+    AC2: Given only a low-impact field changes (name, description, purpose,
+        registration needs), then the event stays 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row()]
 
+    # Act (When)
     response = patch_details(client, {field: LOW_IMPACT_CHANGES[field]})
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Confirmed"
     assert saved_status(cursor) == "Confirmed"
@@ -398,7 +506,15 @@ def test_low_impact_change_keeps_a_confirmed_event_confirmed(field, setup):
 
 
 def test_a_low_impact_edit_records_what_changed(setup):
-    """The history says which details were edited, by label."""
+    """
+    Summary: The history says which details were edited, by label.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row()]
 
@@ -410,12 +526,23 @@ def test_a_low_impact_edit_records_what_changed(setup):
         },
     )
 
+    # Act (When)
     entry = saved_metadata(cursor)["actionHistory"][-1]
+
+    # Assert (Then)
     assert entry["details"] == "Event details updated: Event name, Purpose."
 
 
 def test_description_and_purpose_are_written_into_the_metadata(setup):
-    """Both live in the `description` JSON, not in columns."""
+    """
+    Summary: Both live in the `description` JSON, not in columns.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row()]
 
@@ -427,20 +554,30 @@ def test_description_and_purpose_are_written_into_the_metadata(setup):
         },
     )
 
+    # Act (When)
     metadata = saved_metadata(cursor)
+
+    # Assert (Then)
     assert metadata["description"] == LOW_IMPACT_CHANGES["description"]
     assert metadata["purpose"] == LOW_IMPACT_CHANGES["purpose"]
 
 
 def test_a_mixed_edit_on_a_confirmed_event_saves_nothing(setup):
-    """AC1/AC2: the low-impact half is not quietly saved while the rest is refused.
-
-    An edit is one change. Saving half of it would leave the coordinator
-    unsure which fields took effect.
     """
+    Summary: The low-impact half is not quietly saved while the rest is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    AC2: Given only a low-impact field changes (name, description, purpose,
+        registration needs), then the event stays 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(
         client,
         {
@@ -449,6 +586,7 @@ def test_a_mixed_edit_on_a_confirmed_event_saves_nothing(setup):
         },
     )
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_RECHECK_REQUIRED"
     assert response.json["changedFields"] == ["eventName", "expectedAttendance"]
@@ -472,18 +610,23 @@ def test_a_mixed_edit_on_a_confirmed_event_saves_nothing(setup):
             "venueRequirements": "Hall A",
         },
     ],
+    ids=["expectedattendance_120", "expectedattendance_120_2", "venuerequirements_hall_a", "preferredstartdate_2026_11_10t09_00_00_000", "preferredstartdate_2026_11_10t09_00", "eventname_community_workshop", "description_a_workshop_for_the_community", "preferredstartdate_2026_11_10t09_00_expectedatte"],
 )
 def test_resaving_unchanged_values_changes_nothing(changes, setup):
-    """AC2: "changed" is decided on normalised values, so re-saving the form is safe.
-
-    Without this, opening the edit dialog and pressing save would withdraw a
-    safety approval that nothing had invalidated.
     """
+    Summary: "changed" is decided on normalised values, so re-saving the form is safe.
+    AC2: Given only a low-impact field changes (name, description, purpose,
+        registration needs), then the event stays 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(client, changes)
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Confirmed"
     # No UPDATE at all: no status change and no history entry.
@@ -501,15 +644,27 @@ def test_resaving_unchanged_values_changes_nothing(changes, setup):
         {"description": LOW_IMPACT_CHANGES["description"]},
         {"registrationNeeds": LOW_IMPACT_CHANGES["registrationNeeds"]},
     ],
+    ids=["eventname_low_impact_changes_eventname", "description_low_impact_changes_description", "registrationneeds_low_impact_changes_registratio"],
 )
 def test_an_edit_preserves_the_decision_and_earlier_history(changes, setup):
-    """Rewriting `description` must not drop the metadata stored alongside it."""
+    """
+    Summary: Rewriting `description` must not drop the metadata stored alongside it.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row()]
 
     patch_details(client, changes)
 
+    # Act (When)
     metadata = saved_metadata(cursor)
+
+    # Assert (Then)
     assert metadata["decision"] == DECISION
     assert metadata["decisionHistory"] == [DECISION]
     assert metadata["actionDetails"] == "Venue confirmed with Venue Staff."
@@ -519,7 +674,13 @@ def test_an_edit_preserves_the_decision_and_earlier_history(changes, setup):
 
 
 def test_a_recheck_preserves_the_decision_and_earlier_history(setup):
-    """AC3: the approval entry stays in the history, with the withdrawal after it."""
+    """
+    Summary: The approval entry stays in the history, with the withdrawal after it.
+    AC3: Given a safety approval is withdrawn, then it stays visible in the
+        event's safety history.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(), event_row(status="Pending Safety Check")]
 
@@ -530,7 +691,10 @@ def test_a_recheck_preserves_the_decision_and_earlier_history(setup):
         safetyRecheck=RECHECK,
     )
 
+    # Act (When)
     metadata = saved_metadata(cursor)
+
+    # Assert (Then)
     assert metadata["decision"] == DECISION
     assert metadata["actionHistory"][1] == APPROVED_HISTORY[1]
     assert metadata["actionHistory"][1]["details"] == (
@@ -541,12 +705,21 @@ def test_a_recheck_preserves_the_decision_and_earlier_history(setup):
 # --- Races and the gate's edges ----------------------------------------------
 
 
-@pytest.mark.parametrize("withdrawn_id", [OTHER_ROUND_ID, ROUND_THREE_ID])
+@pytest.mark.parametrize("withdrawn_id", [OTHER_ROUND_ID, ROUND_THREE_ID], ids=["other_round_id", "round_three_id"])
 def test_withdrawing_the_wrong_round_is_refused(withdrawn_id, setup):
-    """A stale or made-up round can't move the event, with no call to another service."""
+    """
+    Summary: A stale or made-up round can't move the event, with no call to another service.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(
         client,
         {"expectedAttendance": "400"},
@@ -554,16 +727,26 @@ def test_withdrawing_the_wrong_round_is_refused(withdrawn_id, setup):
         safetyRecheck={**RECHECK, "withdrawnSafetyCheckId": withdrawn_id},
     )
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "STALE_SAFETY_CHECK"
     assert cursor.execute.call_count == 1
 
 
 def test_a_confirmed_event_with_no_approval_entry_is_refused(setup):
-    """Nothing in the history names the approval this round claims to withdraw."""
+    """
+    Summary: Nothing in the history names the approval this round claims to withdraw.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(action_history=[])
 
+    # Act (When)
     response = patch_details(
         client,
         {"expectedAttendance": "400"},
@@ -571,6 +754,7 @@ def test_a_confirmed_event_with_no_approval_entry_is_refused(setup):
         safetyRecheck=RECHECK,
     )
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "STALE_SAFETY_CHECK"
 
@@ -581,66 +765,106 @@ def test_a_confirmed_event_with_no_approval_entry_is_refused(setup):
     ids=["missing", "wrong"],
 )
 def test_the_recheck_block_without_the_token_is_still_gated(headers, setup):
-    """The gate: `safetyRecheck` is only believed from Safety Check Service.
-
-    Otherwise a browser could claim the approval was withdrawn and move the
-    event itself.
     """
+    Summary: The gate: `safetyRecheck` is only believed from Safety Check Service.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(
         client, {"expectedAttendance": "400"}, headers=headers, safetyRecheck=RECHECK
     )
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_RECHECK_REQUIRED"
     assert cursor.execute.call_count == 1
 
 
 def test_without_a_configured_token_the_recheck_is_refused(no_token):
-    """Failure (SCRUM-10): the lock fails closed, so a `safetyRecheck` block alone no longer suffices."""
+    """
+    Summary: The lock fails closed, so a `safetyRecheck` block alone no longer suffices.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = no_token
 
+    # Act (When)
     response = patch_details(
         client, {"expectedAttendance": "400"}, safetyRecheck=RECHECK
     )
 
+    # Assert (Then)
     assert response.status_code == 503
     assert response.json["code"] == "INTERNAL_AUTH_NOT_CONFIGURED"
     cursor.execute.assert_not_called()
 
 
 def test_without_a_configured_token_a_plain_coordinator_edit_still_works(no_token):
-    """Normal: only the re-check and the Lead's edit need the lock; an ordinary edit does not."""
+    """
+    Summary: Only the re-check and the Lead's edit need the lock; an ordinary edit does not.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = no_token
     cursor.fetchone.side_effect = [event_row(), event_row()]
 
+    # Act (When)
     response = patch_details(client, {"eventName": LOW_IMPACT_CHANGES["eventName"]})
 
+    # Assert (Then)
     assert response.status_code == 200
 
 
 def test_without_a_configured_token_the_lead_edit_is_refused(no_token):
-    """Failure (SCRUM-10): acting as the Lead needs the lock too, so it is refused when unconfigured."""
+    """
+    Summary: Acting as the Lead needs the lock too, so it is refused when unconfigured.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = no_token
 
+    # Act (When)
     response = patch_details(client, {"eventName": "X"}, actorRole="Event Coordinator Lead")
 
+    # Assert (Then)
     assert response.status_code == 503
     cursor.execute.assert_not_called()
 
 
 def test_safety_status_cannot_make_the_recheck_move_on_its_own(setup):
-    """The gate's other half: 'Confirmed -> Pending Safety Check' needs the edit.
-
-    `/safety-status` can reach every other safety move, but not this one — a
-    `Confirmed` event may only go back for re-review together with the
-    high-impact change that invalidated its approval.
     """
+    Summary: The gate's other half: 'Confirmed -> Pending Safety Check' needs the edit.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(status="Confirmed")
 
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json={
@@ -652,6 +876,7 @@ def test_safety_status_cannot_make_the_recheck_move_on_its_own(setup):
         headers=INTERNAL_HEADERS,
     )
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "INVALID_SAFETY_TRANSITION"
     assert response.json["currentStatus"] == "Confirmed"
@@ -660,9 +885,18 @@ def test_safety_status_cannot_make_the_recheck_move_on_its_own(setup):
 
 
 def test_the_recheck_move_is_the_only_way_out_of_confirmed():
-    """AC1: 'Confirmed' gains exactly one outgoing safety move, and only via /details."""
+    """
+    Summary: 'Confirmed' gains exactly one outgoing safety move, and only via /details.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Act (When)
     from app.models import RECHECK_ONLY_MOVES
 
+    # Assert (Then)
     assert SAFETY_TRANSITIONS["Confirmed"] == {"Pending Safety Check"}
     assert RECHECK_ONLY_MOVES == {("Confirmed", "Pending Safety Check")}
     # 'Cancelled' stays terminal (SCRUM-151 AC4).
@@ -674,12 +908,22 @@ def test_the_recheck_move_is_the_only_way_out_of_confirmed():
 
 @pytest.mark.parametrize("field", list(HIGH_IMPACT_FIELDS))
 def test_high_impact_edits_are_blocked_while_the_check_is_pending(field, setup):
-    """Q3: don't move the goalposts under a Safety Officer who is mid-review."""
+    """
+    Summary: Don't move the goalposts under a Safety Officer who is mid-review.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(status="Pending Safety Check")
 
+    # Act (When)
     response = patch_details(client, {field: HIGH_IMPACT_CHANGES[field]})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "EVENT_UNDER_SAFETY_REVIEW"
     assert response.json["currentStatus"] == "Pending Safety Check"
@@ -688,15 +932,25 @@ def test_high_impact_edits_are_blocked_while_the_check_is_pending(field, setup):
 
 
 def test_low_impact_edits_are_allowed_while_the_check_is_pending(setup):
-    """Q3: a rename doesn't affect the review, so it saves as usual."""
+    """
+    Summary: A rename doesn't affect the review, so it saves as usual.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
         event_row(status="Pending Safety Check"),
         event_row(status="Pending Safety Check"),
     ]
 
+    # Act (When)
     response = patch_details(client, {"eventName": LOW_IMPACT_CHANGES["eventName"]})
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == "Pending Safety Check"
     assert saved_status(cursor) == "Pending Safety Check"
@@ -706,16 +960,22 @@ def test_low_impact_edits_are_allowed_while_the_check_is_pending(setup):
     "status", ["Submitted", "Under Review", "Approved", "Safety Changes Requested"]
 )
 def test_before_confirmation_a_high_impact_edit_just_saves(status, setup):
-    """AC1's scope: only a 'Confirmed' event has a safety approval to withdraw.
-
-    A 'Safety Changes Requested' event is ordinary rework (SCRUM-164), and the
-    rest never reached a safety decision, so none of them is gated.
     """
+    Summary: Only a 'Confirmed' event has a safety approval to withdraw.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.side_effect = [event_row(status=status), event_row(status=status)]
 
+    # Act (When)
     response = patch_details(client, {"expectedAttendance": "400"})
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["status"] == status
     assert saved_status(cursor) == status
@@ -726,12 +986,22 @@ def test_before_confirmation_a_high_impact_edit_just_saves(status, setup):
 
 @pytest.mark.parametrize("status", ["Rejected", "Cancelled"])
 def test_a_terminal_event_cannot_be_edited(status, setup):
-    """A rejected or cancelled event's details are history, not a working draft."""
+    """
+    Summary: A rejected or cancelled event's details are history, not a working draft.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(status=status)
 
+    # Act (When)
     response = patch_details(client, {"eventName": LOW_IMPACT_CHANGES["eventName"]})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "EVENT_NOT_EDITABLE"
     assert response.json["currentStatus"] == status
@@ -742,12 +1012,22 @@ def test_a_terminal_event_cannot_be_edited(status, setup):
 
 
 def test_a_stranger_is_refused_before_any_status_logic(setup):
-    """403 and nothing else: a caller who isn't the coordinator learns nothing."""
+    """
+    Summary: 403 and nothing else: a caller who isn't the coordinator learns nothing.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
 
+    # Act (When)
     response = patch_details(client, {"expectedAttendance": "400"})
 
+    # Assert (Then)
     assert response.status_code == 403
     assert "not assigned to the current coordinator" in response.json["message"]
     assert "SAFETY_RECHECK_REQUIRED" not in response.get_data(as_text=True)
@@ -755,44 +1035,86 @@ def test_a_stranger_is_refused_before_any_status_logic(setup):
 
 
 def test_an_unassigned_event_is_refused(setup):
+    """
+    Summary: An unassigned event is refused.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(coordinator_id=None)
 
+    # Act (When)
     response = patch_details(client, {"eventName": "Renamed"})
 
+    # Assert (Then)
     assert response.status_code == 403
 
 
 def test_a_missing_event_is_404(setup):
+    """
+    Summary: A missing event is 404.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = None
 
+    # Act (When)
     response = patch_details(client, {"eventName": "Renamed"})
 
+    # Assert (Then)
     assert response.status_code == 404
     assert response.json["message"] == "Event request not found."
 
 
 def test_a_signed_in_coordinator_is_required(setup):
-    """SCRUM-8: the editor is the signed-in user, never a coordinatorId in the body."""
+    """
+    Summary: The editor is the signed-in user, never a coordinatorId in the body.
+    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
+        when they attempt to access protected information or functionality,
+        then access is denied.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     _, _, cursor = setup
     client = setup[0].application.test_client()
 
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/details",
         json={"coordinatorId": COORDINATOR_ID, "changes": {"eventName": "Renamed"}},
     )
 
+    # Assert (Then)
     assert response.status_code == 401
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("changes", [{}, None, [], "eventName", 7])
+@pytest.mark.parametrize("changes", [{}, None, [], "eventName", 7], ids=["empty", "none", "empty_2", "eventname", "7"])
 def test_changes_must_be_a_non_empty_object(changes, setup):
+    """
+    Summary: Changes must be a non empty object.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_details(client, changes)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == (
         "changes must be a non-empty object of fields to update."
@@ -802,33 +1124,64 @@ def test_changes_must_be_a_non_empty_object(changes, setup):
 
 @pytest.mark.parametrize("field", ["status", "coordinatorId", "organiserId", "id"])
 def test_fields_that_are_not_editable_are_rejected(field, setup):
-    """Status and ownership have their own endpoints and their own rules."""
+    """
+    Summary: Status and ownership have their own endpoints and their own rules.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_details(client, {field: "whatever"})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert field in response.json["message"]
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("value", [120, None, {"nested": "object"}, ["a"]])
+@pytest.mark.parametrize("value", [120, None, {"nested": "object"}, ["a"]], ids=["120", "none", "nested_object", "a"])
 def test_every_change_value_must_be_text(value, setup):
-    """As on submit: the API takes text and converts at the boundary."""
+    """
+    Summary: As on submit: the API takes text and converts at the boundary.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_details(client, {"expectedAttendance": value})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Every value in changes must be text."
     cursor.execute.assert_not_called()
 
 
 def test_a_non_object_body_is_rejected(setup):
+    """
+    Summary: A non object body is rejected.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = client.patch(f"/events/{EVENT_ID}/details", json=["not", "an", "object"])
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Send a JSON object."
     cursor.execute.assert_not_called()
@@ -843,14 +1196,25 @@ def test_a_non_object_body_is_rejected(setup):
         ({"preferredEndDate": "2026-11-10T08:00:00"}, "Preferred End Date & Time"),
         ({"preferredStartDate": "not a date"}, "Preferred dates"),
     ],
+    ids=["expectedattendance_0_expected_attendance", "expectedattendance_5_expected_attendance", "expectedattendance_not_a_number_expected_attenda", "preferredenddate_2026_11_10t08_00_00_preferred_e", "preferredstartdate_not_a_date_preferred_dates"],
 )
 def test_the_merged_values_are_validated(changes, expected, setup):
-    """An edit is held to the same rules as a submission, on the merged event."""
+    """
+    Summary: An edit is held to the same rules as a submission, on the merged event.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(client, changes, headers=INTERNAL_HEADERS)
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "Please correct the event details."
     assert any(expected in error for error in response.json["errors"])
@@ -860,26 +1224,43 @@ def test_the_merged_values_are_validated(changes, expected, setup):
 
 @pytest.mark.parametrize("field", ["eventName", "description", "purpose"])
 def test_a_required_field_cannot_be_blanked(field, setup):
+    """
+    Summary: A required field cannot be blanked.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row()
 
+    # Act (When)
     response = patch_details(client, {field: "   "})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["missingFields"]
 
 
 def test_filling_in_a_date_an_event_never_had_is_a_change(setup):
-    """An event stored without its dates: setting one is a high-impact change.
-
-    The merged event is valid, so this reaches the comparison rather than
-    validation — a blank stored date is not "the same as" a real one.
     """
+    Summary: An event stored without its dates: setting one is a high-impact change.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(start=None)
 
+    # Act (When)
     response = patch_details(client, {"preferredStartDate": "2026-11-10T09:00:00"})
 
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "SAFETY_RECHECK_REQUIRED"
     assert response.json["highImpactFields"] == ["preferredStartDate"]
@@ -893,16 +1274,21 @@ def test_filling_in_a_date_an_event_never_had_is_a_change(setup):
     ],
 )
 def test_an_optional_field_can_be_cleared(field, column, recheck, setup):
-    """Only the required six have to stay filled in.
-
-    Clearing `accessibilityNeeds` is a high-impact change, so it needs the
-    re-check; clearing `registrationNeeds` doesn't.
     """
+    Summary: Only the required six have to stay filled in.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cleared = event_row()
     cleared[column] = ""
     cursor.fetchone.side_effect = [event_row(), cleared]
 
+    # Act (When)
     response = patch_details(
         client,
         {field: ""},
@@ -910,6 +1296,7 @@ def test_an_optional_field_can_be_cleared(field, column, recheck, setup):
         **({"safetyRecheck": RECHECK} if recheck else {}),
     )
 
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json[field] == ""
 
@@ -926,10 +1313,21 @@ def test_an_optional_field_can_be_cleared(field, column, recheck, setup):
         {**RECHECK, "roundNumber": True},
         {k: v for k, v in RECHECK.items() if k != "roundNumber"},
     ],
+    ids=["not_an_object", "safetycheckid_round_three_id_roundnumber_3", "withdrawnsafetycheckid_nope_safetycheckid_round", "withdrawnsafetycheckid_round_two_id_safetychecki", "recheck_roundnumber_0", "recheck_roundnumber_3", "recheck_roundnumber_true", "k_v_for_k_v_in_recheck_items_if_k_roundnumber"],
 )
 def test_a_malformed_recheck_block_is_rejected(recheck, setup):
+    """
+    Summary: A malformed recheck block is rejected.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = patch_details(
         client,
         {"expectedAttendance": "400"},
@@ -937,13 +1335,22 @@ def test_a_malformed_recheck_block_is_rejected(recheck, setup):
         safetyRecheck=recheck,
     )
 
+    # Assert (Then)
     assert response.status_code == 400
     assert "safetyRecheck" in response.json["message"]
     cursor.execute.assert_not_called()
 
 
 def test_every_editable_field_is_classified_exactly_once():
-    """The two sets partition the editable fields — no field is both or neither."""
+    """
+    Summary: The two sets partition the editable fields — no field is both or neither.
+    AC1: Given an event is 'Confirmed', when its date/time, expected
+        attendance, venue requirements, equipment requirements or accessibility
+        needs change, then its status returns to 'Pending Safety Check' and the
+        coordinator is told why.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Act + Assert (When / Then)
     assert set(LOW_IMPACT_FIELDS) | set(HIGH_IMPACT_FIELDS) == set(EDITABLE_FIELDS)
     assert not set(LOW_IMPACT_FIELDS) & set(HIGH_IMPACT_FIELDS)
     # Every editable field is a column this service owns, or lives in the
@@ -955,7 +1362,18 @@ def test_every_editable_field_is_classified_exactly_once():
     }
 
 
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
 def test_details_without_database_url(no_database):
+    """
+    Summary: Details without database url.
+    Supporting design check: an Event Service with no database configured
+        answers 503
+    Double: None
+    """
     response = patch_details(no_database, {"eventName": "Renamed"})
 
     assert response.status_code == 503
@@ -963,6 +1381,11 @@ def test_details_without_database_url(no_database):
 
 
 def test_details_database_failure_is_503(setup):
+    """
+    Summary: Details database failure is 503.
+    Supporting design check: a database failure answers 503 without internals
+    Double: Stub (psycopg2.connect raises OperationalError)
+    """
     client, _, cursor = setup
     cursor.execute.side_effect = __import__("psycopg2").OperationalError(
         "connection refused"

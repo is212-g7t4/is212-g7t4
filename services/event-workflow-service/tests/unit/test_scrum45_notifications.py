@@ -1,20 +1,50 @@
-"""SCRUM-45 Event Organiser Status and Update Notifications: event-workflow-service unit tests.
+"""
+SCRUM-45: Event Organiser Status and Update Notifications
 
-Story: As an Event Organiser, I want to receive an in-app notification when the Lead Coordinator approves or rejects my event request, so that I know the outcome and who is responsible for coordinating my event.
-Real: own worker, envelope preparation, HTTP/publisher adapters and runner logic.
-Doubled: owner API/HTTP transport, broker connection, process and time boundaries as each scenario states.
-Not proven: production authentication, hosted Supabase, cross-service delivery or browser navigation.
-Owned: saved-source envelope preparation, name lookup, freeze-before-publish and recovery via Event HTTP. Not covered here: Event persistence, Notification inbox and UI/E2E.
-AC = acceptance criterion; DR = supporting design rule, not an extra AC.
+User Story
+----------
+As an Event Organiser, I want to receive an in-app notification when the Lead
+Coordinator approves or rejects my event request, so that I know the outcome
+and and who is responsible for coordinating my event.
 
-AC1 A successfully recorded approval sends an in-app approval notification to the submitting Event Organiser.
-  Owned: Approval preparation and publication-adapter calls; Event commit and actual inbox delivery are outside Workflow.
-AC2 A successfully recorded rejection sends an in-app rejection notification to the submitting Event Organiser, including the rejection reason.
-  Owned: Rejection preparation with saved reason and publication-adapter calls; Event commit and inbox storage are outside Workflow.
-AC3 Both decision notifications include event name, decision, and a link to the event request and its decision details.
-  Owned: Exact decision envelope and freeze-before-publish ordering; destination access and browser navigation are not proven.
-AC4 A successfully recorded initial assignment or reassignment sends the submitting Event Organiser an in-app notification with event name, newly assigned coordinator name, and an event-details link.
-  Owned: Saved-ID User lookup, named assignment envelope and frozen retry; Event assignment and inbox storage are outside Workflow.
+Acceptance Criteria
+-------------------
+AC1: Given the Lead Coordinator successfully records an approval of an event
+     request, the Event Organiser who submitted it receives an in-app
+     notification confirming the approval.
+AC2: Given the Lead Coordinator successfully records a rejection of an event
+     request, the Event Organiser who submitted it receives an in-app
+     notification confirming the rejection and stating the rejection reason.
+AC3: Both decision notifications include the event name, the decision, and a
+     link to view the event request and its decision details.
+AC4: Given an initial coordinator assignment or reassignment is successfully
+     recorded, the Event Organiser receives an in-app notification with the
+     event name, the newly assigned coordinator’s name, and a link to view the
+     event details.
+
+Real
+----
+- The event-workflow notification workers: they claim jobs from the owning
+  service's outbox over HTTP, look up current recipients and display facts, ask
+  the owner to freeze the envelope, publish the frozen envelope to RabbitMQ and
+  mark it published, retrying or holding on failure.
+- Assertions are on the envelopes frozen and published, call order, and
+  retry/hold decisions.
+
+Doubled
+-------
+- Owner outbox and lookup HTTP (Event, User, Registration, Venue Availability):
+  Stub (respx / monkeypatched httpx fixtures) - canned replies; requests
+  inspected.
+- RabbitMQ publisher (pika): Mock - publish arguments, confirms and persistence
+  inspected.
+
+Not proven
+----------
+- That the owner freezes the envelope in the same transaction as the change (->
+  the owning service's notification tests and integration tests).
+- That Notification Service stores and shows the inbox item (->
+  notification-service consumer tests and frontend NotificationCenter tests).
 """
 from unittest.mock import Mock
 
@@ -67,14 +97,22 @@ rejection_JOB = dict(id='20000000-0000-0000-0000-000000000001', source=rejection
 
 # AC1 — Approval
 
-def test_ac1_approval_worker_freezes_saved_facts_before_publish():
-    """Normal: dispatch a saved approval using a fake owner API; publish receives the exact
-    organiser/content/link and completion is requested, checking message preparation without
-    proving broker delivery or call order.
+def test_approval_alert_freezes_saved_facts_before_publish():
     """
+    Summary: An approval alert is frozen with the saved facts before it is sent.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    AC3: Both decision notifications include the event name, the decision, and
+        a link to view the event request and its decision details.
+    Double: Stub (owner outbox), Mock (freeze then publish)
+    """
+    # Arrange (Given)
     api, publish = (Mock(), Mock())
     api.claim.return_value = [approval_JOB]
     api.freeze.side_effect = lambda job, envelope: envelope
+
+    # Act + Assert (When / Then)
     assert dispatch_once(api, publish) == 1
     expected = dict(version=1, id=approval_JOB['id'], type='event.approval', recipientId=approval_SOURCE['recipientId'], createdAt=approval_JOB['createdAt'], message='Community Workshop was approved', destination=dict(kind='event-details', eventId=approval_SOURCE['eventId']), details=approval_SOURCE)
     publish.assert_called_once_with(expected)
@@ -85,15 +123,21 @@ def test_ac1_approval_worker_freezes_saved_facts_before_publish():
 
 # AC2 — Rejection and reason
 
-def test_ac2_worker_delivers_rejection_to_saved_submitting_organiser():
-    """Normal: dispatch a saved rejection using a fake owner API; publish receives the exact
-    reason, organiser and link, and completion is requested, checking the prepared message
-    rather than inbox delivery.
+def test_rejection_alert_reaches_submitting_organiser():
     """
+    Summary: A rejection alert reaches the organiser who submitted the request.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (owner outbox), Mock (publish)
+    """
+    # Arrange (Given)
     from app.dispatcher import dispatch_once
     api, publish = (Mock(), Mock())
     api.claim.return_value = [rejection_JOB]
     api.freeze.side_effect = lambda job, envelope: envelope
+
+    # Act + Assert (When / Then)
     assert dispatch_once(api, publish) == 1
     envelope = publish.call_args.args[0]
     assert envelope == dict(version=1, id=rejection_JOB['id'], type='event.rejection', recipientId=rejection_SOURCE['recipientId'], createdAt=rejection_JOB['createdAt'], message='Community Workshop was rejected: Missing plan', destination=dict(kind='event-details', eventId=rejection_SOURCE['eventId']), details=rejection_SOURCE)
@@ -104,12 +148,14 @@ def test_ac2_worker_delivers_rejection_to_saved_submitting_organiser():
 
 # AC3 — Decision content and link
 
-@pytest.mark.parametrize('kind', ['event.approval', 'event.rejection', 'event.coordinator-assignment'])
+@pytest.mark.parametrize('kind', ['event.approval', 'event.rejection', 'event.coordinator-assignment'], ids=["approval", "rejection", "coordinator_assignment"])
 @pytest.mark.parametrize('freeze_fails', [False, True], ids=['frozen-owner-result', 'freeze-outage'])
-def test_ac3_dispatch_waits_for_freeze_and_publishes_only_owner_returned_envelope(kind, freeze_fails):
-    """Normal/Failure: dispatch each type with ordered recording callbacks; success publishes only
-    the owner-returned envelope, while freeze failure publishes nothing and retries, preventing
-    an unfrozen local draft from escaping.
+def test_decision_alert_publishes_only_owner_frozen_envelope(kind, freeze_fails):
+    """
+    Summary: Only the envelope the owner froze is sent, and nothing if freezing fails.
+    AC3: Both decision notifications include the event name, the decision, and
+        a link to view the event request and its decision details.
+    Double: Stub (freeze succeeds or fails), Mock (publish)
     """
     source = dict(eventId='event', recipientId='organiser', eventName='Community Workshop', decision='Approved' if kind == 'event.approval' else 'Rejected', reason='Missing plan', coordinatorId='alice')
     job = dict(id='change', type=kind, source=source, envelope=None, createdAt='2026-10-21T00:00:00+00:00', leaseToken='lease')
@@ -155,30 +201,46 @@ def test_ac3_dispatch_waits_for_freeze_and_publishes_only_owner_returned_envelop
 
 # AC4 — Initial assignment and reassignment
 
-def test_ac4_worker_resolves_saved_id_using_user_username_and_freezes_before_publish(initial_assignment_api):
-    """Normal: dispatch assignment through the HTTP adapter with fake responses; the published
-    envelope uses the saved coordinator's username and event link, not an unrelated current
-    identity.
+def test_assignment_alert_names_coordinator_from_user_service(initial_assignment_api, mocker):
     """
+    Summary: An assignment alert names the new coordinator, looked up before freezing.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (user lookup), Mock (freeze then publish)
+    """
+    # Arrange (Given)
     published = []
-    with httpx.Client(transport=httpx.MockTransport(initial_assignment_transport)) as client, patch('httpx.request', side_effect=client.request):
+
+    # Act (When)
+    with httpx.Client(transport=httpx.MockTransport(initial_assignment_transport)) as client:
+        mocker.patch('httpx.request', side_effect=client.request)
         assert dispatch_once(initial_assignment_api, published.append) == 1
+
+    # Assert (Then)
     assert len(published) == 1, 'Initial assignment must publish after User lookup'
     assert published[0] == dict(version=1, id=initial_assignment_JOB['id'], type='event.coordinator-assignment', recipientId=initial_assignment_SOURCE['recipientId'], createdAt=initial_assignment_JOB['createdAt'], message='Alice Tan has been assigned to coordinate Community Workshop.', destination=dict(kind='event-details', eventId=initial_assignment_SOURCE['eventId']), details={**initial_assignment_SOURCE, 'coordinatorName': 'Alice Tan'})
 
 
 # Supporting DR3/DR4/DR6 — retry, frozen history and missing-name recovery
 
-def test_ac1_dr_failed_approval_publication_reuses_frozen_envelope_after_source_changes():
-    """Failure: fail approval publication, then reclaim with changed source facts; retry publishes
-    the first frozen envelope without another freeze, preserving historical organiser and name
-    (DR3/DR4).
+def test_approval_alert_retry_reuses_frozen_envelope():
     """
+    Summary: A retried approval alert resends the frozen alert even if the event changed.
+    AC1: Given the Lead Coordinator successfully records an approval of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the approval.
+    Double: Stub (frozen envelope), Mock (publish)
+    """
+    # Arrange (Given)
     api, publish = (Mock(), Mock(side_effect=RuntimeError('broker unavailable')))
     api.claim.return_value = [approval_JOB]
     api.freeze.side_effect = lambda job, envelope: envelope
     dispatch_once(api, publish)
     frozen = publish.call_args.args[0]
+
+    # Act + Assert (When / Then)
     api.published.assert_not_called()
     api.retry.assert_called_once_with(approval_JOB, 'RuntimeError')
     api.reset_mock()
@@ -190,10 +252,16 @@ def test_ac1_dr_failed_approval_publication_reuses_frozen_envelope_after_source_
     api.freeze.assert_not_called()
     api.published.assert_called_once_with(retry)
 
-def test_ac4_dr_assignment_publish_retry_uses_frozen_name_without_user_lookup(initial_assignment_api):
-    """Failure: fail assignment publication, then reclaim its frozen envelope; one User GET and the
-    unchanged published name show retry does not resolve a different identity (DR4).
+def test_assignment_alert_retry_uses_frozen_name(initial_assignment_api, mocker):
     """
+    Summary: A retried assignment alert keeps the frozen coordinator name.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (frozen envelope), Mock (no user lookup)
+    """
+    # Arrange (Given)
     frozen, looked_up = ([], [])
 
     def respond(request):
@@ -207,21 +275,33 @@ def test_ac4_dr_assignment_publish_retry_uses_frozen_name_without_user_lookup(in
         frozen.append(envelope)
         raise RuntimeError('broker outage')
     published = []
-    with httpx.Client(transport=httpx.MockTransport(respond)) as client, patch('httpx.request', side_effect=client.request):
+
+    # Act (When)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        mocker.patch('httpx.request', side_effect=client.request)
         dispatch_once(initial_assignment_api, outage)
         dispatch_once(initial_assignment_api, published.append)
+
+    # Assert (Then)
     assert len(looked_up) == 1
     assert published == frozen
     assert published[0]['details']['coordinatorName'] == 'Alice Tan'
 
-def test_ac2_dr_publish_retry_preserves_prepared_notification_content():
-    """Failure: fail rejection publication, then reclaim with a renamed source; retry publishes the
-    frozen envelope without another freeze, retaining the original decision content (DR3/DR4).
+def test_rejection_alert_retry_keeps_prepared_content():
     """
+    Summary: A retried rejection alert keeps its prepared content.
+    AC2: Given the Lead Coordinator successfully records a rejection of an
+        event request, the Event Organiser who submitted it receives an in-app
+        notification confirming the rejection and stating the rejection reason.
+    Double: Stub (frozen envelope), Mock (publish)
+    """
+    # Arrange (Given)
     from app.dispatcher import dispatch_once
     api, publish = (Mock(), Mock(side_effect=RuntimeError('broker down')))
     api.claim.return_value = [rejection_JOB]
     api.freeze.side_effect = lambda job, envelope: envelope
+
+    # Act + Assert (When / Then)
     assert dispatch_once(api, publish) == 1
     api.retry.assert_called_once_with(rejection_JOB, 'RuntimeError')
     api.published.assert_not_called()
@@ -235,35 +315,46 @@ def test_ac2_dr_publish_retry_preserves_prepared_notification_content():
     api.freeze.assert_not_called()
     api.published.assert_called_once_with(retry_job)
 
-def test_ac2_dr_worker_uses_authenticated_event_http_outbox_protocol(monkeypatch):
-    """Normal: DR3: mock HTTP transport only; claim/freeze/complete/retry adapters send the owning Event API contract with token, lease and bounded timeouts."""
+def test_worker_calls_event_outbox_with_internal_token(monkeypatch, mocker):
+    """
+    Summary: The worker calls Event Service's outbox as a trusted service.
+    AC2: (delivery)
+    Double: Stub (httpx), Mock (requests inspected)
+    """
     import app.dispatcher as worker
     from unittest.mock import patch
     monkeypatch.setenv('EVENT_SERVICE_URL', 'http://event.test/')
     monkeypatch.setenv('INTERNAL_SERVICE_TOKEN', 'test-token')
-    with patch('httpx.request') as request:
-        request.return_value.json.side_effect = [{'jobs': [rejection_JOB]}, {'envelope': {'frozen': True}}, {}, {}]
-        api = worker.OutboxAPI()
-        assert api.claim() == [rejection_JOB]
-        assert api.freeze(rejection_JOB, {'draft': True}) == {'frozen': True}
-        api.published(rejection_JOB)
-        api.retry(rejection_JOB, 'BrokerUnavailable')
-        calls = request.call_args_list
-        assert [call.args for call in calls] == [('POST', 'http://event.test/internal/notification-outbox/claim'), ('POST', f"http://event.test/internal/notification-outbox/{rejection_JOB['id']}/freeze"), ('POST', f"http://event.test/internal/notification-outbox/{rejection_JOB['id']}/published"), ('POST', f"http://event.test/internal/notification-outbox/{rejection_JOB['id']}/retry")]
-        assert calls[1].kwargs['json'] == {'leaseToken': 'lease', 'envelope': {'draft': True}}
-        assert calls[3].kwargs['json'] == {'leaseToken': 'lease', 'error': 'BrokerUnavailable'}
-        assert all((call.kwargs['headers'] == {'X-Internal-Token': 'test-token'} and call.kwargs['timeout'] == 5 for call in calls))
+    request = mocker.patch('httpx.request')
+    request.return_value.json.side_effect = [{'jobs': [rejection_JOB]}, {'envelope': {'frozen': True}}, {}, {}]
+    api = worker.OutboxAPI()
+    assert api.claim() == [rejection_JOB]
+    assert api.freeze(rejection_JOB, {'draft': True}) == {'frozen': True}
+    api.published(rejection_JOB)
+    api.retry(rejection_JOB, 'BrokerUnavailable')
+    calls = request.call_args_list
+    assert [call.args for call in calls] == [('POST', 'http://event.test/internal/notification-outbox/claim'), ('POST', f"http://event.test/internal/notification-outbox/{rejection_JOB['id']}/freeze"), ('POST', f"http://event.test/internal/notification-outbox/{rejection_JOB['id']}/published"), ('POST', f"http://event.test/internal/notification-outbox/{rejection_JOB['id']}/retry")]
+    assert calls[1].kwargs['json'] == {'leaseToken': 'lease', 'envelope': {'draft': True}}
+    assert calls[3].kwargs['json'] == {'leaseToken': 'lease', 'error': 'BrokerUnavailable'}
+    assert all((call.kwargs['headers'] == {'X-Internal-Token': 'test-token'} and call.kwargs['timeout'] == 5 for call in calls))
 
-def test_ac2_dr_broker_publish_requires_confirm_and_persistent_message(monkeypatch):
-    """Normal: DR3: execute real publication adapter with only broker socket mocked; observe durable queue, publisher confirms, mandatory routing and stable ID."""
+def test_publish_uses_confirms_and_persistent_messages(monkeypatch, mocker):
+    """
+    Summary: Alerts are published with broker confirmation and as persistent messages.
+    AC2: (delivery)
+    Double: Mock (pika channel)
+    """
+    # Arrange (Given)
     import app.dispatcher as worker
     from unittest.mock import MagicMock, patch
     import json
     monkeypatch.setenv('RABBITMQ_URL', 'amqp://guest:***@localhost/%2F')
     connection = MagicMock()
-    with patch('pika.BlockingConnection', return_value=connection):
-        worker.publish({'id': rejection_JOB['id'], 'type': 'event.rejection'})
+    mocker.patch('pika.BlockingConnection', return_value=connection)
+    worker.publish({'id': rejection_JOB['id'], 'type': 'event.rejection'})
     channel = connection.channel.return_value
+
+    # Act + Assert (When / Then)
     channel.queue_declare.assert_called_once_with(queue='notifications.v1', durable=True)
     channel.confirm_delivery.assert_called_once()
     values = channel.basic_publish.call_args.kwargs
@@ -273,54 +364,61 @@ def test_ac2_dr_broker_publish_requires_confirm_and_persistent_message(monkeypat
     assert json.loads(values['body'])['type'] == 'event.rejection'
     connection.close.assert_called_once()
 
-def test_ac2_dr_worker_runner_retries_then_polls_until_stopped():
-    """Failure: feed the runner timeouts, child failures, empty work, success and interruption;
-    recorded child commands and sleep delays show bounded attempts and reset backoff without
-    real waits (DR3).
+def test_worker_loop_retries_then_polls_until_stopped(mocker):
+    """
+    Summary: The worker retries after failures and keeps polling until stopped.
+    AC2: (delivery)
+    Double: Stub (attempt outcomes), Mock (sleep)
     """
     import app.dispatcher as worker
     import subprocess
     import sys
     from unittest.mock import call, patch
     outcomes = [subprocess.TimeoutExpired('worker', 50), subprocess.CalledProcessError(1, 'worker'), subprocess.CalledProcessError(3, 'worker'), subprocess.CalledProcessError(1, 'worker'), subprocess.CalledProcessError(1, 'worker'), subprocess.CompletedProcess('worker', 0), subprocess.CalledProcessError(1, 'worker'), KeyboardInterrupt()]
-    with patch('subprocess.run', side_effect=outcomes) as run, patch('time.sleep') as sleep:
-        worker.run()
-        assert run.call_args_list == [call([sys.executable, '-m', 'app.dispatcher', '--attempt'], timeout=50, check=True)] * 8
-        assert sleep.call_args_list == [call(1), call(2), call(1), call(1), call(2), call(1)]
+    run = mocker.patch('subprocess.run', side_effect=outcomes)
+    sleep = mocker.patch('time.sleep')
+    worker.run()
+    assert run.call_args_list == [call([sys.executable, '-m', 'app.dispatcher', '--attempt'], timeout=50, check=True)] * 8
+    assert sleep.call_args_list == [call(1), call(2), call(1), call(1), call(2), call(1)]
 
-def test_ac2_dr_worker_default_cli_stops_cleanly(monkeypatch):
-    """Normal: run the default module entry with an interrupted child launch; it returns without
-    propagating KeyboardInterrupt, allowing the polling worker to stop cleanly (DR3).
+def test_worker_cli_stops_cleanly(monkeypatch, mocker):
+    """
+    Summary: The worker command stops cleanly.
+    AC2: (delivery)
+    Double: Stub (interrupt)
     """
     import runpy
     from pathlib import Path
     from unittest.mock import patch
     monkeypatch.setattr('sys.argv', ['app.dispatcher'])
-    with patch('subprocess.run', side_effect=KeyboardInterrupt()):
-        runpy.run_path(str(Path(__file__).parents[2] / 'app' / 'dispatcher.py'), run_name='__main__')
+    mocker.patch('subprocess.run', side_effect=KeyboardInterrupt())
+    runpy.run_path(str(Path(__file__).parents[2] / 'app' / 'dispatcher.py'), run_name='__main__')
 
-def test_ac2_dr_worker_attempt_bounds_io_inside_lease():
-    """Boundary: run the attempt adapter with fake child outcomes; it sets a 50-second timeout,
-    maps only empty work to zero and propagates timeout, keeping a child attempt inside the
-    60-second lease (DR3).
+def test_worker_attempt_runs_io_inside_bounded_child(mocker):
+    """
+    Summary: Each attempt runs inside a time-bounded child so a stuck call cannot hold the lease.
+    AC2: (delivery)
+    Double: Mock (subprocess.run)
     """
     import app.dispatcher as worker
     import subprocess
     from unittest.mock import patch
     import pytest
-    with patch('subprocess.run') as run:
-        assert worker.attempt() == 1
-        assert run.call_args.kwargs == {'timeout': 50, 'check': True}
-        assert run.call_args.args[0][-3:] == ['-m', 'app.dispatcher', '--attempt']
-        run.side_effect = subprocess.CalledProcessError(3, 'worker')
-        assert worker.attempt() == 0
-        run.side_effect = subprocess.TimeoutExpired('worker', 50)
-        with pytest.raises(subprocess.TimeoutExpired):
-            worker.attempt()
+    run = mocker.patch('subprocess.run')
+    assert worker.attempt() == 1
+    assert run.call_args.kwargs == {'timeout': 50, 'check': True}
+    assert run.call_args.args[0][-3:] == ['-m', 'app.dispatcher', '--attempt']
+    run.side_effect = subprocess.CalledProcessError(3, 'worker')
+    assert worker.attempt() == 0
+    run.side_effect = subprocess.TimeoutExpired('worker', 50)
+    with pytest.raises(subprocess.TimeoutExpired):
+        worker.attempt()
 
-def test_ac2_dr_worker_module_attempt_entry_reports_empty_claim(monkeypatch):
-    """Boundary: execute the --attempt module entry with an empty HTTP claim; exit code 3 tells the
-    parent to poll rather than misclassify no work as an outage (DR3).
+def test_worker_attempt_entry_reports_empty_claim(monkeypatch, mocker):
+    """
+    Summary: A one-off attempt reports when there was nothing to send.
+    AC2: (delivery)
+    Double: Stub (empty claim)
     """
     import runpy
     import pytest
@@ -328,19 +426,24 @@ def test_ac2_dr_worker_module_attempt_entry_reports_empty_claim(monkeypatch):
     monkeypatch.setenv('EVENT_SERVICE_URL', 'http://event.test')
     monkeypatch.setenv('INTERNAL_SERVICE_TOKEN', 'test-token')
     monkeypatch.setattr('sys.argv', ['app.dispatcher', '--attempt'])
-    with patch('httpx.request') as request:
-        request.return_value.json.return_value = {'jobs': []}
-        with pytest.raises(SystemExit) as exited:
-            from pathlib import Path
-            runpy.run_path(str(Path(__file__).parents[2] / 'app' / 'dispatcher.py'), run_name='__main__')
-        assert exited.value.code == 3
+    request = mocker.patch('httpx.request')
+    request.return_value.json.return_value = {'jobs': []}
+    with pytest.raises(SystemExit) as exited:
+        from pathlib import Path
+        runpy.run_path(str(Path(__file__).parents[2] / 'app' / 'dispatcher.py'), run_name='__main__')
+    assert exited.value.code == 3
 
-@pytest.mark.parametrize('status,body', [(404, {'message': 'User not found.'}), (200, {'username': '   '}), (200, {}), (200, {'username': None}), (200, {'username': 23})])
-def test_ac4_dr_unusable_user_is_held_for_repair_without_blocking_other_work(initial_assignment_api, status, body):
-    """Failure: dispatch a missing or unusably named coordinator beside a valid rejection; HTTP
-    records a diagnostic hold and only the rejection publishes, avoiding ID-only messages and
-    batch blockage (DR6).
+@pytest.mark.parametrize('status,body', [(404, {'message': 'User not found.'}), (200, {'username': '   '}), (200, {}), (200, {'username': None}), (200, {'username': 23})], ids=["not_found", "blank_name", "no_name", "null_name", "numeric_name"])
+def test_assignment_alert_with_unusable_user_is_held_without_blocking(initial_assignment_api, status, body, mocker):
     """
+    Summary: An assignment alert whose coordinator cannot be named is held for repair without blocking others.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (user lookup returns unusable data), Mock (hold)
+    """
+    # Arrange (Given)
     good = {**initial_assignment_JOB, 'id': '20000000-0000-0000-0000-000000000002', 'type': 'event.rejection', 'source': {**initial_assignment_SOURCE, 'reason': 'Missing plan', 'decision': 'Rejected'}}
     calls, published = ([], [])
 
@@ -351,20 +454,30 @@ def test_ac4_dr_unusable_user_is_held_for_repair_without_blocking_other_work(ini
         if request.url.path.endswith('claim'):
             return httpx.Response(200, json={'jobs': [initial_assignment_JOB, good]})
         return initial_assignment_transport(request)
-    with httpx.Client(transport=httpx.MockTransport(respond)) as client, patch('httpx.request', side_effect=client.request):
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        mocker.patch('httpx.request', side_effect=client.request)
         assert dispatch_once(initial_assignment_api, published.append) == 2
+
+    # Act (When)
     held = [request for request in calls if request.url.path.endswith('/hold')]
+
+    # Assert (Then)
     assert len(held) == 1, 'Unusable coordinator name must be held, not endlessly retried'
     import json
     assert json.loads(held[0].content) == {'leaseToken': 'lease', 'error': f'CoordinatorNameUnavailable coordinatorId={initial_assignment_COORDINATOR}'}
     assert len(published) == 1 and published[0]['id'] == good['id']
 
-@pytest.mark.parametrize('outcome', [503, 'timeout'])
-def test_ac4_dr_temporary_lookup_failure_retries_same_change_then_delivers(initial_assignment_api, outcome):
-    """Failure: fail User lookup with timeout or 503, then restore it; no first-attempt
-    freeze/publication and later delivery of the same ID/name preserve retryable assignment work
-    (DR3/DR6).
+@pytest.mark.parametrize('outcome', [503, 'timeout'], ids=["service_unavailable", "timeout"])
+def test_assignment_alert_after_temporary_lookup_failure_retries_then_delivers(initial_assignment_api, outcome, mocker):
     """
+    Summary: A temporary lookup failure is retried for the same change and then delivered.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (lookup fails once), Mock (publish)
+    """
+    # Arrange (Given)
     actions, published = ([], [])
     failed = True
 
@@ -375,21 +488,31 @@ def test_ac4_dr_temporary_lookup_failure_retries_same_change_then_delivers(initi
                 raise httpx.ReadTimeout('temporary', request=request)
             return httpx.Response(503, json={})
         return initial_assignment_transport(request)
-    with httpx.Client(transport=httpx.MockTransport(respond)) as client, patch('httpx.request', side_effect=client.request):
+
+    # Act (When)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        mocker.patch('httpx.request', side_effect=client.request)
         dispatch_once(initial_assignment_api, published.append)
         assert published == []
         assert actions[-1].endswith('/retry')
         assert not any((path.endswith('/freeze') or path.endswith('/hold') for path in actions))
         failed = False
         dispatch_once(initial_assignment_api, published.append)
+
+    # Assert (Then)
     assert published[0]['id'] == initial_assignment_JOB['id']
     assert published[0]['details']['coordinatorName'] == 'Alice Tan'
 
-def test_ac4_dr_hold_storage_outage_records_recovery_diagnosis(initial_assignment_api, caplog):
-    """Failure: make User lookup missing and the hold write fail; dispatch logs lease-recovery
-    warning rather than hiding failed recovery. This one-job case does not prove unrelated
-    progress (DR6).
+def test_assignment_alert_when_hold_cannot_be_saved_logs_diagnosis(initial_assignment_api, caplog, mocker):
     """
+    Summary: If a hold cannot be recorded, a recovery diagnosis is logged.
+    AC4: Given an initial coordinator assignment or reassignment is
+        successfully recorded, the Event Organiser receives an in-app
+        notification with the event name, the newly assigned coordinator’s
+        name, and a link to view the event details.
+    Double: Stub (hold storage fails)
+    """
+    # Arrange (Given)
     calls = []
 
     def respond(request):
@@ -399,46 +522,68 @@ def test_ac4_dr_hold_storage_outage_records_recovery_diagnosis(initial_assignmen
         if request.url.path.endswith('/hold'):
             return httpx.Response(503, json={})
         return initial_assignment_transport(request)
-    with httpx.Client(transport=httpx.MockTransport(respond)) as client, patch('httpx.request', side_effect=client.request):
+
+    # Act (When)
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        mocker.patch('httpx.request', side_effect=client.request)
         assert dispatch_once(initial_assignment_api, Mock()) == 1
+
+    # Assert (Then)
     assert 'Hold update failed; lease will recover' in caplog.text
 
-def test_ac2_dr_retry_state_outage_does_not_block_unrelated_pending_notification():
-    """Failure: fail the first job's publication and retry update; dispatch still marks the second
-    job published, so one recovery outage cannot abort the claimed batch (DR3).
+def test_worker_when_retry_state_unavailable_still_sends_other_alerts():
     """
+    Summary: A failure recording one retry does not block other waiting alerts.
+    AC2: (delivery)
+    Double: Stub (retry call fails), Mock (publish other job)
+    """
+    # Arrange (Given)
     from app.dispatcher import dispatch_once
     api, publish = (Mock(), Mock(side_effect=[RuntimeError(), None]))
     second = {**rejection_JOB, 'id': '20000000-0000-0000-0000-000000000002'}
     api.claim.return_value = [rejection_JOB, second]
     api.freeze.side_effect = lambda job, envelope: envelope
     api.retry.side_effect = RuntimeError('owner unavailable')
+
+    # Act + Assert (When / Then)
     assert dispatch_once(api, publish) == 2
     api.published.assert_called_once_with(second)
 
-def test_ac2_dr_broker_nack_and_closed_connection_propagate_failure(monkeypatch):
-    """Failure: make the broker adapter reject publication on an already closed connection; the
-    error propagates without a second close, allowing the worker to retry instead of claiming
-    delivery (DR3).
+def test_publish_when_broker_rejects_or_closes_raises(monkeypatch, mocker):
     """
+    Summary: A broker rejection or closed connection is reported as a failure.
+    AC2: (delivery)
+    Double: Mock (pika nacks or closes)
+    """
+    # Arrange (Given)
     import app.dispatcher as worker
     from unittest.mock import MagicMock, patch
     import pytest
     monkeypatch.setenv('RABBITMQ_URL', 'amqp://guest:guest@localhost/%2F')
     connection = MagicMock(is_open=False)
     connection.channel.return_value.basic_publish.side_effect = RuntimeError('nack')
-    with patch('pika.BlockingConnection', return_value=connection), pytest.raises(RuntimeError):
+
+    # Act + Assert (When / Then)
+    mocker.patch('pika.BlockingConnection', return_value=connection)
+    with pytest.raises(RuntimeError):
         worker.publish({'id': rejection_JOB['id'], 'type': 'event.rejection'})
+
+    # Assert (Then)
     connection.close.assert_not_called()
 
-def test_ac2_dr_worker_attempt_nonempty_child_error_propagates():
-    """Failure: make the attempt child exit with an error other than empty work; CalledProcessError
-    propagates, preventing a worker outage from being mistaken for a successful empty claim
-    (DR3).
+def test_worker_attempt_when_child_fails_reports_error(mocker):
     """
+    Summary: A failed attempt in the child process is reported.
+    AC2: (delivery)
+    Double: Mock (subprocess.run returns an error)
+    """
+    # Arrange (Given)
     import app.dispatcher as worker
     import subprocess
     import pytest
     from unittest.mock import patch
-    with patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, 'worker')), pytest.raises(subprocess.CalledProcessError):
+
+    # Act + Assert (When / Then)
+    mocker.patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, 'worker'))
+    with pytest.raises(subprocess.CalledProcessError):
         worker.attempt()

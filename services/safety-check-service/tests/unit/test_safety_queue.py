@@ -1,19 +1,87 @@
-"""SCRUM-162: GET /safety-checks/queue.
+"""
+SCRUM-162: View Safety Check Queue
 
+User Story
+----------
 As a Safety Officer, I want to view a list of events awaiting an Operational
 Safety Check, so that I know which events I need to review.
 
-AC1 The queue shows only events with status 'Pending Safety Check'.
-AC2 Each entry shows event name, event date/time, venue(s), expected
-    attendance and submission date, with the nearest event date first.
-AC3 Given an event was resubmitted after an earlier decision, then it is
-    labelled as a resubmission.
-AC4 Given a decision is recorded for an event, then it no longer appears in
-    the queue.
+Acceptance Criteria
+-------------------
+AC1: The queue shows only events with status 'Pending Safety Check'.
+AC2: Each entry shows event name, event date/time, venue(s), expected
+     attendance and submission date, with the nearest event date first.
+AC3: Given an event was resubmitted after an earlier decision, then it is
+     labelled as a resubmission.
+AC4: Given a decision is recorded for an event, then it no longer appears in
+     the queue.
 
-Every downstream call is a monkeypatched `app.clients` wrapper, so these
-tests exercise the orchestration and the error mapping, not HTTP
-(`test_clients.py` covers that).
+SCRUM-8: User Authentication and Authorization
+
+User Story
+----------
+As a system user, I want to securely access the system, so that I can use the
+information and functionality available to me.
+
+Acceptance Criteria
+-------------------
+AC1: Given a system user has not been successfully authenticated, when they
+     attempt to access protected information or functionality, then access is
+     denied.
+AC2: Given a system user successfully authenticates, when they access protected
+     information or functionality, then their access is evaluated according to
+     their role and relationship to the relevant event.
+AC3: Given a system user's authentication attempt is unsuccessful, when the
+     authentication attempt is completed, then they remain unable to access
+     protected information or functionality.
+
+SCRUM-9: Role-Based Access Control for Events
+
+User Story
+----------
+As a registered user, I want to view only information appropriate to my role
+and relationship to an event, so that I can access the information relevant to
+my responsibilities without viewing restricted information.
+
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to view information based on
+     their role and relationship to the event, when they access that
+     information, then the information is made available to them.
+AC2: Given an authenticated user's role does not permit them to view particular
+     information, when they attempt to access that information, then access is
+     denied.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to view that event's information, when they attempt to access the
+     information, then access is denied.
+AC4: Given a user is permitted to view information for one event but does not
+     have the required relationship to another event, when they attempt to view
+     information for both events, then they can only view the information for
+     which they have the required access.
+AC5: Given two authenticated users have different roles or relationships to the
+     same event, when they access information relating to that event, then each
+     user can only view the information permitted by their own role and
+     relationship to the event.
+
+Real
+----
+- GET /safety-checks/queue: Pending Safety Check events with name, date,
+  venues, attendance and submission date, nearest first, resubmission flag, and
+  failing whole on any unreadable part.
+- Assertions are on the queue returned and the status.
+
+Doubled
+-------
+- Event, Safety Check Record, Venue Availability, Venue, Equipment Request,
+  Equipment and User Services: Stub (monkeypatched app.clients functions) -
+  canned answers or raised client errors; calls recorded so tests assert the
+  order and what was (or was not) called.
+
+Not proven
+----------
+- That the atomic services behave as stubbed, and that a compensation really
+  restores state in the database (-> each atomic service's unit and integration
+  tests, and tests/integration/ here with respx).
 """
 import logging
 
@@ -119,8 +187,13 @@ def queue(client, safety_officer_id=OFFICER_ID):
 # --- AC1, AC2: what an entry shows --------------------------------------------
 
 
-def test_entry_shows_name_date_venue_attendance_and_submission_date(client, downstream):
-    """AC2: every field the officer needs to pick what to review next."""
+def test_queue_entry_shows_name_date_venues_attendance_and_submission(client, downstream):
+    """
+    Summary: Each entry shows what the officer needs to choose what to review.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     response = queue(client)
 
     assert response.status_code == 200
@@ -140,8 +213,12 @@ def test_entry_shows_name_date_venue_attendance_and_submission_date(client, down
     ]
 
 
-def test_only_pending_safety_check_events_are_requested(client, downstream):
-    """AC1: Event Service is asked for 'Pending Safety Check' only, as the officer."""
+def test_queue_asks_only_for_pending_safety_check_events(client, downstream):
+    """
+    Summary: Only events awaiting a safety check are asked for.
+    AC1: The queue shows only events with status 'Pending Safety Check'.
+    Double: Mock (list_events inspected)
+    """
     queue(client)
 
     assert ("list_events", "Pending Safety Check", OFFICER_ID, "Safety Officer") in (
@@ -149,15 +226,24 @@ def test_only_pending_safety_check_events_are_requested(client, downstream):
     )
 
 
-def test_the_open_round_is_read_for_each_event(client, downstream):
-    """AC2: the submission date comes from the event's open ('Pending') round."""
+def test_queue_reads_open_round_for_each_event(client, downstream):
+    """
+    Summary: The submission date comes from each event's open round.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     queue(client)
 
     assert ("list_records", EVENT_A, "Pending") in downstream.calls
 
 
-def test_empty_queue(client, downstream):
-    """AC1: nothing pending is an empty list, not an error."""
+def test_queue_with_nothing_pending_returns_empty_list(client, downstream):
+    """
+    Summary: Nothing pending gives an empty queue, not an error.
+    AC1: The queue shows only events with status 'Pending Safety Check'.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.events = []
 
     response = queue(client)
@@ -167,8 +253,13 @@ def test_empty_queue(client, downstream):
     assert "list_records" not in downstream.names()
 
 
-def test_nearest_event_date_first(client, downstream):
-    """AC2: sorted by event date, nearest first, whatever order arrives."""
+def test_queue_lists_nearest_event_first(client, downstream):
+    """
+    Summary: Events are listed nearest date first.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.events = [
         pending_event(EVENT_B, "2026-12-01T09:00:00", name="December"),
         pending_event(EVENT_A, "2026-11-12T09:00:00", name="November"),
@@ -183,8 +274,12 @@ def test_nearest_event_date_first(client, downstream):
     assert names == ["November", "Late November", "December"]
 
 
-def test_same_start_time_is_ordered_by_event_id(client, downstream):
-    """AC2 boundary: a tie still has a stable order, so the list doesn't jump about."""
+def test_queue_ties_ordered_by_event_id(client, downstream):
+    """
+    Summary: Events at the same time keep a stable order.
+    AC2: (boundary: equal start times)
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.events = [
         pending_event(EVENT_B, "2026-11-12T09:00:00"),
         pending_event(EVENT_A, "2026-11-12T09:00:00"),
@@ -198,8 +293,12 @@ def test_same_start_time_is_ordered_by_event_id(client, downstream):
     assert ids == [EVENT_A, EVENT_B]
 
 
-def test_an_undated_event_goes_last(client, downstream):
-    """AC2 boundary: an event with no date can't be 'nearest'."""
+def test_queue_lists_undated_event_last(client, downstream):
+    """
+    Summary: An event without a date goes last.
+    AC2: (boundary: no date)
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.events = [
         pending_event(EVENT_B, ""),
         pending_event(EVENT_A, "2026-11-12T09:00:00"),
@@ -213,8 +312,13 @@ def test_an_undated_event_goes_last(client, downstream):
     assert ids == [EVENT_A, EVENT_B]
 
 
-def test_missing_event_fields_come_back_blank(client, downstream):
-    """A sparse event still renders rather than breaking the list."""
+def test_queue_entry_with_missing_fields_shows_blanks(client, downstream):
+    """
+    Summary: An event with missing fields still appears, with blanks.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.events = [{"id": EVENT_A, "status": "Pending Safety Check"}]
 
     entry = queue(client).get_json()["events"][0]
@@ -228,8 +332,13 @@ def test_missing_event_fields_come_back_blank(client, downstream):
 # --- AC2: venues ----------------------------------------------------------------
 
 
-def test_every_venue_is_listed(client, downstream):
-    """AC2: 'venue(s)' — an event can be booked into more than one venue."""
+def test_queue_entry_lists_every_venue(client, downstream):
+    """
+    Summary: Every venue the event is booked into is listed.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.bookings = {
         EVENT_A: [
             booking(eventId=EVENT_A, venueId=HALL, booking_id="b1"),
@@ -245,8 +354,13 @@ def test_every_venue_is_listed(client, downstream):
     ]
 
 
-def test_a_venue_booked_twice_is_listed_once(client, downstream):
-    """Two bookings in the same hall (say, two days) are still one venue."""
+def test_queue_entry_lists_repeated_venue_once(client, downstream):
+    """
+    Summary: A venue booked twice is listed once.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.bookings = {
         EVENT_A: [
             booking(eventId=EVENT_A, venueId=HALL, booking_id="b1"),
@@ -260,8 +374,13 @@ def test_a_venue_booked_twice_is_listed_once(client, downstream):
 
 
 @pytest.mark.parametrize("status", ["Cancelled", "Expired", "Rejected"])
-def test_released_bookings_are_not_venues(status, client, downstream):
-    """A booking that no longer holds the venue isn't where the event happens."""
+def test_queue_entry_ignores_released_bookings(status, client, downstream):
+    """
+    Summary: Cancelled, expired or rejected bookings are not listed as venues.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.bookings = {
         EVENT_A: [
             booking(eventId=EVENT_A, venueId=HALL, booking_id="b1"),
@@ -274,8 +393,13 @@ def test_released_bookings_are_not_venues(status, client, downstream):
     assert venues == [{"id": HALL, "name": "Main Hall"}]
 
 
-def test_a_venue_missing_from_the_catalogue_is_still_shown(client, downstream):
-    """The booking still counts; only its name is unknown."""
+def test_queue_entry_shows_venue_missing_from_catalogue(client, downstream):
+    """
+    Summary: A booked venue missing from the catalogue is still shown.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.venues = []
 
     venues = queue(client).get_json()["events"][0]["venues"]
@@ -283,7 +407,13 @@ def test_a_venue_missing_from_the_catalogue_is_still_shown(client, downstream):
     assert venues == [{"id": HALL, "name": "Unknown venue"}]
 
 
-def test_no_live_booking_is_an_empty_venue_list(client, downstream):
+def test_queue_entry_without_live_booking_has_no_venues(client, downstream):
+    """
+    Summary: With no live booking, the venue list is empty.
+    AC2: Each entry shows event name, event date/time, venue(s), expected
+        attendance and submission date, with the nearest event date first.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.bookings = {}
 
     assert queue(client).get_json()["events"][0]["venues"] == []
@@ -292,48 +422,73 @@ def test_no_live_booking_is_an_empty_venue_list(client, downstream):
 # --- AC3: resubmissions ---------------------------------------------------------
 
 
-def test_first_round_is_not_a_resubmission(client, downstream):
-    """AC3 boundary: round 1 is the first submission."""
+def test_queue_entry_for_first_round_is_not_resubmission(client, downstream):
+    """
+    Summary: A first submission is not labelled a resubmission.
+    AC3: (boundary: round 1)
+    Double: Stub (events, rounds, bookings, venues)
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     entry = queue(client).get_json()["events"][0]
 
+    # Assert (Then)
     assert entry["roundNumber"] == 1
     assert entry["resubmission"] is False
 
 
 @pytest.mark.parametrize("round_number", [2, 3])
-def test_a_later_round_is_a_resubmission(round_number, client, downstream):
-    """AC3: any round after the first follows an earlier decision."""
+def test_queue_entry_for_later_round_is_resubmission(round_number, client, downstream):
+    """
+    Summary: Any later round is labelled a resubmission.
+    AC3: Given an event was resubmitted after an earlier decision, then it is
+        labelled as a resubmission.
+    Double: Stub (events, rounds, bookings, venues)
+    """
+    # Arrange (Given)
     downstream.rounds = {EVENT_A: [record(round_number=round_number, eventId=EVENT_A)]}
 
+    # Act (When)
     entry = queue(client).get_json()["events"][0]
 
+    # Assert (Then)
     assert entry["roundNumber"] == round_number
     assert entry["resubmission"] is True
 
 
-def test_resubmission_shows_the_latest_submission_date(client, downstream):
-    """AC2/AC3: the date shown is when it was resubmitted, not first submitted."""
+def test_queue_entry_for_resubmission_shows_latest_date(client, downstream):
+    """
+    Summary: A resubmission shows when it was resubmitted.
+    AC3: Given an event was resubmitted after an earlier decision, then it is
+        labelled as a resubmission.
+    Double: Stub (events, rounds, bookings, venues)
+    """
+    # Arrange (Given)
     downstream.rounds = {
         EVENT_A: [
             record(round_number=2, eventId=EVENT_A, submittedAt="2026-11-05T01:00:00+00:00")
         ]
     }
 
+    # Act (When)
     entry = queue(client).get_json()["events"][0]
 
+    # Assert (Then)
     assert entry["submittedAt"] == "2026-11-05T01:00:00+00:00"
 
 
 # --- AC4: decided events drop out ------------------------------------------------
 
 
-def test_a_decided_event_no_longer_appears(client, downstream):
-    """AC4: once decided the event leaves 'Pending Safety Check', so it isn't listed.
-
-    The queue is built only from what Event Service returns for that status;
-    a decision moves the event to 'Confirmed', 'Safety Changes Requested' or
-    'Cancelled', and the next read leaves it out.
+def test_queue_excludes_decided_event(client, downstream):
     """
+    Summary: Once decided, an event leaves the queue.
+    AC4: Given a decision is recorded for an event, then it no longer appears
+        in the queue.
+    Double: Stub (events, rounds, bookings, venues)
+    """
+    # Arrange (Given)
     downstream.events = [
         pending_event(EVENT_A, "2026-11-12T09:00:00"),
         pending_event(EVENT_B, "2026-11-13T09:00:00"),
@@ -341,6 +496,8 @@ def test_a_decided_event_no_longer_appears(client, downstream):
     downstream.rounds = {
         event_id: [record(eventId=event_id)] for event_id in (EVENT_A, EVENT_B)
     }
+
+    # Act + Assert (When / Then)
     assert len(queue(client).get_json()["events"]) == 2
 
     downstream.events = [pending_event(EVENT_B, "2026-11-13T09:00:00")]
@@ -349,8 +506,14 @@ def test_a_decided_event_no_longer_appears(client, downstream):
     assert ids == [EVENT_B]
 
 
-def test_event_with_no_open_round_is_left_out_and_logged(client, downstream, caplog):
-    """Out of step: nothing to decide, so no row — but someone should know."""
+def test_queue_leaves_out_event_without_open_round_and_logs(client, downstream, caplog):
+    """
+    Summary: An event with no open round is left out and logged.
+    AC4: Given a decision is recorded for an event, then it no longer appears
+        in the queue.
+    Double: Stub (events, rounds, bookings, venues)
+    """
+    # Arrange (Given)
     downstream.events = [
         pending_event(EVENT_A, "2026-11-12T09:00:00"),
         pending_event(EVENT_B, "2026-11-13T09:00:00"),
@@ -360,6 +523,7 @@ def test_event_with_no_open_round_is_left_out_and_logged(client, downstream, cap
     with caplog.at_level(logging.WARNING):
         response = queue(client)
 
+    # Act + Assert (When / Then)
     assert [entry["eventId"] for entry in response.get_json()["events"]] == [EVENT_B]
     assert EVENT_A in caplog.text
 
@@ -367,19 +531,39 @@ def test_event_with_no_open_round_is_left_out_and_logged(client, downstream, cap
 # --- Who may see it ---------------------------------------------------------------
 
 
-def test_a_signed_in_officer_is_required(client, downstream):
-    """SCRUM-8: without a token there is no officer to check."""
+def test_queue_without_token_returns_401(client, downstream):
+    """
+    Summary: Nobody can open the queue without signing in.
+    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
+        when they attempt to access protected information or functionality,
+        then access is denied.
+    Double: None
+    """
+    # Arrange (Given): client, downstream, from fixtures
+
+    # Act (When)
     response = client.application.test_client().get("/safety-checks/queue")
 
+    # Assert (Then)
     assert response.status_code == 401
     assert downstream.calls == []
 
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Venue Staff", "Event Organiser"])
-def test_only_a_safety_officer_sees_the_queue(role, client, downstream):
-    """SCRUM-9: the role comes from the signed token (no User Service lookup)."""
+def test_queue_when_not_safety_officer_returns_403(role, client, downstream):
+    """
+    Summary: Only a Safety Officer can open the queue.
+    SCRUM-9 AC2: Given an authenticated user's role does not permit them to
+        view particular information, when they attempt to access that
+        information, then access is denied.
+    Double: None
+    """
+    # Arrange (Given): role, client, downstream, from fixtures
+
+    # Act (When)
     response = client.get("/safety-checks/queue", headers=bearer(OFFICER_ID, role))
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.get_json()["code"] == "NOT_SAFETY_OFFICER"
     assert downstream.names() == []
@@ -392,9 +576,14 @@ def test_only_a_safety_officer_sees_the_queue(role, client, downstream):
 @pytest.mark.parametrize(
     ("error", "status"),
     [(clients.DownstreamTimeout(), 504), (clients.DownstreamError(), 502)],
+    ids=["clients_downstreamtimeout_504", "clients_downstreamerror_502"],
 )
-def test_any_unreadable_part_fails_the_whole_queue(name, error, status, client, downstream):
-    """A partial list would silently hide an event the officer must review."""
+def test_queue_with_any_unreadable_part_fails_whole(name, error, status, client, downstream):
+    """
+    Summary: If any part cannot be read, the whole queue fails rather than hiding an event.
+    AC1: The queue shows only events with status 'Pending Safety Check'.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.fail[name] = error
 
     response = queue(client)
@@ -405,8 +594,12 @@ def test_any_unreadable_part_fails_the_whole_queue(name, error, status, client, 
     }
 
 
-def test_an_unexpected_downstream_shape_is_a_502(client, downstream):
-    """A malformed reply (here, an event with no id) is a 502, not a 500."""
+def test_queue_with_malformed_downstream_answer_returns_502(client, downstream):
+    """
+    Summary: A malformed downstream answer is a 502.
+    AC1: The queue shows only events with status 'Pending Safety Check'.
+    Double: Stub (events, rounds, bookings, venues)
+    """
     downstream.events = [{"eventName": "No id"}]
 
     response = queue(client)

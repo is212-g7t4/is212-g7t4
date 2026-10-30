@@ -1,4 +1,61 @@
-"""SCRUM-155 composite orchestration for venue buffer changes."""
+"""
+SCRUM-155: Identify Legacy Scheduling Conflicts
+
+User Story
+----------
+As a Venue Staff member, I want the system to identify existing venue bookings
+that now have scheduling conflicts due to the new setup and turnaround rules so
+that I can resolve them manually without losing the original bookings.
+
+Acceptance Criteria
+-------------------
+AC1: The system must evaluate existing bookings against the newly applied setup
+     and turnaround time rules to identify any overlapping schedules.
+AC2: Existing bookings that become problematic under the new time padding rules
+     must be explicitly flagged or identified by the system.
+AC3: The system must preserve the original event information and must not
+     silently remove or automatically cancel these conflicting existing
+     bookings.
+AC4: If the calculated total occupied time overlaps with any existing booking's
+     total occupied time, the system must detect the conflict and flag the
+     venue as unavailable
+
+SCRUM-154: Configure Venue Buffer Times
+
+User Story
+----------
+As a Venue Staff member, I want to configure specific setup and turnaround
+times for each venue so that the system accurately reflects the total
+operational time required around an event
+
+Acceptance Criteria
+-------------------
+AC1: The system must allow Venue Staff to input and save a configurable setup
+     time and turnaround time (e.g., in minutes) when creating or editing a
+     venue profile.
+AC2: These buffer durations must be configurable on a per-venue basis, allowing
+     different spaces to have unique time requirements.
+AC3: The saved setup and turnaround times must be persistently associated with
+     the specific venue in the catalogue.
+
+Real
+----
+- The venue edit route (save, then reconcile buffer conflicts), the legacy
+  conflict read with event names, buffer forwarding on create, edit and search,
+  and their failure paths.
+- Assertions are on the status, the conflicts returned and calls made.
+
+Doubled
+-------
+- Event, Venue, Venue Availability, User and Safety Check Services: Stub (patch
+  / monkeypatch on app.clients, or respx) - canned answers or raised errors;
+  calls recorded so tests assert what was (or was not) called.
+
+Not proven
+----------
+- That the atomic services behave as stubbed (-> their own unit and integration
+  tests, and tests/integration/ here with respx).
+"""
 
 import httpx
 import pytest
@@ -19,7 +76,16 @@ VENUE = {
 }
 
 
-def test_venue_edit_saves_then_reconciles_without_changing_bookings(monkeypatch):
+def test_edit_venue_buffers_saves_then_flags_conflicts_without_changing_bookings(monkeypatch):
+    """
+    Summary: Changing a venue's buffers saves it, then flags new conflicts without changing any booking.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    AC3: The system must preserve the original event information and must not
+        silently remove or automatically cancel these conflicting existing
+        bookings.
+    Double: Stub (Venue Service saves), Mock (reconcile called)
+    """
     calls = []
     monkeypatch.setattr(
         routes,
@@ -42,7 +108,13 @@ def test_venue_edit_saves_then_reconciles_without_changing_bookings(monkeypatch)
     assert [call[0] for call in calls] == ["save", "reconcile"]
 
 
-def test_conflict_read_uses_current_venue_buffers(monkeypatch):
+def test_legacy_conflicts_use_current_venue_buffers(monkeypatch):
+    """
+    Summary: Conflicts are worked out with the venue's current buffers.
+    AC1: The system must evaluate existing bookings against the newly applied
+        setup and turnaround time rules to identify any overlapping schedules.
+    Double: Stub (venue buffers)
+    """
     monkeypatch.setattr(routes, "get_venue", lambda venue_id: VENUE)
     monkeypatch.setattr(
         routes,
@@ -62,7 +134,13 @@ def test_conflict_read_uses_current_venue_buffers(monkeypatch):
     }
 
 
-def test_conflict_read_enriches_event_names_for_venue_staff(monkeypatch):
+def test_legacy_conflicts_show_event_names(monkeypatch):
+    """
+    Summary: Venue Staff see the event names of conflicting bookings.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: Stub (events)
+    """
     conflicts = {
         "venueId": VENUE_ID,
         "conflictCount": 2,
@@ -98,7 +176,13 @@ def test_conflict_read_enriches_event_names_for_venue_staff(monkeypatch):
     assert [call[0] for call in calls] == ["event-1", "event-2"]
 
 
-def test_event_name_failure_keeps_conflict_response_usable(monkeypatch):
+def test_legacy_conflicts_when_event_names_fail_still_return_conflicts(monkeypatch):
+    """
+    Summary: If event names cannot be read, the conflicts are still shown.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: Stub (event lookup fails)
+    """
     conflict = {
         "venueId": VENUE_ID,
         "conflictCount": 1,
@@ -126,7 +210,14 @@ def test_event_name_failure_keeps_conflict_response_usable(monkeypatch):
     assert "eventName" not in response.json["conflicts"][0]["secondBooking"]
 
 
-def test_downstream_validation_error_is_preserved(monkeypatch):
+def test_edit_venue_keeps_venue_services_validation_error(monkeypatch):
+    """
+    Summary: Venue Service's validation error reaches Venue Staff unchanged.
+    SCRUM-154 AC1: The system must allow Venue Staff to input and save a
+        configurable setup time and turnaround time (e.g., in minutes) when
+        creating or editing a venue profile.
+    Double: Stub (Venue Service answers 400)
+    """
     request = httpx.Request("PUT", f"http://venue/venues/{VENUE_ID}")
     response = httpx.Response(
         400,
@@ -147,7 +238,14 @@ def test_downstream_validation_error_is_preserved(monkeypatch):
     assert result.json["errors"] == ["Bad buffer"]
 
 
-def test_new_composite_clients_forward_current_venue_buffers(monkeypatch):
+def test_booking_clients_forward_current_venue_buffers(monkeypatch):
+    """
+    Summary: Booking calls carry the venue's current buffers.
+    AC4: If the calculated total occupied time overlaps with any existing
+        booking's total occupied time, the system must detect the conflict and
+        flag the venue as unavailable
+    Double: Stub (respx; requests inspected)
+    """
     calls = []
 
     def response(method, url, body):
@@ -182,7 +280,13 @@ def test_new_composite_clients_forward_current_venue_buffers(monkeypatch):
     assert calls[-2][1].endswith("/legacy-conflicts/reconcile")
 
 
-def test_internal_event_client_requests_venue_staff_view(monkeypatch):
+def test_event_client_asks_for_venue_staff_view(monkeypatch):
+    """
+    Summary: Event names are read in Venue Staff's view.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: Stub (respx; request inspected)
+    """
     seen = {}
 
     def get(url, **kwargs):
@@ -200,7 +304,13 @@ def test_internal_event_client_requests_venue_staff_view(monkeypatch):
     assert seen["kwargs"]["params"] == {"viewerRole": "Venue Staff"}
 
 
-def test_get_booking_client_translates_not_found(monkeypatch):
+def test_get_booking_client_maps_not_found(monkeypatch):
+    """
+    Summary: A missing booking is reported as not found.
+    AC1: The system must evaluate existing bookings against the newly applied
+        setup and turnaround time rules to identify any overlapping schedules.
+    Double: Stub (respx answers 404)
+    """
     monkeypatch.setattr(
         clients.httpx,
         "get",
@@ -210,7 +320,14 @@ def test_get_booking_client_translates_not_found(monkeypatch):
         clients.get_booking("missing")
 
 
-def test_buffered_search_widens_read_and_applies_exact_window(monkeypatch):
+def test_search_widens_read_by_buffers_then_checks_exact_window(monkeypatch):
+    """
+    Summary: Search reads widely enough to see buffered bookings, then checks the exact window.
+    AC4: If the calculated total occupied time overlaps with any existing
+        booking's total occupied time, the system must detect the conflict and
+        flag the venue as unavailable
+    Double: Stub (window)
+    """
     calls = []
     venue = {
         **VENUE,
@@ -241,7 +358,14 @@ def test_buffered_search_widens_read_and_applies_exact_window(monkeypatch):
     assert calls == [0, 75]
 
 
-def test_booking_create_and_edit_forward_catalogue_buffers(monkeypatch):
+def test_create_and_edit_requests_forward_venue_buffers(monkeypatch):
+    """
+    Summary: Creating or editing a request forwards the venue's buffers.
+    AC4: If the calculated total occupied time overlaps with any existing
+        booking's total occupied time, the system must detect the conflict and
+        flag the venue as unavailable
+    Double: Mock (create/update inspected)
+    """
     venue = {
         **VENUE,
         "capacity": 100,
@@ -273,7 +397,13 @@ def test_booking_create_and_edit_forward_catalogue_buffers(monkeypatch):
     assert update_calls[0][-2:] == (30, 45)
 
 
-def test_venue_edit_failure_paths_are_explicit(monkeypatch):
+def test_edit_venue_failures_are_reported(monkeypatch):
+    """
+    Summary: Each venue edit failure is reported clearly.
+    SCRUM-154 AC3: The saved setup and turnaround times must be persistently
+        associated with the specific venue in the catalogue.
+    Double: Stub (failures)
+    """
     client = signed_in(create_app().test_client(), role="Venue Staff")
     path = f"/venues/{VENUE_ID}"
     assert client.put(path, json=[]).status_code == 400
@@ -307,7 +437,13 @@ def test_venue_edit_failure_paths_are_explicit(monkeypatch):
     assert result.json["venueSaved"] is True
 
 
-def test_conflict_read_failure_paths(monkeypatch):
+def test_legacy_conflicts_failures_are_reported(monkeypatch):
+    """
+    Summary: Each conflict read failure is reported clearly.
+    AC2: Existing bookings that become problematic under the new time padding
+        rules must be explicitly flagged or identified by the system.
+    Double: Stub (failures)
+    """
     path = f"/venues/{VENUE_ID}/legacy-conflicts"
     client = signed_in(create_app().test_client())
     request = httpx.Request("GET", "http://venue")
@@ -331,7 +467,14 @@ def test_conflict_read_failure_paths(monkeypatch):
     assert client.get(path).status_code == 502
 
 
-def test_search_buffer_helpers_cover_boundaries_and_legacy_call_shape():
+def test_search_buffer_helpers_handle_boundaries():
+    """
+    Summary: Buffer padding in search handles edges and older call shapes.
+    AC4: If the calculated total occupied time overlaps with any existing
+        booking's total occupied time, the system must detect the conflict and
+        flag the venue as unavailable
+    Double: None
+    """
     assert _shift(datetime.max, 1) == datetime.max
     assert _shift(datetime.min, -1) == datetime.min
     venue = {"id": VENUE_ID, "status": "Available", "setupTimeMinutes": 30, "turnaroundTimeMinutes": 45}
