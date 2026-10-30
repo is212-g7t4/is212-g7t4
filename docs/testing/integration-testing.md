@@ -559,8 +559,11 @@ changing app code; report them.
   `tests/integration/conftest.py` sets `PG_IMAGE` to
   `postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3`
   and asserts it is already present locally; it never pulls it, so every test
-  errors at setup on a machine without that exact digest. It does not use
-  `postgres:17.6` like the other suites.
+  errors at setup on a machine without that exact digest. CI pulls it for you
+  (`ci.yml` greps `tests/integration` for `postgres@sha256:` and runs
+  `docker pull`); locally run
+  `docker pull postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3`
+  first. It does not use `postgres:17.6` like the other suites.
 - **Safety Check Record has no integration tier**, so its SCRUM-10 role gates are
   proven by unit tests only. The new write-role gates in the composites (Venue
   Booking, Safety Check, Attendee Registration, Event Workflow) are likewise
