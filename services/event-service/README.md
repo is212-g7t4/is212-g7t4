@@ -75,6 +75,27 @@ calls this endpoint directly.
 Decisions are returned in `decision` and retained in `decisionHistory`. Each decision
 records its status, coordinator ID, UTC timestamp, and rejection reason when present.
 
+## Who may change what (SCRUM-10)
+
+Every write route checks the token's role first, then the caller's relationship to
+the event, then its state. A role that may not make the change gets
+`403 {"message": "Your role cannot change this information."}` before the body is
+read, and nothing is written. "Coordinators" means `Event Coordinator` and
+`Event Coordinator Lead`.
+
+| Route | Roles | Relationship |
+|---|---|---|
+| `POST /events`, `POST /events/drafts`, `PATCH`/`DELETE /events/drafts/<id>`, `POST /events/drafts/<id>/submit` | Event Organiser | owns the draft |
+| `POST /events/<id>/change-requests`, `PATCH .../clarification-response`, `PATCH .../amendment-response` | Event Organiser | owns the event |
+| `PATCH /events/<id>` (assign a coordinator) | Event Coordinator Lead | |
+| `PATCH .../progress`, `/approve`, `/reject`, `/clarification-request`, `/amendment-request`, `/details` | Coordinators | assigned to the event; the Lead may also edit an unassigned event through `/details` |
+| `PATCH /change-requests/<id>/decision` | Coordinators | assigned to the event; internal token |
+| `PATCH /events/<id>/safety-status` | submit, withdraw, restore: Coordinators; confirm, request changes, cancel: Safety Officer | internal token |
+
+The full matrix for every service, the tests that prove each acceptance criterion and
+the known gaps are in
+[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
+
 ## Event clarification
 
 An assigned coordinator can call `PATCH /events/<id>/clarification-request`
@@ -200,9 +221,11 @@ pre-safety transitions actually move an event through the review lifecycle.
 SCRUM-152 AC1's guarantee that `Confirmed` can't be reached "through ... the
 API" covers `PATCH /events/<id>/safety-status` too, not just `/progress`:
 that endpoint accepts a direct call only from Safety Check Service, proven by
-`X-Internal-Service-Token`. That lock is opt-in — set `INTERNAL_SERVICE_TOKEN`
-here and on Safety Check Service to turn it on. Leaving it unset logs a
-startup warning and leaves the endpoint unlocked, as it was before SCRUM-150.
+`X-Internal-Service-Token`, and only for a caller whose role fits the move
+(SCRUM-10, below). `INTERNAL_SERVICE_TOKEN` must be set here and on Safety Check
+Service. If it is unset on this service the endpoint answers
+`503 INTERNAL_AUTH_NOT_CONFIGURED` (it used to skip the check), and a startup
+warning is logged.
 
 Under Compose, this service reads the root `.env` and then
 `services/event-service/.env`, so one value in the root `.env` configures the
@@ -240,29 +263,35 @@ any of them, so the two tables of allowed moves never overlap:
 workflow's. SCRUM-149 adds `Approved → Pending Safety Check`; SCRUM-150 adds
 `Pending Safety Check → Confirmed`.
 
-**Optionally locked to Safety Check Service (SCRUM-150, moved forward from
-SCRUM-152 v2's B1).** This story opens the first legitimate route into
+**Locked to Safety Check Service (SCRUM-150, moved forward from SCRUM-152 v2's
+B1) and role-gated (SCRUM-10).** This story opens the first legitimate route into
 `Confirmed`, so a direct API call could in principle confirm an event and
-skip the Safety Officer. Setting `INTERNAL_SERVICE_TOKEN` closes that: every
-request must then carry the shared secret:
+skip the Safety Officer. Two checks therefore apply, in this order.
+
+*Role (SCRUM-10).* Safety Check Service forwards the signed-in user's token, so
+the role is the real caller's. A coordinator (`Event Coordinator` or
+`Event Coordinator Lead`) may submit (`Pending Safety Check`) and withdraw or
+restore an approval after a venue change. Only a `Safety Officer` may move an
+event to `Confirmed`, `Safety Changes Requested` or `Cancelled`. Any other role
+gets `403 {"message": "Your role cannot change this information."}` before the
+body is read.
+
+*Internal token.* Every request must also carry the shared secret:
 
 ```
 X-Internal-Service-Token: <INTERNAL_SERVICE_TOKEN>
 ```
 
-checked with `hmac.compare_digest` before the body is even parsed: missing or
-wrong → `403 {"code": "INTERNAL_ONLY"}`. The header is deliberately **not** in
-the CORS allow-headers list, so a browser cannot send it — only a
-server-to-server caller can.
+checked with `hmac.compare_digest`: missing or wrong →
+`403 {"code": "INTERNAL_ONLY"}`. The header is deliberately **not** in the CORS
+allow-headers list, so a browser cannot send it — only a server-to-server caller
+can.
 
-**The lock is opt-in.** If `INTERNAL_SERVICE_TOKEN` is unset on this service
-(the default for local/dev setups that don't configure it), the check is
-skipped entirely and the endpoint behaves exactly as it did before SCRUM-150
-— no `503`, no header required. To turn the lock on, set
-`INTERNAL_SERVICE_TOKEN` to the same value here and in
-[`safety-check-service`](../safety-check-service/), which sends the header
-(or an empty one, if it also has nothing configured) on every call to this
-endpoint, submit and approve alike.
+**The lock fails closed (SCRUM-10).** If `INTERNAL_SERVICE_TOKEN` is unset on this
+service, the endpoint answers `503 {"code": "INTERNAL_AUTH_NOT_CONFIGURED"}`
+rather than skipping the check, as it used to. Set `INTERNAL_SERVICE_TOKEN` to
+the same value here and in [`safety-check-service`](../safety-check-service/),
+which sends the header on every call to this endpoint, submit and approve alike.
 
 ```json
 PATCH /events/<id>/safety-status
@@ -435,10 +464,12 @@ What happens, by the event's status:
   ```
 
   Only [`safety-check-service`](../safety-check-service/) sends this, after it
-  has withdrawn round N and opened round N+1. The same opt-in
-  `X-Internal-Service-Token` lock as `/safety-status` applies: without a
-  matching token (when one is configured) the request is treated as an
-  ordinary edit and gated. `withdrawnSafetyCheckId` must equal the
+  has withdrawn round N and opened round N+1. The same
+  `X-Internal-Service-Token` lock as `/safety-status` applies and fails closed
+  (SCRUM-10): a request with a `safetyRecheck` block, or one acting as the Lead
+  (`actorRole`), gets `503 INTERNAL_AUTH_NOT_CONFIGURED` when the token is not
+  configured, and is treated as an ordinary edit and gated when the header is
+  missing or wrong. A plain coordinator edit never needs the token. `withdrawnSafetyCheckId` must equal the
   `safetyCheckId` on the latest `Confirmed` entry in `actionHistory` — the
   approval the event actually holds — else `409 {"code": "STALE_SAFETY_CHECK"}`,
   so a stale or made-up round can't move the event.

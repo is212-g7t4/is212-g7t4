@@ -74,8 +74,17 @@ See [INDEX.md](INDEX.md) for the concrete list of every service directory.
     see `docs/supabase-setup.md`) on `flask.g`. **Caller identity comes only
     from the token** — never from a body, query param or other header.
     Composites forward the caller's `Authorization` header downstream. Only
-    `/health`, `OPTIONS`, `/internal/*` and background workers sending
-    `X-Internal-Token` (and no `Authorization`) skip the token.
+    `/health`, `OPTIONS` and `/internal/*` skip the token, plus (in the six
+    services the notification dispatchers call: User, Venue, Venue
+    Availability, Registration, Event and Equipment Request) background workers
+    sending `X-Internal-Token` and no `Authorization`. Every other service
+    refuses a request that has no user token.
+    **Writes are role-gated (SCRUM-10):** each user-facing write route checks the
+    token's role first, then the caller's relationship to the record (owner,
+    assigned coordinator), then state. The routes only another service may call
+    also require `X-Internal-Service-Token`, which fails closed when
+    `INTERNAL_SERVICE_TOKEN` is not configured. The route-by-route matrix is in
+    [docs/scrum-10-role-based-modification-control.md](docs/scrum-10-role-based-modification-control.md).
   - MongoDB (Atlas) — Forum/Communication Service only. This is the one
     deliberate polyglot-persistence choice in the system (variable-shape,
     append-only, no relational joins needed). Do not "fix" this to Postgres.
