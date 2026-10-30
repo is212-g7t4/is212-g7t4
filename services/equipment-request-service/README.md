@@ -27,7 +27,7 @@ Every endpoint needs a Supabase access token (`Authorization: Bearer
 without a valid token.
 
 - `GET /equipment-requests[?status=Pending|Approved|Rejected][&eventId=<uuid>][&eventIds=<uuid>,<uuid>...]`
-  — Technical Support or Event Coordinator. `eventIds` takes up to 500 IDs.
+  — Technical Support, Event Coordinator or Event Coordinator Lead. `eventIds` takes up to 500 IDs.
   Each item:
   `{id, eventId, equipmentId, quantityRequested, technicalRequirements, status, reviewedBy, rejectionReason}`.
 - `GET /equipment-requests/<id>` — same roles; `404` if unknown.
@@ -43,7 +43,8 @@ without a valid token.
   (1-500 characters after trimming). The reason is saved to `rejection_reason`
   and returned on reads; bulk rejection applies it to every Pending line.
   Approval and safety reset clear any previous rejection reason.
-- `POST /events/<event_id>/equipment-requests` — Event Coordinator only. Body
+- `POST /events/<event_id>/equipment-requests` — Event Coordinator or Event Coordinator Lead (the Lead, for events
+  assigned to them, as for venue requests). Body
   `{"items": [{"equipmentId", "quantityRequested", "technicalRequirements"?}]}`
   (1–50 items, quantity a whole number ≥ 1, each equipment once). Saves every
   line as Pending in one transaction and returns `201 {"requests": [...]}`;
