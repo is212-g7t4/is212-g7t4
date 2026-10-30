@@ -200,6 +200,7 @@ test('SCRUM-170 refresh supersedes stale page, nullable legacy metadata and dupl
  vi.mocked(listClosures).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
  render(<VenueDetailPage {...props} />)
  const button = await screen.findByRole('button', { name: 'Refresh closures' })
+ await waitFor(() => expect(listClosures).toHaveBeenCalledTimes(1))
  const signal = vi.mocked(listClosures).mock.calls[0][2]
  vi.mocked(listClosures).mockResolvedValueOnce({ closures: [{ ...row, createdBy: null, createdAt: null }], nextCursor: 'next' })
  fireEvent.click(button)
