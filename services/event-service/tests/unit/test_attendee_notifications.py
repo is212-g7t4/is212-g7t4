@@ -1,14 +1,47 @@
-"""SCRUM-46 Attendee Registration and Update Notifications: Event unit tests.
+"""
+SCRUM-46: Attendee Registration and Update Notifications
 
-Story: As an Attendee, I want to receive notifications about my registration status, so that I can confirm my place and stay updated on event changes.
+User Story
+----------
+As an Attendee, I want to receive notifications about my registration status,
+so that I can confirm my place and stay updated on event changes.
 
-Real: Event mutation routes and owner SQL construction. Doubled: PostgreSQL cursor.
-Not proven: SQL persistence, external recipient APIs, broker or browser delivery.
-AC1 Given an Attendee successfully registers for an event, the system sends an in-app notification confirming their registration with the event name, date, time, venue, and registration reference number.
-AC2 Given an Attendee successfully withdraws their registration, the system sends an in-app notification confirming the withdrawal with the event name.
-AC3 Given an event cancellation takes effect, or a change to its date, time or venue is approved and applied, all currently registered Attendees receive an in-app notification with the event name and cancellation status or updated details, as applicable.
-AC1/2 are owned by Registration and Workflow; AC3 durable triggers are covered here.
-AC = acceptance criterion; DR = supporting design rule.
+Acceptance Criteria
+-------------------
+AC1: Given an Attendee successfully registers for an event, the system sends an
+     in-app notification confirming their registration with the event name,
+     date, time, venue, and registration reference number.
+AC2: Given an Attendee successfully withdraws their registration, the system
+     sends an in-app notification confirming the withdrawal with the event
+     name.
+AC3: Given an event cancellation takes effect, or a change to its date, time or
+     venue is approved and applied, all currently registered Attendees receive
+     an in-app notification with the event name and cancellation status or
+     updated details, as applicable.
+
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 
 import json
@@ -16,21 +49,25 @@ import pytest
 from tests.unit.factories import EVENT, COORDINATOR, ROUND, HEADERS
 
 
-# AC3 ----
-def test_ac3_cancellation_saves_attendee_fanout_without_registration_mutation(
+def test_cancellation_saves_attendee_fanout_without_registration_mutation(
     safety_notification_boundary,
 ):
-    """Normal: cancel a pending safety review through the actual Event mutation route.
-    With SQL rows doubled, require one attendee cancellation intent carrying the
-    saved event name and no Registration UPDATE. Cancellation reports event state;
-    it must not rewrite attendance history. This records SQL intent, not a commit
-    or delivery to the eventual audience.
     """
+    Summary: Cancel a pending safety review through the actual Event mutation route.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor, row = safety_notification_boundary
     from tests.unit.factories import pending_safety_notification_row
 
     row = pending_safety_notification_row()
     cursor.fetchone.side_effect = [row, {**row, "status": "Cancelled"}]
+
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT}/safety-status",
         headers=HEADERS,
@@ -42,6 +79,8 @@ def test_ac3_cancellation_saves_attendee_fanout_without_registration_mutation(
             remarks="Unsafe",
         ),
     )
+
+    # Assert (Then)
     assert response.status_code == 200
     inserts = [
         c.args[1]
@@ -59,15 +98,18 @@ def test_ac3_cancellation_saves_attendee_fanout_without_registration_mutation(
     )
 
 
-def test_ac3_fanout_freezes_two_registration_targets_with_stable_child_identities(
+def test_fanout_freezes_two_registration_targets_with_stable_child_identities(
     safety_notification_boundary,
 ):
-    """Normal: expand one claimed cancellation parent for two distinct attendee/reference pairs.
-    The real owner route must issue exactly two child inserts, each pairing its
-    UUID5 identity with the correct recipient and registration, rather than merely
-    preserving two unrelated sets. SQL is recorded by a cursor double; PostgreSQL
-    integration separately proves the audience is committed atomically.
     """
+    Summary: Expand one claimed cancellation parent for two distinct attendee/reference pairs.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from tests.unit.factories import (
         safety_outbox_row,
         JOB,
@@ -87,11 +129,15 @@ def test_ac3_fanout_freezes_two_registration_targets_with_stable_child_identitie
         dict(recipientId=OFFICER, registrationId=ROUND),
         dict(recipientId=OTHER_OFFICER, registrationId=EVENT),
     ]
+
+    # Act (When)
     response = client.post(
         f"/internal/notification-outbox/{JOB}/expand",
         headers=OUTBOX_HEADERS,
         json=dict(leaseToken=LEASE, recipients=recipients),
     )
+
+    # Assert (Then)
     assert response.status_code == 200
     inserts = [
         c.args[1]
@@ -140,15 +186,18 @@ def test_ac3_fanout_freezes_two_registration_targets_with_stable_child_identitie
     ],
     ids=["date", "time", "venue-a-to-c", "venue-a-to-a-silent"],
 )
-def test_ac3_safety_approval_notifies_only_final_schedule_changes(
+def test_safety_approval_notifies_only_final_schedule_changes(
     safety_notification_boundary, baseline, final, expected
 ):
-    """Normal/boundary: confirm a safety review with a captured baseline and final facts.
-    Date moves the start to the next day, time extends the end, venue-a-to-c changes
-    the hall, and venue-a-to-a-silent is a net-zero edit. Expect one exact delta or
-    no attendee intent, avoiding intermediate/stale updates. Event HTTP and comparison
-    logic run; the baseline and final database rows are synthetic cursor results.
     """
+    Summary: Confirm a safety review with a captured baseline and final facts.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from datetime import datetime
     from tests.unit.factories import pending_safety_notification_row
 
@@ -161,6 +210,8 @@ def test_ac3_safety_approval_notifies_only_final_schedule_changes(
         if key != "venueName":
             row[key] = datetime.fromisoformat(value)
     cursor.fetchone.side_effect = [row, {**row, "status": "Confirmed"}]
+
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT}/safety-status",
         headers=HEADERS,
@@ -172,6 +223,8 @@ def test_ac3_safety_approval_notifies_only_final_schedule_changes(
             attendeeVenue=final.get("venueName"),
         ),
     )
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     jobs = [
         c.args[1]
@@ -208,16 +261,20 @@ def test_ac3_safety_approval_notifies_only_final_schedule_changes(
             "Workshop was updated. Venue: Hall A → Hall C.",
         ),
     ],
+    ids=["attendee_event_cancelled_none_workshop_was_cance", "attendee_event_updated_startdatetime_2030_03_01t", "attendee_event_updated_venuename_hall_a_hall_c_w"],
 )
-def test_ac3_event_owner_freezes_exact_saved_change_content(
+def test_event_owner_freezes_exact_saved_change_content(
     safety_notification_boundary, kind, changes, message
 ):
-    """Normal: freeze a child job using the event facts already captured in its source.
-    Cases are cancellation, combined start/end/venue change, and venue-only change;
-    expect the exact complete envelope and attendee-registration destination back.
-    This checks the owner's accepted wire contract, not reconstruction from current
-    Event state. SQL persistence is doubled, so durable freeze is covered elsewhere.
     """
+    Summary: Freeze a child job using the event facts already captured in its source.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from tests.unit.factories import (
         safety_outbox_row,
         JOB,
@@ -244,11 +301,15 @@ def test_ac3_event_owner_freezes_exact_saved_change_content(
         destination=dict(kind="attendee-registration", registrationId=ROUND),
     )
     cursor.fetchone.side_effect = [record, {**record, "envelope": value}]
+
+    # Act (When)
     response = client.post(
         f"/internal/notification-outbox/{JOB}/freeze",
         headers=OUTBOX_HEADERS,
         json=dict(leaseToken=LEASE, envelope=value),
     )
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     assert response.json["envelope"] == value
 
@@ -264,27 +325,34 @@ def test_ac3_event_owner_freezes_exact_saved_change_content(
         ],
         [],
     ],
+    ids=["none", "recipientid_bad_registrationid_round", "recipientid_coordinator_registrationid_round_rec", "empty"],
 )
-def test_dr_invalid_fanout_is_refused_or_empty_snapshot_completes(
+def test_invalid_fanout_is_refused_or_empty_snapshot_completes(
     safety_notification_boundary, recipients
 ):
-    """Boundary: expand a claimed parent with absent, invalid-UUID, conflicting, or empty recipients.
-    None is not a list; the invalid UUID cannot identify an attendee; conflicting
-    rows assign two references to one attendee. Those return 400, while [] is a valid
-    empty audience and returns 200. No case inserts children. The actual validation
-    runs over a SQL double, guarding against treating malformed lookups as success.
     """
+    Summary: Expand a claimed parent with absent, invalid-UUID, conflicting, or empty recipients.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from tests.unit.factories import safety_outbox_row, JOB, LEASE, OUTBOX_HEADERS
 
     client, cursor, _ = safety_notification_boundary
     cursor.fetchone.return_value = safety_outbox_row(
         "attendee.updated-fanout", dict(eventId=EVENT, eventName="Workshop")
     )
+
+    # Act (When)
     response = client.post(
         f"/internal/notification-outbox/{JOB}/expand",
         headers=OUTBOX_HEADERS,
         json=dict(leaseToken=LEASE, recipients=recipients),
     )
+
+    # Assert (Then)
     assert response.status_code == (200 if recipients == [] else 400)
     assert not any(
         c.args[0].lstrip().startswith("INSERT") for c in cursor.execute.call_args_list
@@ -292,15 +360,18 @@ def test_dr_invalid_fanout_is_refused_or_empty_snapshot_completes(
 
 
 @pytest.mark.parametrize("entry", ["venue", "date"])
-def test_ac3_first_effective_schedule_is_saved_before_review_without_attendee_alert(
+def test_first_effective_schedule_is_saved_before_review_without_attendee_alert(
     safety_notification_boundary, entry
 ):
-    """Normal: reopen a Confirmed event for a venue withdrawal or a date-driven recheck.
-    Both entry points receive Hall A and must save original start/end/venue in action
-    history without creating an attendee alert yet. That baseline makes later final
-    approval compare against the last effective facts. HTTP and serialization run;
-    SQL calls are inspected, not committed to PostgreSQL.
     """
+    Summary: Reopen a Confirmed event for a venue withdrawal or a date-driven recheck.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor, row = safety_notification_boundary
     metadata = json.loads(row["description"])
     metadata["actionHistory"] = [dict(status="Confirmed", safetyCheckId=ROUND)]
@@ -309,6 +380,8 @@ def test_ac3_first_effective_schedule_is_saved_before_review_without_attendee_al
         row,
         {**row, "status": "Approved" if entry == "venue" else "Pending Safety Check"},
     ]
+
+    # Act (When)
     if entry == "venue":
         response = client.patch(
             f"/events/{EVENT}/safety-status",
@@ -342,6 +415,8 @@ def test_ac3_first_effective_schedule_is_saved_before_review_without_attendee_al
         )
         params = cursor.execute.call_args_list[1].args[1]
         saved = json.loads(params[-3])
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     assert saved["actionHistory"][-1]["attendeeBaseline"] == dict(
         startDateTime="2030-03-01T09:00:00+08:00",
@@ -355,16 +430,18 @@ def test_ac3_first_effective_schedule_is_saved_before_review_without_attendee_al
     )
 
 
-@pytest.mark.parametrize("venue", [None, "", "   ", 42, {"name": "Hall C"}])
-def test_dr_incomplete_final_venue_cannot_commit_an_effective_update(
+@pytest.mark.parametrize("venue", [None, "", "   ", 42, {"name": "Hall C"}], ids=["none", "empty", "empty_2", "42", "name_hall_c"])
+def test_incomplete_final_venue_cannot_commit_an_effective_update(
     safety_notification_boundary, venue,
 ):
-    """Failure: final approval has a Hall A baseline but an unusable final attendeeVenue.
-    Null, empty text, whitespace, a number, and an object must each return 400 without
-    an attendee intent. Immutable updates cannot safely guess a final venue later.
-    The real validation and Event route run against doubled SQL rows; this is not a
-    claim that external venue lookup or durable rollback was exercised.
     """
+    Summary: Final approval has a Hall A baseline but an unusable final attendeeVenue.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from tests.unit.factories import pending_safety_notification_row
 
     client, cursor, _ = safety_notification_boundary
@@ -373,6 +450,8 @@ def test_dr_incomplete_final_venue_cannot_commit_an_effective_update(
     metadata["actionHistory"][0]["attendeeBaseline"] = {"venueName": "Hall A"}
     row["description"] = json.dumps(metadata)
     cursor.fetchone.side_effect = [row, {**row, "status": "Confirmed"}]
+
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT}/safety-status",
         headers=HEADERS,
@@ -384,6 +463,8 @@ def test_dr_incomplete_final_venue_cannot_commit_an_effective_update(
             attendeeVenue=venue,
         ),
     )
+
+    # Assert (Then)
     assert response.status_code == 400
     assert not any(
         "attendee." in str(c.args[1])
@@ -392,41 +473,53 @@ def test_dr_incomplete_final_venue_cannot_commit_an_effective_update(
     )
 
 
-def test_ac1_registration_enrichment_context_exposes_only_opted_in_schedule(
+def test_registration_enrichment_context_exposes_only_opted_in_schedule(
     safety_notification_boundary,
 ):
-    """Normal: an internal-token caller explicitly requests schedule enrichment for an event.
-    The real context route must serialize both saved times for a registration alert,
-    so a legacy action can acquire required display facts. The event row is mocked;
-    this case does not itself test denial without the token or downstream delivery.
     """
+    Summary: An internal-token caller explicitly requests schedule enrichment for an event.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     from tests.unit.factories import OUTBOX_HEADERS
 
     client, cursor, row = safety_notification_boundary
     cursor.fetchone.return_value = row
+
+    # Act (When)
     response = client.get(
         f"/internal/events/{EVENT}/notification-context?includeSchedule=true",
         headers=OUTBOX_HEADERS,
     )
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["startDateTime"] == "2030-03-01T09:00:00"
     assert response.json["endDateTime"] == "2030-03-01T17:00:00"
 
 
-def test_dr_legacy_event_without_schedule_can_withdraw_safety_without_crashing(
+def test_legacy_event_without_schedule_can_withdraw_safety_without_crashing(
     safety_notification_boundary,
 ):
-    """Boundary: withdraw safety from a Confirmed legacy event with both dates null.
-    The actual Event route must succeed and capture only its known Hall A venue,
-    without trying to serialize absent dates. This preserves earlier valid workflows
-    while supporting notification baselines; the SQL cursor and stored row are doubled.
     """
+    Summary: Withdraw safety from a Confirmed legacy event with both dates null.
+    AC1: Given an Attendee successfully registers for an event, the system
+        sends an in-app notification confirming their registration with the
+        event name, date, time, venue, and registration reference number.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor, row = safety_notification_boundary
     row.update(preferred_start_date=None, preferred_end_date=None, status="Confirmed")
     metadata = json.loads(row["description"])
     metadata["actionHistory"] = [dict(status="Confirmed", safetyCheckId=ROUND)]
     row["description"] = json.dumps(metadata)
     cursor.fetchone.side_effect = [row, {**row, "status": "Approved"}]
+
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT}/safety-status",
         headers=HEADERS,
@@ -440,22 +533,27 @@ def test_dr_legacy_event_without_schedule_can_withdraw_safety_without_crashing(
             venueBefore="Hall A",
         ),
     )
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     saved = json.loads(cursor.execute.call_args_list[1].args[1][1])
     assert saved["actionHistory"][-1]["attendeeBaseline"] == {"venueName": "Hall A"}
 
 
 @pytest.mark.parametrize("entry", ["venue", "date"])
-@pytest.mark.parametrize("invalid", [None, "", "   ", 42, {"name": "Hall A"}])
-def test_ac3_direct_recheck_requires_original_venue_before_mutating_event(
+@pytest.mark.parametrize("invalid", [None, "", "   ", 42, {"name": "Hall A"}], ids=["none", "empty", "empty_2", "42", "name_hall_a"])
+def test_direct_recheck_requires_original_venue_before_mutating_event(
     safety_notification_boundary, entry, invalid
 ):
-    """Failure: reopen a Confirmed event through either direct venue or date-recheck HTTP.
-    For each entry point, venueBefore is omitted, empty, whitespace, numeric, or an
-    object. Expect 400 before any UPDATE/INSERT, so an incomplete original snapshot
-    cannot poison later comparisons. Real route validation runs with a SQL double;
-    this does not depend on a cooperative composite supplying the right facts.
     """
+    Summary: Reopen a Confirmed event through either direct venue or date-recheck HTTP.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, cursor, row = safety_notification_boundary
     metadata = json.loads(row["description"])
     metadata["actionHistory"] = [dict(status="Confirmed", safetyCheckId=ROUND)]
@@ -475,24 +573,29 @@ def test_ac3_direct_recheck_requires_original_venue_before_mutating_event(
         target = body["safetyRecheck"]
     if invalid is not None:
         target["venueBefore"] = invalid
+
+    # Act (When)
     response = client.patch(path, headers=HEADERS, json=body)
+
+    # Assert (Then)
     assert response.status_code == 400, response.json
     assert not any(c.args[0].lstrip().startswith(("UPDATE", "INSERT"))
                    for c in cursor.execute.call_args_list)
 
 
 @pytest.mark.parametrize("legacy_dates", [False, True])
-def test_ac3_edit_cycle_keeps_original_a_through_b_and_emits_one_combined_c_update(
+def test_edit_cycle_keeps_original_a_through_b_and_emits_one_combined_c_update(
     safety_notification_boundary, legacy_dates
 ):
-    """Normal: reopen venue A, accumulate date edits while B is under review, then approve final C.
-    The actual Event endpoints must emit one A-to-C combined update; a later cancelled
-    cycle must retain that historical alert and add one cancellation, not delete it.
-    legacy_dates=False also compares original start/end; True starts with unknown
-    dates and compares only the known venue. A stateful cursor double applies SQL
-    assignments, not transition rules; B/C are supplied external facts, not a real
-    Venue Booking/Safety composite journey or PostgreSQL concurrency test.
     """
+    Summary: Reopen venue A, accumulate date edits while B is under review, then approve final C.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     # Arrange: let real route rules evolve one synthetic row across repeated requests.
     import re
     from copy import deepcopy
@@ -522,10 +625,14 @@ def test_ac3_edit_cycle_keeps_original_a_through_b_and_emits_one_combined_c_upda
 
     cursor.fetchone.side_effect = None
     cursor.execute.side_effect = execute
+
+    # Act (When)
     # Act: withdraw the original safety decision before accumulating edits.
     response = client.patch(f"/events/{EVENT}/safety-status", headers=HEADERS, json=dict(
         status="Approved", coordinatorId=COORDINATOR, safetyCheckId=ROUND,
         roundNumber=1, withdrawnSafetyCheckId=ROUND, reason="Venue edit", venueBefore="Hall A"))
+
+    # Assert (Then)
     assert response.status_code == 200, response.json
     # Booking A -> B is under review. No attendee notification before effective approval.
     response = client.patch(f"/events/{EVENT}/details", headers=HEADERS, json=dict(

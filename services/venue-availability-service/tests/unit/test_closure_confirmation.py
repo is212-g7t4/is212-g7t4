@@ -1,23 +1,46 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-171: Reject Affected Bookings
 
-- **SCRUM-171 AC4 backend support:** read-only impact/count/token, explicit confirmation gate and changed-impact no-write refusal.
-- **Supporting security/configuration:** signed exact input/identity/impact binding, genuine fixed-clock expiry, malformed signatures and missing keys. No complete visual-preview or transaction proof.
+User Story
+----------
+As a Venue Staff, I want the system to automatically reject existing venue
+requests when I mark a venue as temporarily unavailable, so that I do not have
+to manually reject each affected venue request.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given a closure is recorded, then requests for the same venue with
+     overlapping booking intervals and status Pending, Pending Review, or
+     Approved are changed to Rejected.
+AC2: Given a request belongs to another venue, does not overlap the closure, or
+     is already rejected or cancelled, then that request is not changed by the
+     closure.
+AC3: Given a request is rejected because of a closure, when its details are
+     viewed, then the closure period and operational reason are displayed.
+AC4: Given an affected venue request is rejected, the existing event itself or
+     other venue requests under that event are not rejected and remain
+     unchanged.
 
-- `test_read_only_preview_route_returns_complete_impact`: AC4 backend partial support — read-only preview count, event ID and confirmation token; SELECT-only calls (not complete visual/name assertions).
-- `test_invalid_or_expired_token_requires_reconfirmation`: Supporting AC4 confirmation integrity — invalid/expired tokens raise PreviewChangedError; not visible reconfirmation.
-- `test_signed_token_outside_validity_window_requires_reconfirmation`: Supporting AC4 confirmation validity: genuinely signed expired/out-of-window tokens rejected using a fixed clock; not a new functional acceptance case.
-- `test_key_is_required_without_default`: Infrastructure/configuration support — missing/invalid signing key returns 503; no direct AC.
-- `test_create_requires_explicit_confirmation`: AC4 backend confirmation gate — missing/false/malformed explicit confirmation returns 400; no browser claim.
-- `test_preview_failure_and_stale_confirmation_write_nothing`: AC4 backend changed-impact clause — stale confirmation returns 409 without INSERT/UPDATE; preview-error handling supporting.
-- `test_confirmation_binds_exact_impact_and_caller`: Supporting AC4 signed binding — exact impact, input and caller mismatch rejected; not user-visible review.
+Real
+----
+- POST /venue-closures/preview (read-only impact: affected requests and a
+  signed confirmation token) and POST /venue-closures (requires explicit
+  confirmation bound to that exact impact and caller) run for real.
+- Assertions are on the impact returned, the token checks and that a stale
+  confirmation writes nothing.
 
-## Existing test contract and detailed cases
+Doubled
+-------
+- psycopg2.connect: Stub (`setup`/`client` fixtures) - fresh MagicMock
+  connection; the cursor returns canned VenueBooking / VenueClosure rows (or
+  raises); executed SQL, parameters and locks are inspected.
 
-SCRUM-171 AC4: signed preview binds inputs, identity and exact impact.
-
-Missing-key checks are supporting configuration safety, not direct acceptance.
+Not proven
+----------
+- That the SQL, locks and constraints behave the same on real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That Venue Staff see the impact before confirming (-> frontend
+  closureConfirmation.test.tsx).
 """
 
 import pytest
@@ -33,7 +56,18 @@ DATA = dict(
 KEY = "test-only-signing-key-not-a-production-default"
 
 
-def test_read_only_preview_route_returns_complete_impact(setup):
+def test_preview_closure_returns_affected_requests_without_writing(setup):
+    """
+    Summary: Previewing a closure lists every request it would reject, without changing anything.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    AC2: Given a request belongs to another venue, does not overlap the
+        closure, or is already rejected or cancelled, then that request is not
+        changed by the closure.
+    Double: Stub (cursor returns affected rows), Mock (no write)
+    """
+    # Arrange (Given)
     from tests.unit.factories import VENUE_ID, USER_ID, booking_row
 
     client, cursor = setup
@@ -41,11 +75,15 @@ def test_read_only_preview_route_returns_complete_impact(setup):
         CLOSURE_CONFIRMATION_KEY=KEY
     )
     cursor.fetchall.return_value = [booking_row()]
+
+    # Act (When)
     response = client.post(
         "/venue-closures/preview",
         json=DATA | {"venueId": VENUE_ID},
         headers=bearer(USER_ID, "Venue Staff"),
     )
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["affectedCount"] == 1
     assert response.json["affectedRequests"][0]["eventId"]
@@ -67,7 +105,17 @@ def fixed_confirmation_clock(monkeypatch):
     [None, "", "bad", "1800000900.bad"],
     ids=["missing", "empty", "malformed", "tampered-signature"],
 )
-def test_invalid_or_expired_token_requires_reconfirmation(token):
+def test_create_closure_with_invalid_or_expired_token_requires_reconfirmation(token):
+    """
+    Summary: A bad or expired confirmation must be redone before the closure is saved.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (cursor)
+    """
+    # Arrange (Given): token, from fixtures
+
+    # Act + Assert (When / Then)
     with pytest.raises(closure_store.PreviewChangedError):
         closure_store.verify_preview(token, DATA, "staff", [], KEY)
 
@@ -75,15 +123,33 @@ def test_invalid_or_expired_token_requires_reconfirmation(token):
 @pytest.mark.parametrize(
     "expires", [1_800_000_000, 1_800_000_901], ids=["expired", "beyond-validity-window"]
 )
-def test_signed_token_outside_validity_window_requires_reconfirmation(expires):
+def test_create_closure_with_token_outside_validity_window_requires_reconfirmation(expires):
+    """
+    Summary: A confirmation used outside its time window must be redone.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (cursor)
+    """
+    # Arrange (Given)
     token = closure_store.sign_preview(DATA, "staff", [], KEY, expires=expires)
+
+    # Act + Assert (When / Then)
     with pytest.raises(closure_store.PreviewChangedError):
         closure_store.verify_preview(token, DATA, "staff", [], KEY)
 
 
-@pytest.mark.parametrize("path", ["/venue-closures", "/venue-closures/preview"])
-@pytest.mark.parametrize("key", [None, "short", 123])
-def test_key_is_required_without_default(setup, path, key):
+@pytest.mark.parametrize("path", ["/venue-closures", "/venue-closures/preview"], ids=["create", "preview"])
+@pytest.mark.parametrize("key", [None, "short", 123], ids=["missing", "too_short", "not_text"])
+def test_closure_routes_without_signing_key_are_unavailable(setup, path, key):
+    """
+    Summary: Without a proper signing key, closures cannot be previewed or confirmed.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: None
+    """
+    # Arrange (Given)
     from tests.unit.factories import VENUE_ID, USER_ID
 
     client, cursor = setup
@@ -93,9 +159,13 @@ def test_key_is_required_without_default(setup, path, key):
     data = DATA | {"venueId": VENUE_ID}
     if path == "/venue-closures":
         data |= dict(confirmed=True, confirmationToken="invalid")
+
+    # Act (When)
     response = client.post(
         path, json=data, headers=bearer(USER_ID, "Venue Staff")
     )
+
+    # Assert (Then)
     assert response.status_code == 503
     cursor.execute.assert_not_called()
 
@@ -109,24 +179,48 @@ def test_key_is_required_without_default(setup, path, key):
         {"confirmed": True, "confirmationToken": 123},
         {"confirmed": True, "confirmationToken": "x" * 257},
     ],
+    ids=["no_confirmation", "confirmed_false", "confirmed_without_token", "wrong_token", "malformed_token"],
 )
-def test_create_requires_explicit_confirmation(setup, extra):
+def test_create_closure_without_explicit_confirmation_is_refused(setup, extra):
+    """
+    Summary: A closure is saved only with an explicit, valid confirmation.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (cursor)
+    """
+    # Arrange (Given)
     from tests.unit.factories import VENUE_ID, USER_ID
 
     client, cursor = setup
     client.application.config.update(
         CLOSURE_CONFIRMATION_KEY=KEY
     )
+
+    # Act (When)
     response = client.post(
         "/venue-closures",
         json=DATA | {"venueId": VENUE_ID} | extra,
         headers=bearer(USER_ID, "Venue Staff"),
     )
+
+    # Assert (Then)
     assert response.status_code == 400
     cursor.execute.assert_not_called()
 
 
-def test_preview_failure_and_stale_confirmation_write_nothing(setup):
+def test_closure_when_preview_fails_or_impact_changed_writes_nothing(setup):
+    """
+    Summary: If the preview fails or the impact changed since confirming, nothing is written.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    AC4: Given an affected venue request is rejected, the existing event itself
+        or other venue requests under that event are not rejected and remain
+        unchanged.
+    Double: Stub (cursor raises or returns a changed impact), Mock (no write)
+    """
+    # Arrange (Given)
     import psycopg2
     from tests.unit.factories import VENUE_ID, USER_ID
 
@@ -135,6 +229,8 @@ def test_preview_failure_and_stale_confirmation_write_nothing(setup):
         CLOSURE_CONFIRMATION_KEY=KEY
     )
     headers = bearer(USER_ID, "Venue Staff")
+
+    # Act + Assert (When / Then)
     assert (
         client.post("/venue-closures/preview", json={}, headers=headers).status_code
         == 400
@@ -163,7 +259,14 @@ def test_preview_failure_and_stale_confirmation_write_nothing(setup):
     )
 
 
-def test_confirmation_binds_exact_impact_and_caller():
+def test_closure_confirmation_is_bound_to_impact_and_caller():
+    """
+    Summary: A confirmation only works for the exact impact and the staff member who previewed it.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (cursor)
+    """
     rows = [dict(id="booking", status="Pending Review", start="09:00", end="10:00")]
     token = closure_store.sign_preview(DATA, "staff", rows, KEY)
     closure_store.verify_preview(token, DATA, "staff", rows, KEY)

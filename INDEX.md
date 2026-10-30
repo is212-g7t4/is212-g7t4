@@ -6,8 +6,7 @@ it owns. For *why* the architecture looks like this, see
 [docs/microservices-diagram-notes.md](docs/microservices-diagram-notes.md) —
 this file is a directory, not a design rationale.
 
-> **Status:** two template services are scaffolded. The React frontend has
-> implemented workflows, including the notification bell/inbox; Notification
+> **Status:** the React frontend has implemented workflows, including the notification bell/inbox; Notification
 > Service and its RabbitMQ consumer are built. See the rows below for each
 > service's implemented scope and remaining planned work. User Service remains
 > deliberately minimal and read-only.
@@ -28,8 +27,6 @@ is212-g7t4/
 ├── frontend/
 │   └── event-management-ui/            # React SPA — event/venue/safety flows and notification bell/inbox
 ├── services/
-│   ├── _template-atomic-service/       # copy this to start any atomic service
-│   ├── _template-composite-service/    # copy this to start any composite service
 │   ├── event-workflow-service/         # composite (built, edit validation)
 │   ├── coordinator-assignment-service/ # composite (built)
 │   ├── venue-booking-service/          # composite (built)
@@ -48,23 +45,11 @@ is212-g7t4/
 │   ├── forum-service/                  # atomic, MongoDB (planned)
 │   └── email-sms-wrapper-service/      # wrapper (planned)
 ├── docs/
-├── docker-compose.yml                  # wires up User, Event, Coordinator Assignment, Registration, plus the composite template placeholder
+├── docker-compose.yml                  # wires up every built service plus RabbitMQ
 ├── AGENTS.md
 ├── INDEX.md
 └── README.md
 ```
-
-## Templates
-
-Two minimal, non-working skeletons that exist purely to fix the file
-structure every real service should follow — Flask app factory, `uv`-managed
-`pyproject.toml`/`uv.lock`, a `/health` route, one passing test, Dockerfile,
-and `.env.example`. Copy one, rename it, then fill in the real logic.
-
-| Template | Path | Distinguishing feature | Status |
-|---|---|---|---|
-| Atomic | `services/_template-atomic-service/` | Has `app/models.py`; no HTTP client — atomics never call out | scaffolded |
-| Composite | `services/_template-composite-service/` | Has `app/clients.py` (httpx) for calling downstream services; no `models.py` — composites hold no data | scaffolded |
 
 ## Frontend
 
@@ -115,10 +100,10 @@ call another service, Forum, or the broker.
 | Message Broker | RabbitMQ image, `docker-compose.yml` | Durable `notifications.v1` queue; loopback AMQP 5672 / management 15672; persistent `notification-rabbitmq-data` volume. Composite dispatchers publish; the consumer in `services/notification-service/` stores inbox records. | configured in Compose |
 | Email/SMS Wrapper | `services/email-sms-wrapper-service/` | Wraps the external email/SMS provider; called only by Notification Service | planned |
 
-## Running a template (or any scaffolded service) locally
+## Running one service locally
 
 ```
-cd services/_template-atomic-service   # or _template-composite-service
+cd services/<name>-service
 uv sync
 uv run flask --app app run --debug
 uv run pytest
@@ -126,11 +111,9 @@ uv run pytest
 
 ## Running everything locally
 
-`docker-compose.yml` wires up the composite template placeholder plus the
-real services built so far (User, Event, Coordinator Assignment,
-Registration, Venue, Venue Booking, Venue Availability) — add a service
-entry there each time another real service is copied from a template (see
-the comment in that file).
+`docker-compose.yml` wires up every service built so far — add a service
+entry there each time a new service is created (see the comment in that
+file).
 
 ```
 npm run dev          # frontend (Vite) + backend (docker compose up), together

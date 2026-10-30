@@ -76,7 +76,7 @@ says otherwise.
 | 11 | Open Event C (`Pending Safety Check`) | Existing bookings are listed; instead of the form: "New venue requests can be submitted while the event is Submitted, Under Review, Approved or Safety Changes Requested." | Gate | | |
 | 12 | With Event A's page open in one tab, move Event A to `Pending Safety Check` in Supabase, then submit a new request from that tab | The server's message is shown (not a venue conflict); the page re-reads the event and shows the step-11 note | Gate | | |
 
-## Part B — changing a booking of a Confirmed event (decided 25 Oct)
+## Part B — changing a booking of a Confirmed event (AC7, decided 25 Oct)
 
 Editing or cancelling a venue booking of a `Confirmed` event withdraws its
 safety approval and sends it back to `Approved`. This chain spans Venue

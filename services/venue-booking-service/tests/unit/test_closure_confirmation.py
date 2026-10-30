@@ -1,23 +1,43 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-171: Reject Affected Bookings
 
-- **SCRUM-171 AC4 backend support:** read-only complete enriched names/list/count, including 101 requests without truncation; confirmation token forwarded and changed-impact conflict preserved.
-- **Supporting validation/contracts:** incomplete names/counts/IDs fail closed; malformed inputs make no downstream calls; unknown conflicts are not fabricated as refreshed impact. These mocks do not prove browser reconfirmation or persistence.
+User Story
+----------
+As a Venue Staff, I want the system to automatically reject existing venue
+requests when I mark a venue as temporarily unavailable, so that I do not have
+to manually reject each affected venue request.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given a closure is recorded, then requests for the same venue with
+     overlapping booking intervals and status Pending, Pending Review, or
+     Approved are changed to Rejected.
+AC2: Given a request belongs to another venue, does not overlap the closure, or
+     is already rejected or cancelled, then that request is not changed by the
+     closure.
+AC3: Given a request is rejected because of a closure, when its details are
+     viewed, then the closure period and operational reason are displayed.
+AC4: Given an affected venue request is rejected, the existing event itself or
+     other venue requests under that event are not rejected and remain
+     unchanged.
 
-- `test_incomplete_preview_never_offered_for_confirmation`: Supporting AC4 complete-preview safeguard — incomplete names/IDs/counts fail closed with no token; no standalone positive list proof.
-- `test_confirm_forwards_token_and_preserves_refresh_conflict`: AC4 backend support — token forwarded and changed-impact conflict preserved; redaction supplementary.
-- `test_invalid_confirmation_and_preview_inputs`: Supporting AC4 input validation: four independently isolated malformed create/preview inputs, no downstream calls; identical empty preview exercised once.
-- `test_unknown_conflict_is_not_fabricated_as_refresh`: Supporting error-contract regression — unknown conflict not fabricated as refreshed impact; no direct AC.
-- `test_preview_batches_all_events_without_truncating`: AC4 backend complete-list clause: exact affectedCount and all 101 complete enriched request rows; batching strategy intentionally not asserted.
-- `test_preview_enriches_all_requests_through_owning_services`: AC4 backend list clause — event/venue names enriched, venue detail and token returned with read-only calls.
+Real
+----
+- The closure preview and confirm routes: enriching every affected request
+  through its owning services, refusing an incomplete preview, forwarding the
+  confirmation token and keeping refresh conflicts.
+- Assertions are on the preview returned and the status.
 
-## Existing test contract and detailed cases
+Doubled
+-------
+- Event, Venue, Venue Availability, User and Safety Check Services: Stub (patch
+  / monkeypatch on app.clients, or respx) - canned answers or raised errors;
+  calls recorded so tests assert what was (or was not) called.
 
-SCRUM-171 AC4: complete enriched preview, no writes.
-
-Malformed upstream-response checks support preview integrity/robustness; they
-are not standalone proof of the complete user-facing confirmation criterion.
+Not proven
+----------
+- That the atomic services behave as stubbed (-> their own unit and integration
+  tests, and tests/integration/ here with respx).
 """
 
 import httpx
@@ -103,10 +123,19 @@ def setup(monkeypatch):
         ("event", {"events": []}),
         ("event", {"events": [{"id": UID, "eventName": None}]}),
     ],
+    ids=["venue", "venue_venue_id_wrong_name_hall", "venue_venue_id_uid_name_none", "preview", "preview_dict_closure_body_affectedcount_2_affect", "preview_dict_closure_body_affectedcount_1_affect", "preview_dict_closure_body_affectedcount_2_affect_2", "event_events", "event_events_id_uid_eventname_none"],
 )
-def test_incomplete_preview_never_offered_for_confirmation(
+def test_preview_closure_with_incomplete_data_is_not_offered(
     setup, monkeypatch, stage, body
 ):
+    """
+    Summary: A preview with missing venue, closure or event details is never offered for confirmation.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (one owner returns incomplete data)
+    """
+    # Arrange (Given)
     client, _ = setup
     original = httpx.request
 
@@ -123,12 +152,24 @@ def test_incomplete_preview_never_offered_for_confirmation(
         )
 
     monkeypatch.setattr(httpx, "request", reply)
+
+    # Act (When)
     response = client.post("/venue-closures/preview", json=BODY, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 502
     assert "confirmationToken" not in response.json
 
 
-def test_confirm_forwards_token_and_preserves_refresh_conflict(setup, monkeypatch):
+def test_confirm_closure_forwards_token_and_keeps_refresh_conflict(setup, monkeypatch):
+    """
+    Summary: Confirming forwards the token, and a changed impact asks to refresh.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (Venue Availability answers), Mock (request inspected)
+    """
+    # Arrange (Given)
     client, calls = setup
     original = httpx.request
 
@@ -144,7 +185,11 @@ def test_confirm_forwards_token_and_preserves_refresh_conflict(setup, monkeypatc
 
     monkeypatch.setattr(httpx, "request", reply)
     body = BODY | dict(confirmed=True, confirmationToken="signed")
+
+    # Act (When)
     response = client.post("/venue-closures", json=body, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 409
     assert response.json["code"] == "CLOSURE_PREVIEW_CHANGED"
     assert "private" not in response.text
@@ -161,14 +206,32 @@ def test_confirm_forwards_token_and_preserves_refresh_conflict(setup, monkeypatc
     ],
     ids=["unconfirmed", "missing-token", "invalid-token-type", "invalid-preview"],
 )
-def test_invalid_confirmation_and_preview_inputs(setup, path, body):
+def test_confirm_or_preview_with_invalid_input_returns_400(setup, path, body):
+    """
+    Summary: Invalid preview or confirmation input is refused.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: None
+    """
+    # Arrange (Given)
     client, calls = setup
+
+    # Act + Assert (When / Then)
     assert client.post(path, json=body, headers=HEADERS).status_code == 400
     assert not calls
 
 
-@pytest.mark.parametrize("body", [{"message": "legacy"}, [], None])
-def test_unknown_conflict_is_not_fabricated_as_refresh(setup, monkeypatch, body):
+@pytest.mark.parametrize("body", [{"message": "legacy"}, [], None], ids=["legacy_message", "list_body", "null_body"])
+def test_confirm_closure_with_unknown_conflict_is_not_reported_as_refresh(setup, monkeypatch, body):
+    """
+    Summary: An unrecognised conflict is not mistaken for "please refresh".
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    Double: Stub (Venue Availability answers 409)
+    """
+    # Arrange (Given)
     client, _ = setup
     monkeypatch.setattr(
         httpx,
@@ -177,11 +240,23 @@ def test_unknown_conflict_is_not_fabricated_as_refresh(setup, monkeypatch, body)
             409, json=body, request=httpx.Request(method, url)
         ),
     )
+
+    # Act (When)
     response = client.post("/venue-closures/preview", json=BODY, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 503
 
 
-def test_preview_batches_all_events_without_truncating(setup, monkeypatch):
+def test_preview_closure_reads_all_affected_events_in_batches(setup, monkeypatch):
+    """
+    Summary: Every affected event is read, in batches, without truncation.
+    AC4: Given an affected venue request is rejected, the existing event itself
+        or other venue requests under that event are not rejected and remain
+        unchanged.
+    Double: Stub (Event Service), Mock (batches inspected)
+    """
+    # Arrange (Given)
     from uuid import UUID
 
     client, _ = setup
@@ -203,7 +278,11 @@ def test_preview_batches_all_events_without_truncating(setup, monkeypatch):
         return httpx.Response(200, json=body, request=httpx.Request(method, url))
 
     monkeypatch.setattr(httpx, "request", reply)
+
+    # Act (When)
     response = client.post("/venue-closures/preview", json=BODY, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["affectedCount"] == len(rows)
     assert response.json["affectedRequests"] == [
@@ -211,9 +290,24 @@ def test_preview_batches_all_events_without_truncating(setup, monkeypatch):
     ]
 
 
-def test_preview_enriches_all_requests_through_owning_services(setup):
+def test_preview_closure_enriches_each_request_from_its_owner(setup):
+    """
+    Summary: Each affected request is described using its owning services.
+    AC1: Given a closure is recorded, then requests for the same venue with
+        overlapping booking intervals and status Pending, Pending Review, or
+        Approved are changed to Rejected.
+    AC4: Given an affected venue request is rejected, the existing event itself
+        or other venue requests under that event are not rejected and remain
+        unchanged.
+    Double: Stub (owners)
+    """
+    # Arrange (Given)
     client, calls = setup
+
+    # Act (When)
     response = client.post("/venue-closures/preview", json=BODY, headers=HEADERS)
+
+    # Assert (Then)
     assert response.status_code == 200
     assert response.json["affectedRequests"] == [
         ROW | {"eventName": "Event", "venueName": "Hall"}

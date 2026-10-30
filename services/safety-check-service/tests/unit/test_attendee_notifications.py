@@ -1,14 +1,42 @@
-"""SCRUM-46 Attendee Registration and Update Notifications: Safety Check unit tests.
+"""
+SCRUM-46: Attendee Registration and Update Notifications
 
-Story: As an Attendee, I want to receive notifications about my registration status, so that I can confirm my place and stay updated on event changes.
+User Story
+----------
+As an Attendee, I want to receive notifications about my registration status,
+so that I can confirm my place and stay updated on event changes.
 
-Real: composite HTTP request construction. Doubled: other services via respx.
-Not proven: Event storage, approval authorization or broker delivery.
-AC1 Given an Attendee successfully registers for an event, the system sends an in-app notification confirming their registration with the event name, date, time, venue, and registration reference number.
-AC2 Given an Attendee successfully withdraws their registration, the system sends an in-app notification confirming the withdrawal with the event name.
-AC3 Given an event cancellation takes effect, or a change to its date, time or venue is approved and applied, all currently registered Attendees receive an in-app notification with the event name and cancellation status or updated details, as applicable.
-AC1/2 are covered by Registration/Workflow. AC3 captures actual pre-change venues here.
-AC = acceptance criterion; DR = supporting design rule.
+Acceptance Criteria
+-------------------
+AC1: Given an Attendee successfully registers for an event, the system sends an
+     in-app notification confirming their registration with the event name,
+     date, time, venue, and registration reference number.
+AC2: Given an Attendee successfully withdraws their registration, the system
+     sends an in-app notification confirming the withdrawal with the event
+     name.
+AC3: Given an event cancellation takes effect, or a change to its date, time or
+     venue is approved and applied, all currently registered Attendees receive
+     an in-app notification with the event name and cancellation status or
+     updated details, as applicable.
+
+Real
+----
+- The safety approve and booking-change withdrawal routes as they capture the
+  event's approved venue for the attendee update notice.
+- Assertions are on the facts sent to Event Service.
+
+Doubled
+-------
+- Event, Safety Check Record, Venue Availability, Venue, Equipment Request,
+  Equipment and User Services: Stub (monkeypatched app.clients functions, or
+  respx for client tests) - canned answers or raised client errors; calls
+  recorded so tests assert the order and what was (or was not) called.
+
+Not proven
+----------
+- That the atomic services behave as stubbed, and that a compensation really
+  restores state in the database (-> each atomic service's unit and integration
+  tests, and tests/integration/ here with respx).
 """
 
 import json
@@ -17,15 +45,16 @@ import respx
 from app import clients
 
 
-# AC3 ----
-def test_ac3_venue_withdrawal_captures_earliest_approved_booking_not_requirements(
+def test_withdrawal_captures_earliest_approved_booking_venue(
     monkeypatch,
 ):
-    """Normal: withdraw safety with late/early Approved bookings and an earlier Pending booking.
-    The actual HTTP adapter must send Hall A, the earliest Approved venue, as
-    venueBefore before the booking changes. Strict respx responses control the remote
-    APIs; request construction is real. This prevents requirement text or the wrong
-    booking from becoming the immutable comparison baseline, without proving a commit.
+    """
+    Summary: The update notice names the earliest approved booking's venue, not the event's requirements.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (bookings and venues), Mock (event move inspected)
     """
     event = "11111111-1111-4111-8111-111111111111"
     monkeypatch.setattr(clients, "EVENT_SERVICE_URL", "http://event.test")
@@ -92,14 +121,16 @@ from tests.unit.factories import (
 @pytest.mark.parametrize(
     "state", ["final-venue", "lookup-outage", "already-confirmed-history"]
 )
-def test_ac3_safety_approval_carries_final_venue_only_for_the_current_review_cycle(
+def test_approval_carries_final_venue_for_current_review_only(
     monkeypatch, state
 ):
-    """Boundary: approve through the real Safety route and HTTP adapters with strict remote doubles.
-    final-venue sends Hall C with the Event decision; lookup-outage returns 502 before
-    saving a decision; already-confirmed-history has a completed cycle after the
-    baseline and must not reuse that stale venue context. This protects final facts
-    and cycle boundaries, not Event's SQL transaction or concurrent booking writes.
+    """
+    Summary: An approval passes on the final venue only for the current review cycle.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (bookings and venues), Mock (event move inspected)
     """
     for key, name in [
         ("EVENT_SERVICE_URL", "event"),
@@ -159,13 +190,16 @@ def test_ac3_safety_approval_carries_final_venue_only_for_the_current_review_cyc
 
 
 @pytest.mark.parametrize("state", ["no-approved", "unnamed"])
-def test_dr_unusable_approved_venue_is_not_replaced_with_requirements(
+def test_unusable_approved_venue_is_not_replaced_with_requirements(
     monkeypatch, state
 ):
-    """Failure: enrich venue facts when no Approved booking exists or its venue name is blank.
-    The real HTTP adapter must raise DownstreamError in no-approved and unnamed cases,
-    rather than fabricate a hall from requirements. Strict HTTP doubles supply the
-    upstream responses; this guards snapshot quality, not the remote venue database.
+    """
+    Summary: With no usable approved venue, the requirements text is never shown as the venue.
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: Stub (bookings and venues), Mock (event move inspected)
     """
     monkeypatch.setattr(
         clients, "VENUE_AVAILABILITY_SERVICE_URL", "http://availability.test"

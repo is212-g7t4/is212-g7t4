@@ -1,27 +1,51 @@
-"""SCRUM-10 Role-Based Modification Control: Venue Booking Service unit tests.
+"""
+SCRUM-10: Role-Based Modification Control for Events
 
-Story:      As a registered user, I want to modify only information appropriate to my
-            role and relationship to an event, so that I can perform my responsibilities
-            without changing information outside my permissions.
-Real:       Flask app, routes, token verification and role checks.
-Doubled:    every downstream service (Event, Venue, Venue Availability, Safety Check); the
-            unit tier's socket block fails any call that is not stubbed, so a refused
-            change is also proven to send nothing downstream.
-Not proven: that the requester is the coordinator assigned to the event (Event Service's own
-            tests); that a refused change leaves the stored booking unchanged (Venue
-            Availability Service's tests); Supabase issuing the token.
+User Story
+----------
+As a registered user, I want to modify only information appropriate to my role
+and relationship to an event, so that I can perform my responsibilities without
+changing information outside my permissions.
 
-AC1  Given an authenticated user is permitted to modify information based on their role and
-     relationship to the event, when they make a valid change to that information, then the
-     change is allowed.
-AC2  Given an authenticated user's role does not permit them to modify particular information,
-     when they attempt to change that information, then the modification is prevented and the
-     existing information remains unchanged.
-AC3  Not covered here: the event relationship is decided by Event Service, which this service asks.
-AC4  Given a user is permitted to view particular information but is not permitted to modify it,
-     when they attempt to change that information, then the modification is prevented while their
-     permitted viewing access remains unaffected.
-AC5  Not covered here: see AC3.
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to modify information based on
+     their role and relationship to the event, when they make a valid change to
+     that information, then the change is allowed.
+AC2: Given an authenticated user's role does not permit them to modify
+     particular information, when they attempt to change that information, then
+     the modification is prevented and the existing information remains
+     unchanged.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to modify that event's information, when they attempt to make a
+     change, then the modification is prevented and the existing information
+     remains unchanged.
+AC4: Given a user is permitted to view particular information but is not
+     permitted to modify it, when they attempt to change that information, then
+     the modification is prevented while their permitted viewing access remains
+     unaffected.
+AC5: Given a user is permitted to modify information for one event but does not
+     have the required access to another event, when they attempt to modify
+     information for both events, then only modifications to information for
+     which they have the required access are allowed.
+
+Real
+----
+- The booking-request write routes and venue profile edit: token verification
+  and the role checks run for real.
+- Assertions are on the status and nothing being sent downstream.
+
+Doubled
+-------
+- Event, Venue, Venue Availability, Safety Check Record and Safety Check
+  Services: Stub (unittest.mock.patch / monkeypatch on app.routes and
+  app.clients, or respx for client tests) - canned answers or raised client
+  errors; calls recorded so tests assert what was (or was not) called.
+
+Not proven
+----------
+- That a refused change leaves stored data unchanged (-> the atomics'
+  modification-access tests).
 """
 import pytest
 
@@ -41,58 +65,104 @@ REQUESTER_ROUTES = [
 
 # AC1 ----
 
-@pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead"])
-def test_ac1_coordinator_roles_get_past_the_gate_to_the_cancel_checks(role):
-    """Normal: both coordinator roles reach the handler's own validation (eventId is required)."""
+@pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead"], ids=["event_coordinator", "event_coordinator_lead"])
+def test_cancel_request_when_coordinator_role_reaches_cancel_checks(role):
+    """
+    Summary: Coordinators and the Lead get past the role check to the cancel checks.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (downstream)
+    """
+    # Arrange (Given)
     client = signed_in(create_app().test_client(), role=role)
 
+    # Act (When)
     response = client.patch("/booking-requests/booking-1/cancel", json={})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert response.json["message"] == "eventId is required."
 
 
-def test_ac1_venue_staff_edit_a_venue_profile(monkeypatch):
-    """Normal: the Venue Staff role is permitted to save a venue profile."""
+def test_edit_venue_when_venue_staff_is_allowed(monkeypatch):
+    """
+    Summary: Venue Staff can save a venue profile.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (Venue Service saves)
+    """
+    # Arrange (Given)
     monkeypatch.setattr(routes, "update_venue_profile", lambda venue_id, data: VENUE)
     monkeypatch.setattr(
         routes, "reconcile_legacy_conflicts", lambda venue: {"venueId": VENUE_ID, "conflictCount": 0, "conflicts": []}
     )
 
+    # Act (When)
     response = signed_in(create_app().test_client(), role="Venue Staff").put(f"/venues/{VENUE_ID}", json={"name": "X"})
 
+    # Assert (Then)
     assert response.status_code == 200
 
 
 # AC2 ----
 
-@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"])
-@pytest.mark.parametrize("method, path", REQUESTER_ROUTES)
-def test_ac2_only_coordinators_may_create_edit_or_cancel_a_booking_request(method, path, role):
-    """Failure: other roles are refused before anything is read, and nothing is sent downstream."""
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"], ids=["venue_staff", "technical_support", "safety_officer", "event_organiser", "attendee"])
+@pytest.mark.parametrize("method, path", REQUESTER_ROUTES, ids=["create", "edit", "cancel"])
+def test_requester_actions_when_other_role_return_403(method, path, role):
+    """
+    Summary: Only coordinators may create, edit or cancel booking requests.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: None
+    """
+    # Arrange (Given)
     client = create_app().test_client()
 
+    # Act (When)
     response = getattr(client, method)(path, json={}, headers=bearer(USER, role))
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["message"] == "Your role cannot change this information."
 
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Safety Officer",
-                                  "Event Organiser", "Attendee"])
-def test_ac2_only_venue_staff_may_edit_a_venue_profile(role):
-    """Failure: the venue profile is Venue Staff's; no other role reaches Venue Service."""
+                                  "Event Organiser", "Attendee"], ids=["event_coordinator", "event_coordinator_lead", "technical_support", "safety_officer", "event_organiser", "attendee"])
+def test_edit_venue_when_not_venue_staff_returns_403(role):
+    """
+    Summary: Only Venue Staff can edit a venue profile.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: None
+    """
+    # Arrange (Given)
     client = create_app().test_client()
 
+    # Act (When)
     response = client.put(f"/venues/{VENUE_ID}", json={"name": "X"}, headers=bearer(USER, role))
 
+    # Assert (Then)
     assert response.status_code == 403
 
 
 # AC4 ----
 
-def test_ac4_a_coordinator_keeps_viewing_legacy_conflicts_when_their_venue_edit_is_refused(monkeypatch):
-    """Conflict: the refused PUT does not disturb the conflict view the coordinator role still has."""
+def test_legacy_conflicts_after_refused_venue_edit_still_viewable(monkeypatch):
+    """
+    Summary: A coordinator refused a venue edit can still view legacy conflicts.
+    AC4: Given a user is permitted to view particular information but is not
+        permitted to modify it, when they attempt to change that information,
+        then the modification is prevented while their permitted viewing access
+        remains unaffected.
+    Double: Stub (downstream)
+    """
+    # Arrange (Given)
     monkeypatch.setattr(routes, "get_venue", lambda venue_id: VENUE)
     monkeypatch.setattr(
         routes, "reconcile_legacy_conflicts", lambda venue: {"venueId": VENUE_ID, "conflictCount": 0, "conflicts": []}
@@ -101,7 +171,10 @@ def test_ac4_a_coordinator_keeps_viewing_legacy_conflicts_when_their_venue_edit_
 
     before = coordinator.get(f"/venues/{VENUE_ID}/legacy-conflicts")
     refused = coordinator.put(f"/venues/{VENUE_ID}", json={"name": "X"})
+
+    # Act (When)
     after = coordinator.get(f"/venues/{VENUE_ID}/legacy-conflicts")
 
+    # Assert (Then)
     assert (before.status_code, refused.status_code, after.status_code) == (200, 403, 200)
     assert before.json == after.json
