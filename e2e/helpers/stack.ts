@@ -1,6 +1,14 @@
 import type { APIRequestContext, Browser, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 
+// Load local journey credentials when the runner is launched without exported
+// shell variables. The file is git-ignored; callers may still supply env vars.
+try {
+  process.loadEnvFile('.env')
+} catch {
+  // `.env` is optional when credentials are provided by the invoking shell.
+}
+
 // Seeded users (database/supabase/seed.sql). SCRUM-8: each signs in through User Service with
 // the shared E2E_PASSWORD, so journeys need that env var and the real Supabase accounts.
 export const users = {
@@ -9,10 +17,22 @@ export const users = {
   organiser: { id: '3d89d4d2-3502-4bd9-ade8-c9887f2bee45', role: 'Event Organiser', email: 'michaellee@connect.com' },
   techSupport: { id: 'ad3d6da3-7220-4f80-9157-2ee4abc0455c', role: 'Technical Support', email: 'wei.chen@connectsphere.example' },
   venueStaff: { id: 'd9e4002b-db91-4939-b87e-50f9cceb5e0a', role: 'Venue Staff', email: 'siti.aminah@connectsphere.example' },
+  safetyOfficer: { id: '5af3e7c1-2b4d-4e8a-9f60-7d1c3b5a9e21', role: 'Safety Officer', email: 'nurul.huda@connectsphere.example' },
 } as const
 export type Actor = (typeof users)[keyof typeof users]
 
-const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010 }
+const passwordEnv: Record<string, string> = {
+  // Set one shared E2E_PASSWORD when the seeded accounts share a password,
+  // or these per-role values when they do not. Never commit either form.
+  [users.lead.id]: 'E2E_PASSWORD_LEAD',
+  [users.coordinator.id]: 'E2E_PASSWORD_COORDINATOR',
+  [users.organiser.id]: 'E2E_PASSWORD_ORGANISER',
+  [users.techSupport.id]: 'E2E_PASSWORD_TECH_SUPPORT',
+  [users.venueStaff.id]: 'E2E_PASSWORD_VENUE_STAFF',
+  [users.safetyOfficer.id]: 'E2E_PASSWORD_SAFETY_OFFICER',
+}
+
+const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, safety: 5012 }
 const url = (service: keyof typeof ports, path: string) => `http://localhost:${ports[service]}${path}`
 
 type Login = { accessToken: string; expiresAt: number; user: Record<string, string> }
@@ -22,8 +42,12 @@ const logins = new Map<string, Promise<Login>>()
 function signIn(actor: Actor): Promise<Login> {
   if (!logins.has(actor.id)) {
     logins.set(actor.id, (async () => {
-      const password = process.env.E2E_PASSWORD
-      if (!password) throw new Error('Set E2E_PASSWORD to the seeded users\' Supabase password.')
+      const password = process.env[passwordEnv[actor.id]] || process.env.E2E_PASSWORD
+      if (!password) {
+        throw new Error(
+          `Set ${passwordEnv[actor.id]} or the shared E2E_PASSWORD to sign in as ${actor.role}.`,
+        )
+      }
       const response = await fetch(url('user', '/auth/login'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: actor.email, password }),
@@ -35,7 +59,8 @@ function signIn(actor: Actor): Promise<Login> {
   return logins.get(actor.id)!
 }
 
-const authHeaders = async (actor: Actor) => ({ Authorization: `Bearer ${(await signIn(actor)).accessToken}` })
+export const authHeaders = async (actor: Actor) => ({ Authorization: `Bearer ${(await signIn(actor)).accessToken}` })
+export const serviceUrl = (service: keyof typeof ports, path: string) => url(service, path)
 
 /** A fresh browser context signed in as `actor`, so several roles can act in one test. */
 export async function openAs(browser: Browser, actor: Actor): Promise<Page> {

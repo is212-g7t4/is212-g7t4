@@ -22,7 +22,27 @@ export async function deleteFixtureEvents() {
   try {
     const ids = `(SELECT event_id FROM public."Event" WHERE event_name ~ $1)`
     const pattern = [FIXTURE_NAME]
+    const venues = `(SELECT venue_id FROM public."Venue" WHERE venue_name ~ $1)`
+    const outboxVenues = `(SELECT venue_id FROM public."Venue" WHERE venue_name ~ $2)`
     await db.query('BEGIN')
+    // Event outbox rows have no FK by design. Remove fixture jobs as well as
+    // source events so a delayed dispatcher cannot publish after cleanup.
+    await db.query(
+      `DELETE FROM public."EventNotificationOutbox" WHERE source->>'eventName' ~ $1`,
+      pattern,
+    )
+    // Venue Notification Outbox keeps booking/closure foreign keys even after
+    // delivery. Remove fixture intents before deleting either source record.
+    await db.query(
+      `DELETE FROM public."VenueNotificationOutbox"
+       WHERE booking_id IN (
+         SELECT booking_id FROM public."VenueBooking"
+         WHERE event_id IN ${ids} OR venue_id IN ${outboxVenues}
+       ) OR closure_id IN (
+         SELECT closure_id FROM public."VenueClosure" WHERE venue_id IN ${outboxVenues}
+       )`,
+      [FIXTURE_NAME, FIXTURE_VENUE],
+    )
     await db.query(
       `DELETE FROM public."SafetyCheckFlag" WHERE safety_check_id IN (SELECT safety_check_id FROM public."SafetyCheck" WHERE event_id IN ${ids})`,
       pattern,
@@ -31,7 +51,6 @@ export async function deleteFixtureEvents() {
       await db.query(`DELETE FROM public."${table}" WHERE event_id IN ${ids}`, pattern)
     }
     await db.query(`DELETE FROM public."Event" WHERE event_name ~ $1`, pattern)
-    const venues = `(SELECT venue_id FROM public."Venue" WHERE venue_name ~ $1)`
     await db.query(`DELETE FROM public."VenueBooking" WHERE venue_id IN ${venues}`, [FIXTURE_VENUE])
     await db.query(`DELETE FROM public."VenueClosure" WHERE venue_id IN ${venues}`, [FIXTURE_VENUE])
     await db.query(`DELETE FROM public."Venue" WHERE venue_name ~ $1`, [FIXTURE_VENUE])

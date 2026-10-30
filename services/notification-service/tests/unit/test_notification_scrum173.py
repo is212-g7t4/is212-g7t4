@@ -516,6 +516,19 @@ class TestReviewValidation:
         ch.basic_ack.assert_not_called()
 
 
+    def test_r1_missing_event_reference_is_quarantined_before_ack(self):
+        """A delayed message for a removed fixture event must not block later notifications."""
+        body = json.dumps(envelope()).encode()
+        ch = Mock()
+        error = psycopg2.errors.ForeignKeyViolation("event no longer exists")
+        with patch("app.consumer.store.deliver", side_effect=error) as deliver, \
+                patch("app.consumer.store.quarantine") as quarantine:
+            process("synthetic", ch, Mock(delivery_tag=31), body)
+        deliver.assert_called_once()
+        assert quarantine.call_args.args[1] == body
+        ch.basic_ack.assert_called_once_with(delivery_tag=31)
+
+
     def test_r1_quarantine_keeps_bytes_and_sanitizes_untrusted_error_text(self):
         """## Supporting diagnostics/security
         Quarantine keeps original binary bytes while escaping unsafe diagnostic text.
