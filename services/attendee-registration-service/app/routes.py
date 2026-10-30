@@ -18,6 +18,19 @@ from app.validation import event_has_started, validate_registration, withdrawal_
 
 bp = Blueprint("attendee_registration_service", __name__)
 
+ATTENDEE_ROLES = ("Attendee",)
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change registrations, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing, here or downstream.
+    A caller with no user passes and meets the handler's own sign-in check.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
+
 
 @bp.get("/health")
 def health():
@@ -90,6 +103,8 @@ def attendee_registrations():
 
 @bp.post("/registrations")
 def register_for_event():
+    if (forbidden := _cannot_modify(ATTENDEE_ROLES)):
+        return forbidden
     cleaned, errors, missing = validate_registration(request.get_json(silent=True))
     if missing or errors:
         return jsonify(
@@ -145,6 +160,8 @@ def register_for_event():
 
 @bp.patch("/registrations/<uuid:registration_id>/withdraw")
 def withdraw_from_event(registration_id):
+    if (forbidden := _cannot_modify(ATTENDEE_ROLES)):
+        return forbidden
     try:
         registration = next(
             (

@@ -77,10 +77,17 @@ def test_dev_identity_headers_no_longer_grant_access(client):
     assert client.post("/equipment", headers=headers).status_code == 401
 
 
-def test_background_worker_internal_tokenpasses_authentication(client):
-    response = client.post("/equipment", headers={"X-Internal-Token": "internal-test-token"})
+def test_internal_token_alone_is_refused_by_authentication():
+    """SCRUM-10: no background worker calls this service, so the internal token is not a way in."""
+    from flask import Flask
 
-    assert response.status_code not in (401, 503)
+    from app.auth import authenticate
+
+    with Flask(__name__).test_request_context("/anything", headers={"X-Internal-Token": "internal-test-token"}):
+        response, status = authenticate()
+
+    assert status == 401
+    assert response.json == {"message": "Sign in to continue."}
 
 
 def test_user_token_takes_precedence_over_an_internal_token(client):
@@ -123,3 +130,15 @@ def test_signing_keys_come_from_the_supabase_jwks_endpoint(monkeypatch):
     assert created == ["https://project.supabase.test/auth/v1/.well-known/jwks.json"]
     jwks.get_signing_key_from_jwt.assert_called_once_with("token")
     assert key is jwks.get_signing_key_from_jwt.return_value.key
+
+
+def test_a_token_without_a_subject_is_refused_by_authentication():
+    """SCRUM-10: authentication guarantees a user id, so handlers need not re-check it."""
+    from flask import Flask
+
+    from app.auth import authenticate
+
+    with Flask(__name__).test_request_context("/anything", headers=bearer("", "Attendee")):
+        response, status = authenticate()
+
+    assert status == 401

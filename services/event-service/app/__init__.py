@@ -91,6 +91,17 @@ STAFF_ROLES = ("Venue Staff", "Technical Support", "Safety Officer")
 STAFF_HIDDEN_FIELDS = ("organiserId", "actionHistory", "decision", "decisionHistory")
 # Roles that may look events up by id or time window (summaries only).
 LOOKUP_ROLES = ALL_EVENTS_ROLES + ("Event Coordinator",)
+# SCRUM-10: who may change what. The role is the token's; the caller's
+# relationship to the event (owner, assigned coordinator) is still checked
+# afterwards by the model layer.
+ORGANISER_ROLE = "Event Organiser"
+ORGANISER_ONLY = (ORGANISER_ROLE,)
+COORDINATOR_ROLES = ("Event Coordinator", LEAD_ROLE)
+LEAD_ONLY = (LEAD_ROLE,)
+SAFETY_OFFICER_ONLY = ("Safety Officer",)
+# PATCH /safety-status is called by Safety Check Service with the caller's own token: a coordinator
+# submits or withdraws, a Safety Officer decides.
+SAFETY_STATUS_ROLES = COORDINATOR_ROLES + SAFETY_OFFICER_ONLY
 
 
 def _role_allowed(roles):
@@ -101,6 +112,15 @@ def _role_allowed(roles):
 
 def _forbidden():
     return jsonify(message="Your role cannot view this information."), 403
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change this
+    information, else None. Runs before the body is read or the database is
+    touched, so a refused change leaves the event as it was."""
+    if _role_allowed(roles):
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
 
 
 def _for_viewer(event):
@@ -300,6 +320,8 @@ def create_app(config=None):
 
     @app.post("/events")
     def submit():
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -321,6 +343,8 @@ def create_app(config=None):
 
     @app.post("/events/drafts")
     def create_draft():
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         organiser_id, details, failure = _draft_details(
             request.get_json(silent=True), validate_draft
         )
@@ -341,6 +365,8 @@ def create_app(config=None):
 
     @app.patch("/events/drafts/<uuid:event_id>")
     def edit_draft(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         organiser_id, details, failure = _draft_details(
             request.get_json(silent=True), validate_draft
         )
@@ -358,6 +384,8 @@ def create_app(config=None):
 
     @app.post("/events/drafts/<uuid:event_id>/submit")
     def submit_existing_draft(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         # The full submission rules, the same as POST /events (AC5).
         organiser_id, details, failure = _draft_details(
             request.get_json(silent=True), validate
@@ -376,6 +404,8 @@ def create_app(config=None):
 
     @app.delete("/events/drafts/<uuid:event_id>")
     def remove_draft(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         organiser_id, failure = _current_user()
         if failure:
             return failure
@@ -591,6 +621,8 @@ def create_app(config=None):
 
     @app.post("/events/<uuid:event_id>/change-requests")
     def request_changes(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -646,20 +678,31 @@ def create_app(config=None):
             ), 400
         return jsonify(saved), 201
 
-    def _change_workflow_is_internal():
-        """Opt-in server-to-server lock, matching the other workflow endpoints."""
+    def _internal_lock_failure(code, message):
+        """The refusal for a route only another service may call, else None.
+
+        SCRUM-10: fails closed. An unconfigured token used to switch the lock off; the role checks
+        say who the person is, this says the call came through the workflow.
+        """
         configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
         if not configured_token:
-            return True
-        return hmac.compare_digest(
-            request.headers.get("X-Internal-Service-Token", ""), configured_token
-        )
+            return jsonify(
+                code="INTERNAL_AUTH_NOT_CONFIGURED",
+                message="Internal service authentication is not configured.",
+            ), 503
+        presented_token = request.headers.get("X-Internal-Service-Token", "")
+        if not hmac.compare_digest(presented_token, configured_token):
+            return jsonify(code=code, message=message), 403
+        return None
+
+    def _change_workflow_failure():
+        return _internal_lock_failure("INTERNAL_ONLY", "Internal workflow access required.")
 
     @app.get("/change-requests")
     def pending_change_requests():
         """Atomic read used by Event Workflow Service (SCRUM-43 AC1/AC2)."""
-        if not _change_workflow_is_internal():
-            return jsonify(code="INTERNAL_ONLY", message="Internal workflow access required."), 403
+        if (locked := _change_workflow_failure()):
+            return locked
         coordinator_id, failure = _current_user()
         if failure:
             return failure
@@ -673,8 +716,8 @@ def create_app(config=None):
 
     @app.get("/change-requests/<uuid:change_request_id>")
     def change_request_details(change_request_id):
-        if not _change_workflow_is_internal():
-            return jsonify(code="INTERNAL_ONLY", message="Internal workflow access required."), 403
+        if (locked := _change_workflow_failure()):
+            return locked
         coordinator_id, failure = _current_user()
         if failure:
             return failure
@@ -693,8 +736,10 @@ def create_app(config=None):
     @app.patch("/change-requests/<uuid:change_request_id>/decision")
     def process_change_request(change_request_id):
         """Commit a workflow-approved decision and its event update atomically."""
-        if not _change_workflow_is_internal():
-            return jsonify(code="INTERNAL_ONLY", message="Internal workflow access required."), 403
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
+        if (locked := _change_workflow_failure()):
+            return locked
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -750,6 +795,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>")
     def assign_coordinator(event_id):
+        if (forbidden := _cannot_modify(LEAD_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         coordinator_id = data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
         try:
@@ -781,6 +828,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/progress")
     def update_progress(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         status = data.get("status", "") if isinstance(data, dict) else ""
         action_details = data.get("actionDetails", "") if isinstance(data, dict) else ""
@@ -843,6 +892,8 @@ def create_app(config=None):
         still can't change a `Confirmed` event's high-impact fields without
         the approval being withdrawn.
         """
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -873,15 +924,18 @@ def create_app(config=None):
         safety_recheck, failure = _safety_recheck(data)
         if failure:
             return failure
-        # The same opt-in lock as /safety-status: when
-        # INTERNAL_SERVICE_TOKEN isn't configured, `safetyRecheck` alone is
-        # treated as sufficient, so a local setup behaves as it did before
-        # SCRUM-153. Configuring it on both services turns the lock on.
+        # The same lock as /safety-status, and it fails closed (SCRUM-10): without INTERNAL_SERVICE_TOKEN
+        # the re-check and the Lead's edit of an unassigned event are refused. Only those two need it; a
+        # plain coordinator edit never does, so it works whether or not the token is configured.
         configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
-        internal = True
-        if configured_token:
-            presented_token = request.headers.get("X-Internal-Service-Token", "")
-            internal = hmac.compare_digest(presented_token, configured_token)
+        if (safety_recheck is not None or actor_role is not None) and not configured_token:
+            return jsonify(
+                code="INTERNAL_AUTH_NOT_CONFIGURED",
+                message="Internal service authentication is not configured.",
+            ), 503
+        internal = bool(configured_token) and hmac.compare_digest(
+            request.headers.get("X-Internal-Service-Token", ""), configured_token
+        )
 
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
@@ -952,22 +1006,19 @@ def create_app(config=None):
         status (SCRUM-152), so there is exactly one way into this part of the
         lifecycle.
 
-        The internal token below (SCRUM-150, moved forward from SCRUM-152 v2)
-        is an opt-in lock: if `INTERNAL_SERVICE_TOKEN` isn't configured on
-        this service, the check is skipped entirely rather than failing
-        closed — local/dev setups that don't set it behave exactly as before
-        SCRUM-150. Configuring it (on both this service and Safety Check
-        Service) turns the lock on.
+        Two checks, in this order. The caller's role (SCRUM-10): a coordinator
+        submits, withdraws or restores; only a Safety Officer decides. Then the
+        internal token (SCRUM-150, moved forward from SCRUM-152 v2), which
+        proves the call came through Safety Check Service. The token fails
+        closed (SCRUM-10): without `INTERNAL_SERVICE_TOKEN` configured on this
+        service the route answers 503 rather than skipping the lock.
         """
-        configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
-        if configured_token:
-            presented_token = request.headers.get("X-Internal-Service-Token", "")
-            if not hmac.compare_digest(presented_token, configured_token):
-                return jsonify(
-                    code="INTERNAL_ONLY",
-                    message="Only the Safety Check workflow can change an event's safety status.",
-                ), 403
-
+        if (forbidden := _cannot_modify(SAFETY_STATUS_ROLES)):
+            return forbidden
+        if (locked := _internal_lock_failure(
+            "INTERNAL_ONLY", "Only the Safety Check workflow can change an event's safety status."
+        )):
+            return locked
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -1005,6 +1056,12 @@ def create_app(config=None):
         venue_change, failure = _venue_change(data, status, safety_check_id)
         if failure:
             return failure
+
+        # SCRUM-10: who may make this move depends on the move. A coordinator submits, withdraws or
+        # restores; only a Safety Officer decides. Still before anything is read or written.
+        decides = not venue_change and status != "Pending Safety Check"
+        if (forbidden := _cannot_modify(SAFETY_OFFICER_ONLY if decides else COORDINATOR_ROLES)):
+            return forbidden
 
         # Each move needs its own identity fields validated.
         coordinator_id = None
@@ -1099,6 +1156,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/approve")
     def approve(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         coordinator_id, failure = _current_user()
         if failure:
             return failure
@@ -1124,6 +1183,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/clarification-request")
     def request_clarification(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         message = data.get("message") if isinstance(data, dict) else None
         coordinator_id, failure = _current_user()
@@ -1159,6 +1220,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/clarification-response")
     def respond_to_clarification(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         response = data.get("response") if isinstance(data, dict) else None
         organiser_id, failure = _current_user()
@@ -1191,6 +1254,8 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/amendment-request")
     def request_amendment(event_id):
         """SCRUM-16 AC1/AC2/AC5: the assigned coordinator flags fields for the organiser to amend."""
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         fields = data.get("fields") if isinstance(data, dict) else None
         reason = data.get("reason") if isinstance(data, dict) else None
@@ -1240,6 +1305,8 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/amendment-response")
     def respond_to_amendment(event_id):
         """SCRUM-16 AC3/AC4: the organiser amends only the flagged fields and resubmits."""
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         changes = data.get("changes") if isinstance(data, dict) else None
         note = data.get("note") if isinstance(data, dict) else None
@@ -1289,6 +1356,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/reject")
     def reject(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         reason = data.get("reason") if isinstance(data, dict) else None
         coordinator_id, failure = _current_user()

@@ -12,7 +12,7 @@ ATTENDEE_ID = "56b34ab1-92cd-4b35-83c7-f04e176e2bd0"
 
 @pytest.fixture
 def client():
-    return signed_in(create_app({"TESTING": True, "FRONTEND_ORIGIN": "http://localhost:5174"}).test_client())
+    return signed_in(create_app({"TESTING": True, "FRONTEND_ORIGIN": "http://localhost:5174"}).test_client(), role="Attendee")
 
 
 def payload(**overrides):

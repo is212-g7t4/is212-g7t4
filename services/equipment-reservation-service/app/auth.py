@@ -5,7 +5,6 @@ Every service carries its own copy of this module: there is no shared library
 the project's JWKS endpoint, so no signing secret is needed here.
 """
 
-import hmac
 import os
 from functools import lru_cache
 
@@ -27,22 +26,17 @@ def signing_key(token):
 
 
 def authenticate():
-    """before_request: require a Supabase access token, or a background worker's internal token.
+    """before_request: require a Supabase access token.
 
-    Sets g.user_id and g.role for a signed-in user; both stay None for an internal caller.
+    Sets g.user_id and g.role for the signed-in user.
     """
     g.user_id = g.role = None
-    # /internal/* routes keep their own X-Internal-Token guard.
     if request.method == "OPTIONS" or request.path in PUBLIC_PATHS or request.path.startswith("/internal/"):
         return None
     authorization = request.headers.get("Authorization")
-    # A user's token always decides who the caller is, even next to an internal token.
+    # SCRUM-10: only a signed-in user reaches this service. No background worker calls it, so an
+    # internal token alone is not a way in.
     if authorization is None:
-        internal_token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
-        if internal_token and hmac.compare_digest(
-            internal_token.encode(), request.headers.get("X-Internal-Token", "").encode()
-        ):
-            return None
         return jsonify(message="Sign in to continue."), 401
     scheme, _, token = authorization.partition(" ")
     if scheme != "Bearer" or not token:
@@ -60,6 +54,8 @@ def authenticate():
     except jwt.PyJWKClientConnectionError:
         return jsonify(message="Unable to verify your session. Please try again."), 503
     except jwt.PyJWTError:
+        return jsonify(message="Your session is invalid or has expired. Sign in again."), 401
+    if not claims["sub"]:
         return jsonify(message="Your session is invalid or has expired. Sign in again."), 401
     g.user_id, g.role = claims["sub"], claims.get(ROLE_CLAIM)
     return None

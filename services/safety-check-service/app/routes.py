@@ -83,6 +83,20 @@ NOT_SAFETY_OFFICER = (
     "Only a Safety Officer can decide an event's Operational Safety Check."
 )
 UNREADABLE_ARRANGEMENTS = "Unable to check the event's arrangements right now."
+COORDINATOR_ROLES = ("Event Coordinator", LEAD_ROLE)
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change this information, else None.
+
+    Runs first in the handler, so a refused change reads and writes nothing, here or downstream.
+    A caller with no user passes and meets the handler's own sign-in check.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
+
+
 UNREADABLE_ROLE = "Unable to check the caller's role right now."
 UNREADABLE_QUEUE = "Unable to load the safety check queue right now."
 VENUE_CHANGE_TIMEOUT = "Updating the event's safety approval took too long. Please try again."
@@ -99,8 +113,6 @@ def health():
 def review_safety_check(event_id):
     """Read the complete safety context for a Safety Officer (SCRUM-163)."""
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     failure = _token_safety_officer()
     if failure:
         return failure
@@ -210,12 +222,12 @@ def submit_safety_check():
     event update then fails, the round just created is deleted again — there is
     no distributed transaction, so this compensates by hand.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -291,8 +303,6 @@ def approve_safety_check():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -325,8 +335,6 @@ def request_safety_changes():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -368,8 +376,6 @@ def reject_safety_check():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -422,12 +428,12 @@ def recheck_safety():
     details and its safety status must change together, or AC1's guarantee
     (never prepared on an outdated review) doesn't hold.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -590,12 +596,12 @@ def withdraw_for_venue_change():
     Record first, then event, as in `recheck_safety`: the record service's row
     lock is the race guard. If the event move fails, the withdrawal is undone.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     booking_id = _uuid_or_none(data.get("bookingId"))
     if not event_id or not booking_id:
@@ -676,12 +682,12 @@ def restore_after_venue_change():
     reading 'Confirmed' with no approval in force: at worst it stays
     'Approved' with its round approved again, and the coordinator resubmits.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     withdrawn_id = _uuid_or_none(data.get("withdrawnSafetyCheckId"))
     if not event_id or not withdrawn_id:
@@ -938,8 +944,6 @@ def _release_venue_bookings(event_id):
 @bp.get("/safety-checks/resubmit/readiness")
 def safety_resubmission_readiness():
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -959,8 +963,6 @@ def safety_resubmission_readiness():
 @bp.get("/safety-checks/feedback")
 def safety_check_feedback():
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -987,8 +989,6 @@ def safety_check_readiness():
     sees what is missing before clicking rather than after.
     """
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -1030,8 +1030,6 @@ def safety_check_queue():
     silently omits an event.
     """
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     failure = _token_safety_officer()
     if failure:
         return failure

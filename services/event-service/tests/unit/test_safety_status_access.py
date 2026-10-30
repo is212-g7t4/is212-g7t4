@@ -4,9 +4,8 @@ Moved forward from SCRUM-152 v2 (its B1), because this story opens the first
 legitimate route into 'Confirmed'; configuring the lock stops a direct API
 call from confirming an event and skipping the Safety Officer entirely.
 
-The lock is opt-in: it only activates when `INTERNAL_SERVICE_TOKEN` is
-configured on this service. Unconfigured (the default for local/dev setups
-that don't set it), the endpoint behaves exactly as it did before SCRUM-150.
+The lock fails closed (SCRUM-10): without `INTERNAL_SERVICE_TOKEN` configured on this
+service the endpoint answers 503. It used to be opt-in and skip the check.
 
 Database calls are mocked; no live database writes.
 """
@@ -20,7 +19,7 @@ from tests.unit.factories import signed_in
 
 @pytest.fixture
 def unconfigured(monkeypatch):
-    """Same as `setup`, but with no INTERNAL_SERVICE_TOKEN — the lock is off."""
+    """Same as `setup`, but with no INTERNAL_SERVICE_TOKEN configured."""
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr(
@@ -91,21 +90,20 @@ def test_wrong_header_is_refused_when_the_lock_is_configured(setup):
     cursor.execute.assert_not_called()
 
 
-def test_token_unconfigured_skips_the_lock_entirely(unconfigured):
-    """Opt-in: no INTERNAL_SERVICE_TOKEN means no check, not a 503."""
+def test_token_unconfigured_fails_closed(unconfigured):
+    """SCRUM-10: no INTERNAL_SERVICE_TOKEN means the route is refused with 503, not left open."""
     client, _, cursor = unconfigured
-    cursor.fetchone.return_value = None
 
     response = client.patch(f"/events/{EVENT_ID}/safety-status", json=body())
 
-    # Past the (skipped) lock: reaches the model and gets the normal 404.
-    assert response.status_code == 404
+    assert response.status_code == 503
+    assert response.json["code"] == "INTERNAL_AUTH_NOT_CONFIGURED"
+    cursor.execute.assert_not_called()
 
 
 def test_token_unconfigured_ignores_any_header_sent(unconfigured):
-    """A header sent anyway (e.g. an older client) doesn't change anything."""
+    """A header sent anyway doesn't open an unconfigured route."""
     client, _, cursor = unconfigured
-    cursor.fetchone.return_value = None
 
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
@@ -113,7 +111,8 @@ def test_token_unconfigured_ignores_any_header_sent(unconfigured):
         headers={"X-Internal-Service-Token": "anything"},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 503
+    cursor.execute.assert_not_called()
 
 
 def test_right_header_passes_the_lock(setup):

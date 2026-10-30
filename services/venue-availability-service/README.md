@@ -17,7 +17,9 @@ migration; normal mode remains the default for migrated databases.
 
 `POST /events/<event_id>/venue-bookings/safety-reset` accepts
 `{"bookingIds": ["<uuid>"]}` and requires `X-Internal-Service-Token` matching
-`INTERNAL_SERVICE_TOKEN`. All selected bookings must belong to the event.
+`INTERNAL_SERVICE_TOKEN` **and** the `Safety Officer` role (SCRUM-10; Safety Check
+Service forwards the signed-in Safety Officer's token). All selected bookings must
+belong to the event.
 Selected active bookings return to `Pending Review` and clear their reviewer;
 Cancelled, Expired and Rejected history is not reopened. Other bookings are
 unchanged. Only the safety composite calls this internal operation.
@@ -57,6 +59,18 @@ Every endpoint except `/health` needs a Supabase access token
 (`Authorization: Bearer <token>`); the caller's id and role come from the
 token, never from the request. `401` without a valid token. Background
 workers send `X-Internal-Token` instead.
+
+### Who may change what (SCRUM-10)
+
+The role is checked first, before the body is read; a wrong role gets
+`403 {"message": "Your role cannot change this information."}` and nothing is
+written. Create, edit and cancel a booking (`POST /venue-bookings`,
+`PATCH /venue-bookings/<id>`, `PATCH .../cancel`): `Event Coordinator` or
+`Event Coordinator Lead`. Approve and reject (`PATCH .../approve`, `.../reject`) and
+`POST /venue-holds`: `Venue Staff`. `POST /venues/<id>/legacy-conflicts/reconcile`
+follows the booking-view roles (coordinators, Venue Staff, Technical Support) because
+reading legacy conflicts triggers it. The closure routes were already Venue Staff only.
+See [docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
 
 `GET /venue-bookings` is for internal roles: `Event Coordinator`,
 `Event Coordinator Lead`, `Venue Staff`, `Technical Support` and the canonical

@@ -31,6 +31,20 @@ def health():
     return jsonify(status="ok")
 
 
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change event details, else None.
+
+    Checked on the token's role before any downstream call, so a refused edit asks Event Service,
+    User Service and the booking services nothing. A caller with no user passes and meets the
+    handler's own sign-in check.
+    """
+    if g.user_id is None or g.role in roles:
+        return None
+    return jsonify(
+        code="NOT_ASSIGNED_COORDINATOR", message="Your role cannot change this information."
+    ), 403
+
+
 def _uuid_or_none(value):
     try:
         return str(UUID(value))
@@ -55,6 +69,8 @@ def update_event_details(event_id):
        event comes back `409 SAFETY_RECHECK_REQUIRED` as before: the safety
        re-check is only offered once this validation has passed.
     """
+    if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+        return forbidden
     event_id = _uuid_or_none(event_id)
     data = request.get_json(silent=True)
     if not event_id:
@@ -62,8 +78,6 @@ def update_event_details(event_id):
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     changes = data.get("changes")
     if (
         not isinstance(changes, dict)
@@ -132,8 +146,6 @@ def _workflow_failure(error):
 @bp.get("/change-requests")
 def pending_change_requests():
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     try:
         _coordinator_role(coordinator_id)
         changes = clients.list_pending_change_requests()
@@ -156,8 +168,6 @@ def process_change_request(change_request_id):
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     decision = data.get("decision")
     if decision not in ("Approved", "Rejected"):
         return jsonify(message="decision must be Approved or Rejected."), 400

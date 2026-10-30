@@ -27,7 +27,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-from tests.unit.factories import BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
+from tests.unit.factories import bearer, BOOKING_ID, EVENT_ID, USER_ID, VENUE_ID, booking_row, signed_in
 
 JOB = "10000000-0000-0000-0000-000000000004"
 TOKEN = "10000000-0000-0000-0000-000000000005"
@@ -212,7 +212,8 @@ def test_ac1_ac2_failed_intent_rolls_back_the_business_transaction(setup, action
     else:
         # Rejection input only satisfies the upstream decision workflow, not a SCRUM-47 assertion.
         result = client.patch(f"/venue-bookings/{BOOKING_ID}/{action}",
-                              json={"reviewedBy": STAFF, "rejectionReason": "Fixture input"})
+                              json={"reviewedBy": STAFF, "rejectionReason": "Fixture input"},
+                              headers=bearer(USER_ID, "Venue Staff"))
 
     # Assert: response and write/transaction outcomes, not just executed lines.
     assert result.status_code == 503
