@@ -68,7 +68,7 @@ def review_request(request_id, status, rejection_reason=None):
     payload = {"status": status, "notificationContext": notification_snapshot(row["eventId"])}
     if status == "Rejected":
         payload["rejectionReason"] = rejection_reason
-    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload, headers=_mutation_headers())
+    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload)
     return body["request"]
 
 
@@ -76,18 +76,21 @@ def review_event_requests(event_id, status, rejection_reason=None):
     payload = {"status": status, "notificationContext": notification_snapshot(event_id)}
     if status == "Rejected":
         payload["rejectionReason"] = rejection_reason
-    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload, headers=_mutation_headers())
+    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload)
     return body["requests"]
 
 
 def create_event_requests(event_id, items):
     context = notification_snapshot(event_id, submission=True)
     body = _call("POST", _request_service(f"/events/{event_id}/equipment-requests"),
-                 json={"items": items, "notificationContext": context}, headers=_mutation_headers())
+                 json={"items": items, "notificationContext": context})
     return body["requests"]
 
 
-def _mutation_headers():
+def _internal_read_headers():
+    """The token Event Service's /internal/* routes require. Equipment Request's create and review
+    routes authenticate the forwarded user and never read it, so mutations do not send it (SCRUM-10).
+    Checked while the snapshot is built, so a missing token stops a mutation before anything is written."""
     token = os.getenv("INTERNAL_SERVICE_TOKEN")
     if not token:
         raise DownstreamError(503, "Internal service authentication is not configured.")
@@ -100,8 +103,7 @@ def notification_snapshot(event_id, submission=False):
     # Read assignment after the catalogue to shorten the decision snapshot/write gap.
     # Event and Equipment Request still do not share a transaction: reassignment
     # can race with the owner write, so this is not commit-time assignment proof.
-    headers = {"X-Internal-Token": os.getenv("INTERNAL_SERVICE_TOKEN", "")}
-    event = _call("GET", _event_service(f"/internal/events/{event_id}/notification-context"), headers=headers)
+    event = _call("GET", _event_service(f"/internal/events/{event_id}/notification-context"), headers=_internal_read_headers())
     if event.get("id") != event_id:
         raise DownstreamError(502, "Event notification context does not match this event.")
     context = dict(eventId=event_id, eventName=event["eventName"], equipmentNames=names)

@@ -134,6 +134,18 @@ def client(database_url, monkeypatch):
     return signed_in(create_app({"TESTING": True, "DATABASE_URL": database_url}).test_client())
 
 
+@pytest.fixture
+def locked_client(database_url, monkeypatch):
+    """The app with INTERNAL_SERVICE_TOKEN configured, as in every real deployment (SCRUM-10: the
+    routes only another service may call refuse to run without it). Callers send the header themselves."""
+    assert_local(database_url)
+    assert database_url in OWNED_URLS
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    return signed_in(create_app(
+        {"TESTING": True, "DATABASE_URL": database_url, "INTERNAL_SERVICE_TOKEN": TOKEN}
+    ).test_client())
+
+
 class Database:
     """Direct reads and writes for the arrange and assert steps; never used by the app."""
 

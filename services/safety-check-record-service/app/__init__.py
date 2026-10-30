@@ -123,8 +123,6 @@ def create_app(config=None) -> Flask:
             return jsonify(message="Send a JSON object."), 400
         # The coordinator whose token Safety Check Service forwards.
         submitted_by = g.user_id
-        if not submitted_by:
-            return jsonify(message="Sign in to continue."), 401
         event_id = _uuid_or_none(data.get("eventId"))
         if not event_id:
             return jsonify(message="eventId must be a valid UUID."), 400
@@ -214,8 +212,6 @@ def create_app(config=None) -> Flask:
                 message=f"status must be one of: {', '.join(DECISION_STATUSES)}."
             ), 400
         decided_by = g.user_id
-        if not decided_by:
-            return jsonify(message="Sign in to continue."), 401
         remarks_required = status in (CHANGES_REQUESTED, SAFETY_REJECTED)
         remarks, failure = _remarks(data, required=remarks_required)
         if failure:
@@ -304,8 +300,6 @@ def create_app(config=None) -> Flask:
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
         withdrawn_by = g.user_id
-        if not withdrawn_by:
-            return jsonify(message="Sign in to continue."), 401
         reason, failure = _withdrawal_reason(data)
         if failure:
             return failure

@@ -43,8 +43,6 @@ def create_app():
     @app.patch("/notifications/<uuid:notification_id>")
     def inbox(notification_id=None):
         user = g.user_id
-        if not user:
-            return jsonify(message="Sign in to continue."), 401
         if not app.config["DATABASE_URL"]:
             return jsonify(message="Notification database is not configured."), 503
         try:

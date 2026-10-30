@@ -26,7 +26,7 @@ def test_ac1_multi_item_submission_passes_trusted_full_list_and_tss(boundary):
         dict(equipmentId=MIC,quantityRequested=5,technicalRequirements=""),
         dict(equipmentId=PROJECTOR,quantityRequested=2,technicalRequirements="")],notificationContext=dict(
         eventId=EVENT,eventName="Community Fair",equipmentNames={MIC:"Microphone",PROJECTOR:"Projector"},recipientIds=[TSS1,TSS2]))
-    assert call.kwargs["headers"]["X-Internal-Token"] == "synthetic"
+    assert "X-Internal-Token" not in call.kwargs["headers"]  # the owner authenticates the forwarded user (SCRUM-10)
     assert response.json["requests"] == boundary.saved
 
 

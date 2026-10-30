@@ -50,8 +50,6 @@ def _validate_items(payload):
 
 
 def _authorise(allowed_roles, denied_message):
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     if g.role not in allowed_roles:
         return jsonify(message=denied_message), 403
     return None

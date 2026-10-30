@@ -78,8 +78,6 @@ def update_event_details(event_id):
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     changes = data.get("changes")
     if (
         not isinstance(changes, dict)
@@ -148,8 +146,6 @@ def _workflow_failure(error):
 @bp.get("/change-requests")
 def pending_change_requests():
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     try:
         _coordinator_role(coordinator_id)
         changes = clients.list_pending_change_requests()
@@ -172,8 +168,6 @@ def process_change_request(change_request_id):
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     decision = data.get("decision")
     if decision not in ("Approved", "Rejected"):
         return jsonify(message="decision must be Approved or Rejected."), 400

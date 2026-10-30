@@ -113,8 +113,6 @@ def health():
 def review_safety_check(event_id):
     """Read the complete safety context for a Safety Officer (SCRUM-163)."""
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     failure = _token_safety_officer()
     if failure:
         return failure
@@ -230,8 +228,6 @@ def submit_safety_check():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -307,8 +303,6 @@ def approve_safety_check():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -341,8 +335,6 @@ def request_safety_changes():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -384,8 +376,6 @@ def reject_safety_check():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -444,8 +434,6 @@ def recheck_safety():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -614,8 +602,6 @@ def withdraw_for_venue_change():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     booking_id = _uuid_or_none(data.get("bookingId"))
     if not event_id or not booking_id:
@@ -702,8 +688,6 @@ def restore_after_venue_change():
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(data.get("eventId"))
     withdrawn_id = _uuid_or_none(data.get("withdrawnSafetyCheckId"))
     if not event_id or not withdrawn_id:
@@ -960,8 +944,6 @@ def _release_venue_bookings(event_id):
 @bp.get("/safety-checks/resubmit/readiness")
 def safety_resubmission_readiness():
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -981,8 +963,6 @@ def safety_resubmission_readiness():
 @bp.get("/safety-checks/feedback")
 def safety_check_feedback():
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -1009,8 +989,6 @@ def safety_check_readiness():
     sees what is missing before clicking rather than after.
     """
     coordinator_id = g.user_id
-    if not coordinator_id:
-        return jsonify(message="Sign in to continue."), 401
     event_id = _uuid_or_none(request.args.get("eventId"))
     if not event_id:
         return jsonify(message="eventId must be a valid UUID."), 400
@@ -1052,8 +1030,6 @@ def safety_check_queue():
     silently omits an event.
     """
     safety_officer_id = g.user_id
-    if not safety_officer_id:
-        return jsonify(message="Sign in to continue."), 401
     failure = _token_safety_officer()
     if failure:
         return failure

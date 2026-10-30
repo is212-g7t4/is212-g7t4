@@ -44,12 +44,18 @@ from tests.unit.factories import bearer
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 
+
+@pytest.fixture
+def client(locked_client):
+    return locked_client
+
 OTHER_COORDINATOR_ID = "55555555-5555-4555-8555-555555555555"
 STAFF_ID = "66666666-6666-4666-8666-666666666666"
 LEAD = "Event Coordinator Lead"
 COORDINATOR = "Event Coordinator"
 ORGANISER = "Event Organiser"
 PROGRESS = {"status": "Approved", "actionDetails": "Venue held."}
+SERVICE = {"X-Internal-Service-Token": "synthetic"}
 
 
 @pytest.fixture(autouse=True)
@@ -128,7 +134,7 @@ def test_ac2_a_coordinator_cannot_assign_coordinators(client, db):
     response = client.patch(
         f"/events/{event_id}",
         json={"assignedCoordinatorId": OTHER_COORDINATOR_ID},
-        **as_user(COORDINATOR_ID, COORDINATOR),
+        headers={**bearer(COORDINATOR_ID, COORDINATOR), **SERVICE},
     )
 
     assert response.status_code == 403
@@ -194,8 +200,9 @@ def test_ac3_lead_edits_details_only_while_no_coordinator_is_assigned(client, db
     before = db.event(assigned_id)
     body = {"changes": {"eventName": "Renamed"}, "actorRole": LEAD}
 
-    allowed = client.patch(f"/events/{unassigned_id}/details", json=body, **as_user(LEAD_ID, LEAD))
-    refused = client.patch(f"/events/{assigned_id}/details", json=body, **as_user(LEAD_ID, LEAD))
+    lead = {"headers": {**bearer(LEAD_ID, LEAD), **SERVICE}}
+    allowed = client.patch(f"/events/{unassigned_id}/details", json=body, **lead)
+    refused = client.patch(f"/events/{assigned_id}/details", json=body, **lead)
 
     assert (allowed.status_code, refused.status_code) == (200, 403)
     assert db.event(unassigned_id)["event_name"] == "Renamed"
@@ -234,3 +241,40 @@ def test_ac5_coordinator_changes_only_the_event_they_are_assigned_to(client, db)
     assert (allowed.status_code, refused.status_code) == (200, 403)
     assert db.event(mine_id)["status"] == "Approved"
     assert db.event(theirs_id) == theirs_before
+
+
+# AC2: PATCH /safety-status is called by Safety Check Service with the caller's own token ----
+
+SAFETY_ROUND = "77777777-7777-4777-8777-777777777777"
+OFFICER_ID = "88888888-8888-4888-8888-888888888888"
+
+
+def test_ac2_the_assigned_coordinator_cannot_confirm_their_own_event(client, db):
+    """Failure: the coordinator holds the assignment but not the Safety Officer role, so nothing changes."""
+    event_id = under_review(db, status="Pending Safety Check")
+    before = db.event(event_id)
+
+    response = client.patch(
+        f"/events/{event_id}/safety-status",
+        json={"status": "Confirmed", "safetyCheckId": SAFETY_ROUND, "roundNumber": 1},
+        headers={**bearer(COORDINATOR_ID, COORDINATOR), **SERVICE},
+    )
+
+    assert response.status_code == 403
+    assert db.event(event_id) == before
+
+
+def test_ac2_a_safety_officer_cannot_submit_an_event_for_a_safety_check(client, db):
+    """Failure: even as the named coordinator, the Safety Officer role cannot submit; the event stays Approved."""
+    make_user(db, OFFICER_ID, role="Safety Officer")
+    event_id = under_review(db, status="Approved", coordinator_id=OFFICER_ID)
+    before = db.event(event_id)
+
+    response = client.patch(
+        f"/events/{event_id}/safety-status",
+        json={"status": "Pending Safety Check", "safetyCheckId": SAFETY_ROUND, "roundNumber": 1},
+        headers={**bearer(OFFICER_ID, "Safety Officer"), **SERVICE},
+    )
+
+    assert response.status_code == 403
+    assert db.event(event_id) == before
