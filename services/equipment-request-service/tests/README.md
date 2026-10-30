@@ -2,16 +2,19 @@
 
 ## Story and acceptance criteria
 
-Technical Support Staff and Event Coordinators receive equipment alerts so they
-can coordinate equipment arrangements. The original three criteria stay unchanged:
+As an Event Coordinator and Technical Support Staff, I want to receive
+notifications about equipment requests and decisions, so that I can coordinate
+equipment arrangements efficiently. (Copied from Jira; each test file's module
+docstring carries the full story and ACs.)
 
-- **AC1:** A submission alert identifies the event and the full submitted list.
-- **AC2:** An approval alert identifies the event, equipment and requested quantity.
-- **AC3:** A rejection alert contains those facts but not the workflow rejection reason.
+- **AC1:** Given an Event Coordinator submits an equipment request, the system sends an in-app notification to Technical Support Staff with the event name, requested equipment list, and a link to review the request.
+- **AC2:** Given equipment is confirmed as available or found to be unavailable, the system sends an in-app notification to the Event Coordinator with the event name, equipment list, and availability status.
+- **AC3:** Given an equipment request is submitted and pending review, the system sends an in-app notification to Technical Support Staff that a request requires their review.
 
-`DR` in a test means a supporting design rule, not a fourth acceptance criterion.
-Each test explains what it arranges, does and checks. Each gets fresh test data,
-Flask client and database connection/cursor doubles.
+Tests follow the repo's unit test convention: each has a Summary, the AC it
+checks (or `AC MISSING` for supporting rules no AC states, such as outbox
+leasing), and the test double it uses. Each gets fresh test data, Flask client
+and database connection/cursor doubles.
 
 ## What runs
 
@@ -30,13 +33,15 @@ There is no shared database, broker, migration or worker in this suite.
 ## Where to read
 
 `unit/test_scrum48_notifications.py` uses the real HTTP routes, validation,
-models and outbox construction. The older `test_equipment_requests.py` remains
-in its original location and continues to check the pre-existing request API.
+models and outbox construction. The request API itself is covered per story in
+`unit/test_scrum32_create_equipment_request.py`,
+`unit/test_scrum33_equipment_request_review.py` and
+`unit/test_scrum164_equipment_safety_reset.py`.
 
 | Area | What the new tests check |
 | --- | --- |
 | Submission / AC1 | One frozen full-list SQL intent per unique eligible TSS, not per equipment unit; no invented recipient when the eligible list is empty. |
-| Decisions / AC2–AC3 | One reason-free alert per changed request record for single and bulk reviews; exact event, item, quantity, recipient and destination. |
+| Decisions / AC2 | One reason-free alert per changed request record for single and bulk reviews; exact event, item, quantity, recipient and destination. |
 | Failed and no-op actions | Missing/already-decided requests create no alert intent; safety reset to Pending is not a new decision alert. |
 | Transaction failure | Failure on the first or a later outbox INSERT exits the same owner transaction with an exception and closes the connection. Mocked INSERT RETURNING rows are Pending; review UPDATE RETURNING rows are Approved, matching the SQL contract. |
 | Trusted context | Wrong/missing token, malformed names/UUIDs and mismatched event context are rejected; role headers cannot authenticate the worker APIs. |

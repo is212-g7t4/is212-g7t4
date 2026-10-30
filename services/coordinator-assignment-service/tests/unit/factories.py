@@ -22,3 +22,13 @@ def signed_in(client, user_id="00000000-0000-4000-8000-000000000001", role="Even
     """Send every request from this test client with a signed-in user's token."""
     client.environ_base["HTTP_AUTHORIZATION"] = bearer(user_id, role)["Authorization"]
     return client
+
+
+LEAD = {"user_id": "user-lead", "username": "Alice Tan", "role": "Event Coordinator Lead"}
+COORDINATOR = {"user_id": "user-coordinator", "username": "Marcus Lim", "role": "Event Coordinator"}
+SECOND_COORDINATOR = {"user_id": "user-456", "username": "Priya Nair", "role": "Event Coordinator"}
+
+
+def as_lead():
+    """Authorization header for the signed-in Event Coordinator Lead."""
+    return bearer(LEAD["user_id"], LEAD["role"])

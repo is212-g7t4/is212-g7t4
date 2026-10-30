@@ -1,4 +1,6 @@
 """Synthetic row/envelope builders for SCRUM-46 owner unit boundaries."""
+from datetime import UTC, datetime
+
 
 import time
 
@@ -91,3 +93,31 @@ def signed_in(client, user_id=USER, role="Attendee"):
     """Send every request from this test client with a signed-in user's token."""
     client.environ_base["HTTP_AUTHORIZATION"] = bearer(user_id, role)["Authorization"]
     return client
+
+
+EVENT_ID = "25c9fe40-c44d-4d79-8d5d-de66d40c1678"
+
+
+ATTENDEE_ID = "56b34ab1-92cd-4b35-83c7-f04e176e2bd0"
+
+
+def registration_row(**overrides):
+    row = {
+        "registration_id": "9f725c7a-ac3d-4d4a-937a-84db7906be71",
+        "event_id": EVENT_ID,
+        "attendee_id": None,
+        "registration_date": datetime(2026, 9, 13, 1, 15, tzinfo=UTC),
+        "status": "Confirmed",
+        "withdrawn_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def registration_payload(**overrides):
+    payload = {
+        "eventId": EVENT_ID,
+        "capacity": 30,
+    }
+    payload.update(overrides)
+    return payload

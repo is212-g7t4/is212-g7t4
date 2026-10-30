@@ -1,30 +1,50 @@
-"""SCRUM-10 Role-Based Modification Control: Safety Check Service unit tests.
+"""
+SCRUM-10: Role-Based Modification Control for Events
 
-Story:      As a registered user, I want to modify only information appropriate to my
-            role and relationship to an event, so that I can perform my responsibilities
-            without changing information outside my permissions.
-Real:       Flask app, routes, token verification and role checks.
-Doubled:    every downstream service (Event, Venue Availability, Equipment Request, Safety Check
-            Record, User, Venue, Equipment); the unit tier's socket block fails any call that is
-            not stubbed, so a refused change is also proven to send nothing downstream.
-Not proven: that the caller is the event's assigned coordinator (the existing submit and
-            re-check tests); that a refused change leaves the stored event and round unchanged
-            (Event Service and Safety Check Record Service tests); Supabase issuing the token.
-            Approve, request-changes and reject are Safety Officer-only through a User Service
-            lookup and keep their own tests (test_safety_approve.py, test_safety_reject_changes.py).
+User Story
+----------
+As a registered user, I want to modify only information appropriate to my role
+and relationship to an event, so that I can perform my responsibilities without
+changing information outside my permissions.
 
-AC1  Given an authenticated user is permitted to modify information based on their role and
-     relationship to the event, when they make a valid change to that information, then the
-     change is allowed.
-AC2  Given an authenticated user's role does not permit them to modify particular information,
-     when they attempt to change that information, then the modification is prevented and the
-     existing information remains unchanged.
-AC3  Not covered here: the assignment check is covered by test_safety_submit.py and
-     test_safety_recheck.py.
-AC4  Given a user is permitted to view particular information but is not permitted to modify it,
-     when they attempt to change that information, then the modification is prevented while their
-     permitted viewing access remains unaffected.
-AC5  Not covered here: see AC3.
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to modify information based on
+     their role and relationship to the event, when they make a valid change to
+     that information, then the change is allowed.
+AC2: Given an authenticated user's role does not permit them to modify
+     particular information, when they attempt to change that information, then
+     the modification is prevented and the existing information remains
+     unchanged.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to modify that event's information, when they attempt to make a
+     change, then the modification is prevented and the existing information
+     remains unchanged.
+AC4: Given a user is permitted to view particular information but is not
+     permitted to modify it, when they attempt to change that information, then
+     the modification is prevented while their permitted viewing access remains
+     unaffected.
+AC5: Given a user is permitted to modify information for one event but does not
+     have the required access to another event, when they attempt to modify
+     information for both events, then only modifications to information for
+     which they have the required access are allowed.
+
+Real
+----
+- The safety write routes: token verification and the coordinator-role gate.
+- Assertions are on the status and nothing being sent downstream.
+
+Doubled
+-------
+- Event, Safety Check Record, Venue Availability, Venue, Equipment Request,
+  Equipment and User Services: Stub (monkeypatched app.clients functions) -
+  canned answers or raised client errors; calls recorded so tests assert the
+  order and what was (or was not) called.
+
+Not proven
+----------
+- That the coordinator is the event's assigned one (AC3): Event Service decides
+  (-> event-service test_event_modification_access.py).
 """
 import pytest
 
@@ -43,13 +63,22 @@ COORDINATOR_ROUTES = [
 # AC1 ----
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead"])
-@pytest.mark.parametrize("path", COORDINATOR_ROUTES)
-def test_ac1_coordinator_roles_get_past_the_gate_to_the_handler_checks(path, role):
-    """Normal: both coordinator roles reach the handler, which then asks for a valid eventId."""
+@pytest.mark.parametrize("path", COORDINATOR_ROUTES, ids=["submit", "resubmit", "recheck", "withdraw_for_venue_change", "restore_after_venue_change"])
+def test_safety_actions_when_coordinator_role_reach_handler_checks(path, role):
+    """
+    Summary: Coordinators and the Lead get past the role check to submit, re-check or withdraw.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (downstream clients)
+    """
+    # Arrange (Given)
     client = signed_in(create_app().test_client(), role=role)
 
+    # Act (When)
     response = client.post(path, json={})
 
+    # Assert (Then)
     assert response.status_code == 400
     assert "eventId" in response.json["message"]
 
@@ -57,28 +86,49 @@ def test_ac1_coordinator_roles_get_past_the_gate_to_the_handler_checks(path, rol
 # AC2 ----
 
 @pytest.mark.parametrize("role", ["Safety Officer", "Venue Staff", "Technical Support", "Event Organiser", "Attendee"])
-@pytest.mark.parametrize("path", COORDINATOR_ROUTES)
-def test_ac2_only_coordinators_may_submit_recheck_or_withdraw_a_safety_check(path, role):
-    """Failure: other roles are refused before anything is read, and nothing is sent downstream."""
+@pytest.mark.parametrize("path", COORDINATOR_ROUTES, ids=["submit", "resubmit", "recheck", "withdraw_for_venue_change", "restore_after_venue_change"])
+def test_safety_actions_when_not_coordinator_return_403(path, role):
+    """
+    Summary: Every other role is refused submitting, re-checking or withdrawing.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: None
+    """
+    # Arrange (Given)
     client = create_app().test_client()
 
+    # Act (When)
     response = client.post(path, json={}, headers=bearer(OFFICER_ID, role))
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["message"] == "Your role cannot change this information."
 
 
 # AC4 ----
 
-def test_ac4_a_safety_officer_keeps_their_queue_when_a_submission_is_refused(monkeypatch):
-    """Conflict: the refused submit does not disturb the queue the Safety Officer role still has."""
+def test_queue_after_refused_submission_still_viewable_by_officer(monkeypatch):
+    """
+    Summary: A Safety Officer refused a submission can still see their queue.
+    AC4: Given a user is permitted to view particular information but is not
+        permitted to modify it, when they attempt to change that information,
+        then the modification is prevented while their permitted viewing access
+        remains unaffected.
+    Double: Stub (queue reads)
+    """
+    # Arrange (Given)
     monkeypatch.setattr(clients, "list_events_by_status", lambda status, viewer_role: [])
     monkeypatch.setattr(clients, "list_venues", lambda: [])
     officer = signed_in(create_app().test_client(), OFFICER_ID, "Safety Officer")
 
     before = officer.get("/safety-checks/queue")
     refused = officer.post("/safety-checks", json={})
+
+    # Act (When)
     after = officer.get("/safety-checks/queue")
 
+    # Assert (Then)
     assert (before.status_code, refused.status_code, after.status_code) == (200, 403, 200)
     assert before.json == after.json

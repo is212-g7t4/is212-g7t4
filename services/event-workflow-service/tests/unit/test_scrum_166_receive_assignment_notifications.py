@@ -1,24 +1,54 @@
-"""SCRUM-166 — Receive assignment notifications.
+"""
+SCRUM-166: Receive assignment notifications
 
-As an Event Coordinator, I want to receive in-app notifications when I am assigned to or removed from an event, so that I know which events I am responsible for.
+User Story
+----------
+As an Event Coordinator, I want to receive in-app notifications when I am
+assigned to or removed from an event, so that I know which events I am
+responsible for.
 
-- **AC1:** Given the Lead Coordinator successfully assigns an Event Coordinator to an event that previously had no assigned coordinator, the assigned coordinator receives an in-app assignment notification.
-- **AC2:** Given the Lead Coordinator successfully reassigns an event from one coordinator to a different coordinator:
-  - The new coordinator receives an in-app notification that they have been assigned.
-  - The previous coordinator receives an in-app notification that they have been removed.
-- **AC3:** Assignment notifications include the event name, Event Organiser name, proposed event date/time, and a link to view the newly assigned event.
-- **AC4:** Removal notifications include the event name, Event Organiser name, proposed event date/time, and a clear statement that the recipient is no longer assigned to the event.
-- **AC5:** Saving an assignment without changing the assigned coordinator does not create new assignment or removal notifications.
+Acceptance Criteria
+-------------------
+AC1: Given the Lead Coordinator successfully assigns an Event Coordinator to an
+     event that previously had no assigned coordinator, the assigned
+     coordinator receives an in-app assignment notification.
+AC2: Given the Lead Coordinator successfully reassigns an event from one
+     coordinator to a different coordinator:
+     1. The new coordinator receives an in-app notification that they have been
+     assigned.
+     2. The previous coordinator receives an in-app notification that they have
+     been removed.
+AC3: Assignment notifications include the event name, Event Organiser name,
+     proposed event date/time, and a link to view the newly assigned event.
+AC4: Removal notifications include the event name, Event Organiser name,
+     proposed event date/time, and a clear statement that the recipient is no
+     longer assigned to the event.
+AC5: Saving an assignment without changing the assigned coordinator does not
+     create new assignment or removal notifications.
 
-AC = acceptance criterion; DR = supporting design rule.
-AC1/AC2: not covered here as trigger/persistence; Event/Notification integration
-story modules verify those boundaries. AC3/AC4: covered here as preparation and
-frozen publication, with HTTP serialization in Workflow adapter integrations.
-AC5: not covered here because Event suppresses unchanged saves; its unit and
-integration story modules verify that guard.
+Real
+----
+- The event-workflow notification workers: they claim jobs from the owning
+  service's outbox over HTTP, look up current recipients and display facts, ask
+  the owner to freeze the envelope, publish the frozen envelope to RabbitMQ and
+  mark it published, retrying or holding on failure.
+- Assertions are on the envelopes frozen and published, call order, and
+  retry/hold decisions.
 
-Real: dispatcher orchestration. Doubled: owner/User APIs and publisher.
-Not proven: HTTP serialization, database persistence or actual broker delivery.
+Doubled
+-------
+- Owner outbox and lookup HTTP (Event, User, Registration, Venue Availability):
+  Stub (respx / monkeypatched httpx fixtures) - canned replies; requests
+  inspected.
+- RabbitMQ publisher (pika): Mock - publish arguments, confirms and persistence
+  inspected.
+
+Not proven
+----------
+- That the owner freezes the envelope in the same transaction as the change (->
+  the owning service's notification tests and integration tests).
+- That Notification Service stores and shows the inbox item (->
+  notification-service consumer tests and frontend NotificationCenter tests).
 """
 
 import httpx
@@ -42,9 +72,12 @@ def make_job(kind="assigned", recipient=BOB):
 
 # AC3 — Assignment content and frozen publication
 
-def test_ac3_assignment_uses_saved_facts_and_owner_frozen_envelope():
-    """Prepare assignment for the captured recipient, then publish the owner's frozen value.
-    The message includes organiser and full proposed Singapore period and a safe event link.
+def test_assignment_alert_uses_saved_facts_and_frozen_envelope():
+    """
+    Summary: An assignment alert carries the saved event facts in the owner-frozen envelope.
+    AC3: Assignment notifications include the event name, Event Organiser name,
+        proposed event date/time, and a link to view the newly assigned event.
+    Double: Stub (owner outbox), Mock (publish)
     """
     job = make_job()
     api = Mock()
@@ -75,9 +108,13 @@ def test_ac3_assignment_uses_saved_facts_and_owner_frozen_envelope():
 
 # AC4 — Removal content
 
-def test_ac4_removal_names_event_organiser_period_and_has_no_link():
-    """Prepare removal for the captured old recipient, not the current coordinator.
-    The full proposed period remains visible without a destination that now denies access.
+def test_removal_alert_names_event_and_has_no_link():
+    """
+    Summary: A removal alert names the event, organiser and period, and links nowhere.
+    AC4: Removal notifications include the event name, Event Organiser name,
+        proposed event date/time, and a clear statement that the recipient is
+        no longer assigned to the event.
+    Double: Stub (owner outbox), Mock (publish)
     """
     job = make_job("removed", ALICE)
     api = Mock()
@@ -108,9 +145,17 @@ def test_ac4_removal_names_event_organiser_period_and_has_no_link():
 
 # Supporting design rule — distinguish repair holds from transient delivery failures
 
-@pytest.mark.parametrize("failure", ["missing-id", "not-found", "invalid-name", "hold-failure"])
-def test_dr_unpreparable_coordinator_delivery_is_held_without_publication(failure):
-    """Unnameable organiser holds the intent; even failed hold cannot publish unsafe content."""
+@pytest.mark.parametrize("failure", ["missing-id", "not-found", "invalid-name", "hold-failure"], ids=["missing_id", "not_found", "invalid_name", "hold_failure"])
+def test_coordinator_alert_that_cannot_be_prepared_is_held(failure):
+    """
+    Summary: An alert that cannot be prepared is held rather than sent incomplete.
+    AC3: Assignment notifications include the event name, Event Organiser name,
+        proposed event date/time, and a link to view the newly assigned event.
+    AC4: Removal notifications include the event name, Event Organiser name,
+        proposed event date/time, and a clear statement that the recipient is
+        no longer assigned to the event.
+    Double: Stub (lookup or hold fails), Mock (no publish)
+    """
     job = make_job()
     api, publish = Mock(), Mock()
     api.claim.return_value = [job]
@@ -131,8 +176,13 @@ def test_dr_unpreparable_coordinator_delivery_is_held_without_publication(failur
     api.retry.assert_not_called()
 
 
-def test_dr_temporary_organiser_http_failure_retries_instead_of_holding():
-    """A User 503 retries the captured job without freezing or publishing partial content."""
+def test_coordinator_alert_after_temporary_failure_retries():
+    """
+    Summary: A temporary organiser lookup failure is retried, not held.
+    AC3: Assignment notifications include the event name, Event Organiser name,
+        proposed event date/time, and a link to view the newly assigned event.
+    Double: Stub (lookup fails once)
+    """
     job = make_job()
     api, publish = Mock(), Mock()
     api.claim.return_value = [job]

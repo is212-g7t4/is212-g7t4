@@ -1,36 +1,48 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-149: Submit Event for Operational Safety Check
 
-- **SCRUM-149 readiness regression; no direct SCRUM-171 AC:** approved arrangements pass; pending/unknown/missing venue and pending/unknown equipment block with readable outstanding items.
-- **Separately approved venue-only compatibility:** rejected venue history is ignored when a live approved booking exists; rejected-only remains missing a live venue. Cancelled/expired handling is unchanged.
-- **SCRUM-149 dead-end fix (29 Oct 2026):** rejected equipment requests are ignored like rejected venue bookings; a pending one beside them still blocks.
+User Story
+----------
+As an Event Coordinator, I want to submit my event for an Operational Safety
+Check once its venue and technical arrangements are confirmed, so that the
+Safety Officer can review it before preparation begins.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given an event assigned to the Event Coordinator has at least one approved
+     venue booking, and none of its venue bookings or equipment requests is
+     still pending, when the Event Coordinator submits it for a safety check,
+     then its status changes to 'Pending Safety Check' and the submission time
+     is recorded. Rejected, cancelled or expired venue bookings and rejected
+     equipment requests are no longer part of the event's arrangements and do
+     not block submission.
+AC2: Given any venue booking or equipment request for the event is still
+     pending, or the event has no approved venue booking, when the Event
+     Coordinator tries to submit, then submission is blocked and the
+     outstanding arrangements are listed.
+AC3: Given the Event Coordinator is submitting, when they enter equipment
+     placement and expected crowd movement notes, then the notes are saved with
+     the safety check.
+AC4: Given the event is already 'Pending Safety Check', when the Event
+     Coordinator submits it again, then no duplicate safety check is created.
+AC5: Given the Event Coordinator is not the assigned coordinator, then the
+     submit action is not available and an API call is rejected.
 
-The named test functions/cases below implement the groups above; their existing
-names and assertions specify the scenario. No group is credited with all five ACs.
+Real
+----
+- app.readiness: which bookings and equipment requests are still outstanding
+  (approved, rejected, cancelled, expired, unknown statuses), the stable order
+  of the list and its labels.
+- Assertions are on whether the event is ready and what is listed.
 
-## Existing test contract and detailed cases
+Doubled
+-------
+- Nothing: pure logic over booking and request rows built in the test.
 
-SCRUM-149 AC1/AC2: the rule for whether an event's arrangements are approved.
-
-AC1 Given an event ... has at least one approved venue booking, and none of
-    its venue bookings or equipment requests is still pending, when the Event
-    Coordinator submits it for a safety check, then its status changes ...
-    Rejected, cancelled or expired venue bookings and rejected equipment
-    requests are no longer part of the event's arrangements and do not block
-    submission.
-AC2 Given any venue booking or equipment request for the event is still
-    pending, or the event has no approved venue booking, when the Event
-    Coordinator tries to submit, then submission is blocked and the outstanding
-    arrangements are listed.
-
-Rule changed 29 Oct 2026: rejected equipment no longer blocks (dead-end fix).
-
-SCRUM-171 authorised compatibility exception: rejected VENUE requests are
-immutable history; require a live approved replacement.
-
-A pure function, so these tests need no HTTP and no app. The rule fails closed:
-anything it can't read as approved counts as outstanding.
+Not proven
+----------
+- That the rows match what the atomics return (-> test_safety_submit.py and
+  tests/integration/).
 """
 import pytest
 
@@ -44,13 +56,35 @@ OTHER_REQUEST_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 # --- AC1: ready --------------------------------------------------------------
 
 
-def test_approved_booking_and_no_equipment_is_ready():
-    """AC1: "or no equipment requested" — an event may need no equipment."""
+def test_readiness_with_approved_booking_and_no_equipment_is_ready():
+    """
+    Summary: An approved booking and no equipment is ready.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert outstanding_arrangements([booking("Approved")], []) == []
 
 
-def test_approved_bookings_and_approved_equipment_are_ready():
-    """AC1: every booking and every request approved."""
+def test_readiness_with_everything_approved_is_ready():
+    """
+    Summary: Every booking and request approved is ready.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert (
         outstanding_arrangements(
             [booking("Approved"), booking("Approved", OTHER_BOOKING_ID)],
@@ -60,12 +94,19 @@ def test_approved_bookings_and_approved_equipment_are_ready():
     )
 
 
-def test_cancelled_and_expired_bookings_are_ignored():
-    """Boundary: a withdrawn or lapsed booking is one the event no longer relies on.
-
-    SCRUM-171 retains rejected venue requests as history; a separate live
-    replacement is checked instead.
+def test_readiness_ignores_cancelled_and_expired_bookings():
     """
+    Summary: Cancelled or lapsed bookings no longer count.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert (
         outstanding_arrangements(
             [
@@ -79,8 +120,19 @@ def test_cancelled_and_expired_bookings_are_ignored():
     )
 
 
-def test_cancelled_equipment_request_is_ignored():
-    """Future-proofing: no endpoint sets 'Cancelled' on a request today."""
+def test_readiness_ignores_cancelled_equipment_request():
+    """
+    Summary: A cancelled equipment request no longer counts.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert (
         outstanding_arrangements(
             [booking("Approved")], [equipment_request("Cancelled")]
@@ -99,10 +151,21 @@ def test_cancelled_equipment_request_is_ignored():
         ("Pending", "Waiting for Venue Staff approval."),
     ],
 )
-def test_unapproved_booking_is_listed_with_its_reason(status, reason):
-    """AC2: a pending live booking blocks, and says why."""
+def test_readiness_lists_pending_booking_with_reason(status, reason):
+    """
+    Summary: A pending booking blocks and says why.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Arrange (Given): status, reason, from fixtures
+
+    # Act (When)
     outstanding = outstanding_arrangements([booking(status)], [])
 
+    # Assert (Then)
     assert outstanding == [
         {
             "type": "venue",
@@ -114,12 +177,21 @@ def test_unapproved_booking_is_listed_with_its_reason(status, reason):
     ]
 
 
-def test_pending_equipment_request_is_listed_with_its_reason():
-    """AC2: a pending equipment request blocks, and says why."""
+def test_readiness_lists_pending_equipment_with_reason():
+    """
+    Summary: A pending equipment request blocks and says why.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Approved")], [equipment_request("Pending")]
     )
 
+    # Assert (Then)
     assert outstanding == [
         {
             "type": "equipment",
@@ -131,13 +203,19 @@ def test_pending_equipment_request_is_listed_with_its_reason():
     ]
 
 
-def test_rejected_equipment_request_is_ignored():
-    """AC1: the dead end from the 28 Oct bug report.
-
-    Equipment decisions are final (SCRUM-33) and a request can't be withdrawn,
-    so a rejected one used to keep an Approved event from ever being
-    submitted. It is no longer part of the event's arrangements.
+def test_readiness_ignores_rejected_equipment_request():
     """
+    Summary: A rejected equipment request no longer blocks.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert (
         outstanding_arrangements(
             [booking("Approved")], [equipment_request("Rejected")]
@@ -146,8 +224,19 @@ def test_rejected_equipment_request_is_ignored():
     )
 
 
-def test_rejected_equipment_beside_approved_equipment_is_ready():
-    """AC1: the approved request counts; the rejected one is ignored."""
+def test_readiness_with_rejected_and_approved_equipment_is_ready():
+    """
+    Summary: An approved request counts and a rejected one is ignored.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert (
         outstanding_arrangements(
             [booking("Approved")],
@@ -160,8 +249,16 @@ def test_rejected_equipment_beside_approved_equipment_is_ready():
     )
 
 
-def test_pending_equipment_still_blocks_beside_a_rejected_one():
-    """AC2: only rejections stop blocking; a pending request still waits."""
+def test_readiness_with_pending_and_rejected_equipment_still_blocks():
+    """
+    Summary: A pending request still blocks beside a rejected one.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Approved")],
         [
@@ -170,6 +267,7 @@ def test_pending_equipment_still_blocks_beside_a_rejected_one():
         ],
     )
 
+    # Assert (Then)
     assert outstanding == [
         {
             "type": "equipment",
@@ -181,35 +279,70 @@ def test_pending_equipment_still_blocks_beside_a_rejected_one():
     ]
 
 
-def test_rejected_equipment_does_not_count_as_a_venue():
-    """AC2: with no live venue left, only "No venue booking" is listed."""
+def test_readiness_without_live_venue_lists_only_missing_booking():
+    """
+    Summary: Without a live venue, only the missing booking is listed.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Rejected")], [equipment_request("Rejected")]
     )
 
+    # Assert (Then)
     assert [item["label"] for item in outstanding] == ["No venue booking"]
 
 
-def test_one_unapproved_booking_among_several_blocks():
-    """AC2 with SCRUM-156's multi-venue events: one pending booking is enough."""
+def test_readiness_with_one_pending_booking_among_several_blocks():
+    """
+    Summary: One pending booking among several blocks the event.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Approved"), booking("Pending Review", OTHER_BOOKING_ID)], []
     )
 
+    # Assert (Then)
     assert [item["id"] for item in outstanding] == [OTHER_BOOKING_ID]
 
 
-def test_venue_items_come_before_equipment_items():
-    """AC2's list is stable: venues first, then equipment, in service order."""
+def test_readiness_lists_venues_before_equipment():
+    """
+    Summary: Outstanding venues are listed before equipment.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Pending Review")], [equipment_request("Pending")]
     )
 
+    # Assert (Then)
     assert [item["type"] for item in outstanding] == ["venue", "equipment"]
 
 
-def test_every_unapproved_arrangement_is_listed():
-    """AC2 lists *the* outstanding arrangements, not just the first one."""
+def test_readiness_lists_every_outstanding_arrangement():
+    """
+    Summary: Every outstanding arrangement is listed, not just the first.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Pending Review"), booking("Pending", OTHER_BOOKING_ID)],
         [
@@ -218,6 +351,7 @@ def test_every_unapproved_arrangement_is_listed():
         ],
     )
 
+    # Assert (Then)
     assert len(outstanding) == 4
     assert [item["id"] for item in outstanding] == [
         BOOKING_ID,
@@ -233,15 +367,23 @@ def test_every_unapproved_arrangement_is_listed():
 @pytest.mark.parametrize(
     "bookings",
     [[], None, [booking("Cancelled")], [booking("Rejected")], [booking("Cancelled"), booking("Expired")]],
+    ids=["empty", "none", "booking_cancelled", "booking_rejected", "booking_cancelled_booking_expired"],
 )
-def test_event_without_a_live_booking_is_blocked(bookings):
-    """AC1 allows no equipment but never no venue: an event needs somewhere to be.
-
-    Only cancelled, rejected or expired bookings means no live venue remains,
-    which reads the same as never having booked.
+def test_readiness_without_live_booking_is_blocked(bookings):
     """
+    Summary: An event with no live venue booking is not ready.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Arrange (Given): bookings, from fixtures
+
+    # Act (When)
     outstanding = outstanding_arrangements(bookings, [])
 
+    # Assert (Then)
     assert outstanding == [
         {
             "type": "venue",
@@ -253,7 +395,19 @@ def test_event_without_a_live_booking_is_blocked(bookings):
     ]
 
 
-def test_no_equipment_requests_is_not_an_outstanding_item():
+def test_readiness_without_equipment_lists_nothing_for_it():
+    """
+    Summary: Having no equipment requests is not an outstanding item.
+    AC1: Given an event assigned to the Event Coordinator has at least one
+        approved venue booking, and none of its venue bookings or equipment
+        requests is still pending, when the Event Coordinator submits it for a
+        safety check, then its status changes to 'Pending Safety Check' and the
+        submission time is recorded. Rejected, cancelled or expired venue
+        bookings and rejected equipment requests are no longer part of the
+        event's arrangements and do not block submission.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert outstanding_arrangements([booking("Approved")], None) == []
 
 
@@ -261,10 +415,21 @@ def test_no_equipment_requests_is_not_an_outstanding_item():
 
 
 @pytest.mark.parametrize("status", ["On Hold", "approved", "Something New", "", None])
-def test_unrecognised_booking_status_is_outstanding(status):
-    """Failure case: "couldn't interpret" must never read as "approved"."""
+def test_readiness_treats_unknown_booking_status_as_outstanding(status):
+    """
+    Summary: A booking status it cannot interpret counts as outstanding.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Arrange (Given): status, from fixtures
+
+    # Act (When)
     outstanding = outstanding_arrangements([booking(status)], [])
 
+    # Assert (Then)
     assert len(outstanding) == 1
     assert outstanding[0]["reason"] == (
         f"Status '{status}' isn't recognised, so it can't be treated as approved."
@@ -272,20 +437,41 @@ def test_unrecognised_booking_status_is_outstanding(status):
 
 
 @pytest.mark.parametrize("status", ["approved", "Allocated", None])
-def test_unrecognised_equipment_status_is_outstanding(status):
+def test_readiness_treats_unknown_equipment_status_as_outstanding(status):
+    """
+    Summary: An equipment status it cannot interpret counts as outstanding.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Arrange (Given): status, from fixtures
+
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Approved")], [equipment_request(status)]
     )
 
+    # Assert (Then)
     assert len(outstanding) == 1
     assert outstanding[0]["type"] == "equipment"
     assert "isn't recognised" in outstanding[0]["reason"]
 
 
-def test_booking_with_no_status_field_is_outstanding():
-    """A malformed row is still a row the rule must not wave through."""
+def test_readiness_treats_booking_without_status_as_outstanding():
+    """
+    Summary: A booking without a status counts as outstanding.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements([{"id": BOOKING_ID}], [])
 
+    # Assert (Then)
     assert len(outstanding) == 1
     assert outstanding[0]["id"] == BOOKING_ID
 
@@ -293,7 +479,16 @@ def test_booking_with_no_status_field_is_outstanding():
 # --- Labels ------------------------------------------------------------------
 
 
-def test_label_shows_a_multi_day_window_in_full():
+def test_readiness_label_shows_multi_day_window():
+    """
+    Summary: A multi-day booking's label shows its whole period.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     label = booking_label(
         booking(
             "Pending",
@@ -302,25 +497,54 @@ def test_label_shows_a_multi_day_window_in_full():
         )
     )
 
+    # Assert (Then)
     assert label == "Booking 12 Nov 2026 09:00–14 Nov 2026 17:00 (120 people)"
 
 
-def test_label_falls_back_when_times_are_unparseable():
-    """Labels are cosmetic: a malformed time must not break the blocked list."""
+def test_readiness_label_with_bad_times_falls_back():
+    """
+    Summary: A label with unreadable times still reads sensibly.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     label = booking_label(
         booking("Pending", requestedStartTime="soon", requestedEndTime="later")
     )
 
+    # Assert (Then)
     assert label == "Booking soon later (120 people)"
 
 
-def test_label_without_times_or_capacity_is_still_readable():
+def test_readiness_label_without_times_or_capacity_is_readable():
+    """
+    Summary: A label without times or capacity is still readable.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act + Assert (When / Then)
     assert booking_label({"id": BOOKING_ID}) == "Booking"
 
 
-def test_equipment_label_without_a_quantity():
+def test_readiness_equipment_label_without_quantity():
+    """
+    Summary: An equipment label without a quantity is still readable.
+    AC2: Given any venue booking or equipment request for the event is still
+        pending, or the event has no approved venue booking, when the Event
+        Coordinator tries to submit, then submission is blocked and the
+        outstanding arrangements are listed.
+    Double: None
+    """
+    # Act (When)
     outstanding = outstanding_arrangements(
         [booking("Approved")], [{"id": REQUEST_ID, "status": "Pending"}]
     )
 
+    # Assert (Then)
     assert outstanding[0]["label"] == "Equipment request"

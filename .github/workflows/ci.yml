@@ -266,7 +266,6 @@ jobs:
         run: |
           cp .env.example .env
           for f in services/*/.env.example; do
-            case "$f" in services/_template-*) continue ;; esac
             cp "$f" "${f%.example}"
           done
       - run: docker compose build

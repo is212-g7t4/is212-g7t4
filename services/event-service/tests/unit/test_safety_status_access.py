@@ -1,13 +1,47 @@
-"""SCRUM-150: PATCH /events/<id>/safety-status can be locked to Safety Check Service.
+"""
+SCRUM-150: Approve Operational Safety Check
 
-Moved forward from SCRUM-152 v2 (its B1), because this story opens the first
-legitimate route into 'Confirmed'; configuring the lock stops a direct API
-call from confirming an event and skipping the Safety Officer entirely.
+User Story
+----------
+As a Safety Officer, I want to approve an event's operational safety
+arrangements, so that the event can proceed to preparation.
 
-The lock fails closed (SCRUM-10): without `INTERNAL_SERVICE_TOKEN` configured on this
-service the endpoint answers 503. It used to be opt-in and skip the check.
+Acceptance Criteria
+-------------------
+AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+     status changes to 'Confirmed'.
+AC2: Given I approve an event, then the safety check is recorded with the
+     status 'Safety Approved', together with my identity, the approval
+     timestamp and any optional remarks, in the event's history.
+AC3: Given an event is not 'Pending Safety Check', then the approve action is
+     not available and an API call is rejected without changing the event.
+AC4: Given the safety check I approve follows a high-impact change, when I
+     approve it, then the changed details become visible to registered
+     Attendees.
 
-Database calls are mocked; no live database writes.
+Real
+----
+- The Event Service routes in app/__init__.py and the rules in app/models.py,
+  run through a real create_app(): request validation, the caller's role and
+  ownership checks from the signed token, the status rules, and the SQL and
+  parameters sent to the database (including notification outbox rows).
+- Assertions are on the HTTP status, the response body and the queries and
+  parameters the cursor received.
+
+Doubled
+-------
+- psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
+  returns canned rows; Mock - its execute calls are asserted to prove what was
+  (or was not) written.
+- Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
+  ES256 key.
+
+Not proven
+----------
+- That the SQL runs against the real Postgres schema, constraints and row locks
+  (-> tests/integration/ against a throwaway postgres:17.6).
+- That the notification outbox rows are delivered (-> Notification Service
+  tests and the E2E journeys).
 """
 from unittest.mock import MagicMock
 
@@ -67,114 +101,185 @@ def body():
 
 
 def test_no_header_is_refused_when_the_lock_is_configured(setup):
+    """
+    Summary: No header is refused when the lock is configured.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = client.patch(f"/events/{EVENT_ID}/safety-status", json=body())
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "INTERNAL_ONLY"
     cursor.execute.assert_not_called()
 
 
 def test_wrong_header_is_refused_when_the_lock_is_configured(setup):
+    """
+    Summary: Wrong header is refused when the lock is configured.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json=body(),
         headers={"X-Internal-Service-Token": "not-the-token"},
     )
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "INTERNAL_ONLY"
     cursor.execute.assert_not_called()
 
 
 def test_token_unconfigured_fails_closed(unconfigured):
-    """SCRUM-10: no INTERNAL_SERVICE_TOKEN means the route is refused with 503, not left open."""
+    """
+    Summary: No INTERNAL_SERVICE_TOKEN means the route is refused with 503, not left open.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = unconfigured
 
+    # Act (When)
     response = client.patch(f"/events/{EVENT_ID}/safety-status", json=body())
 
+    # Assert (Then)
     assert response.status_code == 503
     assert response.json["code"] == "INTERNAL_AUTH_NOT_CONFIGURED"
     cursor.execute.assert_not_called()
 
 
 def test_token_unconfigured_ignores_any_header_sent(unconfigured):
-    """A header sent anyway doesn't open an unconfigured route."""
+    """
+    Summary: A header sent anyway doesn't open an unconfigured route.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = unconfigured
 
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json=body(),
         headers={"X-Internal-Service-Token": "anything"},
     )
 
+    # Assert (Then)
     assert response.status_code == 503
     cursor.execute.assert_not_called()
 
 
 def test_right_header_passes_the_lock(setup):
+    """
+    Summary: Right header passes the lock.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
     cursor.fetchone.return_value = None
 
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json=body(),
         headers={"X-Internal-Service-Token": INTERNAL_TOKEN},
     )
 
+    # Assert (Then)
     # Past the lock: reaches the model and gets the normal 404, not 403.
     assert response.status_code == 404
 
 
 def test_cors_does_not_allow_the_internal_header(setup):
-    """A browser must not be able to send this header (it isn't in CORS)."""
+    """
+    Summary: A browser must not be able to send this header (it isn't in CORS).
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, _ = setup
 
+    # Act (When)
     response = client.options(
         f"/events/{EVENT_ID}/safety-status", headers={"Origin": "http://localhost:5174"}
     )
 
+    # Assert (Then)
     assert "X-Internal-Service-Token" not in response.headers.get(
         "Access-Control-Allow-Headers", ""
     )
 
 
 def test_startup_warns_when_lock_is_off(monkeypatch, caplog):
-    """SCRUM-152 B2: make it visible when the stack is running unlocked."""
+    """
+    Summary: Make it visible when the stack is running unlocked.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     connection = MagicMock()
     monkeypatch.setattr(
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
+
+    # Act (When)
     with caplog.at_level("WARNING"):
         create_app({"TESTING": True, "INTERNAL_SERVICE_TOKEN": ""})
 
+    # Assert (Then)
     assert "INTERNAL_SERVICE_TOKEN is not set" in caplog.text
 
 
 def test_startup_does_not_warn_when_lock_is_on(monkeypatch, caplog):
+    """
+    Summary: Startup does not warn when lock is on.
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     connection = MagicMock()
     monkeypatch.setattr(
         "app.models.psycopg2.connect", lambda *args, **kwargs: connection
     )
+
+    # Act (When)
     with caplog.at_level("WARNING"):
         create_app({"TESTING": True, "INTERNAL_SERVICE_TOKEN": INTERNAL_TOKEN})
 
+    # Assert (Then)
     assert "INTERNAL_SERVICE_TOKEN is not set" not in caplog.text
 
 
 def test_coordinator_cannot_confirm_through_safety_status_when_locked(setup):
-    """SCRUM-152 AC1, API path via /safety-status (not just /progress).
-
-    A coordinator who reads their event's open-round safetyCheckId from
-    GET /events/<id> and calls /safety-status directly, trying to move
-    straight to 'Confirmed' without a Safety Officer's approval, is refused
-    before the request ever reaches the database.
     """
+    Summary: SCRUM-152 AC1, API path via /safety-status (not just /progress).
+    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
+        status changes to 'Confirmed'.
+    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    """
+    # Arrange (Given)
     client, _, cursor = setup
 
+    # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json={
@@ -185,6 +290,7 @@ def test_coordinator_cannot_confirm_through_safety_status_when_locked(setup):
         },
     )
 
+    # Assert (Then)
     assert response.status_code == 403
     assert response.json["code"] == "INTERNAL_ONLY"
     cursor.execute.assert_not_called()

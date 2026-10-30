@@ -1,13 +1,29 @@
-"""Infra: owned-resource cleanup and process-group absence safety tests.
+"""
+SUPPORTING DESIGN CHECKS: Integration test harness cleanup
 
-Inputs are fake process/log handles, exact container names and simulated OS/Docker
-results; assertions check cleanup diagnostics, complete teardown attempts and
-honest group-absence status. One test starts and removes its own local process
-group, including a child that ignores TERM. Docker calls are mocked throughout.
+User Story
+----------
+Supporting/supplementary design checks. No story or acceptance
+criterion describes the behaviour these tests check; it is plumbing
+that every story of this service relies on.
 
-Importing this module defines tests without executing cleanup or starting resources.
-Not proven: real Docker removal, shared-stack safety, notification delivery or
-service business rules. Run explicitly through pytest; never target shared resources.
+Real
+----
+- The integration harness cleanup helpers (process-group wait, container and
+  log cleanup) run for real.
+- Assertions are on what is cleaned up and what is reported.
+
+Doubled
+-------
+- os.killpg, subprocess and docker calls: Stub / Mock - simulate permission
+  errors, timeouts and failed removals; calls inspected.
+
+Not proven
+----------
+- That real containers and process groups are removed (-> CI integration-tests
+  job).
+- These test test-support code, not app/; they add nothing to the app coverage
+  figure.
 """
 from unittest.mock import Mock, patch
 import subprocess
@@ -15,25 +31,36 @@ import subprocess
 from scripts.test_support.process_lifecycle import cleanup_owned_resources, wait_group_gone
 
 
-def test_group_absence_wait_retries_transient_permission_without_claiming_success():
-    """Boundary: simulate permission denied followed by process-group absence; the wait succeeds
-    only after absence is observed, avoiding a false cleanup claim during macOS reaping.
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_wait_for_group_absence_retries_transient_permission_error(mocker):
     """
-    with patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[PermissionError(), ProcessLookupError()]):
-        assert wait_group_gone(905, seconds=1)
-
-
-def test_group_absence_wait_never_treats_persistent_permission_as_absence():
-    """Failure: simulate persistent permission denied with an expired wait budget; the wait returns
-    false rather than treating an inaccessible group as removed.
+    Summary: A passing permission error while waiting for a process group is retried, not taken as success.
+    Supporting design check: the integration harness cleans up after itself
+    Double: Stub (killpg raises PermissionError once)
     """
-    with patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=PermissionError()):
-        assert not wait_group_gone(905, seconds=0)
+    mocker.patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[PermissionError(), ProcessLookupError()])
+    assert wait_group_gone(905, seconds=1)
 
 
-def test_cleanup_attempts_all_resources_despite_process_log_and_container_failures():
-    """Failure: inject process-wait, log-close and container-removal errors; cleanup attempts every
-    resource and returns all three diagnostics, so one failure cannot hide later leaks.
+def test_wait_for_group_absence_with_persistent_permission_error_never_succeeds(mocker):
+    """
+    Summary: A lasting permission error is never taken as the process group being gone.
+    Supporting design check: the integration harness cleans up after itself
+    Double: Stub (killpg always raises PermissionError)
+    """
+    mocker.patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=PermissionError())
+    assert not wait_group_gone(905, seconds=0)
+
+
+def test_cleanup_when_some_steps_fail_still_tries_every_resource(mocker):
+    """
+    Summary: Cleanup tries every resource even when some steps fail.
+    Supporting design check: the integration harness cleans up after itself
+    Double: Stub (steps raise), Mock (each cleanup called)
     """
     processes = [Mock(pid=901), Mock(pid=902)]
     processes[1].wait.side_effect = RuntimeError("wait failed")
@@ -45,8 +72,10 @@ def test_cleanup_attempts_all_resources_despite_process_log_and_container_failur
         if args[:3] == ["docker", "rm", "-fv"] and args[-1] == "owned-two":
             return subprocess.CompletedProcess(args, 1, "", "removal refused")
         return subprocess.CompletedProcess(args, 0, "", "")
-    with patch("scripts.test_support.process_lifecycle.wait_group_gone", return_value=True), patch("scripts.test_support.process_lifecycle.os.killpg") as kill, patch("scripts.test_support.process_lifecycle.subprocess.run", side_effect=docker):
-        failures = cleanup_owned_resources(processes, logs, ["owned-one", "owned-two"])
+    mocker.patch("scripts.test_support.process_lifecycle.wait_group_gone", return_value=True)
+    kill = mocker.patch("scripts.test_support.process_lifecycle.os.killpg")
+    mocker.patch("scripts.test_support.process_lifecycle.subprocess.run", side_effect=docker)
+    failures = cleanup_owned_resources(processes, logs, ["owned-one", "owned-two"])
     assert [call.args[0] for call in kill.call_args_list] == [902, 901]
     assert all(log.close.call_count == 1 for log in logs)
     assert [call[-1] for call in calls if call[:3] == ["docker", "rm", "-fv"]] == ["owned-two", "owned-one"]
@@ -57,36 +86,43 @@ def test_cleanup_attempts_all_resources_despite_process_log_and_container_failur
     assert "removal refused" in failures[2]
 
 
-def test_cleanup_reports_remaining_container_even_after_successful_removal_response():
-    """Conflict: return success from removal but still list the exact owned container; cleanup
-    reports unverified absence, so command success cannot masquerade as resource removal.
+def test_cleanup_reports_container_still_present_after_removal(mocker):
+    """
+    Summary: A container still present after a "removed" answer is reported.
+    Supporting design check: the integration harness cleans up after itself
+    Double: Stub (docker reports the container still exists)
     """
     results = [subprocess.CompletedProcess([], 0, "owned", ""),
                subprocess.CompletedProcess([], 0, "owned\n", "")]
-    with patch("scripts.test_support.process_lifecycle.subprocess.run", side_effect=results):
-        failures = cleanup_owned_resources([], [], ["owned"])
+    mocker.patch("scripts.test_support.process_lifecycle.subprocess.run", side_effect=results)
+    failures = cleanup_owned_resources([], [], ["owned"])
     assert len(failures) == 1
     assert "absence unverified owned" in failures[0]
 
 
-def test_cleanup_kills_timed_out_process_group_and_continues_after_missing_group():
-    """Failure: simulate an absent group and a timed-out owned process; cleanup escalates only the
-    owned group and still verifies container absence, preserving bounded and complete teardown.
+def test_cleanup_kills_timed_out_group_and_continues(mocker):
+    """
+    Summary: A process group that does not stop in time is killed and cleanup continues.
+    Supporting design check: the integration harness cleans up after itself
+    Double: Stub (wait times out; group already gone)
     """
     processes = [Mock(pid=903), Mock(pid=904)]
     processes[0].wait.side_effect = [subprocess.TimeoutExpired("owned", 10), 0]
-    with patch("scripts.test_support.process_lifecycle.wait_group_gone", side_effect=[True, False, True]), patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
+    mocker.patch("scripts.test_support.process_lifecycle.wait_group_gone", side_effect=[True, False, True])
+    kill = mocker.patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[ProcessLookupError(), None, None])
+    docker = mocker.patch(
         "scripts.test_support.process_lifecycle.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
-    ) as docker:
-        assert cleanup_owned_resources(processes, [], ["owned"]) == []
+    )
+    assert cleanup_owned_resources(processes, [], ["owned"]) == []
     assert [call.args[0] for call in kill.call_args_list] == [904, 903, 903]
     assert docker.call_count == 2
 
 
-def test_cleanup_removes_term_ignoring_child_after_group_leader_exits(tmp_path):
-    """Failure: start an owned group whose parent exits on TERM while its ready child ignores TERM;
-    cleanup must remove the entire group, not merely reap the leader. A bounded emergency kill
-    prevents leakage if the assertion fails.
+def test_cleanup_removes_child_that_ignores_term(tmp_path):
+    """
+    Summary: A child process that ignores the stop signal is still removed.
+    Supporting design check: the integration harness cleans up after itself
+    Double: None
     """
     import os
     import signal

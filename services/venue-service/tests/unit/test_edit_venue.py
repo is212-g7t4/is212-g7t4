@@ -1,4 +1,50 @@
-"""SCRUM-23 Edit Venue — PUT /venues/<id> on Venue Service."""
+"""
+SCRUM-23: Edit Existing Venue Details and Status
+
+User Story
+----------
+As a Venue Staff, I want to edit an existing venue's profile and status, so
+that the catalogue always reflects accurate characteristics and operating
+information.
+
+Acceptance Criteria
+-------------------
+AC1: Given the user clicks on a "Edit Venue", the system must pre-populate the
+     form with the venue's current data.
+AC2: When the Venue Staff member updates the venue's details and saves, then
+     the updated details must reflect on the venue's profile.
+AC3: The system must provide a toggle or dropdown to change the venue's
+     operational status to either "Available", “Booked", or “Under
+     Maintenance”.
+AC4: Given a venue's status is changed to "Booked" or “Under Maintenance”, then
+     the system must hide it from the Event Coordinator's venue search and
+     availability calendar.
+
+Real
+----
+- PUT /venues/<id>: validation, the duplicate-name check that ignores the
+  venue's own name, the update, 404 for an unknown venue and the serializer run
+  for real.
+- Assertions are on the status, errors and the values sent to the database.
+
+Doubled
+-------
+- psycopg2.connect: Stub / Mock (`setup` fixture) - the cursor returns canned
+  Venue rows (or raises OperationalError); executed SQL and parameters are
+  inspected to prove what is stored or filtered.
+
+Not proven
+----------
+- Pre-populating the form and the status dropdown (AC1, AC3 UI half) (->
+  frontend AddVenuePage.test.tsx edit mode).
+- Hiding Booked / Under Maintenance venues from search and the calendar (AC4)
+  (-> test_venue_search_filters.py does not filter by status;
+  venue-booking-service search tests and venue-availability calendar tests).
+- That the real public."Venue" table stores and returns these values (->
+  tests/integration/, throwaway postgres:17.6).
+- That only Venue Staff can make this change (->
+  test_venue_modification_access.py, SCRUM-10).
+"""
 from unittest.mock import MagicMock
 
 import psycopg2
@@ -21,8 +67,16 @@ def setup(monkeypatch):
     return signed_in(app.test_client(), role="Venue Staff"), cursor
 
 
-def test_ac2_edit_saves_current_venue_fields_and_status(setup):
-    """AC1-3: PUT updates all fields and returns the saved profile, including status."""
+def test_edit_venue_with_valid_form_saves_fields_and_status(setup):
+    """
+    Summary: Saving an edit updates every field, including operating status, and returns the new profile.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    AC3: The system must provide a toggle or dropdown to change the venue's
+        operational status to either "Available", “Booked", or “Under
+        Maintenance”.
+    Double: Stub (cursor: no duplicate, the updated row; update inspected)
+    """
     client, cursor = setup
     cursor.fetchone.side_effect = [None, saved_row(
         venue_name="Updated Lounge",
@@ -74,8 +128,13 @@ def test_ac2_edit_saves_current_venue_fields_and_status(setup):
     assert update_params[-1] == VENUE_ID
 
 
-def test_edit_keeps_existing_name_without_duplicate_conflict(setup):
-    """Keeping this venue's own name must not conflict with itself."""
+def test_edit_venue_keeping_its_own_name_saves_without_conflict(setup):
+    """
+    Summary: Keeping a venue's own name is not treated as a duplicate.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Stub (cursor: duplicate check excludes this venue)
+    """
     client, cursor = setup
     cursor.fetchone.side_effect = [None, saved_row()]
 
@@ -87,7 +146,13 @@ def test_edit_keeps_existing_name_without_duplicate_conflict(setup):
     assert duplicate_params == [VALID_PAYLOAD["name"], VENUE_ID]
 
 
-def test_duplicate_name_from_another_venue_returns_409(setup):
+def test_edit_venue_with_another_venues_name_returns_409(setup):
+    """
+    Summary: An edit cannot give a venue another venue's name.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Stub (cursor finds another venue with the name)
+    """
     client, cursor = setup
     cursor.fetchone.return_value = {"exists": True}
 
@@ -98,7 +163,14 @@ def test_duplicate_name_from_another_venue_returns_409(setup):
     assert cursor.execute.call_count == 1
 
 
-def test_edit_rejects_invalid_status_without_database_write(setup):
+def test_edit_venue_with_unknown_status_returns_400_without_saving(setup):
+    """
+    Summary: Status can only be set to Available, Booked or Under Maintenance.
+    AC3: The system must provide a toggle or dropdown to change the venue's
+        operational status to either "Available", “Booked", or “Under
+        Maintenance”.
+    Double: Mock (cursor not executed)
+    """
     client, cursor = setup
 
     response = client.put(
@@ -120,8 +192,15 @@ def test_edit_rejects_invalid_status_without_database_write(setup):
         ("supportedLayouts", "Supported Room Layouts"),
         ("status", "Operating Status"),
     ],
+    ids=["name", "location", "capacity", "facilities", "supported_layouts", "status"],
 )
-def test_edit_rejects_blank_required_field(field, label, setup):
+def test_edit_venue_with_blank_mandatory_field_returns_400_naming_it(field, label, setup):
+    """
+    Summary: Clearing a mandatory field blocks the save and names the field.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Mock (cursor not executed)
+    """
     client, cursor = setup
     payload = {**VALID_PAYLOAD, field: "" if isinstance(VALID_PAYLOAD[field], str) else []}
 
@@ -142,8 +221,15 @@ def test_edit_rejects_blank_required_field(field, label, setup):
         ("supportedLayouts", "Supported Room Layouts"),
         ("status", "Operating Status"),
     ],
+    ids=["name", "location", "capacity", "facilities", "supported_layouts", "status"],
 )
-def test_edit_rejects_omitted_required_field(field, label, setup):
+def test_edit_venue_with_mandatory_field_omitted_returns_400_naming_it(field, label, setup):
+    """
+    Summary: Leaving a mandatory field out of the edit blocks the save and names the field.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Mock (cursor not executed)
+    """
     client, cursor = setup
     payload = {key: value for key, value in VALID_PAYLOAD.items() if key != field}
 
@@ -154,8 +240,14 @@ def test_edit_rejects_omitted_required_field(field, label, setup):
     cursor.execute.assert_not_called()
 
 
-@pytest.mark.parametrize("capacity", ["not-a-number", "0"])
-def test_edit_rejects_invalid_capacity_without_database_write(capacity, setup):
+@pytest.mark.parametrize("capacity", ["not-a-number", "0"], ids=["not_a_number", "zero"])
+def test_edit_venue_with_invalid_capacity_returns_400_without_saving(capacity, setup):
+    """
+    Summary: Capacity must stay a whole number of at least 1.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Mock (cursor not executed)
+    """
     client, cursor = setup
 
     response = client.put(
@@ -167,7 +259,13 @@ def test_edit_rejects_invalid_capacity_without_database_write(capacity, setup):
     cursor.execute.assert_not_called()
 
 
-def test_edit_rejects_non_list_facilities_without_database_write(setup):
+def test_edit_venue_with_facilities_not_a_list_returns_400_without_saving(setup):
+    """
+    Summary: Facilities must stay a list of names.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Mock (cursor not executed)
+    """
     client, cursor = setup
 
     response = client.put(
@@ -179,7 +277,13 @@ def test_edit_rejects_non_list_facilities_without_database_write(setup):
     cursor.execute.assert_not_called()
 
 
-def test_edit_rejects_non_object_json_body(setup):
+def test_edit_venue_with_non_object_body_returns_400(setup):
+    """
+    Summary: A request that is not a venue form is refused.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: None
+    """
     client, cursor = setup
 
     response = client.put(f"/venues/{VENUE_ID}", json=["not", "an", "object"])
@@ -188,7 +292,13 @@ def test_edit_rejects_non_object_json_body(setup):
     cursor.execute.assert_not_called()
 
 
-def test_edit_unknown_venue_returns_404(setup):
+def test_edit_venue_when_venue_unknown_returns_404(setup):
+    """
+    Summary: Editing a venue that does not exist is refused.
+    AC2: When the Venue Staff member updates the venue's details and saves,
+        then the updated details must reflect on the venue's profile.
+    Double: Stub (update matches no row)
+    """
     client, cursor = setup
     cursor.fetchone.side_effect = [None, None]
 
@@ -198,7 +308,17 @@ def test_edit_unknown_venue_returns_404(setup):
     assert response.json["message"] == "Venue not found."
 
 
-def test_edit_preflight_allows_put(setup):
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_edit_venue_preflight_allows_put_from_frontend(setup):
+    """
+    Summary: The browser may send the edit from the frontend.
+    Supporting design check: CORS allows PUT for venue edits
+    Double: None
+    """
     client, _ = setup
 
     response = client.options(
@@ -213,7 +333,12 @@ def test_edit_preflight_allows_put(setup):
     assert "PUT" in response.headers["Access-Control-Allow-Methods"]
 
 
-def test_edit_database_error_returns_503(setup, monkeypatch):
+def test_edit_venue_when_database_fails_returns_503_without_internals(setup, monkeypatch):
+    """
+    Summary: A database outage while editing gives a 503 that leaks no internals.
+    Supporting design check: database errors answer 503 with a safe message
+    Double: Stub (psycopg2.connect raises OperationalError)
+    """
     client, _ = setup
 
     def explode(*args, **kwargs):
@@ -226,7 +351,12 @@ def test_edit_database_error_returns_503(setup, monkeypatch):
     assert response.status_code == 503
 
 
-def test_edit_missing_database_url_returns_503():
+def test_edit_venue_when_database_url_missing_returns_503():
+    """
+    Summary: Editing reports itself unavailable when no database is configured.
+    Supporting design check: an unconfigured Venue Service answers 503
+    Double: None
+    """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Venue Staff")
 
     response = client.put(f"/venues/{VENUE_ID}", json=VALID_PAYLOAD)

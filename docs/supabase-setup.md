@@ -66,7 +66,7 @@ hook must be enabled under **Authentication → Hooks → Customize Access Token
 
 ## 4. Add a Postgres driver to your service
 
-The service templates don't include one yet. From your service directory:
+A new service has no Postgres driver until you add one. From your service directory:
 
 ```
 cd services/<your-service>

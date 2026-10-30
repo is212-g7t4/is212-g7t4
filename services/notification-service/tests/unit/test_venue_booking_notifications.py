@@ -1,23 +1,41 @@
-"""SCRUM-47 Venue booking notification and decision alerts: consumer unit tests.
+"""
+SCRUM-47: Venue Booking Notification and Decision Alerts
 
-Story: As an Event Coordinator and Venue Staff, I want to receive notifications
-about venue booking requests and decisions, so that I can coordinate venue
+User Story
+----------
+As an Event Coordinator and Venue Staff, I want to receive notifications about
+venue booking requests and decisions, so that I can coordinate venue
 arrangements efficiently.
-AC1 Given an Event Coordinator submits a venue booking request, system sends
-an in-app notification to Venue Staff with event name, requested venue,
-date/time and link to review.
-AC2 Given booking approved/rejected, sends an in-app notification to Event
-Coordinator with event name, venue, decision.
 
-AC = acceptance criterion; DR = supporting design rule, not an extra AC.
-Real: process -> parser/booking validator -> store SQL/transaction adapter.
-Doubled: native psycopg2 connection/cursor and broker ACK channel, no live sockets.
-AC1: staff envelopes retain event_id despite their ID-less review destination.
-AC2: approved/rejected envelopes keep the original submitter, decision and link.
-DR: malformed booking contracts quarantine exact bytes before ACK, never deliver.
-Not proven: durable SQL commits, actual inbox API visibility, RabbitMQ redelivery,
-producer recipient selection, SGT formatting or rendered links; owner/dispatcher
-unit modules test production of the contracts, integration proves persisted state.
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator submits a venue booking request, the system
+     sends an in-app notification to Venue Staff with the event name, requested
+     venue, date/time, and a link to review the request.
+AC2: Given a venue booking request is approved or rejected, the system sends an
+     in-app notification to the Event Coordinator with the event name, venue,
+     and decision.
+
+Real
+----
+- app.consumer.process(): JSON validation, the story's display-contract
+  validator and the inbox/quarantine SQL, with the broker ACK only after the
+  database commit.
+- Assertions are on the SQL and parameters sent, and the ACK and its order.
+
+Doubled
+-------
+- psycopg2.connect: Stub - fresh MagicMock connection and cursor per test; SQL
+  inspected.
+- Broker channel: Mock - asserts basic_ack after the commit.
+
+Not proven
+----------
+- That the inbox row is committed and de-duplicated in real PostgreSQL (->
+  tests/integration/, throwaway postgres:17.6).
+- That the producer publishes this envelope and the UI shows it with a working
+  link (-> the producing service dispatcher tests and the frontend
+  NotificationCenter tests).
 """
 from copy import deepcopy
 import json
@@ -64,20 +82,31 @@ def storage(monkeypatch):
     return connection, cursor, channel, order
 
 
-# AC1/AC2 — all three valid outcomes traverse the real consumer and store.
 @pytest.mark.parametrize("outcome,recipient,kind", [
     pytest.param("submission", STAFF, "venue.booking-submission", id="staff-submission"),
     pytest.param("Approved", SUBMITTER, "venue.booking-decision", id="approved-original-submitter"),
     pytest.param("Rejected", SUBMITTER, "venue.booking-decision", id="rejected-original-submitter"),
 ])
-def test_ac1_ac2_valid_booking_alert_keeps_exact_sql_contract_before_ack(storage, outcome, recipient, kind):
-    """Normal: staff submission or original-submitter decision reaches one exact inbox insert before ACK."""
+def test_process_booking_alert_stores_for_staff_or_coordinator_before_ack(storage, outcome, recipient, kind):
+    """
+    Summary: Booking submissions reach Venue Staff and decisions reach the coordinator, stored before acknowledging.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     connection, cursor, channel, order = storage
     envelope = booking_envelope(outcome)
     expected_payload = deepcopy(envelope)
 
+    # Act (When)
     process("synthetic", channel, Mock(delivery_tag=47), json.dumps(envelope).encode())
 
+    # Assert (Then)
     cursor.execute.assert_called_once()
     sql, params = cursor.execute.call_args.args
     assert 'INSERT INTO public."Notification" ' in sql
@@ -92,7 +121,6 @@ def test_ac1_ac2_valid_booking_alert_keeps_exact_sql_contract_before_ack(storage
     assert order == ["inbox", "commit", "ack"]
 
 
-# DR supporting AC1/AC2 — each malformed contract must be retained, never delivered.
 @pytest.mark.parametrize("outcome,change,details_change", [
     pytest.param("submission", {"details": []}, {}, id="details-not-object"),
     pytest.param("submission", {"destination": {"kind": "event-details", "eventId": EVENT}}, {},
@@ -110,8 +138,18 @@ def test_ac1_ac2_valid_booking_alert_keeps_exact_sql_contract_before_ack(storage
     pytest.param("submission", {}, {"bookingId": None}, id="missing-required-booking-id"),
     pytest.param("Rejected", {}, {"requestedBy": "not-a-uuid"}, id="malformed-original-submitter"),
 ])
-def test_ac1_ac2_invalid_booking_alert_quarantines_exact_body_before_ack(storage, outcome, change, details_change):
-    """Failure: each malformed booking contract is quarantined before ACK with no inbox delivery."""
+def test_process_malformed_booking_alert_quarantines_exact_body(storage, outcome, change, details_change):
+    """
+    Summary: A malformed booking alert is kept aside with its exact body, not delivered.
+    AC1: Given an Event Coordinator submits a venue booking request, the system
+        sends an in-app notification to Venue Staff with the event name,
+        requested venue, date/time, and a link to review the request.
+    AC2: Given a venue booking request is approved or rejected, the system
+        sends an in-app notification to the Event Coordinator with the event
+        name, venue, and decision.
+    Double: Stub (connection), Mock (channel ACK)
+    """
+    # Arrange (Given)
     connection, cursor, channel, order = storage
     envelope = booking_envelope(outcome)
     if details_change.get("bookingId", "present") is None:
@@ -121,8 +159,10 @@ def test_ac1_ac2_invalid_booking_alert_quarantines_exact_body_before_ack(storage
     envelope.update(change)
     body = json.dumps(envelope).encode()
 
+    # Act (When)
     process("synthetic", channel, Mock(delivery_tag=48), body)
 
+    # Assert (Then)
     cursor.execute.assert_called_once()
     sql, params = cursor.execute.call_args.args
     assert sql == 'INSERT INTO public."NotificationFailure" (body,error) VALUES (%s,%s)'

@@ -1,18 +1,44 @@
-"""# Test scope and acceptance mapping — SCRUM-171 integration
+"""
+SCRUM-25: Venue Availability Calendar
 
-- **Calendar read regression (no direct SCRUM-171 AC):** SQL status inclusion, half-open filtering, malformed candidates and venue isolation. Fixture columns now accept nullable closure metadata. Read filtering alone does not prove closure rejections or AC2 preservation; SQLite is not PostgreSQL.
+User Story
+----------
+As an Event Coordinator, I want to view a calendar showing venue availability
+across different dates and times, so that I can easily identify open slots to
+request for my clients.
 
-## Case/group traceability
+Acceptance Criteria
+-------------------
+AC1: Given an internal user (Event Coordinator, Venue Staff, or Technical
+     Support Staff) accesses the calendar, then the system must display a
+     schedule showing dates, times, and current venue statuses.
+AC2: The system must allow internal users (Event Coordinator, Venue Staff, or
+     Technical Support Staff) to toggle the calendar interface between day,
+     week, and month views.
+AC3: Given a venue is unavailable, then the calendar must visually block out
+     that specific time slot and disable it from being selected.
+AC4: Given an external user (Event Organiser or Attendee) attempts to access
+     the calendar, then the system must deny access and display a permission
+     error.
 
-The named test functions/cases below implement the groups above; their existing
-names and assertions specify the scenario. No group is credited with all five ACs.
+Real
+----
+- The calendar read's SQL predicate itself, run against in-memory rows: which
+  statuses are included, the half-open window and that invalid candidates
+  survive for the Python check.
+- Assertions are on the rows the SQL returns.
 
-## Existing test contract and detailed cases
+Doubled
+-------
+- PostgreSQL: Fake - an in-memory sqlite3 database runs the real read predicate
+  (placeholders and schema qualification adapted), so NULL/AND/OR semantics are
+  exercised but not Postgres types.
 
-Execute the read predicate against an in-memory SQL engine, not mock results.
-
-SQLite exercises NULL/AND/OR/comparison semantics, not Postgres driver/types.
-Only placeholders and schema qualification are adapted; live smoke covers PG.
+Not proven
+----------
+- That the overlap SQL, locks and constraints behave the same on real
+  PostgreSQL (-> tests/integration/, throwaway postgres:17.6, and the opt-in
+  tests/live/test_calendar.py).
 """
 
 import sqlite3
@@ -93,8 +119,18 @@ def read(monkeypatch, rows):
         ("Rejected", 0),
         ("Cancelled", 0),
     ],
+    ids=["approved", "pending", "pending_review", "rejected", "cancelled"],
 )
-def test_actual_sql_statuses(monkeypatch, status, count):
+def test_calendar_sql_includes_only_showable_statuses(monkeypatch, status, count):
+    """
+    Summary: The calendar query returns approved and pending bookings, not rejected or cancelled ones.
+    AC3: Given a venue is unavailable, then the calendar must visually block
+        out that specific time slot and disable it from being selected.
+    Double: Fake (in-memory sqlite3 database)
+    """
+    # Arrange (Given): monkeypatch, status, count, from fixtures
+
+    # Act + Assert (When / Then)
     assert len(read(monkeypatch, [booking_row(status=status)])) == count
 
 
@@ -106,8 +142,17 @@ def test_actual_sql_statuses(monkeypatch, status, count):
         (datetime(2026, 9, 30), datetime(2026, 10, 3), 1),
         (datetime(2026, 10, 1, 23), datetime(2026, 10, 2, 1), 1),
     ],
+    ids=["datetime_2026_9_30_23_datetime_2026_10_1_0", "datetime_2026_10_2_datetime_2026_10_2_1_0", "datetime_2026_9_30_datetime_2026_10_3_1", "datetime_2026_10_1_23_datetime_2026_10_2_1_1"],
 )
-def test_actual_sql_half_open(monkeypatch, start, end, count):
+def test_calendar_sql_uses_half_open_window(monkeypatch, start, end, count):
+    """
+    Summary: The query includes overlapping bookings and excludes ones only touching the range.
+    AC1: (boundary: touching and overlapping intervals)
+    Double: Fake (in-memory sqlite3 database)
+    """
+    # Arrange (Given): monkeypatch, start, end, count, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         len(
             read(
@@ -133,13 +178,33 @@ def test_actual_sql_half_open(monkeypatch, start, end, count):
             "requested_end_time": datetime(2025, 1, 1),
         },
     ],
+    ids=["requested_start_time_none", "requested_end_time_none", "status_none", "status_surprise", "venue_id_none", "event_id_none", "requested_start_time_datetime_2025_1_2_requested"],
 )
-def test_actual_sql_invalid_candidates_survive_filter(monkeypatch, change):
+def test_calendar_sql_keeps_invalid_candidates(monkeypatch, change):
+    """
+    Summary: Malformed rows are kept by the query so the read can fail closed.
+    AC3: Given a venue is unavailable, then the calendar must visually block
+        out that specific time slot and disable it from being selected.
+    Double: Fake (in-memory sqlite3 database)
+    """
+    # Arrange (Given): monkeypatch, change, from fixtures
+
+    # Act + Assert (When / Then)
     with pytest.raises(CalendarDataError):
         read(monkeypatch, [booking_row(**change)])
 
 
-def test_actual_sql_other_venue_is_isolated(monkeypatch):
+def test_calendar_sql_returns_only_the_venue_asked_for(monkeypatch):
+    """
+    Summary: Another venue's bookings are never returned.
+    AC1: Given an internal user (Event Coordinator, Venue Staff, or Technical
+        Support Staff) accesses the calendar, then the system must display a
+        schedule showing dates, times, and current venue statuses.
+    Double: Fake (in-memory sqlite3 database)
+    """
+    # Arrange (Given): monkeypatch, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         read(
             monkeypatch,
@@ -149,7 +214,16 @@ def test_actual_sql_other_venue_is_isolated(monkeypatch):
     )
 
 
-def test_actual_sql_excluded_malformed_row_is_ignored(monkeypatch):
+def test_calendar_sql_ignores_malformed_row_of_excluded_status(monkeypatch):
+    """
+    Summary: A malformed row that is rejected or cancelled is ignored.
+    AC3: Given a venue is unavailable, then the calendar must visually block
+        out that specific time slot and disable it from being selected.
+    Double: Fake (in-memory sqlite3 database)
+    """
+    # Arrange (Given): monkeypatch, from fixtures
+
+    # Act + Assert (When / Then)
     assert (
         read(monkeypatch, [booking_row(status="Cancelled", requested_start_time=None)])
         == []

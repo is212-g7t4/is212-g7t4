@@ -14,6 +14,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pytest-mock>=3.14",
     "pytest-socket>=0.8.1",
     "respx>=0.22.0",
 ]
@@ -44,5 +45,5 @@ source = ["app"]
 [tool.coverage.report]
 # Coverage floor (a ratchet): today's measured level, so a PR cannot lower it.
 # Raise this in the PR that adds the tests which push it higher.
-fail_under = 91.8
+fail_under = 100
 show_missing = true

@@ -1,29 +1,42 @@
-"""# SCRUM-173 — Receive Venue Disruption Notifications
+"""
+SCRUM-173: Receive Venue Disruption Notifications
 
-As an Event Coordinator, I want to receive an in-app notification when a venue booking for an event assigned to me is affected, so that I know that alternative arrangements are required.
-AC1: Given a rejection is ready for notification, then the notification is addressed to the coordinator assigned to that event when the notification is created.
-AC2: The notification contains the event name, affected venue, closure start/end, rejection reason, and a link to the venue rejection.
-AC3: Given a temporary system failure occurs during notification dispatch, the system must ensure the notification is eventually delivered to the assigned coordinator without generating multiple duplicate alerts.
+User Story
+----------
+As an Event Coordinator, I want to receive an in-app notification when a venue
+booking for an event assigned to me is affected, so that I know that
+alternative arrangements are required.
 
-## Layer and scope
-# SCRUM-173 MF-02 / AC3: bounded production attempt supervisor.
-Hermetic process-adapter seam, not real broker evidence. Whole claim/enrichment/
-freeze/publish/cleanup attempt shares one budget below the owner's 60s lease.
-Real missing/delayed broker-confirm fault injection is separately recorded.
+Acceptance Criteria
+-------------------
+AC1: Given a rejection is ready for notification, then the notification is
+     addressed to the coordinator assigned to that event when the notification
+     is created.
+AC2: The notification contains the event name, affected venue, closure
+     start/end, rejection reason, and a link to the venue rejection.
+AC3: Given a temporary system failure occurs during notification dispatch, the
+     system must ensure the notification is eventually delivered to the
+     assigned coordinator without generating multiple duplicate alerts.
 
+Real
+----
+- app.dispatcher for venue disruption alerts: one time budget per child
+  attempt, reading the current coordinator, freezing over HTTP, confirmed
+  persistent publish, retries and lease recovery, and the one-shot and daemon
+  commands.
+- Assertions are on exit codes, frozen and published envelopes and retries.
 
-## AC groups
-AC1: current coordinator at preparation; recipient frozen across retries.
-AC2: complete frozen content and structured rejection destination.
-AC3: eventual delivery without duplicate inbox alerts.
-Security, diagnostics, process adapters, fixtures and legacy compatibility are
-explicit supporting/cross-ticket checks, not separate direct AC scenarios.
-FIRST: unit I/O/clocks are mocked; real integration owns setup/finally teardown.
-Historical tests are retrospective evidence, not a blanket test-first claim.
+Doubled
+-------
+- Venue Availability outbox and Event/Venue lookups: Stub (monkeypatched httpx)
+  - canned replies; requests inspected.
+- pika (RabbitMQ) and subprocess: Mock - publish, confirms and child runs
+  inspected.
 
-
-Consolidated story unit tests. Each class preserves an original module scope;
-class-local fixtures never leak into another acceptance/supporting group.
+Not proven
+----------
+- That a real broker keeps the message and Notification Service shows it once
+  (-> notification-service consumer tests; NOT COVERED against a live broker).
 """
 
 # test_notification_deadline.py — original fixture and scenario group
@@ -38,43 +51,67 @@ from app import dispatcher
 class TestNotificationDeadline:
     """SCRUM-173 MF-02 / AC3: bounded production attempt supervisor. Hermetic process-adapter seam, not real broker evidence. Whole claim/enrichment/ freeze/publish/cleanup attempt shares one budget below the owner's 60s lease. Real missing/delayed broker-confirm fault injection is separately recorded."""
 
-    def test_attempt_has_one_hard_budget_for_claim_preparation_publish_and_cleanup(self):
-        """## AC3
-        The supervisor applies one deadline to the entire child attempt, below the owner lease.
+    def test_attempt_applies_one_deadline_to_whole_dispatch(self, mocker):
         """
-        with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run:
-            assert dispatcher.attempt() == 1
+        Summary: One deadline covers the whole attempt, so a stuck step cannot hold the alert.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Mock (subprocess.run timeout)
+        """
+        # Arrange (Given)
+        run = mocker.patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0))
+        assert dispatcher.attempt() == 1
         args, kwargs = run.call_args
+
+        # Act + Assert (When / Then)
         assert args[0] == [sys.executable, '-m', 'app.dispatcher', '--attempt']
         assert kwargs['timeout'] == 50  # starts BEFORE claim, never restarts at publish
         assert kwargs['check'] is True
 
 
-    def test_missing_confirm_timeout_is_not_reported_as_publication(self):
-        """## AC3
-        A timed-out attempt returns failure; an unknown broker outcome is never reported as published.
+    def test_attempt_timeout_is_not_reported_as_published(self, mocker):
         """
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('worker', .2)):
-            with pytest.raises(subprocess.TimeoutExpired):
-                dispatcher.attempt(timeout=.2)
-
-
-    def test_idle_worker_exit_and_real_errors_are_distinct(self):
-        """## AC3 supporting process behavior
-        Idle and failure child exits produce distinct supervisor outcomes.
+        Summary: A timed-out attempt is a failure, never reported as sent.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (child times out)
         """
-        with patch('subprocess.run', side_effect=subprocess.CalledProcessError(3, 'worker')):
-            assert dispatcher.attempt() == 0
-        with patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, 'worker')):
-            with pytest.raises(subprocess.CalledProcessError):
-                dispatcher.attempt()
+        mocker.patch('subprocess.run', side_effect=subprocess.TimeoutExpired('worker', .2))
+        with pytest.raises(subprocess.TimeoutExpired):
+            dispatcher.attempt(timeout=.2)
 
 
-    @pytest.mark.parametrize('claimed,exit_code', [(False, 3), (True, 0)])
-    def test_one_shot_command_exits_after_exactly_one_claim(self, claimed, exit_code, monkeypatch):
-        """## Supporting infrastructure
-        The internal child command exits after a single attempt with the defined exit code.
+    def test_attempt_exit_codes_distinguish_idle_from_error(self, mocker):
         """
+        Summary: An idle worker and a failed one exit differently.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (child exit codes)
+        """
+        mocker.patch('subprocess.run', side_effect=subprocess.CalledProcessError(3, 'worker'))
+        assert dispatcher.attempt() == 0
+        mocker.patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, 'worker'))
+        with pytest.raises(subprocess.CalledProcessError):
+            dispatcher.attempt()
+
+
+    @pytest.mark.parametrize('claimed,exit_code', [(False, 3), (True, 0)], ids=["nothing_claimed", "job_claimed"])
+    def test_one_shot_command_handles_exactly_one_claim(self, claimed, exit_code, monkeypatch, mocker):
+        """
+        Summary: The one-shot command claims once and exits with the result.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (claim result)
+        """
+        # Arrange (Given)
         for name in ('VENUE_AVAILABILITY_SERVICE_URL', 'EVENT_SERVICE_URL', 'VENUE_SERVICE_URL'):
             monkeypatch.setenv(name, 'http://owner.invalid')
         monkeypatch.setenv('INTERNAL_SERVICE_TOKEN', 'test-only')
@@ -84,9 +121,14 @@ class TestNotificationDeadline:
             {'jobs': [{'id': 'one', 'envelope': None, 'source': {}}]} if claimed else {'jobs': []},
             {},
         ]
-        with patch('httpx.request', return_value=response), patch('sys.argv', ['dispatcher', '--attempt']):
-            with pytest.raises(SystemExit) as exit:
-                runpy.run_path(str(Path(dispatcher.__file__)), run_name='__main__')
+
+        # Act (When)
+        mocker.patch('httpx.request', return_value=response)
+        mocker.patch('sys.argv', ['dispatcher', '--attempt'])
+        with pytest.raises(SystemExit) as exit:
+            runpy.run_path(str(Path(dispatcher.__file__)), run_name='__main__')
+
+        # Assert (Then)
         assert exit.value.code == exit_code
 
 
@@ -113,14 +155,25 @@ DISPATCH_JOB = {
 class TestNotificationDispatch:
     """SCRUM-173 AC1/AC2/AC3 — public dispatch-once orchestration seam. Hermetic HTTP/broker adapter doubles; actual messaging is tested separately."""
 
-    def test_frozen_job_retries_without_assignment_lookup(self):
-        """## AC1/AC3
-        Retry of an already frozen job publishes the original envelope without looking up the newer assignment.
+    def test_retry_of_frozen_alert_skips_assignment_lookup(self):
         """
+        Summary: A retry of a frozen alert resends it without looking up the coordinator again.
+        AC1: Given a rejection is ready for notification, then the notification
+            is addressed to the coordinator assigned to that event when the
+            notification is created.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (frozen job), Mock (no lookup)
+        """
+        # Arrange (Given)
         envelope = {"id": DISPATCH_JOB["id"], "recipientId": "original", "message": "historical"}
         api = Mock()
         api.claim.return_value = [DISPATCH_JOB | {"envelope": envelope}]
         publish = Mock()
+
+        # Act + Assert (When / Then)
         assert dispatch_once(api, publish) == 1
         publish.assert_called_once_with(envelope)
         api.context.assert_not_called()
@@ -128,12 +181,20 @@ class TestNotificationDispatch:
         api.published.assert_called_once_with(DISPATCH_JOB | {"envelope": envelope})
 
 
-    def test_failed_publish_keeps_job_retryable(self):
-        """## AC3
-        Broker publication failure records a retry and never a successful publication.
+    def test_failed_publish_records_retry(self):
         """
+        Summary: A failed publish records a retry, never success.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Mock (publish fails; retry recorded)
+        """
+        # Arrange (Given)
         api = Mock()
         api.claim.return_value = [DISPATCH_JOB | {"envelope": {"id": DISPATCH_JOB["id"]}}]
+
+        # Act + Assert (When / Then)
         assert dispatch_once(api, Mock(side_effect=RuntimeError("broker down"))) == 1
         api.retry.assert_called_once()
         api.published.assert_not_called()
@@ -201,18 +262,29 @@ class TestNotificationPipeline:
             monkeypatch.setenv(key, value)
 
 
-    def test_complete_dispatch_uses_http_freeze_and_confirmed_persistent_publish(self):
-        """## AC1/AC2/AC3
-        Preparation reads the current coordinator and complete content via HTTP, freezes once, and confirms a persistent publication.
+    def test_dispatch_reads_current_coordinator_freezes_and_publishes(self, mocker):
         """
+        Summary: An alert is addressed to the current coordinator, frozen, and published with confirmation.
+        AC1: Given a rejection is ready for notification, then the notification
+            is addressed to the coordinator assigned to that event when the
+            notification is created.
+        AC2: The notification contains the event name, affected venue, closure
+            start/end, rejection reason, and a link to the venue rejection.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (lookups), Mock (freeze and publish inspected)
+        """
+        # Arrange (Given)
         connection = MagicMock()
         channel = connection.channel.return_value
-        with (
-            patch("httpx.request", side_effect=handler()) as http,
-            patch("pika.BlockingConnection", return_value=connection),
-        ):
-            assert dispatcher.dispatch_once(dispatcher.OutboxAPI(), dispatcher.publish) == 1
+        http = mocker.patch("httpx.request", side_effect=handler())
+        mocker.patch("pika.BlockingConnection", return_value=connection)
+        assert dispatcher.dispatch_once(dispatcher.OutboxAPI(), dispatcher.publish) == 1
         published = channel.basic_publish.call_args.kwargs
+
+        # Act + Assert (When / Then)
         assert published["mandatory"] is True
         assert published["properties"].delivery_mode == 2
         assert published["properties"].message_id == ID
@@ -231,14 +303,28 @@ class TestNotificationPipeline:
             ({"eventName": ""}, {}),
             ({}, {"name": None}),
         ],
+        ids=["wrong_event", "wrong_venue", "no_coordinator", "blank_event_name", "no_venue_name"],
     )
-    def test_bad_or_absent_assignment_is_not_dropped_or_frozen(self, event, venue):
-        """## AC1/AC3
-        Absent/invalid assignment keeps the intent retryable and unfrozen, without a fallback recipient.
+    def test_dispatch_with_bad_assignment_keeps_alert_retryable(self, event, venue, mocker):
         """
-        with patch("httpx.request", side_effect=handler(event, venue)) as http:
-            publish = Mock()
-            assert dispatcher.dispatch_once(dispatcher.OutboxAPI(), publish) == 1
+        Summary: A missing or bad coordinator or venue detail keeps the alert waiting, not dropped.
+        AC1: Given a rejection is ready for notification, then the notification
+            is addressed to the coordinator assigned to that event when the
+            notification is created.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (lookups return bad data), Mock (no freeze)
+        """
+        # Arrange (Given): event, venue, from fixtures
+
+        # Act (When)
+        http = mocker.patch("httpx.request", side_effect=handler(event, venue))
+        publish = Mock()
+        assert dispatcher.dispatch_once(dispatcher.OutboxAPI(), publish) == 1
+
+        # Assert (Then)
         publish.assert_not_called()
         paths = [call.args[1] for call in http.call_args_list]
         assert any(path.endswith("/retry") for path in paths)
@@ -247,13 +333,21 @@ class TestNotificationPipeline:
         )
 
 
-    def test_unknown_publish_and_retry_write_failure_fall_back_to_lease_recovery(self):
-        """## AC3
-        Uncertain publish and failed retry bookkeeping leave the lease as the recovery path.
+    def test_uncertain_publish_or_retry_failure_falls_back_to_lease_recovery(self):
         """
+        Summary: If the outcome is unknown or the retry cannot be saved, the lease expiry recovers the alert.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (publish outcome unknown)
+        """
+        # Arrange (Given)
         api = Mock()
         api.claim.return_value = [JOB | dict(envelope={"id": ID})]
         api.retry.side_effect = httpx.ConnectError("owner unavailable")
+
+        # Act + Assert (When / Then)
         assert (
             dispatcher.dispatch_once(api, Mock(side_effect=RuntimeError("unknown publish")))
             == 1
@@ -261,34 +355,50 @@ class TestNotificationPipeline:
         api.published.assert_not_called()
 
 
-    def test_empty_claim_and_closed_publish_connection(self):
-        """## AC3 supporting infrastructure
-        An empty claim is idle; a closed publish connection is handled without pretending delivery.
+    def test_empty_claim_is_idle_and_closed_connection_fails(self, mocker):
         """
+        Summary: An empty claim is idle; a closed broker connection is a failure.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (claim and pika)
+        """
+        # Arrange (Given)
         api = Mock()
         api.claim.return_value = []
+
+        # Act + Assert (When / Then)
         assert dispatcher.dispatch_once(api, Mock()) == 0
         connection = MagicMock()
         connection.is_open = False
-        with patch("pika.BlockingConnection", return_value=connection):
-            dispatcher.publish(dict(id=ID, type="future.notification"))
+        mocker.patch("pika.BlockingConnection", return_value=connection)
+        dispatcher.publish(dict(id=ID, type="future.notification"))
         connection.close.assert_not_called()
 
 
-    def test_dispatcher_command_backoff_then_success_then_idle_then_exit(self):
-        """## AC3 supporting process recovery
-        Worker failure backs off, then continues through success and idle before clean exit.
+    def test_dispatcher_command_backs_off_recovers_and_exits(self, mocker):
         """
+        Summary: The worker backs off after failures, recovers, idles and exits cleanly.
+        AC3: Given a temporary system failure occurs during notification
+            dispatch, the system must ensure the notification is eventually
+            delivered to the assigned coordinator without generating multiple
+            duplicate alerts.
+        Double: Stub (attempt outcomes), Mock (sleep)
+        """
+        # Arrange (Given)
         import subprocess
         responses = [
             subprocess.TimeoutExpired("worker", 50),
             subprocess.CompletedProcess([], 0),
             subprocess.CalledProcessError(3, "worker"),
         ]
-        with (
-            patch("subprocess.run", side_effect=responses),
-            patch("time.sleep", side_effect=[None, KeyboardInterrupt()]) as sleep,
-            patch("sys.argv", ["dispatcher"]),
-        ):
-            runpy.run_path(str(Path(dispatcher.__file__)), run_name="__main__")
+
+        # Act (When)
+        mocker.patch("subprocess.run", side_effect=responses)
+        sleep = mocker.patch("time.sleep", side_effect=[None, KeyboardInterrupt()])
+        mocker.patch("sys.argv", ["dispatcher"])
+        runpy.run_path(str(Path(dispatcher.__file__)), run_name="__main__")
+
+        # Assert (Then)
         assert [call.args[0] for call in sleep.call_args_list] == [1, 1]

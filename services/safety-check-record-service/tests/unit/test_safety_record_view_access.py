@@ -1,24 +1,48 @@
-"""SCRUM-9 Role-based viewing control for events: Safety Check Record unit tests.
+"""
+SCRUM-9: Role-Based Access Control for Events
 
-Story:      As a registered user, I want to view only information appropriate to my
-            role and relationship to an event, so that I can access the information
-            relevant to my responsibilities without viewing restricted information.
-Real:       Flask app, GET /safety-check-records route, token verification and role check.
-Doubled:    psycopg2 (mocked cursor).
-Not proven: that a coordinator is assigned to this event; an atomic cannot ask Event
-            Service (Safety Check, Venue Booking and Equipment Reservation do).
-            Modification of safety checks is not covered here (SCRUM-10).
+User Story
+----------
+As a registered user, I want to view only information appropriate to my role
+and relationship to an event, so that I can access the information relevant to
+my responsibilities without viewing restricted information.
 
-AC1  Given an authenticated user is permitted to view information based on their role and
-     relationship to the event, when they access that information, then the information
-     is made available to them.
-AC2  Given an authenticated user's role does not permit them to view particular information,
-     when they attempt to access that information, then access is denied.
-AC3  Not covered here: relationship to the event is checked by the calling composites.
-AC4  Not covered here: same reason as AC3.
-AC5  Given two authenticated users have different roles or relationships to the same event,
-     when they access information relating to that event, then each user can only view the
-     information permitted by their own role and relationship to the event.
+Acceptance Criteria
+-------------------
+AC1: Given an authenticated user is permitted to view information based on
+     their role and relationship to the event, when they access that
+     information, then the information is made available to them.
+AC2: Given an authenticated user's role does not permit them to view particular
+     information, when they attempt to access that information, then access is
+     denied.
+AC3: Given an authenticated user's relationship to an event does not permit
+     them to view that event's information, when they attempt to access the
+     information, then access is denied.
+AC4: Given a user is permitted to view information for one event but does not
+     have the required relationship to another event, when they attempt to view
+     information for both events, then they can only view the information for
+     which they have the required access.
+AC5: Given two authenticated users have different roles or relationships to the
+     same event, when they access information relating to that event, then each
+     user can only view the information permitted by their own role and
+     relationship to the event.
+
+Real
+----
+- GET /safety-check-records: token verification and the role check run for
+  real.
+- Assertions are on the status each role gets.
+
+Doubled
+-------
+- psycopg2.connect: Stub (`setup` fixture) - fresh MagicMock connection; the
+  cursor returns canned SafetyCheck rows (or raises); executed SQL, parameters
+  and the FOR UPDATE lock are inspected.
+
+Not proven
+----------
+- AC3/AC4 (relationship to the event): an atomic cannot ask Event Service; the
+  composites check the relationship (-> safety-check-service tests).
 """
 from unittest.mock import MagicMock
 
@@ -45,33 +69,61 @@ def list_as(client, role):
 # AC1 ----
 
 @pytest.mark.parametrize(
-    "role", ["Event Coordinator", "Event Coordinator Lead", "Safety Officer", "Venue Staff", "Technical Support"]
+    "role", ["Event Coordinator", "Event Coordinator Lead", "Safety Officer", "Venue Staff", "Technical Support"],
+    ids=["event_coordinator", "event_coordinator_lead", "safety_officer", "venue_staff", "technical_support"],
 )
-def test_ac1_safety_roles_can_list_an_events_safety_checks(setup, role):
-    """Normal: the roles that handle an event's safety may read its rounds."""
+def test_list_rounds_when_safety_related_role_returns_200(setup, role):
+    """
+    Summary: Coordinators, the Lead, Safety Officers, Venue Staff and Technical Support can see safety rounds.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor returns no rows)
+    """
+    # Arrange (Given)
     client, _ = setup
 
+    # Act + Assert (When / Then)
     assert list_as(client, role).status_code == 200
 
 
 # AC2 ----
 
-@pytest.mark.parametrize("role", ["Attendee", "Event Organiser"])
-def test_ac2_attendees_and_organisers_cannot_list_safety_checks(setup, role):
-    """Failure: remarks and flags are not for these roles; nothing is queried."""
+@pytest.mark.parametrize("role", ["Attendee", "Event Organiser"], ids=["attendee", "event_organiser"])
+def test_list_rounds_when_attendee_or_organiser_returns_403(setup, role):
+    """
+    Summary: Attendees and organisers cannot see safety rounds.
+    AC2: Given an authenticated user's role does not permit them to view
+        particular information, when they attempt to access that information,
+        then access is denied.
+    Double: Stub (cursor; not executed)
+    """
+    # Arrange (Given)
     client, cursor = setup
 
+    # Act + Assert (When / Then)
     assert list_as(client, role).status_code == 403
     cursor.execute.assert_not_called()
 
 
 # AC5 ----
 
-def test_ac5_same_event_is_open_to_a_safety_officer_but_not_an_attendee(setup):
-    """Conflict: two users ask for the same event and get different answers."""
+def test_list_rounds_for_same_event_answers_each_by_own_role(setup):
+    """
+    Summary: The same event's rounds are open to a Safety Officer but not an attendee.
+    AC5: Given two authenticated users have different roles or relationships to
+        the same event, when they access information relating to that event,
+        then each user can only view the information permitted by their own
+        role and relationship to the event.
+    Double: Stub (cursor returns no rows)
+    """
+    # Arrange (Given)
     client, _ = setup
 
     officer = list_as(client, "Safety Officer")
+
+    # Act (When)
     attendee = list_as(client, "Attendee")
 
+    # Assert (Then)
     assert (officer.status_code, attendee.status_code) == (200, 403)

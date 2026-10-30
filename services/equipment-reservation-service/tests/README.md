@@ -1,14 +1,18 @@
 # SCRUM-48: Equipment Reservation single-service contract tests
 
-## Story and three original ACs
+## Story and acceptance criteria (copied from Jira)
 
-Technical Support Staff and coordinators receive alerts to coordinate equipment.
+As an Event Coordinator and Technical Support Staff, I want to receive
+notifications about equipment requests and decisions, so that I can coordinate
+equipment arrangements efficiently.
 
-| AC | Given | When | Then at this service boundary |
-|---|---|---|---|
-| AC1 submission | Two equipment entries/quantities >1 and eligible TSS | Coordinator submits | Owner HTTP POST receives complete items, real looked-up event/name/TSS context and configured token |
-| AC2 approval | Original requester A, latest pre-write coordinator snapshot B | TSS approves | Owner HTTP PATCH receives Approved and coordinator B, not A |
-| AC3 rejection | Pending request and private workflow reason | TSS rejects | Workflow payload keeps reason; notification context excludes it |
+- **AC1:** Given an Event Coordinator submits an equipment request, the system sends an in-app notification to Technical Support Staff with the event name, requested equipment list, and a link to review the request.
+- **AC2:** Given equipment is confirmed as available or found to be unavailable, the system sends an in-app notification to the Event Coordinator with the event name, equipment list, and availability status.
+- **AC3:** Given an equipment request is submitted and pending review, the system sends an in-app notification to Technical Support Staff that a request requires their review.
+
+At this service boundary the tests check that a submission carries the full
+list and every Technical Support recipient (AC1, AC3), and that a decision goes
+to the event's current coordinator without the private rejection reason (AC2).
 
 These are not connected delivery tests. The Request owner separately tests exact
 full-list/per-changed-record, reason-free frozen envelopes. Notification separately
@@ -23,7 +27,7 @@ PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked --python 3.12 pytest
 ```
 
 The normal service command retains whole-app branch/source measurement and its
-strict 100 gate: **168 passed, 427/427 lines, 130/130 branches**, zero exclusions.
+strict 100 gate, zero exclusions.
 Every external service/AMQP/subprocess boundary is doubled; sockets are blocked
 and dotenv disabled. There is no DB driver/dotenv test dependency just to load
 another owner. The production dispatcher still legitimately depends on pika.
