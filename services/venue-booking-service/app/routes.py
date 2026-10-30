@@ -177,8 +177,6 @@ def _cannot_modify(roles):
 
 
 def _venue_staff():
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     if g.role != "Venue Staff":
         return jsonify(message="Only Venue Staff can review venue requests."), 403
     return None
@@ -439,8 +437,6 @@ def create_booking_request():
     """
     if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
         return forbidden
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -563,8 +559,6 @@ def create_booking_request():
 @bp.get("/events/<event_id>/booking-requests")
 def list_booking_requests(event_id):
     """Return each venue request for an event as a separate record."""
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     try:
         if g.role == "Event Coordinator":
             get_event(event_id)
@@ -609,8 +603,6 @@ def update_booking_request(booking_id):
     """Modify and resubmit only the selected booking."""
     if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
         return forbidden
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify(message="Send a JSON object."), 400
@@ -752,8 +744,6 @@ def cancel_booking_request(booking_id):
     """Cancel only the selected booking and retain its event association."""
     if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
         return forbidden
-    if not g.user_id:
-        return jsonify(message="Sign in to continue."), 401
     data = request.get_json(silent=True)
     event_id = data.get("eventId") if isinstance(data, dict) else None
     if not event_id:

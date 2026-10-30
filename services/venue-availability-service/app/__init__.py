@@ -96,6 +96,8 @@ def _may_view_bookings():
 
 BOOKING_REQUESTER_ROLES = ("Event Coordinator", "Event Coordinator Lead")
 BOOKING_REVIEWER_ROLES = ("Venue Staff",)
+# Safety Check Service resets bookings on behalf of the Safety Officer who asked for changes.
+SAFETY_RESET_ROLES = ("Safety Officer",)
 
 
 def _cannot_modify(roles):
@@ -407,6 +409,8 @@ def create_app(config=None):
 
     @app.post("/events/<uuid:event_id>/venue-bookings/safety-reset")
     def safety_reset_bookings(event_id):
+        if (forbidden := _cannot_modify(SAFETY_RESET_ROLES)):
+            return forbidden
         token = app.config["INTERNAL_SERVICE_TOKEN"]
         if not token:
             return jsonify(message="Internal service authentication is not configured."), 503

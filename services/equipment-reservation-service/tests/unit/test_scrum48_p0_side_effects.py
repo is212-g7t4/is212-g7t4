@@ -75,7 +75,7 @@ def test_invalid_rejection_has_no_notification_or_downstream_mutation(monkeypatc
 
 def test_public_submission_discards_forged_recipient_and_internal_token(boundary):
     """AC1 security DR: Given forged public context/token, when submitting,
-    then the owner gets only server-resolved TSS/event facts and configured token.
+    then the owner gets only server-resolved TSS/event facts and no forged token.
     Why: public input must not redirect notification intent to another user.
     """
     response = boundary.client.post(f"/equipment-reservations/events/{EVENT}/requests",
@@ -84,7 +84,7 @@ def test_public_submission_discards_forged_recipient_and_internal_token(boundary
               "notificationContext":dict(eventName="Forged event",recipientIds=[B])})
     assert response.status_code == 201
     [call] = mutations(boundary)
-    assert call.kwargs["headers"]["X-Internal-Token"] == "synthetic"
+    assert "X-Internal-Token" not in call.kwargs["headers"]  # the forged token is not forwarded (SCRUM-10)
     assert call.kwargs["json"]["notificationContext"]["recipientIds"] == [
         "10000000-0000-4000-8000-000000000006", "10000000-0000-4000-8000-000000000007"]
     assert call.kwargs["json"]["notificationContext"]["eventName"] == "Community Fair"

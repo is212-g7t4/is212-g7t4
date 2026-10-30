@@ -129,3 +129,26 @@ def test_ac4_a_coordinator_keeps_viewing_bookings_when_their_approval_is_refused
 
     assert (before.status_code, refused.status_code, after.status_code) == (200, 403, 200)
     assert before.json == after.json
+
+
+# AC2: safety-reset is called by Safety Check Service with the caller's own token ----
+
+SAFETY_RESET = f"/events/{EVENT_ID}/venue-bookings/safety-reset"
+
+
+@pytest.mark.parametrize(
+    "role", ["Event Coordinator", "Event Coordinator Lead", "Venue Staff", "Technical Support", "Event Organiser", "Attendee"]
+)
+def test_ac2_only_a_safety_officer_may_reset_bookings_even_with_the_internal_token(setup, role):
+    """Failure: the service-to-service token proves the route, not the person; the role must also fit."""
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
+
+    response = client.post(
+        SAFETY_RESET, json={"bookingIds": [BOOKING_ID]},
+        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, role)},
+    )
+
+    assert response.status_code == 403
+    assert response.json["message"] == "Your role cannot change this information."
+    cursor.execute.assert_not_called()

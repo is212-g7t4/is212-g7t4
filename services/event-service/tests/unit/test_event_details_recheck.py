@@ -100,7 +100,7 @@ def setup(monkeypatch):
 
 @pytest.fixture
 def no_token(monkeypatch):
-    """The dev setup: with no token configured, `safetyRecheck` alone suffices."""
+    """No INTERNAL_SERVICE_TOKEN configured: the token-locked paths fail closed (SCRUM-10)."""
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr(
@@ -598,17 +598,37 @@ def test_the_recheck_block_without_the_token_is_still_gated(headers, setup):
     assert cursor.execute.call_count == 1
 
 
-def test_without_a_configured_token_the_recheck_block_suffices(no_token):
-    """The opt-in lock: a dev setup with no token behaves as it did before SCRUM-153."""
+def test_without_a_configured_token_the_recheck_is_refused(no_token):
+    """Failure (SCRUM-10): the lock fails closed, so a `safetyRecheck` block alone no longer suffices."""
     client, _, cursor = no_token
-    cursor.fetchone.side_effect = [event_row(), event_row(status="Pending Safety Check")]
 
     response = patch_details(
         client, {"expectedAttendance": "400"}, safetyRecheck=RECHECK
     )
 
+    assert response.status_code == 503
+    assert response.json["code"] == "INTERNAL_AUTH_NOT_CONFIGURED"
+    cursor.execute.assert_not_called()
+
+
+def test_without_a_configured_token_a_plain_coordinator_edit_still_works(no_token):
+    """Normal: only the re-check and the Lead's edit need the lock; an ordinary edit does not."""
+    client, _, cursor = no_token
+    cursor.fetchone.side_effect = [event_row(), event_row()]
+
+    response = patch_details(client, {"eventName": LOW_IMPACT_CHANGES["eventName"]})
+
     assert response.status_code == 200
-    assert response.json["status"] == "Pending Safety Check"
+
+
+def test_without_a_configured_token_the_lead_edit_is_refused(no_token):
+    """Failure (SCRUM-10): acting as the Lead needs the lock too, so it is refused when unconfigured."""
+    client, _, cursor = no_token
+
+    response = patch_details(client, {"eventName": "X"}, actorRole="Event Coordinator Lead")
+
+    assert response.status_code == 503
+    cursor.execute.assert_not_called()
 
 
 def test_safety_status_cannot_make_the_recheck_move_on_its_own(setup):

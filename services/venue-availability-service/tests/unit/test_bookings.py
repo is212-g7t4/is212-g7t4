@@ -71,7 +71,7 @@ def test_safety_reset_returns_only_selected_active_bookings_to_review(setup):
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
     cursor.fetchall.side_effect = [[booking_row(status="Approved")], [booking_row(status="Pending Review")]]
     response = client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token"}, json={"bookingIds": [BOOKING_ID]})
+        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]})
     assert response.status_code == 200
     assert response.json["bookings"][0]["status"] == "Pending Review"
     sql, params = cursor.execute.call_args.args
@@ -85,12 +85,13 @@ def test_safety_reset_rejects_booking_from_another_event(setup):
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
     cursor.fetchall.return_value = []
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token"}, json={"bookingIds": [BOOKING_ID]}).status_code == 404
+        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]}).status_code == 404
     assert not any('UPDATE public."VenueBooking"' in call.args[0] for call in cursor.execute.call_args_list)
 
 
 @pytest.mark.parametrize("token,headers,code", [(None, {}, 503), ("test-token", {}, 403)])
 def test_safety_reset_requires_internal_authentication(setup, token, headers, code):
+    headers = {**headers, **bearer(USER_ID, "Safety Officer")}
     client, cursor = setup
     client.application.config["INTERNAL_SERVICE_TOKEN"] = token
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset", headers=headers,
@@ -104,7 +105,7 @@ def test_safety_reset_validates_booking_ids(setup, payload):
     client, cursor = setup
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token"}, json=payload).status_code == 400
+        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json=payload).status_code == 400
     cursor.execute.assert_not_called()
 
 
@@ -112,7 +113,7 @@ def test_safety_reset_requires_database(setup):
     client, _ = setup
     client.application.config.update(INTERNAL_SERVICE_TOKEN="test-token", DATABASE_URL=None)
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token"}, json={"bookingIds": [BOOKING_ID]}).status_code == 503
+        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]}).status_code == 503
 
 
 def test_create_booking_succeeds_when_no_conflict(setup):

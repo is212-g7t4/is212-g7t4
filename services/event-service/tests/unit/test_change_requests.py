@@ -73,8 +73,11 @@ def setup(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return signed_in(app.test_client(), role="Event Organiser"), connection, cursor
+    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url", "INTERNAL_SERVICE_TOKEN": "workflow-token"})
+    client = signed_in(app.test_client(), role="Event Organiser")
+    # The review routes are only for Event Workflow Service, which always sends this header (SCRUM-10: fails closed).
+    client.environ_base["HTTP_X_INTERNAL_SERVICE_TOKEN"] = "workflow-token"
+    return client, connection, cursor
 
 
 def post(client, **overrides):
@@ -438,7 +441,10 @@ def test_review_malformed_requests_are_rejected_before_database_access(setup, pa
 
 
 def test_review_unconfigured_database_returns_service_unavailable():
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({
+        "TESTING": True, "DATABASE_URL": None, "INTERNAL_SERVICE_TOKEN": "workflow-token",
+    }).test_client())
+    client.environ_base["HTTP_X_INTERNAL_SERVICE_TOKEN"] = "workflow-token"
     assert client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}").status_code == 503
     assert client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}").status_code == 503
     assert client.patch(
@@ -466,4 +472,26 @@ def test_review_internal_endpoints_honor_the_configured_service_token(monkeypatc
     ]
 
     assert [response.status_code for response in responses] == [403, 403, 403]
+    connection.cursor.assert_not_called()
+
+
+def test_review_routes_fail_closed_when_the_service_token_is_not_configured(monkeypatch):
+    """Failure: an unconfigured token used to switch the lock off; now the routes answer 503 and touch nothing."""
+    connection = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
+    client = signed_in(create_app({
+        "TESTING": True, "DATABASE_URL": "unused-test-url", "INTERNAL_SERVICE_TOKEN": None,
+    }).test_client())
+
+    responses = [
+        client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}"),
+        client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"),
+        client.patch(
+            f"/change-requests/{CHANGE_ID}/decision",
+            json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [503, 503, 503]
+    assert {response.json["code"] for response in responses} == {"INTERNAL_AUTH_NOT_CONFIGURED"}
     connection.cursor.assert_not_called()

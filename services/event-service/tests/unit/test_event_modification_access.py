@@ -42,6 +42,7 @@ OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
 ORGANISER_ID = "33333333-3333-4333-8333-333333333333"
 STAFF_ID = "55555555-5555-4555-8555-555555555555"
 LEAD = "Event Coordinator Lead"
+SERVICE_TOKEN = "test-service-token"
 ORGANISER = "Event Organiser"
 COORDINATOR = "Event Coordinator"
 
@@ -73,7 +74,7 @@ def setup(monkeypatch):
     connection = MagicMock()
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
-    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
+    app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url", "INTERNAL_SERVICE_TOKEN": SERVICE_TOKEN})
     return app.test_client(), cursor
 
 
@@ -212,3 +213,68 @@ def test_ac5_coordinator_changes_only_the_event_they_are_assigned_to(setup):
     refused = coordinator.patch(f"/events/{OTHER_EVENT_ID}/progress", json=body)
 
     assert (allowed.status_code, refused.status_code) == (200, 403)
+
+
+# AC2/AC4: PATCH /safety-status is called by Safety Check Service with the caller's own token ----
+
+SAFETY_ROUND = "55555555-5555-4555-8555-555555555555"
+SAFETY_BODY = {"safetyCheckId": SAFETY_ROUND, "roundNumber": 1}
+OFFICER_ID = "66666666-6666-4666-8666-666666666666"
+
+
+def move(client, status, role, **extra):
+    return client.patch(
+        f"/events/{EVENT_ID}/safety-status", json={"status": status, **SAFETY_BODY, **extra},
+        headers={**bearer(OFFICER_ID, role), "X-Internal-Service-Token": SERVICE_TOKEN},
+    )
+
+
+@pytest.mark.parametrize("status", ["Confirmed", "Safety Changes Requested", "Cancelled"])
+@pytest.mark.parametrize("role", [COORDINATOR, LEAD, ORGANISER, "Venue Staff", "Attendee"])
+def test_ac2_only_a_safety_officer_may_decide_a_safety_check(setup, status, role):
+    """Failure: a coordinator cannot approve their own event, nor can any other role."""
+    client, cursor = setup
+
+    response = move(client, status, role, remarks="r", areas=["Venue"])
+
+    assert response.status_code == 403
+    assert response.json["message"] == "Your role cannot change this information."
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["Safety Officer", ORGANISER, "Venue Staff", "Attendee"])
+def test_ac2_only_coordinators_may_submit_an_event_for_a_safety_check(setup, role):
+    """Failure: submitting is the coordinator's step; the Safety Officer decides but does not submit."""
+    client, cursor = setup
+
+    response = move(client, "Pending Safety Check", role)
+
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("marker", [{"withdrawnSafetyCheckId": SAFETY_ROUND, "reason": "venue changed"},
+                                    {"restoredSafetyCheckId": SAFETY_ROUND}])
+def test_ac2_a_safety_officer_cannot_withdraw_or_restore_an_approval_for_a_venue_change(setup, marker):
+    """Failure: withdrawing or restoring after a booking change is the coordinator's step."""
+    client, cursor = setup
+    status = "Approved" if "withdrawnSafetyCheckId" in marker else "Confirmed"
+
+    response = move(client, status, "Safety Officer", **marker)
+
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("role", [COORDINATOR, LEAD, "Safety Officer"])
+def test_ac1_each_permitted_role_gets_past_the_safety_status_gate(setup, role):
+    """Normal: the three roles Safety Check Service acts for reach the handler's own validation."""
+    client, _ = setup
+
+    response = client.patch(
+        f"/events/{EVENT_ID}/safety-status", json={},
+        headers={**bearer(OFFICER_ID, role), "X-Internal-Service-Token": SERVICE_TOKEN},
+    )
+
+    assert response.status_code == 400
+    assert "Status must be one of" in response.json["message"]

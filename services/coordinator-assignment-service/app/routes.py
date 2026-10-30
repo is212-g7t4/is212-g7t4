@@ -56,8 +56,6 @@ def get_queue():
     {"events": [...]}
     """
     acting_user_id = g.user_id
-    if not acting_user_id:
-        return jsonify(error="Sign in to continue."), 401
 
     # SCRUM-9: the role is the token's, not a User Service lookup.
     if g.role != LEAD_ROLE:
@@ -91,8 +89,6 @@ def get_workload():
     Coordinator, so they still show up rather than silently disappear.
     """
     acting_user_id = g.user_id
-    if not acting_user_id:
-        return jsonify(error="Sign in to continue."), 401
 
     if g.role != LEAD_ROLE:
         return jsonify(
@@ -146,8 +142,6 @@ def assign_coordinator(event_id, coordinator_id):
             return jsonify(error="event_id and coordinator_id are required"), 400
 
         acting_user_id = g.user_id
-        if not acting_user_id:
-            return jsonify(error="Sign in to continue."), 401
 
         try:
             acting_user = get_user(acting_user_id)
