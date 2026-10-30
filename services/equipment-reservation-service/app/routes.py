@@ -10,8 +10,8 @@ bp = Blueprint("equipment_reservation_service", __name__)
 STATUSES = ("Pending", "Approved", "Rejected")
 DECISIONS = ("Approved", "Rejected")
 REVIEW_ROLES = {"Technical Support", "Technical Support Staff"}
-READ_ROLES = REVIEW_ROLES | {"Event Coordinator"}
-CREATE_ROLES = {"Event Coordinator"}
+READ_ROLES = REVIEW_ROLES | {"Event Coordinator", "Event Coordinator Lead"}
+CREATE_ROLES = {"Event Coordinator", "Event Coordinator Lead"}
 MAX_ITEMS = 50
 MAX_REQUIREMENTS_LENGTH = 1000
 
@@ -95,14 +95,14 @@ def health():
 @bp.get("/equipment-reservations")
 def reservations_list():
     """Equipment requests grouped by event, with the availability of each Pending line."""
-    failure = _authorise(READ_ROLES, "Only Technical Support or Event Coordinators can view equipment requests.")
+    failure = _authorise(READ_ROLES, "Only Technical Support, Event Coordinators or the Event Coordinator Lead can view equipment requests.")
     if failure:
         return failure
     status = request.args.get("status")
     if status is not None and status not in STATUSES:
         return jsonify(message=f"status must be one of: {', '.join(STATUSES)}."), 400
     event_ids = None
-    if g.role == "Event Coordinator":
+    if g.role in ("Event Coordinator", "Event Coordinator Lead"):
         event_ids = clients.list_assigned_event_ids()
     requests = clients.list_requests(status, event_ids)
     return jsonify(events=reservations.build_event_views(requests))
@@ -144,7 +144,7 @@ def event_review(event_id):
 
 @bp.post("/equipment-reservations/events/<event_id>/requests")
 def event_requests_create(event_id):
-    failure = _authorise(CREATE_ROLES, "Only Event Coordinators can request equipment.")
+    failure = _authorise(CREATE_ROLES, "Only Event Coordinators and the Event Coordinator Lead can request equipment.")
     if failure:
         return failure
     event_id = _uuid_or_none(event_id)

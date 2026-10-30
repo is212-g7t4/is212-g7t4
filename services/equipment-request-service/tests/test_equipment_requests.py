@@ -460,6 +460,17 @@ def test_create_saves_nothing_when_an_event_or_equipment_does_not_exist(setup):
     assert "no longer exists" in response.json["message"]
 
 
+# The Event Coordinator Lead may record equipment needs like a coordinator.
+def test_lead_can_create(setup):
+    client, cursor, _ = setup
+    cursor.fetchone.return_value = db_row()
+
+    headers = bearer(USER_ID, "Event Coordinator Lead")
+    response = client.post(f"/events/{EVENT_ID}/equipment-requests", headers=headers, json={"items": [item()]})
+
+    assert response.status_code == 201
+
+
 # Create request AC1 (access): only an identified Event Coordinator may record equipment needs.
 @pytest.mark.parametrize("headers,code", [({}, 401), (TS, 403), (bearer(USER_ID, "Attendee"), 403)])
 def test_only_event_coordinators_can_create(setup, headers, code):

@@ -21,7 +21,7 @@ import pytest
 from flask import g
 
 from app import clients, create_app
-from tests.unit.factories import OFFICER_ID, booking, record, user, signed_in
+from tests.unit.factories import OFFICER_ID, bearer, booking, record, user, signed_in
 
 EVENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 EVENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -377,23 +377,12 @@ def test_a_signed_in_officer_is_required(client, downstream):
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Venue Staff", "Event Organiser"])
 def test_only_a_safety_officer_sees_the_queue(role, client, downstream):
-    """The role is looked up in User Service, not trusted from the request."""
-    downstream.user = user(role=role)
-
-    response = queue(client)
+    """SCRUM-9: the role comes from the signed token (no User Service lookup)."""
+    response = client.get("/safety-checks/queue", headers=bearer(OFFICER_ID, role))
 
     assert response.status_code == 403
     assert response.get_json()["code"] == "NOT_SAFETY_OFFICER"
-    assert downstream.names() == ["get_user"]
-
-
-def test_unknown_user_is_not_a_safety_officer(client, downstream):
-    downstream.fail["get_user"] = clients.UserNotFoundError()
-
-    response = queue(client)
-
-    assert response.status_code == 403
-    assert response.get_json()["code"] == "NOT_SAFETY_OFFICER"
+    assert downstream.names() == []
 
 
 # --- Failures: fail closed, never leak ----------------------------------------------
@@ -424,12 +413,3 @@ def test_an_unexpected_downstream_shape_is_a_502(client, downstream):
 
     assert response.status_code == 502
 
-
-@pytest.mark.parametrize(
-    ("error", "status"),
-    [(clients.DownstreamTimeout(), 504), (clients.DownstreamError(), 502)],
-)
-def test_role_lookup_failure(error, status, client, downstream):
-    downstream.fail["get_user"] = error
-
-    assert queue(client).status_code == status

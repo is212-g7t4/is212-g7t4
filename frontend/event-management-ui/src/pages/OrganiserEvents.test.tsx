@@ -21,6 +21,7 @@ const events = [
   { ...baseEvent, id: 'approved-1', eventName: 'Approved Fair', status: 'Approved' },
   { ...baseEvent, id: 'submitted-1', eventName: 'Pending Fair', status: 'Submitted' },
   { ...baseEvent, id: 'rejected-1', eventName: 'Rejected Fair', status: 'Rejected' },
+  { ...baseEvent, id: 'confirmed-1', eventName: 'Confirmed Fair', status: 'Confirmed' },
 ]
 
 beforeEach(() => {
@@ -37,20 +38,21 @@ function renderList(onViewDetails = vi.fn()) {
   return onViewDetails
 }
 
-test('organiser list shows every event they created; every event opens; only approved ones show a registration count', async () => {
+test('organiser list shows every event they created; every event opens; only confirmed ones show a registration count', async () => {
   mockOrganiserApi(async () => ({ events }))
-  vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'approved-1': { total: 3, confirmed: 2 } })
+  vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'confirmed-1': { total: 3, confirmed: 2 } })
   const onViewDetails = renderList()
 
-  expect(await screen.findByText('Approved Fair')).toBeInTheDocument()
+  expect(await screen.findByText('Confirmed Fair')).toBeInTheDocument()
   expect(eventApi).toHaveBeenCalledWith(`/events?organiserId=${ORGANISER_ID}`)
-  expect(fetchRegistrationCounts).toHaveBeenCalledWith(['approved-1'])
+  expect(fetchRegistrationCounts).toHaveBeenCalledWith(['confirmed-1'])
   expect(screen.getByText('3 registrations')).toBeInTheDocument()
   expect(screen.getByText('Pending Fair')).toBeInTheDocument()
   expect(screen.getByText('Rejected Fair')).toBeInTheDocument()
   expect(screen.getByText('The event has been rejected. Submit a new request.')).toBeInTheDocument()
-  expect(screen.getByText('Registrations are available once the event is approved')).toBeInTheDocument()
-  expect(screen.getAllByRole('button')).toHaveLength(3)
+  // Approved and Submitted events can't take registrations yet.
+  expect(screen.getAllByText('Registrations are available once the event is confirmed')).toHaveLength(2)
+  expect(screen.getAllByRole('button')).toHaveLength(4)
 
   fireEvent.click(screen.getByRole('button', { name: /Approved Fair/ }))
   expect(onViewDetails).toHaveBeenCalledWith('approved-1')
@@ -141,8 +143,8 @@ function renderDetail() {
   render(<EventDetailPage eventId="approved-1" role="Event Organiser" currentCoordinatorId={ORGANISER_ID} backLabel="My events" onBack={vi.fn()} />)
 }
 
-test('organiser detail lists attendees with status and totals', async () => {
-  vi.mocked(eventApi).mockResolvedValue(events[0])
+test('organiser detail lists attendees with status and totals once the event is confirmed', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...events[0], status: 'Confirmed' })
   vi.mocked(fetchRegistrations).mockResolvedValue([
     { id: 'r1', attendeeName: 'Lena Ho', attendeeEmail: 'lena@example.com', attendeeOrganization: 'Acme', registrationDate: '2026-09-13T09:15:00', status: 'Confirmed' },
     { id: 'r2', attendeeName: 'Sam Lim', attendeeEmail: 'sam@example.com', attendeeOrganization: '', registrationDate: null, status: 'Withdrawn' },
@@ -167,16 +169,16 @@ test('organiser who did not create the event sees the refusal and no registratio
   expect(fetchRegistrations).not.toHaveBeenCalled()
 })
 
-test('organiser detail for a non-approved event shows no registrations', async () => {
-  vi.mocked(eventApi).mockResolvedValue(events[1])
+test.each([events[0], events[1]])('organiser detail for a $status event shows no registrations', async (event) => {
+  vi.mocked(eventApi).mockResolvedValue(event)
   renderDetail()
 
-  expect(await screen.findByText('Registrations are only available for approved events.')).toBeInTheDocument()
+  expect(await screen.findByText('Registrations are only available for confirmed events.')).toBeInTheDocument()
   expect(fetchRegistrations).not.toHaveBeenCalled()
 })
 
 test('organiser detail shows a registrations error', async () => {
-  vi.mocked(eventApi).mockResolvedValue(events[0])
+  vi.mocked(eventApi).mockResolvedValue({ ...events[0], status: 'Confirmed' })
   vi.mocked(fetchRegistrations).mockRejectedValue(new Error('Unable to load registrations.'))
   renderDetail()
   expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load registrations.')

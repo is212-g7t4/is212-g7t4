@@ -17,7 +17,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return signed_in(app.test_client()), cursor
+    return signed_in(app.test_client(), role="Attendee"), cursor
 
 
 def confirmed_row():
@@ -55,5 +55,5 @@ def test_attendee_catalogue_returns_confirmed_events(setup):
 
 
 def test_attendee_catalogue_reports_missing_database_configuration():
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Attendee")
     assert client.get("/events/registration").status_code == 503

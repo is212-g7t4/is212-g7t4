@@ -33,6 +33,8 @@ def get_coordinators():
     Response:
     List of available coordinators with their details.
     """
+    if g.role != LEAD_ROLE:
+        return jsonify(error="Only the Event Coordinator Lead can list coordinators"), 403
     try:
         coordinators = get_available_coordinators()
         return jsonify(coordinators=coordinators), 200
@@ -57,12 +59,8 @@ def get_queue():
     if not acting_user_id:
         return jsonify(error="Sign in to continue."), 401
 
-    try:
-        acting_user = get_user(acting_user_id)
-    except Exception as e:
-        return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
-
-    if not acting_user or acting_user.get("role") != LEAD_ROLE:
+    # SCRUM-9: the role is the token's, not a User Service lookup.
+    if g.role != LEAD_ROLE:
         return jsonify(
             error="Only the Event Coordinator Lead can view the unassigned queue"
         ), 403
@@ -96,12 +94,7 @@ def get_workload():
     if not acting_user_id:
         return jsonify(error="Sign in to continue."), 401
 
-    try:
-        acting_user = get_user(acting_user_id)
-    except Exception as e:
-        return jsonify(error=f"Failed to validate acting user: {str(e)}"), 500
-
-    if not acting_user or acting_user.get("role") != LEAD_ROLE:
+    if g.role != LEAD_ROLE:
         return jsonify(
             error="Only the Event Coordinator Lead can view coordinator workload"
         ), 403

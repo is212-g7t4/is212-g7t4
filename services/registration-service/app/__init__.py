@@ -21,6 +21,8 @@ from app.models import (
 )
 from app.auth import authenticate
 
+EVENT_TEAM_ROLES = ("Event Organiser", "Event Coordinator", "Event Coordinator Lead")
+
 
 def create_app(config=None):
     app = Flask(__name__)
@@ -83,6 +85,10 @@ def create_app(config=None):
             return jsonify(
                 registrations=list_attendee_registrations(app.config["DATABASE_URL"], g.user_id)
             )
+        # An event's attendee list is for its team only (SCRUM-9); whether this caller
+        # is that event's organiser/coordinator is checked by Attendee Registration Service.
+        if g.user_id and g.role not in EVENT_TEAM_ROLES:
+            return jsonify(message="Your role cannot view an event's registrations."), 403
         try:
             event_id = str(UUID(event_id or ""))
         except (ValueError, TypeError, AttributeError):

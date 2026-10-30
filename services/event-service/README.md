@@ -54,7 +54,9 @@ request asks for the organiser view with `?organiserId=`. Passing
 `viewerRole` (any value) widens them from "assigned to me" to every event,
 judged on the token's role: `Event Coordinator Lead` on all three, and
 `Venue Staff`/`Technical Support` on `/events` and `/events/<id>` only. Any
-other role gets `403`. Approve and reject are **not** widened: the Lead
+other role gets `403`. `Venue Staff`, `Technical Support` and `Safety Officer`
+receive a trimmed event: no `organiserId`, `actionHistory`, `decision` or
+`decisionHistory` (SCRUM-9). Approve and reject are **not** widened: the Lead
 must be the assigned coordinator to approve or reject, the same as anyone else.
 The retired `isManager=true` flag is ignored.
 

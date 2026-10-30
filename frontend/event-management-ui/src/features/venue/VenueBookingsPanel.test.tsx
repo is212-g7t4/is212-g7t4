@@ -39,13 +39,13 @@ const venues = [
 const bookings = [
   {
     id: 'booking-a', eventId, venueId: 'venue-a', venueName: 'Auditorium A',
-    requestedStartTime: '2026-10-20T09:00', requestedEndTime: '2026-10-20T12:00',
+    requestedStartTime: '2099-10-20T09:00', requestedEndTime: '2099-10-20T12:00',
     requiredCapacity: 500, venueRequirements: 'Main stage', status: 'Approved',
     requestedBy: coordinatorId, reviewedBy: null,
   },
   {
     id: 'booking-b', eventId, venueId: 'venue-b', venueName: 'Breakout Room B',
-    requestedStartTime: '2026-10-20T09:00', requestedEndTime: '2026-10-20T12:00',
+    requestedStartTime: '2099-10-20T09:00', requestedEndTime: '2099-10-20T12:00',
     requiredCapacity: 50, venueRequirements: 'Workshop tables', status: 'Pending Review',
     requestedBy: coordinatorId, reviewedBy: null,
   },
@@ -55,8 +55,8 @@ const renderPanel = () => render(<VenueBookingsPanel
   eventId={eventId}
   eventStatus="Under Review"
   coordinatorId={coordinatorId}
-  eventStart="2026-10-20T09:00"
-  eventEnd="2026-10-20T17:00"
+  eventStart="2099-10-20T09:00"
+  eventEnd="2099-10-20T17:00"
   eventExpectedAttendance="500"
   eventVenueRequirements="Main programme space"
 />)
@@ -71,7 +71,7 @@ beforeEach(() => {
 
 test('active holds are labeled and unavailable in the venue booking selector', async () => {
   vi.mocked(fetchActiveVenueHolds).mockResolvedValue([
-    { id: 'hold-a', venueId: 'venue-a', createdAt: '2026-10-19T09:00:00+08:00', expiresAt: '2026-10-21T09:00:00+08:00', heldBy: null },
+    { id: 'hold-a', venueId: 'venue-a', createdAt: '2099-10-19T09:00:00+08:00', expiresAt: '2099-10-21T09:00:00+08:00', heldBy: null },
   ])
   renderPanel()
 
@@ -79,8 +79,8 @@ test('active holds are labeled and unavailable in the venue booking selector', a
   expect(heldVenue).toBeDisabled()
   expect(screen.getByRole('option', { name: 'Breakout Room B · capacity 60' })).toBeEnabled()
 
-  fireEvent.change(screen.getByLabelText('Booking start *'), { target: { value: '2026-10-22T09:00' } })
-  fireEvent.change(screen.getByLabelText('Booking end *'), { target: { value: '2026-10-22T12:00' } })
+  fireEvent.change(screen.getByLabelText('Booking start *'), { target: { value: '2099-10-22T09:00' } })
+  fireEvent.change(screen.getByLabelText('Booking end *'), { target: { value: '2099-10-22T12:00' } })
   expect(screen.getByRole('option', { name: 'Auditorium A · capacity 500' })).toBeEnabled()
 })
 
@@ -183,8 +183,8 @@ test('submits booking-level capacity instead of the event total attendance', asy
     eventId,
     venueId: 'venue-b',
     coordinatorId,
-    requestedStartTime: '2026-10-20T09:00',
-    requestedEndTime: '2026-10-20T17:00',
+    requestedStartTime: '2099-10-20T09:00',
+    requestedEndTime: '2099-10-20T17:00',
     requiredCapacity: 50,
     venueRequirements: 'Breakout tables',
   }))
@@ -231,8 +231,8 @@ test('editing one booking replaces only that booking and resets it to pending re
     eventId,
     venueId: 'venue-a',
     coordinatorId,
-    requestedStartTime: '2026-10-20T09:00',
-    requestedEndTime: '2026-10-20T12:00',
+    requestedStartTime: '2099-10-20T09:00',
+    requestedEndTime: '2099-10-20T12:00',
     requiredCapacity: 450,
     venueRequirements: 'Revised main stage',
   }))
@@ -292,7 +292,7 @@ test('missing venue and reversed interval never send a request', async () => {
   fireEvent.submit(form)
   expect(await screen.findByRole('alert')).toHaveTextContent('Select a venue')
   fireEvent.change(screen.getByLabelText(/Venue \*/), { target: { value: 'venue-a' } })
-  fireEvent.change(screen.getByLabelText('Booking end *'), { target: { value: '2026-10-20T08:00' } })
+  fireEvent.change(screen.getByLabelText('Booking end *'), { target: { value: '2099-10-20T08:00' } })
   fireEvent.submit(form)
   expect(await screen.findByRole('alert')).toHaveTextContent('Booking end date and time must be after the start.')
   expect(createVenueBooking).not.toHaveBeenCalled()
@@ -351,8 +351,8 @@ const renderForStatus = (eventStatus: string, onEventChanged = vi.fn()) => rende
   eventId={eventId}
   eventStatus={eventStatus}
   coordinatorId={coordinatorId}
-  eventStart="2026-10-20T09:00"
-  eventEnd="2026-10-20T17:00"
+  eventStart="2099-10-20T09:00"
+  eventEnd="2099-10-20T17:00"
   eventExpectedAttendance="500"
   eventVenueRequirements="Main programme space"
   onEventChanged={onEventChanged}
@@ -371,8 +371,8 @@ test.each(['Submitted', 'Under Review', 'Approved', 'Safety Changes Requested'])
   'SCRUM-28 AC1: a %s event offers the booking form with timing, capacity and requirements', async (status) => {
     renderForStatus(status)
     expect(await screen.findByRole('button', { name: 'Submit venue booking' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Booking start *')).toHaveValue('2026-10-20T09:00')
-    expect(screen.getByLabelText('Booking end *')).toHaveValue('2026-10-20T17:00')
+    expect(screen.getByLabelText('Booking start *')).toHaveValue('2099-10-20T09:00')
+    expect(screen.getByLabelText('Booking end *')).toHaveValue('2099-10-20T17:00')
     expect(screen.getByLabelText('Expected attendance / required capacity *')).toHaveValue(500)
     expect(screen.getByLabelText('Venue requirements')).toHaveValue('Main programme space')
     expect(screen.queryByText(/New venue requests can be submitted while/)).not.toBeInTheDocument()
@@ -523,4 +523,14 @@ test('SCRUM-29 regression: a closure rejection keeps its own box, not the staff 
   renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
   expect(screen.getByText('Rejected due to temporary venue closure')).toBeInTheDocument()
   expect(screen.queryByText('Rejected by Venue Staff')).not.toBeInTheDocument()
+})
+
+test('SCRUM-28: a booking outside the event dates is refused before it is sent', async () => {
+  renderPanel(); await screen.findByText('Auditorium A', { selector: 'strong' })
+  fireEvent.change(screen.getByLabelText(/Venue \*/), { target: { value: 'venue-b' } })
+  fireEvent.change(screen.getByLabelText('Booking start *'), { target: { value: '2099-10-21T09:00' } })
+  fireEvent.change(screen.getByLabelText('Booking end *'), { target: { value: '2099-10-21T12:00' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Submit venue booking' }))
+  expect(await screen.findByText("Booking must fall within the event's dates (2099-10-20 to 2099-10-20).")).toBeInTheDocument()
+  expect(createVenueBooking).not.toHaveBeenCalled()
 })
