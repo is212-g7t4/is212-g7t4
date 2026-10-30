@@ -14,8 +14,8 @@ PAYLOAD = dict(
     eventId="event-1",
     venueId="venue-1",
     coordinatorId="coordinator-1",
-    requestedStartTime="2026-10-01T09:00",
-    requestedEndTime="2026-10-01T12:00",
+    requestedStartTime="2030-10-01T09:00",
+    requestedEndTime="2030-10-01T12:00",
     requiredCapacity=80,
     venueRequirements="Projector",
 )
@@ -329,7 +329,7 @@ def test_edit_rejects_offset_times():
         signed_in(create_app().test_client())
         .patch(
             "/booking-requests/booking-1",
-            json=PAYLOAD | {"requestedStartTime": "2026-10-01T09:00+08:00"},
+            json=PAYLOAD | {"requestedStartTime": "2030-10-01T09:00+08:00"},
         )
     )
     assert response.status_code == 400

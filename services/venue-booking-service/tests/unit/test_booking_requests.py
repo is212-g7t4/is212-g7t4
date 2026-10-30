@@ -17,8 +17,8 @@ EVENT = {
     "id": "evt-1",
     "status": "Under Review",
     "expectedAttendance": "150",
-    "preferredStartDate": "2026-10-01T09:00",
-    "preferredEndDate": "2026-10-01T12:00",
+    "preferredStartDate": "2030-10-01T09:00",
+    "preferredEndDate": "2030-10-01T12:00",
 }
 # Statuses match the ones Venue Service actually stores: Available,
 # Under Maintenance or Booked. Only Available is bookable.
@@ -37,8 +37,8 @@ BOOKING = {
     "id": "booking-1",
     "eventId": "evt-1",
     "venueId": "ven-2",
-    "requestedStartTime": "2026-10-01T09:00:00",
-    "requestedEndTime": "2026-10-01T12:00:00",
+    "requestedStartTime": "2030-10-01T09:00:00",
+    "requestedEndTime": "2030-10-01T12:00:00",
     "requiredCapacity": 80,
     "venueRequirements": "Projector",
     "status": "Pending Review",
@@ -50,8 +50,8 @@ REQUEST = {
     "eventId": "evt-1",
     "venueId": "ven-2",
     "coordinatorId": "coord-1",
-    "requestedStartTime": "2026-10-01T09:00",
-    "requestedEndTime": "2026-10-01T12:00",
+    "requestedStartTime": "2030-10-01T09:00",
+    "requestedEndTime": "2030-10-01T12:00",
     "requiredCapacity": 80,
     "venueRequirements": "Projector",
 }
@@ -194,7 +194,7 @@ def test_booking_request_succeeds_for_catalogued_available_venue(
     assert response.json == BOOKING
     mock_get_event.assert_called_once_with("evt-1")
     mock_create_booking.assert_called_once_with(
-        "evt-1", "ven-2", "2026-10-01T09:00", "2026-10-01T12:00",
+        "evt-1", "ven-2", "2030-10-01T09:00", "2030-10-01T12:00",
         80, "Projector"
     )
 
@@ -208,8 +208,8 @@ def test_booking_request_requires_all_fields():
 @pytest.mark.parametrize(
     "change",
     [
-        {"requestedStartTime": "2026-10-01"},
-        {"requestedEndTime": "2026-10-01T08:00"},
+        {"requestedStartTime": "2030-10-01"},
+        {"requestedEndTime": "2030-10-01T08:00"},
         {"requiredCapacity": 0},
         {"requiredCapacity": True},
         {"venueRequirements": None},
@@ -437,8 +437,8 @@ def test_update_booking_revalidates_and_resubmits_only_selected_booking(
     assert response.json["status"] == "Pending Review"
     mock_get_event.assert_called_once_with("evt-1")
     mock_update_booking.assert_called_once_with(
-        "booking-1", "evt-1", "ven-2", "2026-10-01T09:00",
-        "2026-10-01T12:00", 50, "Projector"
+        "booking-1", "evt-1", "ven-2", "2030-10-01T09:00",
+        "2030-10-01T12:00", 50, "Projector"
     )
 
 
@@ -534,7 +534,7 @@ def test_cancel_booking_requires_assigned_coordinator(mock_get_event, mock_cance
         {"eventId": "evt-1"},
         REQUEST | {"requiredCapacity": 0},
         REQUEST | {"venueRequirements": None},
-        REQUEST | {"requestedStartTime": "2026-10-01"},
+        REQUEST | {"requestedStartTime": "2030-10-01"},
     ],
 )
 def test_update_booking_validates_request(payload):
