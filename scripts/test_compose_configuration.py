@@ -1,11 +1,14 @@
-"""SCRUM-173 local Compose configuration regression tests (no Docker daemon needed).
+"""Local Docker Compose configuration regressions; no Docker daemon needed.
 
-Uses only synthetic env files in temporary directories, never real credentials.
-Covers root-only notification setup, token consistency, selective secret exposure,
-existing service database preservation, optional dedicated notification database,
-and actionable rejection of missing internal tokens. Runs `docker compose config`
-only: no containers, broker messages or database writes are performed.
-Run: python3 -m unittest discover -s scripts -p test_notification_compose_config.py -v
+Inputs are the repository docker-compose.yml and synthetic settings/env files
+copied into temporary directories, never real credentials. The tests render
+`docker compose config --format json` and assert on its service configuration or
+expected missing-token error output. Cases cover upstream URLs, database
+preservation/overrides, token consistency and selective secret exposure.
+
+Only configuration parsing runs: no containers, broker messages or database
+writes. Importing this module defines tests but does not execute them; run explicitly:
+python3 -m unittest discover -s scripts -p test_compose_configuration.py -v
 """
 import json
 import os

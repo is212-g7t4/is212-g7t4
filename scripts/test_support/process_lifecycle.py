@@ -1,8 +1,14 @@
-"""Resource support for scripts/scrum45_manual_sandbox.py.
+"""Explicit process, command, polling and port helpers for test-owned resources.
 
-SCRUM-45 cross-service tests/fixture have been handed off. Only the resource and
-process lifecycle helpers imported by kept scripts and their safety tests remain.
-This module does not start services or provision databases on import.
+Inputs are command arguments, polling callbacks, wait budgets, owned process
+handles, log handles and exact container names. Helpers return command stdout,
+callback results, an available loopback port, group-absence status or cleanup
+failure diagnostics. Command failures and expired callback waits raise errors.
+
+Cleanup signals only the supplied process groups and removes only named containers;
+callers must establish ownership before passing resources. Port discovery is not a
+reservation. Importing this module performs no commands, polling, socket binding,
+process signalling or container/database setup; callers must invoke helpers explicitly.
 """
 import os
 import signal
