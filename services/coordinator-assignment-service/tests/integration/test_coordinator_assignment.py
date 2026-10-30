@@ -26,6 +26,7 @@ import respx
 from httpx import Response
 
 import app.clients as service_clients
+from tests.unit.factories import bearer
 from tests.integration.factories import (
     COORDINATOR_ID,
     EVENT_ID,
@@ -91,7 +92,6 @@ def test_ac1_lead_sees_assigned_and_unassigned_submitted_requests(client):
         coordinatorId=COORDINATOR_ID,
     )
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
-        stub_acting_user(router)
         event_route = router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events/submitted",
             params={"viewerRole": "Event Coordinator Lead"},
@@ -106,10 +106,9 @@ def test_ac1_lead_sees_assigned_and_unassigned_submitted_requests(client):
 
 def test_ac1_non_lead_is_forbidden_before_event_service_is_called(client):
     """Failure: a coordinator cannot read the Manager's assignment worklist."""
-    with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
-        stub_acting_user(router, user())
-
-        response = client.get("/queue")
+    with respx.mock(assert_all_mocked=True, assert_all_called=True):
+        # SCRUM-9: the role is the token's; no User Service call is made.
+        response = client.get("/queue", headers=bearer(LEAD_ID, "Event Coordinator"))
 
     assert response.status_code == 403
     assert "Lead" in response.get_json()["error"]
@@ -118,7 +117,6 @@ def test_ac1_non_lead_is_forbidden_before_event_service_is_called(client):
 def test_ac1_event_service_outage_is_not_reported_as_an_empty_worklist(client):
     """Failure: a downstream outage produces an error, never a false empty list."""
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
-        stub_acting_user(router)
         router.get(
             f"{service_clients.EVENT_SERVICE_URL}/events/submitted",
             params={"viewerRole": "Event Coordinator Lead"},

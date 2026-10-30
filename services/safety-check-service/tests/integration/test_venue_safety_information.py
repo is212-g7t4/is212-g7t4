@@ -45,7 +45,6 @@ from tests.integration.factories import (
     booking,
     event,
     safety_round,
-    user,
     venue,
 )
 from tests.unit.factories import signed_in
@@ -58,9 +57,6 @@ HALL_RESTRICTIONS = "Noise curfew 10pm\nNo open flames"
 
 def stub_review(router, bookings, venues_response):
     """Every downstream read the review makes, with the URLs and queries app/clients.py sends."""
-    router.get(f"{service_clients.USER_SERVICE_URL}/users/{OFFICER_ID}").mock(
-        return_value=Response(200, json=user())
-    )
     router.get(
         f"{service_clients.EVENT_SERVICE_URL}/events/{EVENT_ID}",
         params={"viewerRole": "Safety Officer"},

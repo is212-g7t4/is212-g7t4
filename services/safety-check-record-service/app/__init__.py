@@ -33,6 +33,9 @@ from app.models import (
 )
 from app.auth import authenticate
 
+SAFETY_VIEW_ROLES = (
+    "Event Coordinator", "Event Coordinator Lead", "Safety Officer", "Venue Staff", "Technical Support",
+)
 NO_DATABASE = (
     "DATABASE_URL is not configured for Safety Check Record Service."
 )
@@ -129,6 +132,10 @@ def create_app(config=None) -> Flask:
 
     @app.get("/safety-check-records")
     def list_records():
+        # Safety-check rounds are for the roles that handle an event's safety, not
+        # Attendees or Organisers (SCRUM-9). Internal callers have no user.
+        if g.user_id and g.role not in SAFETY_VIEW_ROLES:
+            return jsonify(message="Your role cannot view safety checks."), 403
         event_id = _uuid_or_none(request.args.get("eventId"))
         if not event_id:
             return jsonify(message="eventId must be a valid UUID."), 400

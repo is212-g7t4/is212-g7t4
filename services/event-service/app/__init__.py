@@ -85,6 +85,29 @@ from app.auth import authenticate
 # asked for with ?viewerRole=. The role itself is the signed-in caller's (SCRUM-8).
 LEAD_ROLE = "Event Coordinator Lead"
 ALL_EVENTS_ROLES = (LEAD_ROLE, "Venue Staff", "Technical Support", "Safety Officer")
+# SCRUM-9: operational staff see every event, but not who organised it or the
+# internal decision/action history (which carries rejection reasons).
+STAFF_ROLES = ("Venue Staff", "Technical Support", "Safety Officer")
+STAFF_HIDDEN_FIELDS = ("organiserId", "actionHistory", "decision", "decisionHistory")
+# Roles that may look events up by id or time window (summaries only).
+LOOKUP_ROLES = ALL_EVENTS_ROLES + ("Event Coordinator",)
+
+
+def _role_allowed(roles):
+    """True for a signed-in caller whose token role is in `roles`, and for an
+    internal background caller (no user, authenticated by X-Internal-Token)."""
+    return g.user_id is None or g.role in roles
+
+
+def _forbidden():
+    return jsonify(message="Your role cannot view this information."), 403
+
+
+def _for_viewer(event):
+    """The event as the caller may see it: staff roles get the trimmed view."""
+    if g.role in STAFF_ROLES:
+        return {k: v for k, v in event.items() if k not in STAFF_HIDDEN_FIELDS}
+    return event
 
 
 def _venue_change(data, status, safety_check_id):
@@ -386,6 +409,8 @@ def create_app(config=None):
 
     @app.get("/events/unassigned")
     def unassigned():
+        if not _role_allowed((LEAD_ROLE,)):
+            return _forbidden()
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
@@ -394,6 +419,8 @@ def create_app(config=None):
 
     @app.get("/events/active")
     def active():
+        if not _role_allowed(ALL_EVENTS_ROLES):
+            return _forbidden()
         if not app.config["DATABASE_URL"]:
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
@@ -447,20 +474,21 @@ def create_app(config=None):
             return jsonify(
                 message="DATABASE_URL is not configured for Event Service."
             ), 503
-        return jsonify(
-            events=list_events(
-                app.config["DATABASE_URL"],
-                coordinator_id,
-                status,
-                venue,
-                date_from,
-                date_to,
-                view_all=bool(viewer_role),
-            )
+        events = list_events(
+            app.config["DATABASE_URL"],
+            coordinator_id,
+            status,
+            venue,
+            date_from,
+            date_to,
+            view_all=bool(viewer_role),
         )
+        return jsonify(events=[_for_viewer(event) for event in events])
 
     @app.get("/events/registration")
     def registration_events():
+        if not _role_allowed(("Attendee",) + ALL_EVENTS_ROLES):
+            return _forbidden()
         if not app.config["DATABASE_URL"]:
             return jsonify(message="DATABASE_URL is not configured for Event Service."), 503
         return jsonify(events=list_confirmed_events(app.config["DATABASE_URL"]))
@@ -479,18 +507,26 @@ def create_app(config=None):
 
     @app.get("/events/summaries")
     def event_summaries():
-        # Name/status lookup for other screens (e.g. equipment review); no event body or ownership check.
+        # Name/status lookup for other screens (e.g. equipment review); no event body.
+        if not _role_allowed(LOOKUP_ROLES):
+            return _forbidden()
         return _summaries(list_event_summaries)
 
     @app.get("/events/attendee-summaries")
     def attendee_event_summaries():
         # The same lookup for registered Attendees: while a safety re-check is
         # open they see the last approved times and venue (SCRUM-153 AC4/AC5).
+        # Which ids an Attendee may ask for (their own registrations) is
+        # enforced by Attendee Registration Service, which supplies them.
+        if not _role_allowed(("Attendee",) + LOOKUP_ROLES):
+            return _forbidden()
         return _summaries(list_attendee_event_summaries)
 
     @app.get("/events/overlapping")
     def overlapping_events():
         # Time-window lookup for Equipment Reservation Service; summaries only, no event body.
+        if not _role_allowed(LOOKUP_ROLES):
+            return _forbidden()
         statuses = [part for part in request.args.get("statuses", "").split(",") if part]
         if not statuses or any(s not in ALL_STATUSES for s in statuses):
             return jsonify(message=f"statuses must list values from: {', '.join(ALL_STATUSES)}."), 400
@@ -551,7 +587,7 @@ def create_app(config=None):
             return jsonify(
                 message="This event request is not assigned to the current coordinator."
             ), 403
-        return jsonify(event), 200
+        return jsonify(_for_viewer(event)), 200
 
     @app.post("/events/<uuid:event_id>/change-requests")
     def request_changes(event_id):

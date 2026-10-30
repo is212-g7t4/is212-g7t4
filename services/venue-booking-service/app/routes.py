@@ -23,6 +23,7 @@ from app.clients import (
     get_booking,
     get_event_bookings,
     get_event,
+    get_event_as,
     get_event_for_internal_viewer,
     get_staff_events,
     get_safety_records,
@@ -549,12 +550,15 @@ def list_booking_requests(event_id):
     if not g.user_id:
         return jsonify(message="Sign in to continue."), 401
     try:
-        get_event(event_id)
+        if g.role == "Event Coordinator":
+            get_event(event_id)
+        else:
+            get_event_as(event_id, g.role)
     except EventNotFoundError:
         return jsonify(message="Event request not found."), 404
     except EventNotAssignedError:
         return jsonify(
-            message="This event request is not assigned to the given coordinator."
+            message="You cannot view the venue requests for this event."
         ), 403
     except Exception as error:
         return jsonify(message=f"Failed to look up the event: {error}"), 502
