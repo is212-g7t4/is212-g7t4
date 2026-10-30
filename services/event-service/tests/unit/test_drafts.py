@@ -41,7 +41,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return signed_in(app.test_client()), connection, cursor
+    return signed_in(app.test_client(), role="Event Organiser"), connection, cursor
 
 
 def draft_row(**overrides):
@@ -141,7 +141,7 @@ def test_ac1_save_as_draft_rejects_a_body_that_is_not_an_object(setup):
 )
 def test_ac1_draft_requests_fail_loudly_without_a_database(method, path):
     """AC1: a draft is never reported as saved when there is nowhere to store it."""
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Event Organiser")
 
     response = getattr(client, method)(path, json={"organiserId": ORGANISER_ID, **COMPLETE})
 

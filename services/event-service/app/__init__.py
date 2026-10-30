@@ -91,6 +91,13 @@ STAFF_ROLES = ("Venue Staff", "Technical Support", "Safety Officer")
 STAFF_HIDDEN_FIELDS = ("organiserId", "actionHistory", "decision", "decisionHistory")
 # Roles that may look events up by id or time window (summaries only).
 LOOKUP_ROLES = ALL_EVENTS_ROLES + ("Event Coordinator",)
+# SCRUM-10: who may change what. The role is the token's; the caller's
+# relationship to the event (owner, assigned coordinator) is still checked
+# afterwards by the model layer.
+ORGANISER_ROLE = "Event Organiser"
+ORGANISER_ONLY = (ORGANISER_ROLE,)
+COORDINATOR_ROLES = ("Event Coordinator", LEAD_ROLE)
+LEAD_ONLY = (LEAD_ROLE,)
 
 
 def _role_allowed(roles):
@@ -101,6 +108,15 @@ def _role_allowed(roles):
 
 def _forbidden():
     return jsonify(message="Your role cannot view this information."), 403
+
+
+def _cannot_modify(roles):
+    """SCRUM-10: the 403 for a signed-in caller whose role may not change this
+    information, else None. Runs before the body is read or the database is
+    touched, so a refused change leaves the event as it was."""
+    if _role_allowed(roles):
+        return None
+    return jsonify(message="Your role cannot change this information."), 403
 
 
 def _for_viewer(event):
@@ -300,6 +316,8 @@ def create_app(config=None):
 
     @app.post("/events")
     def submit():
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -321,6 +339,8 @@ def create_app(config=None):
 
     @app.post("/events/drafts")
     def create_draft():
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         organiser_id, details, failure = _draft_details(
             request.get_json(silent=True), validate_draft
         )
@@ -341,6 +361,8 @@ def create_app(config=None):
 
     @app.patch("/events/drafts/<uuid:event_id>")
     def edit_draft(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         organiser_id, details, failure = _draft_details(
             request.get_json(silent=True), validate_draft
         )
@@ -358,6 +380,8 @@ def create_app(config=None):
 
     @app.post("/events/drafts/<uuid:event_id>/submit")
     def submit_existing_draft(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         # The full submission rules, the same as POST /events (AC5).
         organiser_id, details, failure = _draft_details(
             request.get_json(silent=True), validate
@@ -376,6 +400,8 @@ def create_app(config=None):
 
     @app.delete("/events/drafts/<uuid:event_id>")
     def remove_draft(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         organiser_id, failure = _current_user()
         if failure:
             return failure
@@ -591,6 +617,8 @@ def create_app(config=None):
 
     @app.post("/events/<uuid:event_id>/change-requests")
     def request_changes(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -695,6 +723,8 @@ def create_app(config=None):
         """Commit a workflow-approved decision and its event update atomically."""
         if not _change_workflow_is_internal():
             return jsonify(code="INTERNAL_ONLY", message="Internal workflow access required."), 403
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -750,6 +780,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>")
     def assign_coordinator(event_id):
+        if (forbidden := _cannot_modify(LEAD_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         coordinator_id = data.get("assignedCoordinatorId", "") if isinstance(data, dict) else ""
         try:
@@ -781,6 +813,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/progress")
     def update_progress(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         status = data.get("status", "") if isinstance(data, dict) else ""
         action_details = data.get("actionDetails", "") if isinstance(data, dict) else ""
@@ -843,6 +877,8 @@ def create_app(config=None):
         still can't change a `Confirmed` event's high-impact fields without
         the approval being withdrawn.
         """
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify(message="Send a JSON object."), 400
@@ -1099,6 +1135,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/approve")
     def approve(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         coordinator_id, failure = _current_user()
         if failure:
             return failure
@@ -1124,6 +1162,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/clarification-request")
     def request_clarification(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         message = data.get("message") if isinstance(data, dict) else None
         coordinator_id, failure = _current_user()
@@ -1159,6 +1199,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/clarification-response")
     def respond_to_clarification(event_id):
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         response = data.get("response") if isinstance(data, dict) else None
         organiser_id, failure = _current_user()
@@ -1191,6 +1233,8 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/amendment-request")
     def request_amendment(event_id):
         """SCRUM-16 AC1/AC2/AC5: the assigned coordinator flags fields for the organiser to amend."""
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         fields = data.get("fields") if isinstance(data, dict) else None
         reason = data.get("reason") if isinstance(data, dict) else None
@@ -1240,6 +1284,8 @@ def create_app(config=None):
     @app.patch("/events/<uuid:event_id>/amendment-response")
     def respond_to_amendment(event_id):
         """SCRUM-16 AC3/AC4: the organiser amends only the flagged fields and resubmits."""
+        if (forbidden := _cannot_modify(ORGANISER_ONLY)):
+            return forbidden
         data = request.get_json(silent=True)
         changes = data.get("changes") if isinstance(data, dict) else None
         note = data.get("note") if isinstance(data, dict) else None
@@ -1289,6 +1335,8 @@ def create_app(config=None):
 
     @app.patch("/events/<uuid:event_id>/reject")
     def reject(event_id):
+        if (forbidden := _cannot_modify(COORDINATOR_ROLES)):
+            return forbidden
         data = request.get_json(silent=True)
         reason = data.get("reason") if isinstance(data, dict) else None
         coordinator_id, failure = _current_user()
