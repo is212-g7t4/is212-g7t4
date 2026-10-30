@@ -6,8 +6,10 @@ Real-stack Playwright journeys. Manual and opt-in (never in CI): start the stack
 |---|---|---|---|---|---|
 | J5a Prevent conflicting venue reservations | `J5/J5a-venue-conflict/` | SCRUM-259 | SCRUM-28, 29, 30, 154 | SCRUM-11, 159, 19 | Implemented (buffer conflict, resubmit, approval); SCRUM-155, 145, 146, 147, 156 left to integration tests |
 | J5b Prevent equipment over-allocation | `J5/J5b-equipment-over-allocation/` | SCRUM-259 | SCRUM-32, 33, 34, 35 | SCRUM-31, 11, 159, 19 | Implemented |
+| J6a Organiser requests a change | `J6/J6a-organiser-change-request/` | SCRUM-260 | SCRUM-42, 43, 49 | SCRUM-11, 159, 19 | Implemented (pending immutability, comparison, approval/rejection notifications, rejection reason) |
+| J6b Coordinator edits a Confirmed event | `J6/J6b-confirmed-event-safety/` | SCRUM-260 | SCRUM-20, 153 | SCRUM-11, 159, 19, 28, 29, 149, 150 | Implemented (low-impact edit, arrangement conflict, safety withdrawal/history/queue); safety reapproval itself is covered by J1 |
 
-Other journeys (J1 to J4, J6 to J8; SCRUM-255 to 258, 260 to 262) get a row here when their spec is added.
+Other journeys (J1 to J4 and J7 to J8; SCRUM-255 to 258 and 261 to 262) get a row here when their spec is added.
 
 ## Adding a journey
 

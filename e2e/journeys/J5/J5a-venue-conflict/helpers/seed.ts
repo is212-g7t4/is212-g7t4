@@ -1,6 +1,6 @@
 import type { APIRequestContext } from '@playwright/test'
 import { expect } from '@playwright/test'
-import { createUnderReviewEvent, randomWindow } from '../../../../helpers/stack'
+import { authHeaders, createUnderReviewEvent, randomWindow, users } from '../../../../helpers/stack'
 
 export const SETUP_MINUTES = 60
 export const TURNAROUND_MINUTES = 60
@@ -16,12 +16,14 @@ export async function createBufferedVenue(api: APIRequestContext, name: string) 
     accessibility: 'Step-free access', supportedLayouts: ['Theatre'], status: 'Available',
   }
   const created = await api.post(`${venueServiceUrl}/venues`, {
+    headers: await authHeaders(users.venueStaff),
     data: { ...profile, setupTimeMinutes: '0', turnaroundTimeMinutes: '0' },
   })
   expect(created.ok(), `create venue: ${created.status()} ${await created.text()}`).toBe(true)
   const venueId = (await created.json()).venue.id as string
 
   const configured = await api.put(`${venueBookingServiceUrl}/venues/${venueId}`, {
+    headers: await authHeaders(users.venueStaff),
     data: { ...profile, setupTimeMinutes: String(SETUP_MINUTES), turnaroundTimeMinutes: String(TURNAROUND_MINUTES) },
   })
   expect(configured.ok(), `configure buffers: ${configured.status()} ${await configured.text()}`).toBe(true)
