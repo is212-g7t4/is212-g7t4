@@ -30,9 +30,9 @@ can pass while the boundary itself is broken. Integration tests exist to exercis
 
 | | Unit (`tests/unit/`) | Integration (`tests/integration/`) | Frontend e2e (`frontend/.../e2e/`) | Repo e2e (`e2e/` at the repo root) |
 |---|---|---|---|---|
-| Scope | One function/class | One service, route to DB | UI journey in a browser | A flow across several real services, sometimes from a real browser |
-| Database | Mocked (`psycopg2.connect` patched) | Real Postgres in a throwaway container | Mocked via `page.route()` | Real Postgres in containers the harness owns |
-| Other services | Mocked | Stubbed/faked at the HTTP layer | Mocked | Real, started as processes; real RabbitMQ where needed |
+| Scope | One function/class | One service, route to DB | UI journey in a browser | Maintained real-stack Playwright journeys |
+| Database | Mocked (`psycopg2.connect` patched) | Real Postgres in a throwaway container | Mocked via `page.route()` | Shared development stack (manual journeys only) |
+| Other services | Mocked | Stubbed/faked at the HTTP layer | Mocked | Real stack; never run by service integration tests |
 | Speed | Milliseconds | Seconds | Seconds to minutes | Minutes |
 
 ### 1.1 Single-service scope
@@ -62,8 +62,7 @@ Each service's integration tests live in **that service's**
 A test that needs two or more real services is an **end-to-end test**, not an
 integration test, and doesn't belong in any service. Because it spans
 services, it lives in the repo-root `e2e/` folder (§2). If a requirement seems
-to need one, **stop and ask** (§11). The existing SCRUM-171 and SCRUM-173
-harnesses are tests of this kind.
+to need one, **stop and ask** (§11). The maintained Playwright journeys are in `e2e/journeys/`.
 
 ### 1.2 Atomic vs composite services
 
@@ -96,20 +95,19 @@ continuous delivery.
 | Unit | `tests/unit/` | none | mocked | Every CI run; enforces the coverage floor |
 | Integration | `tests/integration/` | `integration` | `postgres:17.6` via Testcontainers | Every CI run (separate job); needs Docker, no secrets |
 | Live | `tests/live/` | `live` | The real Supabase project | Opt-in, locally only, **never in CI** |
-| Repo e2e | `e2e/` (repo root) | none | Its own containers (Postgres, RabbitMQ), several real services | Every CI run (`repo-e2e` job) except the browser-driven `verify_scrum171_frontend.py` and `e2e/journeys/`, which stay manual |
+| Repo e2e | `e2e/journeys/` | none | Real development stack | Manual, opt-in only (`npm run test:journeys`); never in CI |
 
 ```
 uv run pytest                            # unit only (the default selection)
 PYTHON_DOTENV_DISABLED=1 uv run pytest -m integration --no-cov    # integration tier (Docker must be running)
 uv run pytest -m live --no-cov           # live tier, needs real credentials in .env
-python3 scripts/verify_scrum173.py --integration-only   # repo e2e, SCRUM-173; Docker, takes minutes
 ```
 
-This file covers the integration tier only. Repo-root `e2e/` belongs to no
-service: it has no `pyproject.toml` and no marker, and no service's
-`uv run pytest` collects it. Its harnesses run in a throwaway `uv run
---no-project` environment and start each service from that service's own
-`.venv`.
+This file covers the integration tier only. Repo-root `e2e/journeys/` belongs
+to no service and is not collected by service pytest runs. The five legacy
+root Python harnesses, their CI jobs and the story-specific verification runners
+were retired. Run maintained application tests directly as described above;
+maintained journeys and shared helpers stay unchanged.
 
 - Integration tests run with `--no-cov`. *Why:* the `fail_under` ratchet is
   defined against the unit run, so integration tests can't be used to paper
@@ -134,15 +132,13 @@ Already done:
 
 - Venue Availability's live smoke test is in `tests/live/test_calendar.py`
   under the `live` marker.
-- The SCRUM-171/173 harnesses moved from Venue Booking to the repo-root `e2e/`.
-  `scripts/verify_scrum173.py` runs the SCRUM-173 one from there.
-  - The `verify_*.py` files are standalone scripts that pytest doesn't
-    collect. `e2e/` allows that; §6.1's rule covers `tests/integration/` only.
+- The legacy SCRUM-46/171/173 root Python harnesses and dedicated
+  SCRUM-173 integration workflow have been retired. Maintained journeys remain manual.
 - Venue Availability registers the `live` marker and deselects it by default.
   Venue Booking's `integration` marker description now matches the others.
-- `.github/workflows/ci.yml` has an `integration-tests` matrix job (one per
-  service with `tests/integration/`) and a `repo-e2e` job, both required by
-  `ci-passed`. AGENTS.md's *Testing expectations* and *CI* sections match.
+- `.github/workflows/ci.yml` retains the `integration-tests` matrix job (one per
+  service with `tests/integration/`), required by `ci-passed`. Only the retired
+  root-harness job and its gate references were removed.
 
 Still to do:
 
@@ -285,8 +281,7 @@ say so**. Don't work around it.
    can't fail proves nothing. The break must show as **failed**, not
    **error**: an error (a setup failure, or a syntax error from the edit)
    means the assertion never ran, so repeat that one until it fails properly.
-6. **Run the tier** (`uv run pytest -m integration --no-cov`, scoped to your
-   new files while the SCRUM-173 harness still shares the marker), run the
+6. **Run the tier** (`uv run pytest -m integration --no-cov`), run the
    unit tier too, then report (§10).
 
 Name and document every file and test as §6.1 describes.
@@ -579,8 +574,6 @@ changing app code; report them.
   Check Record Service, which neither INDEX row lists.
 - **AGENTS.md says "one Supabase project/schema per atomic"**; the migrations
   use one shared schema (§12.2).
-- **AGENTS.md says there is a single CI workflow**; `scrum173-integration.yml`
-  also exists.
 
 ### 12.4 Reference implementations
 
