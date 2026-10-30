@@ -4,7 +4,6 @@ import './App.css'
 import { Sidebar, Topbar } from './components/Navigation'
 import { DashboardPage } from './pages/DashboardPage'
 import { EventDetailPage } from './pages/EventDetailPage'
-import { ManagePage } from './pages/ManagePage'
 import { MyEventsPage } from './pages/MyEventsPage'
 import { AttendeeEventsPage } from './pages/AttendeeEventsPage'
 import { AttendeeRegistrationsPage } from './pages/AttendeeRegistrationsPage'
@@ -28,7 +27,7 @@ import { VenueSearchPage } from './pages/VenueSearchPage'
 import { AddVenuePage, EditVenuePage } from './pages/AddVenuePage'
 import { fetchUsers } from './features/user/users'
 import { routeTitles } from './types'
-import type { EventData, Role, Route, User } from './types'
+import type { Role, Route, User } from './types'
 import { AlertIcon, CheckIcon } from './components/Icon'
 import { HoldReminderAlert } from './features/venue/HoldReminderAlert'
 import { LoginPage } from './features/auth/LoginPage'
@@ -38,7 +37,6 @@ const paths: Record<Route, string> = {
   notifications: '/notifications',
   dashboard: '/',
   submit: '/events/new',
-  manage: '/events/evt-001/edit',
   review: '/requests/review',
   changeRequests: '/change-requests',
   queue: '/requests/queue',
@@ -67,7 +65,6 @@ function getRoute(): Route {
   const path = window.location.pathname
   if (path === '/notifications') return 'notifications'
   if (path === '/events/new') return 'submit'
-  if (/^\/events\/[^/]+\/edit$/.test(path)) return 'manage'
   if (path === '/requests/review') return 'review'
   if (path === '/change-requests') return 'changeRequests'
   if (path === '/requests/queue') return 'queue'
@@ -118,18 +115,6 @@ function App() {
   const [detailOrigin, setDetailOrigin] = useState<Route>('review')
   const [users, setUsers] = useState<User[]>([])
   const [session, setSession] = useState(loadSession)
-  const [event, setEvent] = useState<EventData>({
-    eventName: '',
-    description: '',
-    purpose: '',
-    preferredStartDate: '',
-    preferredEndDate: '',
-    expectedAttendance: '',
-    venueRequirements: '',
-    accessibilityNeeds: '',
-    equipmentRequirements: '',
-    registrationNeeds: '',
-  })
   const [notice, setNotice] = useState<{ message: string; tone: 'success' | 'error' } | null>(null)
 
   useEffect(() => {
@@ -213,10 +198,6 @@ function App() {
     setRoute('editVenue')
   }
 
-  const updateEvent = (field: keyof EventData, value: string) => {
-    setEvent((current) => ({ ...current, [field]: value }))
-  }
-
   const role: Role = activeUser?.role ?? 'Event Organiser'
   const eventTabs = isCoordinator(role) ? coordinatorEventTabs(role) : []
   const inEventsPage = eventTabs.includes(route)
@@ -243,7 +224,6 @@ function App() {
       {route === 'dashboard' && <DashboardPage onNavigate={navigate} role={role} userName={activeUser?.username} />}
       {route === 'submit' && <SubmissionPage role={role} currentOrganiserId={activeUser?.id} />}
       {route === 'editDraft' && draftId && <SubmissionPage key={`${draftId}-${activeUser?.id}`} role={role} currentOrganiserId={activeUser?.id} draftId={draftId} />}
-      {route === 'manage' && <ManagePage event={event} updateEvent={updateEvent} onSave={() => setNotice({ message: 'Event details saved locally.', tone: 'success' })} />}
       {inEventsPage && <EventsTabs tabs={eventTabs} route={route} onNavigate={navigate} />}
       {route === 'review' && <SubmittedRequestsPage key={activeUser?.id} role={role} currentCoordinatorId={activeUser?.id} currentCoordinatorName={activeUser?.username} resolveUserName={resolveUserName} onViewDetails={navigateToEvent} />}
       {route === 'changeRequests' && <ChangeRequestsPage key={`${activeUser?.id}-${role}-${changeRequestTargetSearch}`} targetSearch={changeRequestTargetSearch} onViewEvent={navigateToEvent} role={role} coordinatorId={activeUser?.id} coordinatorName={activeUser?.username} />}

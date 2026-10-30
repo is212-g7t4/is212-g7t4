@@ -5,6 +5,7 @@ import type { SubmittedEvent } from '../features/event/submission'
 import { fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
 import { RegistrationTable } from '../features/registration/RegistrationTable'
+import { PREPARATION_STATUS } from '../features/event/eventStatus'
 import { EventOverview } from '../features/event/EventOverview'
 import { StatusBadge } from '../components/FormControls'
 import { ArrowLeftIcon, RefreshIcon } from '../components/Icon'
@@ -44,7 +45,7 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
   }, [eventId, organiserId, refresh])
 
   useEffect(() => {
-    if (event?.status !== 'Approved') return
+    if (event?.status !== PREPARATION_STATUS) return
     let active = true
     fetchRegistrations(eventId).then((fetched) => {
       if (active) {
@@ -133,7 +134,7 @@ export function OrganiserEventDetailPage({ eventId, organiserId, resolveUserName
 
       <div className="event-card-section">
         <h3>Registrations</h3>
-        {event.status !== 'Approved' ? <p>Registrations are only available for approved events.</p> :
+        {event.status !== PREPARATION_STATUS ? <p>Registrations are only available for confirmed events.</p> :
           registrationsLoading ? <TableSkeleton rows={3} columns={5} /> : registrationsError ? <p className="field-error" role="alert">{registrationsError}</p> : <>
           <dl className="event-details">
             <div className="event-detail"><dt>Total registrations</dt><dd>{registrations.length}</dd></div>

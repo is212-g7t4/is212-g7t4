@@ -7,6 +7,7 @@ import { StatusBadge } from '../components/FormControls'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ArrowRightIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
+import { PREPARATION_STATUS } from '../features/event/eventStatus'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 
 export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails, onOpenDraft }: { organiserId?: string; organiserName?: string; onViewDetails: (id: string) => void; onOpenDraft?: (id: string) => void }) {
@@ -25,9 +26,9 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
     let active = true
     eventApi(`/events?organiserId=${organiserId}`).then(async (body) => {
       const fetched = body.events as SubmittedEvent[]
-      const approvedIds = fetched.filter((event) => event.status === 'Approved').map((event) => event.id)
+      const confirmedIds = fetched.filter((event) => event.status === PREPARATION_STATUS).map((event) => event.id)
       // Counts are secondary: if they fail, still show the events.
-      const fetchedCounts = await fetchRegistrationCounts(approvedIds).catch(() => {
+      const fetchedCounts = await fetchRegistrationCounts(confirmedIds).catch(() => {
         if (active) setCountsError(true)
         return {}
       })
@@ -66,7 +67,7 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
       onCancel={() => setDraftToDelete(null)} onConfirm={() => deleteDraft(draftToDelete)}>
       You are deleting <strong>{draftToDelete.eventName}</strong>. This can't be undone.
     </ConfirmDialog>}
-    <section className="intro"><h1>My events</h1><p className="muted">Events created by {organiserName || 'you'}. Open an event to see its details; registrations are shown for approved events.</p></section>
+    <section className="intro"><h1>My events</h1><p className="muted">Events created by {organiserName || 'you'}. Open an event to see its details; registrations are shown for confirmed events.</p></section>
     {(drafts.length > 0 || draftError) && <section className="event-list-section" aria-labelledby="drafts-heading">
       <h2 id="drafts-heading" className="event-list-heading">Drafts</h2>
       {draftError && <p className="field-error" role="alert">{draftError}</p>}
@@ -101,7 +102,7 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
       {countsError && <p className="field-error" role="alert">Unable to load registration counts.</p>}
       {events.map((event) => {
         const tile = getDateTile(event.preferredStartDate)
-        const approved = event.status === 'Approved'
+        const confirmed = event.status === PREPARATION_STATUS
         const content = <>
           <span className="event-row-date">
             <span className="event-row-date-month">{tile.month}</span>
@@ -114,11 +115,11 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
             </span>
             <span className="event-row-schedule muted">{formatSchedule(event.preferredStartDate, event.preferredEndDate)}</span>
             <span className="event-row-venue muted">
-              {approved
+              {confirmed
                 ? counts[event.id] ? `${counts[event.id].total} registration${counts[event.id].total === 1 ? '' : 's'}` : 'Registrations unavailable'
                 : event.status === 'Rejected'
                   ? 'The event has been rejected. Submit a new request.'
-                  : 'Registrations are available once the event is approved'}
+                  : 'Registrations are available once the event is confirmed'}
             </span>
           </span>
           <ArrowRightIcon size={16} className="icon" />
