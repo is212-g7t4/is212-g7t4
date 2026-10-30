@@ -1,23 +1,25 @@
-"""Infra: SCRUM-45 retained manual-sandbox lifecycle safety tests.
+"""Infra: owned-resource cleanup and process-group absence safety tests.
 
-Supporting DR3 (retry/recovery) requires verification resources to be cleaned up
-honestly; these are not additional acceptance criteria or delivery tests.
-Real: cleanup/wait helpers; the final test starts only its own local process group.
-Doubled: process signalling, clock-adjacent waits and Docker calls in other cases.
-Not proven: notification delivery, real Docker removal, shared-stack safety or any
-service's business rules. The process regression checks exact owned-group absence.
+Inputs are fake process/log handles, exact container names and simulated OS/Docker
+results; assertions check cleanup diagnostics, complete teardown attempts and
+honest group-absence status. One test starts and removes its own local process
+group, including a child that ignores TERM. Docker calls are mocked throughout.
+
+Importing this module defines tests without executing cleanup or starting resources.
+Not proven: real Docker removal, shared-stack safety, notification delivery or
+service business rules. Run explicitly through pytest; never target shared resources.
 """
 from unittest.mock import Mock, patch
 import subprocess
 
-from scripts.scrum45_support.system import cleanup_owned_resources, wait_group_gone
+from scripts.test_support.process_lifecycle import cleanup_owned_resources, wait_group_gone
 
 
 def test_group_absence_wait_retries_transient_permission_without_claiming_success():
     """Boundary: simulate permission denied followed by process-group absence; the wait succeeds
     only after absence is observed, avoiding a false cleanup claim during macOS reaping.
     """
-    with patch("scripts.scrum45_support.system.os.killpg", side_effect=[PermissionError(), ProcessLookupError()]):
+    with patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[PermissionError(), ProcessLookupError()]):
         assert wait_group_gone(905, seconds=1)
 
 
@@ -25,7 +27,7 @@ def test_group_absence_wait_never_treats_persistent_permission_as_absence():
     """Failure: simulate persistent permission denied with an expired wait budget; the wait returns
     false rather than treating an inaccessible group as removed.
     """
-    with patch("scripts.scrum45_support.system.os.killpg", side_effect=PermissionError()):
+    with patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=PermissionError()):
         assert not wait_group_gone(905, seconds=0)
 
 
@@ -43,7 +45,7 @@ def test_cleanup_attempts_all_resources_despite_process_log_and_container_failur
         if args[:3] == ["docker", "rm", "-fv"] and args[-1] == "owned-two":
             return subprocess.CompletedProcess(args, 1, "", "removal refused")
         return subprocess.CompletedProcess(args, 0, "", "")
-    with patch("scripts.scrum45_support.system.wait_group_gone", return_value=True), patch("scripts.scrum45_support.system.os.killpg") as kill, patch("scripts.scrum45_support.system.subprocess.run", side_effect=docker):
+    with patch("scripts.test_support.process_lifecycle.wait_group_gone", return_value=True), patch("scripts.test_support.process_lifecycle.os.killpg") as kill, patch("scripts.test_support.process_lifecycle.subprocess.run", side_effect=docker):
         failures = cleanup_owned_resources(processes, logs, ["owned-one", "owned-two"])
     assert [call.args[0] for call in kill.call_args_list] == [902, 901]
     assert all(log.close.call_count == 1 for log in logs)
@@ -61,7 +63,7 @@ def test_cleanup_reports_remaining_container_even_after_successful_removal_respo
     """
     results = [subprocess.CompletedProcess([], 0, "owned", ""),
                subprocess.CompletedProcess([], 0, "owned\n", "")]
-    with patch("scripts.scrum45_support.system.subprocess.run", side_effect=results):
+    with patch("scripts.test_support.process_lifecycle.subprocess.run", side_effect=results):
         failures = cleanup_owned_resources([], [], ["owned"])
     assert len(failures) == 1
     assert "absence unverified owned" in failures[0]
@@ -73,8 +75,8 @@ def test_cleanup_kills_timed_out_process_group_and_continues_after_missing_group
     """
     processes = [Mock(pid=903), Mock(pid=904)]
     processes[0].wait.side_effect = [subprocess.TimeoutExpired("owned", 10), 0]
-    with patch("scripts.scrum45_support.system.wait_group_gone", side_effect=[True, False, True]), patch("scripts.scrum45_support.system.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
-        "scripts.scrum45_support.system.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
+    with patch("scripts.test_support.process_lifecycle.wait_group_gone", side_effect=[True, False, True]), patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[ProcessLookupError(), None, None]) as kill, patch(
+        "scripts.test_support.process_lifecycle.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")
     ) as docker:
         assert cleanup_owned_resources(processes, [], ["owned"]) == []
     assert [call.args[0] for call in kill.call_args_list] == [904, 903, 903]

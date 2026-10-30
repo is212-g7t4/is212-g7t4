@@ -34,7 +34,7 @@ Both owner APIs fence work with leases, persist a frozen envelope before publica
 
 ## Local verification commands
 
-Follow [the team integration guide](testing/integration-testing.md). Unit discovery remains automatic; service integration and root E2E remain explicit local tiers. CI and coverage thresholds are unchanged.
+Follow [the team integration guide](testing/integration-testing.md). Unit discovery remains automatic; service integration runs in its existing CI matrix and can be selected locally. Coverage thresholds are unchanged.
 
 Use a clean allowlisted environment; do not load service `.env` files or point test processes at a shared database. From an owning service directory:
 
@@ -55,15 +55,10 @@ env -i HOME="$HOME" PATH="$PATH" PYTHON_DOTENV_DISABLED=1 UV_NO_ENV_FILE=1 \
 
 These fixtures provision their own PostgreSQL, load the complete unmodified migration chain, establish only synthetic SQL roles, and clean owned resources. Event's migration cases separately exercise clean installation and upgrading the pre-SCRUM-46 inventory with existing rows in every table, including all prior Event notification types. They do not establish hosted Supabase role parity.
 
-The cross-service test is in root `e2e/`, not a service integration directory. It needs Docker, local `postgres:17.6` / `rabbitmq:4-management` images, and synced locked virtualenvs for Event, Registration, Venue Availability, Venue, User, Attendee Registration, Notification and Event Workflow. Sync each with `uv sync --locked --no-env-file` in a dotenv-disabled environment. From the repository root:
-
-```sh
-env -i HOME="$HOME" PATH="$PATH" PYTHON_DOTENV_DISABLED=1 UV_NO_ENV_FILE=1 \
-  uv run --no-env-file --no-project --with pytest --with httpx --with psycopg2-binary \
-  pytest e2e/test_attendee_notifications.py -q -s
-```
-
-The E2E fixture starts seven real HTTP services, the dispatcher and consumer, plus uniquely named loopback-only PostgreSQL/RabbitMQ containers. It never uses the shared Compose stack. RabbitMQ's fixture storage is ephemeral tmpfs owned by UID/GID 999, avoiding the observed local image cookie-permission failure; this is not a persistent-broker deployment configuration.
+The legacy root Python E2E harness has been retired and archived. Its earlier
+results below are historical evidence, not a runnable command or current coverage.
+Service unit/integration tests and frontend lifecycle tests remain; maintained
+real-stack journeys stay in `e2e/journeys/` and remain manual/opt-in.
 
 From `frontend/event-management-ui`, the normal commands are `npm test`, `npm run test:coverage` and `npm run build` (includes TypeScript compilation). An earlier default-parallel run timed out in six existing calendar cases; that evidence is retained. The latest follow-up passed both normal commands without changing scheduling or timeouts, and also passed the equivalent serialized scheduling below:
 
@@ -75,9 +70,9 @@ npm run build
 
 The four Node tests check journey-adapter cleanup, not browser acceptance.
 
-## Current test inventory and historical measurements
+## Historical test inventory and measurements
 
-Each Python story module is named `test_attendee_notifications.py` and documents ACs, boundaries and limitations. Current counts below are parameter-expanded cases, not function counts: **120 cases**, including supporting recovery/migration rules. The earlier execution measurements following the table are historical; the latest follow-up results appear at the end.
+Each Python story module is named `test_attendee_notifications.py` and documents ACs, boundaries and limitations. The pre-retirement counts below are parameter-expanded cases, not function counts: **120 cases**, including supporting recovery/migration rules and the now-archived root E2E sequence. The earlier execution measurements following the table are historical; the latest follow-up results appear at the end.
 
 | Owner / tier | New story cases | Observable outcomes |
 | --- | ---: | --- |

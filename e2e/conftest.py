@@ -16,7 +16,7 @@ from signing import TokenIssuer
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from scripts.scrum45_support.system import (
+from scripts.test_support.process_lifecycle import (
     command,
     wait,
     free_port,
