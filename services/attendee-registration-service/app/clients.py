@@ -77,6 +77,34 @@ def get_event_registrations(event_id: str) -> list:
     return response.json().get("registrations", [])
 
 
+# How each role asks Event Service for one event (SCRUM-9): Event Service decides
+# whether that role/relationship may open it (organiser: created it; coordinator:
+# assigned; Lead: any).
+EVENT_VIEW_PARAMS = {
+    "Event Organiser": {"organiserId": "me"},
+    "Event Coordinator": {},
+    "Event Coordinator Lead": {"viewerRole": "me"},
+}
+
+
+def can_view_event(event_id: str, role) -> bool | None:
+    """True if the caller may open the event, False if not, None if it doesn't exist."""
+    if role not in EVENT_VIEW_PARAMS:
+        return False
+    response = httpx.get(
+        f"{EVENT_SERVICE_URL}/events/{event_id}",
+        params=EVENT_VIEW_PARAMS[role],
+        headers=_forwarded_auth(),
+        timeout=5,
+    )
+    if response.status_code == 404:
+        return None
+    if response.status_code == 403:
+        return False
+    response.raise_for_status()
+    return True
+
+
 def get_user(user_id: str) -> dict | None:
     """Look up a single user from User Service, or None if they don't exist."""
     response = httpx.get(f"{USER_SERVICE_URL}/users/{user_id}", headers=_forwarded_auth(), timeout=5)

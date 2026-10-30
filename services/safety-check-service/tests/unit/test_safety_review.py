@@ -4,6 +4,7 @@ import pytest
 from app import clients, create_app
 from tests.unit.factories import (
     signed_in,
+    bearer,
     EVENT_ID,
     OFFICER_ID,
     booking,
@@ -106,10 +107,9 @@ def test_review_requires_a_signed_in_officer(client):
     assert response.status_code == 401
 
 
-def test_review_requires_a_safety_officer(client, review_data, monkeypatch):
-    monkeypatch.setattr(clients, "get_user", lambda _id: user(role="Event Coordinator"))
-
-    response = get_review(client)
+def test_review_requires_a_safety_officer(client, review_data):
+    """SCRUM-9: the role comes from the signed token (no User Service lookup)."""
+    response = client.get(f"/safety-checks/{EVENT_ID}/review", headers=bearer(OFFICER_ID, "Event Coordinator"))
 
     assert response.status_code == 403
     assert response.get_json()["code"] == "NOT_SAFETY_OFFICER"
