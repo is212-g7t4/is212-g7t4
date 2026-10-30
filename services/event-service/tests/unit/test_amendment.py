@@ -281,7 +281,9 @@ def test_amendment_endpoints_require_database_configuration(endpoint, body):
 ])
 def test_amendment_endpoints_refuse_a_non_object_body(endpoint, body, message, setup):
     """A body that isn't an object is refused before any database work (the caller is the token's, SCRUM-8)."""
-    response = setup[0].patch(f"/events/{EVENT_ID}/{endpoint}", json=body)
+    # No actor field in a non-object body, so sign in as the role that owns each endpoint (SCRUM-10).
+    role = "Event Organiser" if endpoint == "amendment-response" else "Event Coordinator"
+    response = signed_in(setup[0], role=role).patch(f"/events/{EVENT_ID}/{endpoint}", json=body)
     assert response.status_code == 400
     assert response.json["message"] == message
     setup[2].execute.assert_not_called()

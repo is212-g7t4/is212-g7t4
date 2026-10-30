@@ -33,7 +33,7 @@ def setup(monkeypatch):
         "DATABASE_URL": "unused-test-url",
         "FRONTEND_ORIGIN": "http://localhost:5174",
     })
-    return signed_in(app.test_client()), connection, cursor
+    return signed_in(app.test_client(), role="Event Organiser"), connection, cursor
 
 
 def saved_row():
@@ -418,7 +418,7 @@ def test_database_failure_never_reports_success(setup, operation):
 
 
 def test_missing_database_configuration():
-    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
+    client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Event Organiser")
     assert client.post("/events", json=VALID).status_code == 503
     assert (
         client.get(f"/events/submitted?coordinatorId={COORDINATOR_ID}").status_code

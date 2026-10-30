@@ -74,7 +74,7 @@ def setup(monkeypatch):
     cursor = connection.cursor.return_value.__enter__.return_value
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url"})
-    return signed_in(app.test_client()), connection, cursor
+    return signed_in(app.test_client(), role="Event Organiser"), connection, cursor
 
 
 def post(client, **overrides):
@@ -428,6 +428,7 @@ def test_review_already_applied_values_can_still_close_the_request(setup):
 )
 def test_review_malformed_requests_are_rejected_before_database_access(setup, path, method, body):
     client, _, cursor = setup
+    signed_in(client, role="Event Coordinator")  # decisions are a coordinator's (SCRUM-10)
     if method == "get":
         response = client.get(path)
     else:
