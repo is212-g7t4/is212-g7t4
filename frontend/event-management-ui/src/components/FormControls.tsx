@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { RequestStatus } from '../types'
-import { AlertIcon, CheckIcon } from './Icon'
+import { AlertIcon } from './Icon'
 
 export function FormSection({
   title,
@@ -99,31 +99,5 @@ export function StatusBadge({
     <span className={`status-badge ${status.toLowerCase().replace(/\s+/g, '-')}`}>
       {label ?? status}
     </span>
-  )
-}
-
-export function Impact({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone: 'success' | 'warning'
-}) {
-  return (
-    <div className="impact-row">
-      <span>
-        <span className={`impact-icon ${tone}`}>
-          {tone === 'success' ? <CheckIcon size={13} /> : <AlertIcon size={13} />}
-        </span>
-
-        {label}
-      </span>
-
-      <strong className={tone}>
-        {value}
-      </strong>
-    </div>
   )
 }

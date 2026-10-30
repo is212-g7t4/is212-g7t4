@@ -34,10 +34,6 @@ export function DashboardPage({ onNavigate, role, userName }: { onNavigate: (rou
           <span><strong>280</strong> Attendees</span>
           <span><strong>Auditorium</strong> Venue</span>
         </div>
-
-        <button className="text-button" onClick={() => onNavigate('manage')}>
-          Open event details <ArrowRightIcon size={15} />
-        </button>
       </section>
     </div>
   )

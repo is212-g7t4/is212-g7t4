@@ -7,7 +7,7 @@ import { canManageEquipment } from '../features/equipment/permissions'
 import { canViewMyEvents, coordinatorEventTabs } from '../features/event/permissions'
 import { isCoordinator } from '../roles'
 import { canSearchVenues, canViewVenues } from '../features/venue/permissions'
-import { BuildingIcon, CheckIcon, EditIcon, HomeIcon, ListIcon, PlusIcon, SearchIcon } from './Icon'
+import { BuildingIcon, CheckIcon, HomeIcon, ListIcon, PlusIcon, SearchIcon } from './Icon'
 
 export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role; onNavigate: (route: Route) => void }) {
   return (
@@ -22,7 +22,6 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
       <nav className="nav-list" aria-label="Main navigation">
         <NavButton active={route === 'dashboard'} onClick={() => onNavigate('dashboard')} icon={<HomeIcon size={17} />}>Overview</NavButton>
         <NavButton active={route === 'submit'} onClick={() => onNavigate('submit')} icon={<PlusIcon size={17} />}>Submit event</NavButton>
-        <NavButton active={route === 'manage'} onClick={() => onNavigate('manage')} icon={<EditIcon size={17} />}>Event details</NavButton>
         {isCoordinator(role) ? (
           <NavButton active={coordinatorEventTabs(role).includes(route)} onClick={() => onNavigate(coordinatorEventTabs(role)[0])} icon={<ListIcon size={17} />}>Events</NavButton>
         ) : (
