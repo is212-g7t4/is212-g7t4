@@ -36,6 +36,8 @@ Not proven
 ----------
 - That the atomic services behave as stubbed (-> their own unit and integration
   tests, and tests/integration/ here with respx).
+- AC4's proof that unrelated bookings remain unchanged is covered at the route
+  orchestration layer in `test_scrum156_book_multiple_venues.py`.
 """
 
 import httpx
@@ -64,7 +66,7 @@ def response(status, body):
     )
 
 
-def test_update_booking_client_sends_every_editable_field(monkeypatch):
+def test_ac1_update_booking_client_sends_every_editable_field(monkeypatch):
     """
     Summary: An edit sends every editable detail of that one booking.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -99,7 +101,7 @@ def test_update_booking_client_sends_every_editable_field(monkeypatch):
     ],
     ids=["not_found", "cancelled", "conflict", "unavailable"],
 )
-def test_update_booking_client_maps_errors(monkeypatch, status, body, error):
+def test_ac2_update_booking_client_maps_errors(monkeypatch, status, body, error):
     """
     Summary: Edit failures are mapped to not-found, state and conflict errors.
     AC2: If a modification changes the venue, date/time, required capacity, or
@@ -112,7 +114,7 @@ def test_update_booking_client_maps_errors(monkeypatch, status, body, error):
         clients.update_booking(*DETAILS)
 
 
-def test_cancel_booking_client_returns_cancelled_booking(monkeypatch):
+def test_ac3_ac5_cancel_booking_client_returns_cancelled_booking(monkeypatch):
     """
     Summary: Cancelling returns the booking marked Cancelled.
     AC3: Given an event has multiple venue bookings, when the Event Coordinator
@@ -140,7 +142,7 @@ def test_cancel_booking_client_returns_cancelled_booking(monkeypatch):
 
 
 @pytest.mark.parametrize("status", [404, 503], ids=["not_found", "unavailable"])
-def test_cancel_booking_client_maps_errors(monkeypatch, status):
+def test_ac3_cancel_booking_client_maps_errors(monkeypatch, status):
     """
     Summary: Cancel failures are mapped to not-found or failure.
     AC3: Given an event has multiple venue bookings, when the Event Coordinator
@@ -161,7 +163,7 @@ def test_cancel_booking_client_maps_errors(monkeypatch, status):
         clients.cancel_booking("booking-1", "event-1")
 
 
-def test_review_client_for_cancelled_booking_raises_state_error(monkeypatch):
+def test_ac5_review_client_for_cancelled_booking_raises_state_error(monkeypatch):
     """
     Summary: Reviewing a cancelled booking is reported as a closed booking.
     AC5: A cancelled booking remains associated with the event with a Cancelled

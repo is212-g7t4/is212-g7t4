@@ -4,12 +4,13 @@ Validated on 1 November 2026 for:
 
 - `venue-availability-service`
 - `venue-service`
+- `venue-booking-service`
 - `attendee-registration-service`
 - `registration-service`
 
 ## Result
 
-All four unit suites pass in their locked environments on Windows after
+All five unit suites pass in their locked environments on Windows after
 disabling `.env` loading during test collection and adding the Windows-only
 `tzdata` dependency required by `ZoneInfo("Asia/Singapore")`.
 
@@ -17,6 +18,7 @@ disabling `.env` loading during test collection and adding the Windows-only
 |---|---:|---:|
 | Venue Availability | 548 passed | 100% |
 | Venue | 182 passed | 100% |
+| Venue Booking | 531 passed | 100% |
 | Attendee Registration | 116 passed | 100% |
 | Registration | 131 passed | 100% |
 
@@ -28,12 +30,12 @@ of the unit tier. Integration and live tests were not used as evidence here.
 
 The test modules reproduce the applicable Jira user story and acceptance
 criteria, then state what runs for real, what is doubled and what the module
-does not prove. Every one of the 489 test functions has a docstring describing
+does not prove. Every one of the 741 test functions has a docstring describing
 its asserted behaviour, traceability or supporting-design purpose, and test
 double boundary.
 
-The detailed naming/docstring pass classifies **423 tests as AC evidence** and
-**66 as supporting design, boundary or regression checks**:
+The detailed naming/docstring pass classifies **669 tests as AC evidence** and
+**72 as supporting design, boundary or regression checks**:
 
 - AC evidence uses `test_ac<n>_...`; a test covering several criteria lists
   each one in the prefix.
@@ -43,7 +45,7 @@ The detailed naming/docstring pass classifies **423 tests as AC evidence** and
 - Checks with no direct AC claim use `test_support_...`; they are not presented
   as acceptance evidence merely because they improve code coverage.
 
-All 489 names agree with the AC references in their function docstrings. Every
+All 741 names agree with the AC references in their function docstrings. Every
 function docstring has a `Summary` and `Double` line. Environment, clock, HTTP,
 database and downstream-service doubles are identified explicitly; one unused
 `monkeypatch` fixture was removed. Module-level `Not proven` sections now name
@@ -57,7 +59,7 @@ of the workflow. In particular:
 - SCRUM-9 is covered across Registration, Attendee Registration and Venue
   Availability for both allowed and refused reads.
 - SCRUM-10 route-level role and relationship enforcement is covered across all
-  four services. The remaining persistence proof is recorded under gaps below.
+  five services. The remaining persistence proof is recorded under gaps below.
 - SCRUM-24, 25, 30, 37, 38, 47, 145, 148, 154, 155, 157, 167, 170, 171, 173
   and 174 have their service-owned AC behaviour represented in these unit
   suites.
@@ -97,7 +99,7 @@ the user-story workflow instead of bypassing upstream ownership rules.
 
 ## Redundancy review
 
-No exact duplicate test bodies exist within any of the four unit suites.
+No exact duplicate test bodies exist within any of the five unit suites.
 Similar authentication, CORS and access-control cases across services are not
 redundant: each independently deployable service owns and must enforce the same
 boundary. Focused modules that share a Jira story also test different layers
@@ -123,7 +125,7 @@ These are genuine evidence gaps, not reasons to weaken a unit assertion:
    30 seconds. This needs a frontend timer/refetch test or a real-stack journey,
    not another atomic unit test.
 3. **SCRUM-23 AC4 end-to-end exclusion:** Venue validates the `Booked` and
-   `Under Maintenance` statuses, but these four suites do not alone prove that
+   `Under Maintenance` statuses, but these five suites do not alone prove that
    both search and calendar hide such venues. The owning search composite and
    calendar integration/E2E evidence must remain traceable to this AC.
 4. **UI-only AC halves:** Add/edit forms, empty-state and success messages,

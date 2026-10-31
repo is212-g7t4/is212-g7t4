@@ -202,7 +202,7 @@ def failed_dispatch(monkeypatch):
     return run
 
 
-def test_submission_alert_reaches_each_staff_member_with_period_and_link(dispatch):
+def test_ac1_submission_alert_reaches_each_staff_member_with_period_and_link(dispatch):
     """
     Summary: Each Venue Staff member gets one alert with the event, venue, period and review link.
     AC1: Given an Event Coordinator submits a venue booking request, the system
@@ -237,7 +237,7 @@ def test_submission_alert_reaches_each_staff_member_with_period_and_link(dispatc
     pytest.param("unknown-type", ["claim", "retry"], id="unsupported-job-type"),
     pytest.param("invalid-decision", ["claim", "retry"], id="unsupported-decision"),
 ])
-def test_alert_with_bad_recipients_or_type_retries_without_publishing(failed_dispatch, scenario, steps):
+def test_ac1_ac2_alert_with_bad_recipients_or_type_retries_without_publishing(failed_dispatch, scenario, steps):
     """
     Summary: Unusable recipients, type or decision lead to a retry, not a publish.
     AC1: Given an Event Coordinator submits a venue booking request, the system
@@ -262,7 +262,7 @@ def test_alert_with_bad_recipients_or_type_retries_without_publishing(failed_dis
     assert publications == []
 
 
-def test_submission_alert_when_user_service_down_retries(failed_dispatch):
+def test_ac1_submission_alert_when_user_service_down_retries(failed_dispatch):
     """
     Summary: A User Service outage keeps the submission alert waiting.
     AC1: Given an Event Coordinator submits a venue booking request, the system
@@ -283,7 +283,7 @@ def test_submission_alert_when_user_service_down_retries(failed_dispatch):
     assert publications == []
 
 
-def test_submission_alert_when_freeze_refused_publishes_nothing(failed_dispatch):
+def test_ac1_submission_alert_when_freeze_refused_publishes_nothing(failed_dispatch):
     """
     Summary: If the owner refuses to freeze an alert, nothing is published.
     AC1: Given an Event Coordinator submits a venue booking request, the system
@@ -304,7 +304,7 @@ def test_submission_alert_when_freeze_refused_publishes_nothing(failed_dispatch)
     assert publications == []
 
 
-def test_approval_alert_reaches_original_submitter_with_decision_and_link(dispatch):
+def test_ac2_approval_alert_reaches_original_submitter_with_decision_and_link(dispatch):
     """
     Summary: An approval alert goes to the coordinator who asked, with the decision and link.
     AC2: Given a venue booking request is approved or rejected, the system
@@ -326,7 +326,7 @@ def test_approval_alert_reaches_original_submitter_with_decision_and_link(dispat
     )
 
 
-def test_rejection_alert_reaches_original_submitter_with_decision(dispatch):
+def test_ac2_rejection_alert_reaches_original_submitter_with_decision(dispatch):
     """
     Summary: A rejection alert goes to the coordinator who asked, with the decision.
     AC2: Given a venue booking request is approved or rejected, the system

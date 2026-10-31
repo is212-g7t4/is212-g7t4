@@ -41,6 +41,8 @@ Not proven
 ----------
 - That the atomic services behave as stubbed (-> their own unit and integration
   tests, and tests/integration/ here with respx).
+- AC1/AC2 calendar display and closure detail presentation are owned by Venue
+  Availability and the frontend; this composite owns AC3/AC4 search exclusion.
 """
 
 import httpx
@@ -89,7 +91,7 @@ def search(monkeypatch, payload, **query):
     )
 
 
-def test_search_with_partially_overlapping_closure_excludes_venue(monkeypatch):
+def test_ac3_search_with_partially_overlapping_closure_excludes_venue(monkeypatch):
     """
     Summary: A venue closed for any part of the requested time is left out.
     AC3: Given an Event Coordinator searches for available venues, if their
@@ -138,7 +140,7 @@ def test_search_with_partially_overlapping_closure_excludes_venue(monkeypatch):
         {"bookings": [], "closures": [closure(), closure()]},
     ],
 )
-def test_search_with_malformed_closure_data_fails_closed(monkeypatch, payload):
+def test_ac3_search_with_malformed_closure_data_fails_closed(monkeypatch, payload):
     """
     Summary: Missing or malformed closure data fails the search rather than showing venues as free.
     AC3: Given an Event Coordinator searches for available venues, if their
@@ -171,7 +173,7 @@ def test_search_with_malformed_closure_data_fails_closed(monkeypatch, payload):
     ],
     ids=["2090_10_01t09_00_00_08_00_2090_10_01t12_00_00_08", "2090_09_30t10_00_00_08_00_2090_10_02t11_00_00_08", "2090_10_01t08_00_00_08_00_2090_10_01t10_00_00_08", "2090_10_01t11_00_00_08_00_2090_10_01t13_00_00_08", "2090_10_01t08_00_00_08_00_2090_10_01t09_00_00_08", "2090_10_01t12_00_00_08_00_2090_10_01t13_00_00_08", "2090_10_01t03_59_59_999999z_2090_10_01t05_00_00z", "2090_10_01t04_00_00z_2090_10_01t05_00_00z_false"],
 )
-def test_search_excludes_venue_only_when_closure_really_overlaps(monkeypatch, start, end, excluded):
+def test_ac3_ac4_search_excludes_venue_only_when_closure_really_overlaps(monkeypatch, start, end, excluded):
     """
     Summary: A closure only touching the requested time does not hide the venue.
     AC3: Given an Event Coordinator searches for available venues, if their
@@ -196,14 +198,14 @@ def test_search_excludes_venue_only_when_closure_really_overlaps(monkeypatch, st
     assert response.json["count"] == (0 if excluded else 1)
 
 
-def test_search_longer_than_42_days_returns_400(monkeypatch):
+def test_ac3_search_longer_than_42_days_returns_400(monkeypatch):
     """
     Summary: A search longer than 42 days is refused.
     AC3: Given an Event Coordinator searches for available venues, if their
         specified date and time overlap (even partially) with a venue's
         recorded closure, that venue must be automatically excluded from the
         search results.
-    Double: None
+    Double: Stub (the search helper replaces both downstream HTTP reads).
     """
     # Arrange (Given): monkeypatch, from fixtures
 
@@ -217,7 +219,7 @@ def test_search_longer_than_42_days_returns_400(monkeypatch):
     assert "42 days" in response.json["message"]
 
 
-def test_search_judges_past_in_singapore_time(monkeypatch):
+def test_ac3_search_judges_past_in_singapore_time(monkeypatch):
     """
     Summary: "In the past" is judged in Singapore time, whatever the server's zone.
     AC3: Given an Event Coordinator searches for available venues, if their
@@ -254,7 +256,7 @@ def test_search_judges_past_in_singapore_time(monkeypatch):
     ],
     ids=["approved_0_none", "on_hold_0_none", "pending_1_pending_request", "pending_review_1_pending_request"],
 )
-def test_search_outside_closure_keeps_booking_rules(monkeypatch, status, count, label):
+def test_ac4_search_outside_closure_keeps_booking_rules(monkeypatch, status, count, label):
     """
     Summary: Outside a closure, bookings still decide availability as before.
     AC4: Given an Event Coordinator searches for venues outside of a recorded
@@ -285,7 +287,7 @@ def test_search_outside_closure_keeps_booking_rules(monkeypatch, status, count, 
         assert response.json["venues"][0]["availability"] == label
 
 
-def test_search_with_other_venues_closure_keeps_venue(monkeypatch):
+def test_ac4_search_with_other_venues_closure_keeps_venue(monkeypatch):
     """
     Summary: Another venue's closure does not hide this venue.
     AC4: Given an Event Coordinator searches for venues outside of a recorded
@@ -305,7 +307,7 @@ def test_search_with_other_venues_closure_keeps_venue(monkeypatch):
     assert response.json["count"] == 1
 
 
-def test_search_of_exactly_42_days_is_allowed(monkeypatch):
+def test_ac3_search_of_exactly_42_days_is_allowed(monkeypatch):
     """
     Summary: A search of exactly 42 days is allowed.
     AC3: (boundary: 42 days)
@@ -322,7 +324,7 @@ def test_search_of_exactly_42_days_is_allowed(monkeypatch):
     assert response.status_code == 200
 
 
-def test_search_reads_every_closure_in_window(monkeypatch):
+def test_ac3_search_reads_every_closure_in_window(monkeypatch):
     """
     Summary: Every closure in the window is used, not just the first page.
     AC3: Given an Event Coordinator searches for available venues, if their
@@ -346,7 +348,7 @@ def test_search_reads_every_closure_in_window(monkeypatch):
 
 
 @pytest.mark.parametrize("status", ["Under Maintenance", "Booked"], ids=["under_maintenance", "booked"])
-def test_search_outside_closure_keeps_catalogue_status_rules(monkeypatch, status):
+def test_ac4_search_outside_closure_keeps_catalogue_status_rules(monkeypatch, status):
     """
     Summary: Outside a closure, venues under maintenance or booked are still hidden.
     AC4: Given an Event Coordinator searches for venues outside of a recorded
@@ -376,7 +378,7 @@ def test_search_outside_closure_keeps_catalogue_status_rules(monkeypatch, status
         CATALOGUE[0]["status"] = original
 
 
-def test_search_with_malformed_unrelated_closure_fails_closed(monkeypatch):
+def test_ac3_search_with_malformed_unrelated_closure_fails_closed(monkeypatch):
     """
     Summary: A malformed closure fails the search even if it would not overlap.
     AC3: Given an Event Coordinator searches for available venues, if their

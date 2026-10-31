@@ -37,6 +37,9 @@ Not proven
 ----------
 - That the atomic services behave as stubbed (-> their own unit and integration
   tests, and tests/integration/ here with respx).
+- AC1-AC3 automatic rejection and stored reasons are owned by Venue
+  Availability; this focused composite test proves that later change actions
+  preserve the resulting rejected state (AC4).
 """
 
 import pytest
@@ -48,7 +51,7 @@ STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
 
 
 @pytest.mark.parametrize("action", ["update", "cancel", "approve", "reject"], ids=["update", "cancel", "approve", "reject"])
-def test_change_closure_rejected_request_returns_state_error(monkeypatch, action):
+def test_ac4_change_closure_rejected_request_returns_state_error(monkeypatch, action):
     """
     Summary: A request rejected by a closure cannot be updated, cancelled or decided.
     AC4: Given an affected venue request is rejected, the existing event itself

@@ -122,7 +122,7 @@ def client():
 # --- AC2: required criteria -------------------------------------------------
 
 
-def test_search_without_required_fields_lists_them(client):
+def test_ac2_search_without_required_fields_lists_them(client):
     """
     Summary: An empty search names every field the coordinator still has to fill in.
     AC2: Given the Event Coordinator submits a search without the mandatory
@@ -154,7 +154,7 @@ def test_search_without_required_fields_lists_them(client):
     ],
     ids=["start", "end", "expected_attendance"],
 )
-def test_search_missing_one_required_field_names_only_that_one(client, omitted, label):
+def test_ac2_search_missing_one_required_field_names_only_that_one(client, omitted, label):
     """
     Summary: Only the fields actually missing are listed.
     AC2: Given the Event Coordinator submits a search without the mandatory
@@ -172,7 +172,7 @@ def test_search_missing_one_required_field_names_only_that_one(client, omitted, 
     assert response.json["missing"] == [label]
 
 
-def test_search_that_cannot_run_calls_no_downstream_service(client, mocker):
+def test_ac2_search_that_cannot_run_calls_no_downstream_service(client, mocker):
     """
     Summary: A search that cannot run calls no other service.
     AC2: Given the Event Coordinator submits a search without the mandatory
@@ -191,7 +191,7 @@ def test_search_that_cannot_run_calls_no_downstream_service(client, mocker):
 
 
 @pytest.mark.parametrize("value", ["not-a-date", f"{TOMORROW} 09:00", ""], ids=["not_a_date", "space_separated", "empty"])
-def test_search_with_unreadable_start_returns_400(client, value):
+def test_ac1_search_with_unreadable_start_returns_400(client, value):
     """
     Summary: A date and time the service cannot read is refused.
     AC1: Event Coordinator must be able to input the following criteria: Date
@@ -206,7 +206,7 @@ def test_search_with_unreadable_start_returns_400(client, value):
     assert response.status_code == 400
 
 
-def test_search_with_time_zone_offset_returns_400(client):
+def test_ac1_search_with_time_zone_offset_returns_400(client):
     """
     Summary: Times must be local; an offset would be compared wrongly.
     AC1: Event Coordinator must be able to input the following criteria: Date
@@ -220,7 +220,7 @@ def test_search_with_time_zone_offset_returns_400(client):
 
 
 @pytest.mark.parametrize("end", [START, f"{TOMORROW}T08:00:00"], ids=["end_equals_start", "end_before_start"])
-def test_search_with_end_not_after_start_returns_400(client, end):
+def test_ac1_search_with_end_not_after_start_returns_400(client, end):
     """
     Summary: The search window must have length.
     AC1: (boundary: end = start)
@@ -232,7 +232,7 @@ def test_search_with_end_not_after_start_returns_400(client, end):
     assert response.json["message"] == "The end time must be after the start time."
 
 
-def test_search_starting_in_past_returns_400(client):
+def test_ac1_search_starting_in_past_returns_400(client):
     """
     Summary: A venue cannot be searched for a time already past.
     AC1: Event Coordinator must be able to input the following criteria: Date
@@ -249,7 +249,7 @@ def test_search_starting_in_past_returns_400(client):
 
 
 @pytest.mark.parametrize("value", ["0", "-5", "abc", "2.5"], ids=["zero", "negative", "text", "fractional"])
-def test_search_with_invalid_attendance_returns_400(client, value):
+def test_ac1_search_with_invalid_attendance_returns_400(client, value):
     """
     Summary: Attendance must be a whole number of at least 1.
     AC1: Event Coordinator must be able to input the following criteria: Date
@@ -265,7 +265,7 @@ def test_search_with_invalid_attendance_returns_400(client, value):
     assert "Expected attendance" in response.json["message"]
 
 
-def test_search_with_invalid_min_capacity_returns_400(client):
+def test_ac1_search_with_invalid_min_capacity_returns_400(client):
     """
     Summary: The optional capacity floor is validated the same way.
     AC1: Event Coordinator must be able to input the following criteria: Date
@@ -281,7 +281,7 @@ def test_search_with_invalid_min_capacity_returns_400(client):
 # --- AC3: results matching all active criteria ------------------------------
 
 
-def test_search_forwards_every_optional_filter(client, mocker):
+def test_ac3_search_forwards_every_optional_filter(client, mocker):
     """
     Summary: Every optional criterion reaches Venue Service unchanged.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -316,7 +316,7 @@ def test_search_forwards_every_optional_filter(client, mocker):
     mock_get_bookings.assert_called_once_with(START, END)
 
 
-def test_search_uses_larger_of_attendance_and_min_capacity(client, mocker):
+def test_ac3_search_uses_larger_of_attendance_and_min_capacity(client, mocker):
     """
     Summary: The larger of attendance and minimum capacity is used.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -337,7 +337,7 @@ def test_search_uses_larger_of_attendance_and_min_capacity(client, mocker):
     assert ("minCapacity", "200") in mock_search_venues.call_args.args[0]
 
 
-def test_search_hides_venue_with_approved_overlap(client, mocker):
+def test_ac3_search_hides_venue_with_approved_overlap(client, mocker):
     """
     Summary: A venue with an approved booking in the window is not offered.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -358,7 +358,7 @@ def test_search_hides_venue_with_approved_overlap(client, mocker):
     assert [v["name"] for v in response.json["venues"]] == ["Rooftop Garden"]
 
 
-def test_search_hides_venue_with_active_hold(client, mocker):
+def test_ac3_search_hides_venue_with_active_hold(client, mocker):
     """
     Summary: A venue on hold in the window is not offered.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -380,7 +380,7 @@ def test_search_hides_venue_with_active_hold(client, mocker):
 
 
 @pytest.mark.parametrize("status", ["Pending", "Pending Review"], ids=["pending", "pending_review"])
-def test_search_keeps_venue_with_pending_request_and_badges_it(client, status, mocker):
+def test_ac4_search_keeps_venue_with_pending_request_and_badges_it(client, status, mocker):
     """
     Summary: A venue with only a pending request is still offered, marked as pending.
     AC4: The search results must display the following for each matching venue:
@@ -398,7 +398,7 @@ def test_search_keeps_venue_with_pending_request_and_badges_it(client, status, m
     assert response.json["venues"][0]["availability"] == "Pending request"
 
 
-def test_search_ignores_rejected_booking(client, mocker):
+def test_ac3_search_ignores_rejected_booking(client, mocker):
     """
     Summary: Rejected bookings never hide a venue.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -420,7 +420,7 @@ def test_search_ignores_rejected_booking(client, mocker):
 
 
 @pytest.mark.parametrize("venue", [AUDITORIUM, STATIC_BOOKED], ids=["under_maintenance", "booked"])
-def test_search_hides_non_operational_venue(client, venue, mocker):
+def test_ac3_search_hides_non_operational_venue(client, venue, mocker):
     """
     Summary: Venues under maintenance or booked are not offered.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -438,7 +438,7 @@ def test_search_hides_non_operational_venue(client, venue, mocker):
     assert search(client).json == {"venues": [], "count": 0}
 
 
-def test_search_ignores_other_venues_bookings(client, mocker):
+def test_ac3_search_ignores_other_venues_bookings(client, mocker):
     """
     Summary: Another venue's booking does not hide this venue.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -456,7 +456,7 @@ def test_search_ignores_other_venues_bookings(client, mocker):
     assert search(client).json["venues"][0]["availability"] == "Available"
 
 
-def test_search_calls_downstream_services_in_parallel(client, mocker):
+def test_ac3_search_calls_downstream_services_in_parallel(client, mocker):
     """
     Summary: The two lookups run in parallel to fit the 3-second goal.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -489,7 +489,7 @@ def test_search_calls_downstream_services_in_parallel(client, mocker):
 # --- AC4 and AC5: what the coordinator sees ---------------------------------
 
 
-def test_search_results_carry_every_display_field(client, mocker):
+def test_ac4_search_results_carry_every_display_field(client, mocker):
     """
     Summary: Each result carries everything the card shows.
     AC4: The search results must display the following for each matching venue:
@@ -507,7 +507,7 @@ def test_search_results_carry_every_display_field(client, mocker):
     assert venue == {**ROOFTOP, "availability": "Available"}
 
 
-def test_search_lists_free_venues_before_pending_then_by_name(client, mocker):
+def test_ac4_search_lists_free_venues_before_pending_then_by_name(client, mocker):
     """
     Summary: Fully free venues come first, then pending ones, by name.
     AC4: The search results must display the following for each matching venue:
@@ -528,7 +528,7 @@ def test_search_lists_free_venues_before_pending_then_by_name(client, mocker):
     ]
 
 
-def test_search_with_no_matches_returns_empty_list(client, mocker):
+def test_ac5_search_with_no_matches_returns_empty_list(client, mocker):
     """
     Summary: No available venue is a normal empty answer.
     AC5: Given no venues match the selected criteria, when the search
@@ -553,7 +553,7 @@ def test_search_with_no_matches_returns_empty_list(client, mocker):
 # --- Failure handling -------------------------------------------------------
 
 
-def test_search_when_downstream_slow_returns_504(client, mocker):
+def test_ac3_search_when_downstream_slow_returns_504(client, mocker):
     """
     Summary: A downstream service slower than the budget is a 504.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -575,7 +575,7 @@ def test_search_when_downstream_slow_returns_504(client, mocker):
     assert response.json["message"] == "Venue search took too long. Please try again."
 
 
-def test_search_when_downstream_fails_returns_502(client, mocker):
+def test_ac3_search_when_downstream_fails_returns_502(client, mocker):
     """
     Summary: A downstream failure is a 502 without internals.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -602,7 +602,7 @@ def test_search_when_downstream_fails_returns_502(client, mocker):
     assert "venue-service" not in response.json["message"]
 
 
-def test_search_when_availability_down_returns_502(client, mocker):
+def test_ac3_search_when_availability_down_returns_502(client, mocker):
     """
     Summary: Either lookup failing fails the search.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -620,7 +620,7 @@ def test_search_when_availability_down_returns_502(client, mocker):
     assert search(client).status_code == 502
 
 
-def test_search_offers_no_write_method(client):
+def test_ac3_search_offers_no_write_method(client):
     """
     Summary: The search changes nothing.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -637,7 +637,7 @@ def test_search_offers_no_write_method(client):
 # they build is the contract with each atomic.
 
 
-def test_search_venues_client_sends_repeated_filters_and_timeout(monkeypatch):
+def test_ac3_search_venues_client_sends_repeated_filters_and_timeout(monkeypatch):
     """
     Summary: Repeated filters are sent as separate parameters, with a timeout.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -665,7 +665,7 @@ def test_search_venues_client_sends_repeated_filters_and_timeout(monkeypatch):
     assert captured["timeout"] == clients.SEARCH_TIMEOUT
 
 
-def test_bookings_between_client_uses_all_venue_window(monkeypatch):
+def test_ac3_bookings_between_client_uses_all_venue_window(monkeypatch):
     """
     Summary: Availability comes from the all-venue window read.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -702,7 +702,7 @@ def test_bookings_between_client_uses_all_venue_window(monkeypatch):
     "wrapper", ["search_venues", "get_bookings_between"],
     ids=["search_venues", "bookings_between"],
 )
-def test_search_clients_raise_on_downstream_error(monkeypatch, wrapper):
+def test_ac3_search_clients_raise_on_downstream_error(monkeypatch, wrapper):
     """
     Summary: A downstream failure reaches the route so it can answer 502.
     AC3: Given the Event Coordinator provides all required fields, when they
@@ -729,7 +729,7 @@ def test_search_clients_raise_on_downstream_error(monkeypatch, wrapper):
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_search_preflight_from_frontend_is_allowed():
+def test_support_search_preflight_from_frontend_is_allowed():
     """
     Summary: The frontend may search from a browser.
     Supporting design check: CORS for the configured frontend origin

@@ -86,6 +86,10 @@ Not proven
   submission.md, Part B, run by hand against the stack).
 - That Safety Check Service withdraws and restores correctly (->
   safety-check-service and safety-check-record-service tests).
+- AC4 and AC5 isolation/record-keeping behaviour is covered by
+  `test_scrum156_book_multiple_venues.py` and
+  `test_scrum157_booking_management_clients.py`; this module focuses on the
+  safety-withdrawal workflow around AC1-AC3.
 """
 import logging
 
@@ -173,7 +177,7 @@ def client():
 
 @pytest.mark.parametrize("action", ACTIONS)
 @pytest.mark.parametrize("status", OPEN_STATUSES)
-def test_change_booking_before_safety_check_needs_no_safety_call(client, monkeypatch, action, status):
+def test_ac1_ac3_change_booking_before_safety_check_needs_no_safety_call(client, monkeypatch, action, status):
     """
     Summary: Before the safety check starts, a booking can be edited or cancelled with no safety step.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -199,7 +203,7 @@ def test_change_booking_before_safety_check_needs_no_safety_call(client, monkeyp
 
 @pytest.mark.parametrize("action", ACTIONS)
 @pytest.mark.parametrize("status", CLOSED_STATUSES)
-def test_change_booking_during_safety_check_or_after_close_returns_409(client, monkeypatch, action, status):
+def test_scrum28_ac7_change_booking_during_safety_check_or_after_close_returns_409(client, monkeypatch, action, status):
     """
     Summary: While the safety check is pending or the event is closed, bookings cannot be changed.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -230,7 +234,7 @@ def test_change_booking_during_safety_check_or_after_close_returns_409(client, m
     assert calls.names() == ["get_event"]
 
 
-def test_changeable_statuses_are_submittable_four_plus_confirmed():
+def test_scrum28_ac7_changeable_statuses_are_submittable_four_plus_confirmed():
     """
     Summary: Bookings can be changed in the four submittable statuses and Confirmed.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -256,7 +260,7 @@ def test_changeable_statuses_are_submittable_four_plus_confirmed():
 # --- Confirmed: withdraw first, then change -----------------------------------
 
 
-def test_edit_booking_of_confirmed_event_withdraws_approval_first(client, monkeypatch):
+def test_scrum28_ac7_edit_booking_of_confirmed_event_withdraws_approval_first(client, monkeypatch):
     """
     Summary: Editing a Confirmed event's booking first withdraws its safety approval.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -291,7 +295,7 @@ def test_edit_booking_of_confirmed_event_withdraws_approval_first(client, monkey
     )
 
 
-def test_cancel_booking_of_confirmed_event_withdraws_approval_first(client, monkeypatch):
+def test_scrum28_ac7_cancel_booking_of_confirmed_event_withdraws_approval_first(client, monkeypatch):
     """
     Summary: Cancelling a Confirmed event's booking first withdraws its safety approval.
     AC3: Given an event has multiple venue bookings, when the Event Coordinator
@@ -320,7 +324,7 @@ def test_cancel_booking_of_confirmed_event_withdraws_approval_first(client, monk
     assert calls.args("withdraw_safety_for_venue_change")[2] == "A venue booking was cancelled after safety approval."
 
 
-def test_edit_booking_failing_validation_never_withdraws_approval(client, monkeypatch):
+def test_scrum28_ac7_edit_booking_failing_validation_never_withdraws_approval(client, monkeypatch):
     """
     Summary: An edit that fails validation never touches the approval.
     AC2: If a modification changes the venue, date/time, required capacity, or
@@ -356,7 +360,7 @@ def test_edit_booking_failing_validation_never_withdraws_approval(client, monkey
     ],
     ids=["conflict", "state_error", "not_found", "outage"],
 )
-def test_edit_booking_failure_restores_approval_and_returns_booking_error(client, monkeypatch, error, status):
+def test_scrum28_ac7_edit_booking_failure_restores_approval_and_returns_booking_error(client, monkeypatch, error, status):
     """
     Summary: If the edit fails, the approval is put back and the booking error is shown.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -386,7 +390,7 @@ def test_edit_booking_failure_restores_approval_and_returns_booking_error(client
     assert calls.args("restore_safety_after_venue_change") == (EVENT_ID, WITHDRAWN_ID)
 
 
-def test_edit_booking_conflict_reports_conflict_types(client, monkeypatch):
+def test_ac2_edit_booking_conflict_reports_conflict_types(client, monkeypatch):
     """
     Summary: A conflicting edit shows the venue conflict, not a safety message.
     AC2: If a modification changes the venue, date/time, required capacity, or
@@ -404,7 +408,7 @@ def test_edit_booking_conflict_reports_conflict_types(client, monkeypatch):
 
 
 @pytest.mark.parametrize("error, status", [(BookingStateError(), 409), (BookingNotFoundError(), 404)], ids=["state_error", "not_found"])
-def test_cancel_booking_failure_restores_approval(client, monkeypatch, error, status):
+def test_scrum28_ac7_cancel_booking_failure_restores_approval(client, monkeypatch, error, status):
     """
     Summary: If the cancel fails, the approval is put back.
     AC3: Given an event has multiple venue bookings, when the Event Coordinator
@@ -441,7 +445,7 @@ def test_cancel_booking_failure_restores_approval(client, monkeypatch, error, st
     ids=["withdrawal_conflict", "withdrawal_forbidden", "withdrawal_error", "unreachable"],
 )
 @pytest.mark.parametrize("action", ACTIONS)
-def test_change_booking_when_withdrawal_fails_leaves_booking_untouched(client, monkeypatch, action, error, status):
+def test_scrum28_ac7_change_booking_when_withdrawal_fails_leaves_booking_untouched(client, monkeypatch, action, error, status):
     """
     Summary: If the approval cannot be withdrawn, the booking is never changed.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -474,7 +478,7 @@ def test_change_booking_when_withdrawal_fails_leaves_booking_untouched(client, m
         assert response.json["code"] == "NO_APPROVED_SAFETY_CHECK"
 
 
-def test_change_booking_when_restore_also_fails_logs_and_returns_booking_error(client, monkeypatch, caplog):
+def test_scrum28_ac7_change_booking_when_restore_also_fails_logs_and_returns_booking_error(client, monkeypatch, caplog):
     """
     Summary: When the undo fails too, the original booking error is returned and the repair logged.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -507,7 +511,7 @@ def test_change_booking_when_restore_also_fails_logs_and_returns_booking_error(c
     assert "manual repair" in caplog.text
 
 
-def test_change_booking_success_keeps_withdrawal(client, monkeypatch):
+def test_scrum28_ac7_change_booking_success_keeps_withdrawal(client, monkeypatch):
     """
     Summary: A saved change keeps the withdrawal so Venue Staff re-review the booking.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -536,7 +540,7 @@ def test_change_booking_success_keeps_withdrawal(client, monkeypatch):
 # --- The two HTTP wrappers ----------------------------------------------------
 
 
-def test_withdraw_client_posts_the_change(monkeypatch):
+def test_scrum28_ac7_withdraw_client_posts_the_change(monkeypatch):
     """
     Summary: The withdraw call sends the change to Safety Check Service.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -576,7 +580,7 @@ def test_withdraw_client_posts_the_change(monkeypatch):
     ],
     ids=["json_refusal", "text_refusal"],
 )
-def test_withdraw_client_keeps_the_refusal(monkeypatch, response, body):
+def test_scrum28_ac7_withdraw_client_keeps_the_refusal(monkeypatch, response, body):
     """
     Summary: A refused withdrawal keeps its status and message.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -601,7 +605,7 @@ def test_withdraw_client_keeps_the_refusal(monkeypatch, response, body):
     assert raised.value.body == body
 
 
-def test_restore_client_posts_the_withdrawn_round(monkeypatch):
+def test_scrum28_ac7_restore_client_posts_the_withdrawn_round(monkeypatch):
     """
     Summary: The restore call names the withdrawn round.
     AC1: Given an event has one or more venue bookings, when the Event
@@ -632,7 +636,7 @@ def test_restore_client_posts_the_withdrawn_round(monkeypatch):
     assert sent["json"] == {"eventId": EVENT_ID, "withdrawnSafetyCheckId": WITHDRAWN_ID}
 
 
-def test_restore_client_raises_on_failure(monkeypatch):
+def test_scrum28_ac7_restore_client_raises_on_failure(monkeypatch):
     """
     Summary: A failed restore is raised.
     AC1: Given an event has one or more venue bookings, when the Event

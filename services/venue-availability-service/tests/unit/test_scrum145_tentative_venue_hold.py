@@ -445,7 +445,7 @@ def test_scrum148_ac1_place_hold_with_bad_coordinator_id_returns_400(setup):
     cursor.execute.assert_not_called()
 
 
-def test_scrum148_ac1_scrum148_ac2_scrum147_ac1_hold_reminders_return_own_holds_expiring_within_three_days(setup):
+def test_scrum148_ac1_ac2_scrum147_ac1_hold_reminders_return_own_holds_expiring_within_three_days(setup):
     """
     Summary: A coordinator is reminded of their holds expiring within three days, with venue and expiry.
     SCRUM-148 AC1: Given an active venue hold has an upcoming expiry time, then
@@ -473,7 +473,7 @@ def test_scrum148_ac1_scrum148_ac2_scrum147_ac1_hold_reminders_return_own_holds_
     assert params == [USER_ID]
 
 
-def test_scrum148_ac3_scrum148_ac4_hold_reminders_skip_expired_or_inactive_holds(setup):
+def test_scrum148_ac3_ac4_hold_reminders_skip_expired_or_inactive_holds(setup):
     """
     Summary: No reminder is given once a hold has expired or is no longer On Hold.
     SCRUM-148 AC3: Given the hold has already expired, then the system does not

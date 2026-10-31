@@ -124,7 +124,7 @@ def prepare(monkeypatch, status, body):
     return signed_in(create_app().test_client()), calls
 
 
-def test_create_request_overlapping_approved_booking_returns_conflict_type(monkeypatch):
+def test_ac2_create_request_overlapping_approved_booking_returns_conflict_type(monkeypatch):
     """
     Summary: A request clashing with an approved booking is refused with that conflict type.
     AC2: Given the selected date and time interval overlaps an approved
@@ -155,7 +155,7 @@ def test_create_request_overlapping_approved_booking_returns_conflict_type(monke
 
 
 @pytest.mark.parametrize("action", ["edit", "approve"], ids=["edit", "approve"])
-def test_edit_or_approve_conflict_keeps_its_type(monkeypatch, action):
+def test_ac2_edit_or_approve_conflict_keeps_its_type(monkeypatch, action):
     """
     Summary: Editing or approving into a conflict reports its type.
     AC2: Given the selected date and time interval overlaps an approved
@@ -193,7 +193,7 @@ def test_edit_or_approve_conflict_keeps_its_type(monkeypatch, action):
 
 
 @pytest.mark.parametrize("types", ["VENUE_CLOSURE", ["UNKNOWN"], [None], None, {}], ids=["venue_closure", "unknown", "none", "none_2", "empty"])
-def test_create_request_with_malformed_conflict_data_returns_502(monkeypatch, types):
+def test_ac2_create_request_with_malformed_conflict_data_returns_502(monkeypatch, types):
     """
     Summary: Unreadable conflict details are a dependency failure, never "available".
     AC2: Given the selected date and time interval overlaps an approved
@@ -224,7 +224,7 @@ def test_create_request_with_malformed_conflict_data_returns_502(monkeypatch, ty
     ],
     ids=["tentative_hold", "venue_closure", "several"],
 )
-def test_create_request_reports_every_conflict_type(monkeypatch, types):
+def test_ac2_create_request_reports_every_conflict_type(monkeypatch, types):
     """
     Summary: Hold, closure and multiple conflict types all reach the coordinator.
     AC2: Given the selected date and time interval overlaps an approved
@@ -246,7 +246,7 @@ def test_create_request_reports_every_conflict_type(monkeypatch, types):
     assert response.json["conflictTypes"] == types
 
 
-def test_create_request_without_conflict_returns_pending_review(monkeypatch):
+def test_ac1_create_request_without_conflict_returns_pending_review(monkeypatch):
     """
     Summary: A request with no conflict is created as Pending Review.
     AC1: Given no conflicting confirmed bookings exist for the selected valid
@@ -272,7 +272,7 @@ def test_create_request_without_conflict_returns_pending_review(monkeypatch):
     }
 
 
-def test_create_request_with_untyped_409_returns_generic_conflict(monkeypatch):
+def test_ac2_create_request_with_untyped_409_returns_generic_conflict(monkeypatch):
     """
     Summary: An older conflict answer without types still reports a conflict.
     AC2: Given the selected date and time interval overlaps an approved
@@ -293,7 +293,7 @@ def test_create_request_with_untyped_409_returns_generic_conflict(monkeypatch):
 
 
 @pytest.mark.parametrize("body", [[], None, "not-an-object"], ids=["list_body", "null_body", "text_body"])
-def test_create_request_with_unreadable_conflict_body_returns_502(monkeypatch, body):
+def test_ac2_create_request_with_unreadable_conflict_body_returns_502(monkeypatch, body):
     """
     Summary: An unreadable conflict answer is never treated as availability.
     AC2: Given the selected date and time interval overlaps an approved
@@ -310,7 +310,7 @@ def test_create_request_with_unreadable_conflict_body_returns_502(monkeypatch, b
 
 
 @pytest.mark.parametrize("status", [400, 500, 503], ids=["bad_request", "server_error", "unavailable"])
-def test_create_request_when_availability_fails_returns_error(monkeypatch, status):
+def test_ac1_create_request_when_availability_fails_returns_error(monkeypatch, status):
     """
     Summary: A Venue Availability failure is neither a success nor a conflict.
     AC1: Given no conflicting confirmed bookings exist for the selected valid
@@ -334,7 +334,7 @@ def test_create_request_when_availability_fails_returns_error(monkeypatch, statu
     "failure", [httpx.ReadTimeout("timeout"), httpx.ConnectError("connection failed")],
     ids=["timeout", "connect_error"],
 )
-def test_create_request_when_availability_unreachable_returns_error(monkeypatch, failure):
+def test_ac1_create_request_when_availability_unreachable_returns_error(monkeypatch, failure):
     """
     Summary: An unreachable Venue Availability is never treated as available.
     AC1: Given no conflicting confirmed bookings exist for the selected valid
@@ -365,7 +365,7 @@ def test_create_request_when_availability_unreachable_returns_error(monkeypatch,
     ],
     ids=["event_not_found", "event_forbidden", "event_down", "venue_down"],
 )
-def test_create_request_when_event_or_venue_lookup_fails_is_not_submitted(
+def test_ac1_create_request_when_event_or_venue_lookup_fails_is_not_submitted(
     monkeypatch, stage, status, expected
 ):
     """
@@ -394,7 +394,7 @@ def test_create_request_when_event_or_venue_lookup_fails_is_not_submitted(
     assert not any("json" in kwargs for _, kwargs in calls)
 
 
-def test_create_request_with_non_object_body_returns_400():
+def test_ac1_create_request_with_non_object_body_returns_400():
     """
     Summary: A request that is not a booking is refused.
     AC1: Given no conflicting confirmed bookings exist for the selected valid
@@ -411,7 +411,7 @@ def test_create_request_with_non_object_body_returns_400():
 
 @pytest.mark.parametrize("action", ["approve", "reject"], ids=["approve", "reject"])
 @pytest.mark.parametrize("status,expected", [(200, 200), (404, 404), (503, 502)], ids=["success", "not_found", "failure"])
-def test_review_client_maps_success_not_found_and_failure(
+def test_ac1_review_client_maps_success_not_found_and_failure(
     monkeypatch, action, status, expected
 ):
     """
@@ -463,7 +463,7 @@ def test_review_client_maps_success_not_found_and_failure(
     assert response.status_code == expected
 
 
-def test_update_client_with_untyped_conflict_returns_empty_types(monkeypatch):
+def test_ac2_update_client_with_untyped_conflict_returns_empty_types(monkeypatch):
     """
     Summary: An edit conflict without types is reported with no types.
     AC2: Given the selected date and time interval overlaps an approved
@@ -492,7 +492,7 @@ def test_update_client_with_untyped_conflict_returns_empty_types(monkeypatch):
 
 
 @pytest.mark.parametrize("status,expected", [(404, 404), (403, 403), (503, 502)], ids=["not_found", "forbidden", "unavailable"])
-def test_list_event_requests_when_event_check_fails_returns_error(monkeypatch, status, expected):
+def test_scrum156_ac3_list_event_requests_when_event_check_fails_returns_error(monkeypatch, status, expected):
     """
     Summary: Listing an event's requests fails cleanly when the event check fails.
     SCRUM-156 AC3: Given multiple venue bookings exist for an event, when the
@@ -518,7 +518,7 @@ def test_list_event_requests_when_event_check_fails_returns_error(monkeypatch, s
     )
 
 
-def test_list_event_requests_without_signed_in_user_returns_401():
+def test_scrum156_ac3_list_event_requests_without_signed_in_user_returns_401():
     """
     Summary: Listing needs a signed-in coordinator.
     SCRUM-156 AC3: Given multiple venue bookings exist for an event, when the
@@ -531,7 +531,7 @@ def test_list_event_requests_without_signed_in_user_returns_401():
 
 
 @pytest.mark.parametrize("status,expected", [(200, 200), (503, 502)], ids=["success", "unavailable"])
-def test_list_event_requests_uses_booking_client(monkeypatch, status, expected):
+def test_scrum156_ac3_list_event_requests_uses_booking_client(monkeypatch, status, expected):
     """
     Summary: Listing reads the event's bookings from Venue Availability.
     SCRUM-156 AC3: Given multiple venue bookings exist for an event, when the
@@ -560,7 +560,7 @@ def test_list_event_requests_uses_booking_client(monkeypatch, status, expected):
 
 
 @pytest.mark.parametrize("status,expected", [(404, 404), (503, 502)], ids=["not_found", "unavailable"])
-def test_cancel_request_when_event_check_fails_returns_error(monkeypatch, status, expected):
+def test_scrum156_ac3_cancel_request_when_event_check_fails_returns_error(monkeypatch, status, expected):
     """
     Summary: Cancelling fails cleanly when the event check fails.
     SCRUM-156 AC3: Given multiple venue bookings exist for an event, when the
@@ -590,7 +590,7 @@ def test_cancel_request_when_event_check_fails_returns_error(monkeypatch, status
     assert response.status_code == expected
 
 
-def test_edit_request_with_offset_times_returns_400():
+def test_ac2_edit_request_with_offset_times_returns_400():
     """
     Summary: Edited times must be local Singapore times.
     AC2: Given the selected date and time interval overlaps an approved
@@ -617,11 +617,11 @@ def test_edit_request_with_offset_times_returns_400():
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_preflight_answers_and_blank_origin_allows_nothing(monkeypatch):
+def test_support_preflight_answers_and_blank_origin_allows_nothing(monkeypatch):
     """
     Summary: Browser preflights are answered, and a blank frontend origin allows no website.
     Supporting design check: CORS for the configured frontend origin
-    Double: None
+    Double: Environment stub (FRONTEND_ORIGIN set to blank).
     """
     monkeypatch.setenv("FRONTEND_ORIGIN", "")
     response = signed_in(create_app().test_client()).options("/booking-requests")

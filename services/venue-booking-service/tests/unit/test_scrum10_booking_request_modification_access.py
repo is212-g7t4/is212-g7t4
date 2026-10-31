@@ -46,6 +46,9 @@ Not proven
 ----------
 - That a refused change leaves stored data unchanged (-> the atomics'
   modification-access tests).
+- AC3 relationship checks are exercised by booking submission/management
+  modules. AC5's mixed allowed/denied multi-event outcome is covered only as
+  separate allowed and refused paths, not one combined scenario.
 """
 import pytest
 
@@ -66,7 +69,7 @@ REQUESTER_ROUTES = [
 # AC1 ----
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead"], ids=["event_coordinator", "event_coordinator_lead"])
-def test_cancel_request_when_coordinator_role_reaches_cancel_checks(role):
+def test_ac1_cancel_request_when_coordinator_role_reaches_cancel_checks(role):
     """
     Summary: Coordinators and the Lead get past the role check to the cancel checks.
     AC1: Given an authenticated user is permitted to modify information based
@@ -85,7 +88,7 @@ def test_cancel_request_when_coordinator_role_reaches_cancel_checks(role):
     assert response.json["message"] == "eventId is required."
 
 
-def test_edit_venue_when_venue_staff_is_allowed(monkeypatch):
+def test_ac1_edit_venue_when_venue_staff_is_allowed(monkeypatch):
     """
     Summary: Venue Staff can save a venue profile.
     AC1: Given an authenticated user is permitted to modify information based
@@ -110,7 +113,7 @@ def test_edit_venue_when_venue_staff_is_allowed(monkeypatch):
 
 @pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer", "Event Organiser", "Attendee"], ids=["venue_staff", "technical_support", "safety_officer", "event_organiser", "attendee"])
 @pytest.mark.parametrize("method, path", REQUESTER_ROUTES, ids=["create", "edit", "cancel"])
-def test_requester_actions_when_other_role_return_403(method, path, role):
+def test_ac2_requester_actions_when_other_role_return_403(method, path, role):
     """
     Summary: Only coordinators may create, edit or cancel booking requests.
     AC2: Given an authenticated user's role does not permit them to modify
@@ -132,7 +135,7 @@ def test_requester_actions_when_other_role_return_403(method, path, role):
 
 @pytest.mark.parametrize("role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Safety Officer",
                                   "Event Organiser", "Attendee"], ids=["event_coordinator", "event_coordinator_lead", "technical_support", "safety_officer", "event_organiser", "attendee"])
-def test_edit_venue_when_not_venue_staff_returns_403(role):
+def test_ac2_edit_venue_when_not_venue_staff_returns_403(role):
     """
     Summary: Only Venue Staff can edit a venue profile.
     AC2: Given an authenticated user's role does not permit them to modify
@@ -153,7 +156,7 @@ def test_edit_venue_when_not_venue_staff_returns_403(role):
 
 # AC4 ----
 
-def test_legacy_conflicts_after_refused_venue_edit_still_viewable(monkeypatch):
+def test_ac4_legacy_conflicts_after_refused_venue_edit_still_viewable(monkeypatch):
     """
     Summary: A coordinator refused a venue edit can still view legacy conflicts.
     AC4: Given a user is permitted to view particular information but is not

@@ -45,7 +45,7 @@ Doubled
 Not proven
 ----------
 - That the coordinator is the event's assigned one (AC3): checked by Venue
-  Booking Service (-> its test_booking_request_modification_access.py).
+  Booking Service (-> its test_scrum10_booking_request_modification_access.py).
 - AC5's mixed allowed/denied multi-event outcome is not exercised in one test;
   the individual allowed and refused paths are covered separately here and by
   Venue Booking Service.

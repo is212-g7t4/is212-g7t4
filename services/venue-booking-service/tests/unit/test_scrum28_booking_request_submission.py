@@ -126,7 +126,7 @@ def staff_queue(events, bookings_by_event, query=""):
 # AC1 ----
 
 
-def test_create_request_forwards_booking_timing_capacity_and_requirements():
+def test_ac1_create_request_forwards_booking_timing_capacity_and_requirements():
     """
     Summary: A request carries its own timing, capacity and requirements to Venue Availability.
     AC1: Given an Event Coordinator is preparing a venue booking request for an
@@ -151,7 +151,7 @@ def test_create_request_forwards_booking_timing_capacity_and_requirements():
 
 
 @pytest.mark.parametrize("status", SUBMITTABLE_EVENT_STATUSES)
-def test_create_request_for_submittable_event_is_pending_review(status):
+def test_ac2_create_request_for_submittable_event_is_pending_review(status):
     """
     Summary: A request for an event in a submittable status is recorded for Venue Staff review.
     AC2: Given the relevant event timing and venue requirements have been
@@ -172,7 +172,7 @@ def test_create_request_for_submittable_event_is_pending_review(status):
     create_booking.assert_called_once()
 
 
-def test_submittable_statuses_are_exactly_the_agreed_four():
+def test_ac2_submittable_statuses_are_exactly_the_agreed_four():
     """
     Summary: Requests are accepted for exactly the four statuses agreed for SCRUM-28.
     AC2: Given the relevant event timing and venue requirements have been
@@ -188,7 +188,7 @@ def test_submittable_statuses_are_exactly_the_agreed_four():
 
 
 @pytest.mark.parametrize("status", NOT_SUBMITTABLE)
-def test_create_request_for_event_not_submittable_returns_409(status):
+def test_ac2_create_request_for_event_not_submittable_returns_409(status):
     """
     Summary: A request Venue Staff could never review is not recorded.
     AC2: Given the relevant event timing and venue requirements have been
@@ -210,7 +210,7 @@ def test_create_request_for_event_not_submittable_returns_409(status):
     create_booking.assert_not_called()
 
 
-def test_create_request_for_event_without_status_returns_409():
+def test_ac2_create_request_for_event_without_status_returns_409():
     """
     Summary: An event with an unknown status fails closed.
     AC2: Given the relevant event timing and venue requirements have been
@@ -236,7 +236,7 @@ def test_create_request_for_event_without_status_returns_409():
 # AC3 ----
 
 
-def test_staff_queue_shows_event_dates_with_each_request():
+def test_ac3_staff_queue_shows_event_dates_with_each_request():
     """
     Summary: Venue Staff see the event's dates next to each request.
     AC3: Given a venue booking request has been submitted, when Venue Staff
@@ -263,7 +263,7 @@ def test_staff_queue_shows_event_dates_with_each_request():
 
 
 @pytest.mark.parametrize("missing", ["", None], ids=["event-service-blank", "absent"])
-def test_staff_queue_with_event_without_dates_still_lists_requests(missing):
+def test_ac3_staff_queue_with_event_without_dates_still_lists_requests(missing):
     """
     Summary: An event with no dates still has its requests listed.
     AC3: Given a venue booking request has been submitted, when Venue Staff
@@ -293,7 +293,7 @@ def test_staff_queue_with_event_without_dates_still_lists_requests(missing):
 # AC4 ----
 
 
-def test_staff_queue_counts_pending_and_pending_review_as_awaiting():
+def test_ac4_staff_queue_counts_pending_and_pending_review_as_awaiting():
     """
     Summary: Both spellings of pending count as awaiting review.
     AC4: Given a venue booking request has been submitted and has not yet
@@ -323,7 +323,7 @@ def test_staff_queue_counts_pending_and_pending_review_as_awaiting():
     assert event["awaitingReviewCount"] == 2
 
 
-def test_staff_queue_pending_filter_returns_only_awaiting():
+def test_ac4_staff_queue_pending_filter_returns_only_awaiting():
     """
     Summary: The Pending filter returns and counts only requests awaiting review.
     AC4: Given a venue booking request has been submitted and has not yet
@@ -348,7 +348,7 @@ def test_staff_queue_pending_filter_returns_only_awaiting():
     assert event["awaitingReviewCount"] == 2
 
 
-def test_staff_queue_lists_awaiting_first_oldest_first():
+def test_ac4_staff_queue_lists_awaiting_first_oldest_first():
     """
     Summary: Awaiting requests come first, oldest first.
     AC4: Given a venue booking request has been submitted and has not yet
@@ -379,7 +379,7 @@ def test_staff_queue_lists_awaiting_first_oldest_first():
 # AC5 ----
 
 
-def test_event_requests_list_only_that_events_requests():
+def test_ac5_event_requests_list_only_that_events_requests():
     """
     Summary: Each request appears only under the event it was submitted for.
     AC5: Given an Event Coordinator submits a venue booking request for an
@@ -410,7 +410,7 @@ def test_event_requests_list_only_that_events_requests():
 # AC6 ----
 
 
-def test_create_request_for_venue_booked_at_other_time_is_accepted():
+def test_ac6_create_request_for_venue_booked_at_other_time_is_accepted():
     """
     Summary: A venue booked by another event at a different time can still be requested.
     AC6: Given an Event Coordinator submits a venue booking request for a venue
@@ -430,7 +430,7 @@ def test_create_request_for_venue_booked_at_other_time_is_accepted():
     create_booking.assert_called_once()
 
 
-def test_create_request_overlapping_other_booking_returns_409():
+def test_ac6_create_request_overlapping_other_booking_returns_409():
     """
     Summary: An overlap found by Venue Availability is reported as a conflict.
     AC6: Given an Event Coordinator submits a venue booking request for a venue
@@ -458,7 +458,7 @@ def test_create_request_overlapping_other_booking_returns_409():
     [(status, 200) for status in REVIEWABLE_EVENT_STATUSES]
     + [("Submitted", 409), ("Pending Safety Check", 409), ("Confirmed", 409)],
 )
-def test_staff_review_allows_only_reviewable_event_statuses(event_status, expected):
+def test_ac4_staff_review_allows_only_reviewable_event_statuses(event_status, expected):
     """
     Summary: Venue Staff can decide only for events in a reviewable status.
     AC4: Given a venue booking request has been submitted and has not yet
@@ -515,7 +515,7 @@ def update_window(event, **times):
 
 
 @pytest.mark.parametrize("send", [submit_window, update_window])
-def test_request_starting_in_past_returns_400(send):
+def test_ac1_request_starting_in_past_returns_400(send):
     """
     Summary: A slot that has already started cannot be requested or moved to.
     AC1: Given an Event Coordinator is preparing a venue booking request for an
@@ -551,7 +551,7 @@ def test_request_starting_in_past_returns_400(send):
     ],
     ids=["2030_02_28t13_00_2030_02_28t15_00", "2030_03_02t09_00_2030_03_02t11_00", "2030_02_28t23_00_2030_03_01t10_00", "2030_03_01t16_00_2030_03_02t01_00"],
 )
-def test_request_outside_event_dates_returns_400(send, start, end):
+def test_ac1_request_outside_event_dates_returns_400(send, start, end):
     """
     Summary: Any part of a booking outside the event's dates is refused.
     AC1: Given an Event Coordinator is preparing a venue booking request for an
@@ -581,7 +581,7 @@ def test_request_outside_event_dates_returns_400(send, start, end):
     ],
     ids=["2030_03_01t07_00_2030_03_01t09_00", "2030_03_01t00_00_2030_03_01t23_59"],
 )
-def test_request_on_event_day_outside_event_hours_is_accepted(start, end):
+def test_ac1_request_on_event_day_outside_event_hours_is_accepted(start, end):
     """
     Summary: Setup or teardown on the event's day outside its hours is allowed.
     AC1: Given an Event Coordinator is preparing a venue booking request for an
@@ -600,7 +600,7 @@ def test_request_on_event_day_outside_event_hours_is_accepted(start, end):
     create_booking.assert_called_once()
 
 
-def test_request_on_later_day_of_multi_day_event_is_accepted():
+def test_ac1_request_on_later_day_of_multi_day_event_is_accepted():
     """
     Summary: A later day of a multi-day event counts as within its dates.
     AC1: Given an Event Coordinator is preparing a venue booking request for an
@@ -622,7 +622,7 @@ def test_request_on_later_day_of_multi_day_event_is_accepted():
 
 
 @pytest.mark.parametrize("dates", [{"preferredStartDate": "", "preferredEndDate": ""}, {}], ids=["only_start_date", "no_dates"])
-def test_request_for_event_without_dates_only_checks_future(dates):
+def test_ac1_request_for_event_without_dates_only_checks_future(dates):
     """
     Summary: With no event dates, only "not in the past" is checked.
     AC1: Given an Event Coordinator is preparing a venue booking request for an
@@ -642,7 +642,7 @@ def test_request_for_event_without_dates_only_checks_future(dates):
     create_booking.assert_called_once()
 
 
-def test_booking_window_check_starting_now_is_in_past():
+def test_ac1_booking_window_check_starting_now_is_in_past():
     """
     Summary: A request starting exactly now is already in the past.
     AC1: (boundary: start = now)

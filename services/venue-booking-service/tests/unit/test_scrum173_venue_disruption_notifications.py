@@ -51,7 +51,7 @@ from app import dispatcher
 class TestNotificationDeadline:
     """SCRUM-173 MF-02 / AC3: bounded production attempt supervisor. Hermetic process-adapter seam, not real broker evidence. Whole claim/enrichment/ freeze/publish/cleanup attempt shares one budget below the owner's 60s lease. Real missing/delayed broker-confirm fault injection is separately recorded."""
 
-    def test_attempt_applies_one_deadline_to_whole_dispatch(self, mocker):
+    def test_ac3_attempt_applies_one_deadline_to_whole_dispatch(self, mocker):
         """
         Summary: One deadline covers the whole attempt, so a stuck step cannot hold the alert.
         AC3: Given a temporary system failure occurs during notification
@@ -71,7 +71,7 @@ class TestNotificationDeadline:
         assert kwargs['check'] is True
 
 
-    def test_attempt_timeout_is_not_reported_as_published(self, mocker):
+    def test_ac3_attempt_timeout_is_not_reported_as_published(self, mocker):
         """
         Summary: A timed-out attempt is a failure, never reported as sent.
         AC3: Given a temporary system failure occurs during notification
@@ -85,7 +85,7 @@ class TestNotificationDeadline:
             dispatcher.attempt(timeout=.2)
 
 
-    def test_attempt_exit_codes_distinguish_idle_from_error(self, mocker):
+    def test_ac3_attempt_exit_codes_distinguish_idle_from_error(self, mocker):
         """
         Summary: An idle worker and a failed one exit differently.
         AC3: Given a temporary system failure occurs during notification
@@ -102,7 +102,7 @@ class TestNotificationDeadline:
 
 
     @pytest.mark.parametrize('claimed,exit_code', [(False, 3), (True, 0)], ids=["nothing_claimed", "job_claimed"])
-    def test_one_shot_command_handles_exactly_one_claim(self, claimed, exit_code, monkeypatch, mocker):
+    def test_ac3_one_shot_command_handles_exactly_one_claim(self, claimed, exit_code, monkeypatch, mocker):
         """
         Summary: The one-shot command claims once and exits with the result.
         AC3: Given a temporary system failure occurs during notification
@@ -155,7 +155,7 @@ DISPATCH_JOB = {
 class TestNotificationDispatch:
     """SCRUM-173 AC1/AC2/AC3 — public dispatch-once orchestration seam. Hermetic HTTP/broker adapter doubles; actual messaging is tested separately."""
 
-    def test_retry_of_frozen_alert_skips_assignment_lookup(self):
+    def test_ac1_ac3_retry_of_frozen_alert_skips_assignment_lookup(self):
         """
         Summary: A retry of a frozen alert resends it without looking up the coordinator again.
         AC1: Given a rejection is ready for notification, then the notification
@@ -181,7 +181,7 @@ class TestNotificationDispatch:
         api.published.assert_called_once_with(DISPATCH_JOB | {"envelope": envelope})
 
 
-    def test_failed_publish_records_retry(self):
+    def test_ac3_failed_publish_records_retry(self):
         """
         Summary: A failed publish records a retry, never success.
         AC3: Given a temporary system failure occurs during notification
@@ -262,7 +262,7 @@ class TestNotificationPipeline:
             monkeypatch.setenv(key, value)
 
 
-    def test_dispatch_reads_current_coordinator_freezes_and_publishes(self, mocker):
+    def test_ac1_ac2_ac3_dispatch_reads_current_coordinator_freezes_and_publishes(self, mocker):
         """
         Summary: An alert is addressed to the current coordinator, frozen, and published with confirmation.
         AC1: Given a rejection is ready for notification, then the notification
@@ -305,7 +305,7 @@ class TestNotificationPipeline:
         ],
         ids=["wrong_event", "wrong_venue", "no_coordinator", "blank_event_name", "no_venue_name"],
     )
-    def test_dispatch_with_bad_assignment_keeps_alert_retryable(self, event, venue, mocker):
+    def test_ac1_ac3_dispatch_with_bad_assignment_keeps_alert_retryable(self, event, venue, mocker):
         """
         Summary: A missing or bad coordinator or venue detail keeps the alert waiting, not dropped.
         AC1: Given a rejection is ready for notification, then the notification
@@ -333,7 +333,7 @@ class TestNotificationPipeline:
         )
 
 
-    def test_uncertain_publish_or_retry_failure_falls_back_to_lease_recovery(self):
+    def test_ac3_uncertain_publish_or_retry_failure_falls_back_to_lease_recovery(self):
         """
         Summary: If the outcome is unknown or the retry cannot be saved, the lease expiry recovers the alert.
         AC3: Given a temporary system failure occurs during notification
@@ -355,7 +355,7 @@ class TestNotificationPipeline:
         api.published.assert_not_called()
 
 
-    def test_empty_claim_is_idle_and_closed_connection_fails(self, mocker):
+    def test_ac3_empty_claim_is_idle_and_closed_connection_fails(self, mocker):
         """
         Summary: An empty claim is idle; a closed broker connection is a failure.
         AC3: Given a temporary system failure occurs during notification
@@ -377,7 +377,7 @@ class TestNotificationPipeline:
         connection.close.assert_not_called()
 
 
-    def test_dispatcher_command_backs_off_recovers_and_exits(self, mocker):
+    def test_ac3_dispatcher_command_backs_off_recovers_and_exits(self, mocker):
         """
         Summary: The worker backs off after failures, recovers, idles and exits cleanly.
         AC3: Given a temporary system failure occurs during notification
