@@ -565,7 +565,7 @@ def test_safety_reset_to_pending_sends_no_decision_alert(boundary):
 
     # Act (When)
     response = boundary.client.post(f"/events/{EVENT}/equipment-requests/safety-reset",
-        headers={**bearer(ACTOR, "Safety Officer"), "X-Internal-Service-Token": "synthetic"}, json={"requestIds": [R1]})
+        headers={**bearer(ACTOR, "Safety Officer"), "X-Internal-Token": "synthetic"}, json={"requestIds": [R1]})
 
     # Assert (Then)
     assert response.status_code == 200

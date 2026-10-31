@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
+import { StrictMode } from 'react'
 import { VenueRequestsPage } from './VenueRequestsPage'
 import { VenueBookingError, fetchVenueRequestDetail, fetchVenueRequests, reviewVenueRequest } from '../features/venue/venueBookings'
 import type { VenueBooking, VenueRequestDetail } from '../features/venue/venueBookings'
@@ -80,8 +81,64 @@ test('filtering and refresh reload requests', async () => {
   await screen.findByText('Grand Hall')
   fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'Pending' } })
   await waitFor(() => expect(fetchVenueRequests).toHaveBeenLastCalledWith('Pending'))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh requests' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Refresh requests' }))
   await waitFor(() => expect(fetchVenueRequests).toHaveBeenCalledTimes(3))
+})
+
+test('staff can refresh a failed queue load without overlapping requests', async () => {
+  let resolveQueue!: (events: typeof event[]) => void
+  const refreshed = new Promise<typeof event[]>((resolve) => { resolveQueue = resolve })
+  vi.mocked(fetchVenueRequests)
+    .mockRejectedValueOnce(new Error('Unable to load venue requests right now.'))
+    .mockReturnValueOnce(refreshed)
+
+  show()
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load venue requests right now.')
+  const refresh = screen.getByRole('button', { name: 'Refresh requests' })
+  fireEvent.click(refresh)
+  expect(refresh).toBeDisabled()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  fireEvent.click(refresh)
+  expect(fetchVenueRequests).toHaveBeenCalledTimes(2)
+
+  await act(async () => { resolveQueue([event]) })
+  expect(await screen.findByText('Grand Hall')).toBeInTheDocument()
+  expect(refresh).toBeEnabled()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+test('a failed queue refresh remains an explicit error', async () => {
+  vi.mocked(fetchVenueRequests)
+    .mockResolvedValueOnce([event])
+    .mockRejectedValueOnce(new Error('Venue queue still unavailable.'))
+  show()
+  await screen.findByText('Grand Hall')
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh requests' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Venue queue still unavailable.')
+  expect(screen.getByRole('button', { name: 'Refresh requests' })).toBeEnabled()
+})
+
+test('StrictMode ignores the first successful load and recovers when the active load fails', async () => {
+  let resolveFirst!: (events: typeof event[]) => void
+  let rejectActive!: (error: Error) => void
+  vi.mocked(fetchVenueRequests)
+    .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve }))
+    .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectActive = reject }))
+    .mockResolvedValueOnce([event])
+  render(<StrictMode><VenueRequestsPage role="Venue Staff" user={user} /></StrictMode>)
+  const refresh = screen.getByRole('button', { name: 'Refresh requests' })
+
+  await act(async () => { resolveFirst([event]) })
+  expect(refresh).toBeDisabled()
+  expect(screen.queryByText('Grand Hall')).not.toBeInTheDocument()
+
+  await act(async () => { rejectActive(new Error('The active queue load failed.')) })
+  expect(await screen.findByRole('alert')).toHaveTextContent('The active queue load failed.')
+  expect(refresh).toBeEnabled()
+  fireEvent.click(refresh)
+  expect(await screen.findByText('Grand Hall')).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 
 test('review conflicts stay visible without hiding the request', async () => {

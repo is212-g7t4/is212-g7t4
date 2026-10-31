@@ -65,7 +65,6 @@ EVENT = "22222222-2222-4222-8222-222222222222"
 OTHER = "44444444-4444-4444-8444-444444444444"
 ROUND = "55555555-5555-4555-8555-555555555555"
 INTERNAL = {"X-Internal-Token": "internal-test-token"}
-WORKFLOW = {**INTERNAL, "X-Internal-Service-Token": "internal-test-token"}
 
 
 @pytest.fixture
@@ -90,9 +89,9 @@ def client(monkeypatch):
         ("get", f"/events/{EVENT}?organiserId={OTHER}", None, INTERNAL),
         ("get", f"/events/{EVENT}", None, INTERNAL),
         ("post", f"/events/{EVENT}/change-requests", {}, INTERNAL),
-        ("get", "/change-requests", None, WORKFLOW),
-        ("get", f"/change-requests/{EVENT}", None, WORKFLOW),
-        ("patch", f"/change-requests/{EVENT}/decision", {}, WORKFLOW),
+        ("get", "/change-requests", None, INTERNAL),
+        ("get", f"/change-requests/{EVENT}", None, INTERNAL),
+        ("patch", f"/change-requests/{EVENT}/decision", {}, INTERNAL),
         ("patch", f"/events/{EVENT}", {"assignedCoordinatorId": OTHER}, INTERNAL),
         ("patch", f"/events/{EVENT}/progress", {}, INTERNAL),
         ("patch", f"/events/{EVENT}/details", {}, INTERNAL),
@@ -100,13 +99,13 @@ def client(monkeypatch):
             "patch",
             f"/events/{EVENT}/safety-status",
             {"status": "Pending Safety Check", "safetyCheckId": ROUND, "roundNumber": 1},
-            WORKFLOW,
+            INTERNAL,
         ),
         (
             "patch",
             f"/events/{EVENT}/safety-status",
             {"status": "Confirmed", "safetyCheckId": ROUND, "roundNumber": 1},
-            WORKFLOW,
+            INTERNAL,
         ),
         ("patch", f"/events/{EVENT}/approve", {}, INTERNAL),
         ("patch", f"/events/{EVENT}/clarification-request", {}, INTERNAL),
@@ -115,7 +114,7 @@ def client(monkeypatch):
         ("patch", f"/events/{EVENT}/amendment-response", {}, INTERNAL),
         ("patch", f"/events/{EVENT}/reject", {}, INTERNAL),
     ],
-    ids=["post_events_drafts_internal", "get_events_drafts_none_internal", "patch_f_events_drafts_event_internal", "post_f_events_drafts_event_submit_internal", "delete_f_events_drafts_event_none_internal", "get_events_submitted_none_internal", "get_f_events_organiserid_other_none_internal", "get_events_none_internal", "get_f_events_event_organiserid_other_none_intern", "get_f_events_event_none_internal", "post_f_events_event_change_requests_internal", "get_change_requests_none_workflow", "get_f_change_requests_event_none_workflow", "patch_f_change_requests_event_decision_workflow", "patch_f_events_event_assignedcoordinatorid_other", "patch_f_events_event_progress_internal", "patch_f_events_event_details_internal", "patch_f_events_event_safety_status_status_pendin", "patch_f_events_event_safety_status_status_confir", "patch_f_events_event_approve_internal", "patch_f_events_event_clarification_request_inter", "patch_f_events_event_clarification_response_inte", "patch_f_events_event_amendment_request_internal", "patch_f_events_event_amendment_response_internal", "patch_f_events_event_reject_internal"],
+    ids=["post_events_drafts_internal", "get_events_drafts_none_internal", "patch_f_events_drafts_event_internal", "post_f_events_drafts_event_submit_internal", "delete_f_events_drafts_event_none_internal", "get_events_submitted_none_internal", "get_f_events_organiserid_other_none_internal", "get_events_none_internal", "get_f_events_event_organiserid_other_none_intern", "get_f_events_event_none_internal", "post_f_events_event_change_requests_internal", "get_change_requests_none_internal", "get_f_change_requests_event_none_internal", "patch_f_change_requests_event_decision_internal", "patch_f_events_event_assignedcoordinatorid_other", "patch_f_events_event_progress_internal", "patch_f_events_event_details_internal", "patch_f_events_event_safety_status_status_pendin", "patch_f_events_event_safety_status_status_confir", "patch_f_events_event_approve_internal", "patch_f_events_event_clarification_request_inter", "patch_f_events_event_clarification_response_inte", "patch_f_events_event_amendment_request_internal", "patch_f_events_event_amendment_response_internal", "patch_f_events_event_reject_internal"],
 )
 def test_internal_token_when_action_needs_a_user_returns_401(client, method, path, body, headers):
     """
@@ -123,7 +122,7 @@ def test_internal_token_when_action_needs_a_user_returns_401(client, method, pat
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key from tests/conftest.py; unused because only an internal token is sent)
     """
     # Arrange (Given): client, method, path, body, headers, from fixtures
 
@@ -141,7 +140,7 @@ def test_save_draft_owner_comes_from_token_not_body(client, monkeypatch):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: Stub (save_draft records the owner it was given)
+    Double: Stub (test signing key), Mock (app.save_draft records the owner it was given; asserted to be the token's user)
     """
     # Arrange (Given)
     calls = []
@@ -163,7 +162,7 @@ def test_view_all_uses_token_role_not_query(client):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; the token carries the Event Coordinator role)
     """
     # Arrange (Given): client, from fixtures
 
@@ -181,7 +180,7 @@ def test_submit_with_internal_token_records_no_organiser(client, monkeypatch):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: Stub (submit_event records the owner it was given)
+    Double: Mock (app.submit_event records the details it was given; asserted to carry no organiserId)
     """
     # Arrange (Given)
     submitted = []
@@ -210,7 +209,7 @@ def test_authenticate_without_token_returns_401_sign_in_message(client):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; not reached because no token is sent)
     """
     # Arrange (Given): client, from fixtures
 
@@ -228,7 +227,7 @@ def test_authenticate_with_non_bearer_scheme_returns_401(client):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; not reached because the scheme is Basic)
     """
     # Arrange (Given): client, from fixtures
 
@@ -251,7 +250,7 @@ def test_authenticate_with_invalid_token_returns_401_session_expired(client, hea
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; the forged, expired, wrong-audience and malformed tokens are each checked against it)
     """
     # Arrange (Given): client, headers, from fixtures
 
@@ -269,7 +268,7 @@ def test_authenticate_with_token_missing_subject_returns_401(client):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; the token is validly signed but has no subject)
     """
     # Arrange (Given)
     token = jwt.encode({"aud": "authenticated", "exp": int(time.time()) + 60}, TEST_SIGNING_KEY, algorithm="ES256")
@@ -284,7 +283,7 @@ def test_authenticate_with_dev_identity_headers_returns_401(client):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; not reached because no Authorization header is sent)
     """
     # Arrange (Given)
     headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
@@ -299,7 +298,7 @@ def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client)
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; the malformed bearer token is checked against it despite the internal token)
     """
     # Arrange (Given)
     headers = {"X-Internal-Token": "internal-test-token", "Authorization": "Bearer not-a-jwt"}
@@ -314,7 +313,7 @@ def test_authenticate_with_wrong_internal_token_returns_401(client):
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; not reached because no Authorization header is sent)
     """
     # Arrange (Given): client, from fixtures
 
@@ -328,7 +327,7 @@ def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch)
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (test signing key; not reached because SUPABASE_URL is removed first)
     """
     # Arrange (Given)
     monkeypatch.delenv("SUPABASE_URL")
@@ -383,7 +382,7 @@ def test_authenticate_with_internal_token_allows_background_worker(client):
     Summary: A background worker presenting the internal token gets past sign-in checking.
     Supporting design check: service-to-service calls authenticate with
         X-Internal-Token
-    Double: None
+    Double: Stub (app.list_unassigned returns [] via the client fixture; the signing key is unused without a user token)
     """
     response = client.get("/events/unassigned", headers={"X-Internal-Token": "internal-test-token"})
 
@@ -394,7 +393,7 @@ def test_health_and_preflight_without_token_are_answered(client):
     """
     Summary: The health check and browser preflights are answered without signing in.
     Supporting design check: /health and OPTIONS answer without a token
-    Double: None
+    Double: None (these paths skip authentication, so nothing test-specific is stubbed)
     """
     assert client.get("/health").status_code == 200
     assert client.options("/events/unassigned").status_code == 200

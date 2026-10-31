@@ -180,7 +180,7 @@ def test_safety_reset_returns_selected_bookings_to_review(setup):
 
     # Act (When)
     response = client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]})
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]})
 
     # Assert (Then)
     assert response.status_code == 200
@@ -205,7 +205,7 @@ def test_safety_reset_with_other_events_booking_returns_404(setup):
 
     # Act + Assert (When / Then)
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]}).status_code == 404
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]}).status_code == 404
     assert not any('UPDATE public."VenueBooking"' in call.args[0] for call in cursor.execute.call_args_list)
 
 
@@ -245,7 +245,7 @@ def test_safety_reset_with_invalid_booking_ids_returns_400(setup, payload):
 
     # Act + Assert (When / Then)
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json=payload).status_code == 400
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json=payload).status_code == 400
     cursor.execute.assert_not_called()
 
 
@@ -800,7 +800,7 @@ def test_safety_reset_when_database_url_missing_returns_503(setup):
     client, _ = setup
     client.application.config.update(INTERNAL_SERVICE_TOKEN="test-token", DATABASE_URL=None)
     assert client.post(f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]}).status_code == 503
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, "Safety Officer")}, json={"bookingIds": [BOOKING_ID]}).status_code == 503
 
 
 def test_edit_or_cancel_when_database_url_missing_returns_503():

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { deleteFixtureEvents } from '../../../helpers/cleanup'
 import { openAs, users } from '../../../helpers/stack'
 import { seedJ5b, TABLE_STOCK } from './helpers/seed'
@@ -28,19 +29,21 @@ import { seedJ5b, TABLE_STOCK } from './helpers/seed'
 test.describe.configure({ mode: 'serial' })
 
 test.describe('J5b Prevent equipment over-allocation', () => {
-  const runId = Date.now().toString(36)
+  const runId = randomUUID()
   const eventA = `J5b Event A ${runId}`
   const eventB = `J5b Event B ${runId}`
+  const scope = { eventNames: [eventA, eventB], venueNames: [] }
 
   test.beforeAll(async ({ playwright }) => {
-    // Clear leftovers from interrupted runs so they cannot slow the page or hold stock.
-    await deleteFixtureEvents()
     const api = await playwright.request.newContext()
-    await seedJ5b(api, runId)
-    await api.dispose()
+    try {
+      await seedJ5b(api, runId)
+    } finally {
+      await api.dispose()
+    }
   })
 
-  test.afterAll(deleteFixtureEvents)
+  test.afterAll(async () => { await deleteFixtureEvents(scope) })
 
   test('over-allocated request is blocked, rejected, then revised and approved', async ({ browser }) => {
     const support = await openAs(browser, users.techSupport)

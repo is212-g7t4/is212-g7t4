@@ -1,4 +1,9 @@
 import { authFetch } from '../auth/session'
+
+export function canListEventRegistrations(status: string): boolean {
+  return status === 'Approved' || status === 'Confirmed'
+}
+
 export interface Registration {
   id: string
   attendeeName: string

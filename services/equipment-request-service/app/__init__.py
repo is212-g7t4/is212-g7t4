@@ -195,7 +195,7 @@ def create_app(config=None):
         configured_token = app.config["INTERNAL_SERVICE_TOKEN"]
         if not configured_token:
             return jsonify(message="Internal service authentication is not configured."), 503
-        supplied_token = request.headers.get("X-Internal-Service-Token", "")
+        supplied_token = request.headers.get("X-Internal-Token", "")
         if not hmac.compare_digest(configured_token, supplied_token):
             return jsonify(message="Internal service credentials are required."), 403
         event_id = _uuid_or_none(event_id)

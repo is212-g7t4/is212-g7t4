@@ -150,7 +150,7 @@ def test_failed_and_non_decision_operations_create_no_new_alerts(owner, case, ex
     else:
         # As Safety Check Service sends it after a Safety Officer asks for changes (SCRUM-10): the
         # officer's forwarded token plus the service token.
-        response = owner.client.post(f"/events/{owner.event}/equipment-requests/safety-reset", headers={**owner.identity("Safety Officer", trusted=False), "X-Internal-Service-Token": "disposable-internal-token"}, json={"requestIds": identifiers})
+        response = owner.client.post(f"/events/{owner.event}/equipment-requests/safety-reset", headers={**owner.identity("Safety Officer", trusted=False), "X-Internal-Token": "disposable-internal-token"}, json={"requestIds": identifiers})
     assert response.status_code == expected, response.json
     after = owner.db.snapshot()
     for table in ("EquipmentNotificationOutbox",):

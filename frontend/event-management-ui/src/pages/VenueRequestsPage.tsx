@@ -85,7 +85,7 @@ export function VenueRequestsPage({ role, user, resolveUserName }: {
             {Object.entries(FILTERS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
-        <button className="button small" onClick={() => { setLoading(true); setRefresh((value) => value + 1) }}><RefreshIcon size={14} /> Refresh requests</button>
+        <button className="button small" disabled={loading} onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}><RefreshIcon size={14} /> Refresh requests</button>
       </div>
       {error && <p className="field-error" role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}

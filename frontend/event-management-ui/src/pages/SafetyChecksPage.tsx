@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Role } from '../types'
-import { ArrowRightIcon } from '../components/Icon'
+import { ArrowRightIcon, RefreshIcon } from '../components/Icon'
 import { RoleWarning } from '../components/FormControls'
 import { EventCardSkeletonList } from '../components/Loading'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
@@ -29,6 +29,7 @@ export function SafetyChecksPage({ role, safetyOfficerId, onViewDetails }: Props
   const [events, setEvents] = useState<SafetyQueueItem[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [revision, setRevision] = useState(0)
   const officerId = safetyOfficerId || import.meta.env.VITE_CURRENT_COORDINATOR_ID || ''
   // The sidebar only offers this page to a Safety Officer, but the route is
   // reachable directly, so the check belongs here too. The service checks
@@ -39,17 +40,23 @@ export function SafetyChecksPage({ role, safetyOfficerId, onViewDetails }: Props
     if (!allowed || !officerId) return
     let active = true
     fetchSafetyQueue(officerId).then((queue) => {
-      if (active) setEvents(queue)
+      if (active) { setEvents(queue); setError('') }
     }).catch((cause: Error) => {
       if (active) setError(cause.message)
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [allowed, officerId])
+  }, [allowed, officerId, revision])
 
   if (!allowed) return <RoleWarning>{SAFETY_CHECKS_ACCESS_NOTICE}</RoleWarning>
 
   return <div className="page-stack">
-    <section className="intro"><h1>Safety checks</h1><p className="muted">Events waiting for an Operational Safety Check decision.</p></section>
+    <section className="intro">
+      <h1>Safety checks</h1>
+      <p className="muted">Events waiting for an Operational Safety Check decision.</p>
+      <button className="button small" disabled={loading} onClick={() => { setLoading(true); setError(''); setRevision((value) => value + 1) }}>
+        <RefreshIcon size={13} /> Refresh safety checks
+      </button>
+    </section>
     {loading ? <EventCardSkeletonList /> : error ? <p className="field-error" role="alert">{error}</p> :
       events.length === 0 ? <p>No events are waiting for a safety check.</p> :
       events.map((event) => {

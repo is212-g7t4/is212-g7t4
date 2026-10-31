@@ -70,7 +70,7 @@ OFFICER_ID = "33333333-3333-4333-8333-333333333333"
 SAFETY_CHECK_ID = "55555555-5555-4555-8555-555555555555"
 OTHER_SAFETY_CHECK_ID = "66666666-6666-4666-8666-666666666666"
 INTERNAL_TOKEN = "test-internal-token"
-INTERNAL_HEADERS = {"X-Internal-Service-Token": INTERNAL_TOKEN}
+INTERNAL_HEADERS = {"X-Internal-Token": INTERNAL_TOKEN}
 
 # Every status an event can hold that isn't 'Pending Safety Check'; none of
 # them may move to 'Safety Changes Requested' or 'Cancelled' through this

@@ -335,7 +335,7 @@ OFFICER_ID = "66666666-6666-4666-8666-666666666666"
 def move(client, status, role, **extra):
     return client.patch(
         f"/events/{EVENT_ID}/safety-status", json={"status": status, **SAFETY_BODY, **extra},
-        headers={**bearer(OFFICER_ID, role), "X-Internal-Service-Token": SERVICE_TOKEN},
+        headers={**bearer(OFFICER_ID, role), "X-Internal-Token": SERVICE_TOKEN},
     )
 
 
@@ -421,7 +421,7 @@ def test_each_permitted_role_gets_past_the_safety_status_gate(setup, role):
     # Act (When)
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status", json={},
-        headers={**bearer(OFFICER_ID, role), "X-Internal-Service-Token": SERVICE_TOKEN},
+        headers={**bearer(OFFICER_ID, role), "X-Internal-Token": SERVICE_TOKEN},
     )
 
     # Assert (Then)

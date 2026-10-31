@@ -132,3 +132,49 @@ def owner(postgres, monkeypatch):
                 cur.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
                 cur.execute("SELECT datname FROM pg_database WHERE datname=%s",[name])
                 assert cur.fetchall() == []
+
+
+@pytest.fixture
+def safety_reset_owner(postgres, monkeypatch):
+    """Return a real owner API in a fresh exact-owned DB with all migrations applied."""
+    name = "safety_reset_" + uuid4().hex
+    db = Database(postgres.port, name)
+    real_connect = psycopg2.connect
+
+    def checked_connect(dsn=None, **kwargs):
+        """Accept only the fixture's loopback port and admin or generated database."""
+        values = {**parse_dsn(dsn or ""), **kwargs}
+        assert values.get("host") == "127.0.0.1"
+        assert int(values.get("port", 0)) == postgres.port
+        assert values.get("dbname") in ("postgres", name)
+        assert not any(key in values for key in ("hostaddr", "service", "servicefile"))
+        return real_connect(dsn, **kwargs)
+
+    def forbidden(*args, **kwargs):
+        """Refuse outbound Python network calls; only guarded native libpq is allowed."""
+        pytest.fail("safety reset integration permits native owned PostgreSQL only")
+
+    monkeypatch.setattr(psycopg2, "connect", checked_connect)
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("DATABASE_URL", db.dsn)
+    with closing(psycopg2.connect(postgres.dsn)) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{name}"')
+    try:
+        migrations = Path(__file__).resolve().parents[4] / "database/supabase/migrations"
+        with closing(psycopg2.connect(db.dsn)) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                for migration in sorted(migrations.glob("*.sql")):
+                    cur.execute(migration.read_text())
+        yield OwnerAPI(db)
+    finally:
+        with closing(psycopg2.connect(postgres.dsn)) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+                cur.execute("SELECT datname FROM pg_database WHERE datname=%s", [name])
+                assert cur.fetchall() == []
