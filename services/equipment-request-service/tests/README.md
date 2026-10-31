@@ -79,7 +79,9 @@ starts one UUID-labelled loopback/tmpfs PostgreSQL container; each case owns a
 fresh database. No other service, broker, consumer, dispatcher, HTTP proxy or
 multi-owner loader is imported/started. Native libpq routing is allowlisted and
 Python sockets denied; inherited PG routing/DSNs are cleared and dotenv disabled.
-Those two original modules contained 66 cases. The current reorganisation collects 91 owner integration cases (including the moved allocation regressions); the normal unit run deselects all 91, with no Docker calls.
+Those two original modules contained 66 cases. The reorganisation reached 91;
+integrated PR115 adds 9, for 100 owner integration cases. The normal unit run
+deselects all 100, with no Docker calls.
 
 From this directory, only when deliberately opting in:
 
@@ -110,7 +112,7 @@ not confirmed; revised headers say so explicitly.
 - `unit/test_equipment_availability.py`: SCRUM-34, 2 unit cases.
 - `unit/test_equipment_request_review.py`: SCRUM-33, 40 unit cases.
 - `unit/test_equipment_safety_reset.py`: SCRUM-164, 14 existing unit cases,
-  **not** the absent PR115 Approved-only preservation regressions.
+  separate from the integrated PR115 real-database preservation regressions.
 - Review authentication is in `unit/test_authentication.py`; reset modification
   authority is in `unit/test_safety_reset_modification_access.py`.
 - `integration/test_equipment_reservation.py`: SCRUM-35, 19 collected cases.
@@ -119,16 +121,17 @@ not confirmed; revised headers say so explicitly.
   4 collected cases. Outbox rollback stays under SCRUM-48 in the existing
   `integration/test_scrum48_transactions.py` (now 21 collected cases).
 
-Current whole-owner unit result: **233 passed**, 91 integration cases
-deselected; **563/563 executable statements, 206/206 branch outcomes**,
-unchanged 100% gate. Focused reverse node order: **115 passed**.
-Integration collection succeeded, but database execution/reverse execution is
-blocked: unrelated `backend-ngrok-1` is auto-restarting and would invalidate
-the fixture's unchanged pre-existing-container guard. No shared container was
-stopped or changed. The pinned PostgreSQL image is available.
+Post-main verification at `e7ff578`: **233 unit tests passed**, 100 integrations
+deselected, with the unchanged **100% line/branch** gate. The earlier focused
+reverse unit-node order passed **115** cases. **100 owner integrations passed**,
+including the integrated PR115 `integration/test_equipment_safety_reset.py`
+(9 cases): mixed/ineligible-only selections, rejected/pending metadata, replay,
+invalid membership and lock-waiting rejection. All six pre-existing containers
+were unchanged; the owned disposable container was verified absent, with no
+cleanup errors. The former restarting-container preflight stop is historical,
+not a current blocker. Reverse PostgreSQL order was not verified.
 
-PR115 is merged in cached `origin/main`, but this local HEAD predates it;
-the Approved-only reset predicate and `integration/test_equipment_safety_reset.py`
-are absent here. This is an older checkout, not a lost merged fix. See the
-[cached ancestry evidence](../../../docs/testing/equipment-regressions.md#blockers-and-evidence-limits).
-No fetch, integration or production change was made by this documentation update.
+Most owner integration cases use selected baseline tables and the owner outbox
+migration; PR115's `safety_reset_owner` fixture uses the full unmodified migration
+chain. Its incoming narrow-bugfix header remains, not a claimed complete Jira
+story/AC rewrite. See the [current evidence and limits](../../../docs/testing/equipment-regressions.md#current-post-main-verification-and-evidence-limits).
