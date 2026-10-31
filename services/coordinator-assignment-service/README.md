@@ -65,13 +65,6 @@ header to `user-service` and `event-service`.
   checks authorise against the event's current coordinator, so they move to
   the new coordinator with no further calls.
 
-## Known limitation
-
-No Forum Service call yet for logging the assignment/reassignment reason —
-flagged as an open architecture question in `AGENTS.md`/`docs/microservices-catalog.md`
-(whether this composite needs one at all, since most assignments won't have
-a reason worth logging).
-
 ## Tests
 
 Run the hermetic unit tier (the default):

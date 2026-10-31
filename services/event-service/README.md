@@ -113,8 +113,7 @@ endpoints require non-blank text of at most 1000 characters.
 Every round is append-only in the event metadata's `clarificationHistory`.
 It records the question, requesting coordinator and UTC timestamp, then the
 response, responding organiser and UTC timestamp. Only one round can be open
-at a time; earlier answered rounds remain visible to both parties. This is a
-temporary Event-owned implementation until the planned Forum Service exists.
+at a time; earlier answered rounds remain visible to both parties. Event Service owns this history.
 
 ## Event amendment (SCRUM-16)
 

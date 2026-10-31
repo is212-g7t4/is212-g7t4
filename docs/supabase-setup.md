@@ -1,7 +1,10 @@
 # Supabase setup — for team members
 
-How to connect your service to the shared Supabase database and start
-reading/writing the 12 tables that exist. The full column-by-column structure is in [db-structure.md](db-structure.md).
+How to configure a service for the shared Supabase database. The baseline
+column reference is [db-structure.md](db-structure.md); later migrations in
+`database/supabase/migrations/` add features such as notification outboxes.
+Compose startup does not apply migrations or create accounts. Check the deployment
+with the team before applying missing migrations; never rerun shared setup blindly.
 
 ## 1. Get the DB password
 
@@ -18,21 +21,24 @@ if you've been added to the Supabase org yourself:
 
 ## 2. Set up your `.env`
 
-Copy the root `.env.example` into your service directory as `.env`:
+For each existing service, start from its own `.env.example`; create `.env` only
+if it is missing, then fill in the team-approved values. From the repository root:
 
 ```
-cp .env.example services/<your-service>/.env
+service=equipment-request-service  # choose the service you need
+[ -f "services/$service/.env" ] || cp "services/$service/.env.example" "services/$service/.env"
 ```
 
-Then edit `services/<your-service>/.env` and replace `<DB-PASSWORD>` with
-the real password from step 1. `DATABASE_URL` is already set to the
-**session pooler** connection string — use it as-is, don't switch to the
-direct connection (`db.<ref>.supabase.co`) host, since that requires IPv6
-and won't connect on most networks.
+Set `service` to the real directory name before using the command.
+Configure its server-side `DATABASE_URL` using the team-approved session-pooler
+connection string; examples may contain placeholders, not working credentials.
+For Compose, configure the root `.env` as well: it supplies shared settings such
+as `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `INTERNAL_SERVICE_TOKEN`. Preserve
+service-specific database values in the `env_file` paths declared by Compose.
 
-`SUPABASE_URL` and `SUPABASE_ANON_KEY` are already filled in — those are
-safe to be public (the anon/publishable key is meant for client-side use),
-only the DB password is a real secret.
+Use the approved project URL and anon/publishable key. Database credentials,
+service-role keys and the shared internal-service token are server-side secrets;
+never put them in frontend `VITE_*` settings.
 
 **Never commit `.env`** — it's already covered by `.gitignore`.
 

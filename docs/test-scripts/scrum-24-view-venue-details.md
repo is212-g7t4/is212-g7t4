@@ -1,6 +1,10 @@
 # SCRUM-24 View Venue Details — manual test script
 
-This script predates the frontend test setup (Vitest and Playwright e2e now
+> Historical browser evidence: the mocked frontend browser suite was retired.
+> Referenced browser specs are archived, not maintained runnable checks;
+> unit/component tests and manual real-stack journeys remain separate tiers.
+
+This script predates the then-current frontend test setup (Vitest and Playwright e2e then
 exist), so the UI acceptance criteria for this story are verified by hand
 against `npm run dev`. Fill in the Result and Notes
 columns, then attach this file and the screenshots to SCRUM-24.
