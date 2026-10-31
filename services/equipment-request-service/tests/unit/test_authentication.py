@@ -34,6 +34,8 @@ Doubled
   request, so a request that passes sign-in gets a 404.
 - jwt.PyJWKClient: Mock - verifies the JWKS URL built from SUPABASE_URL.
 
+- Review-access regressions also control the database/HTTP boundary with stubs and the service world with a Fake; refusal and caller-token propagation are checked.
+
 Not proven
 ----------
 - That tokens issued by the real Supabase project verify against its live JWKS
@@ -308,3 +310,57 @@ def test_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch):
     assert created == ["https://project.supabase.test/auth/v1/.well-known/jwks.json"]
     jwks.get_signing_key_from_jwt.assert_called_once_with("token")
     assert key is jwks.get_signing_key_from_jwt.return_value.key
+
+
+import psycopg2
+
+import pytest
+
+from tests.unit.factories import EVENT_ID, MIC, REQUEST_ID, TABLE, USER_ID, bearer, db_row, item, approval_context
+
+TS = bearer(USER_ID, "Technical Support")
+
+COORDINATOR = bearer(USER_ID, "Event Coordinator")
+
+SAFETY_OFFICER = bearer(USER_ID, "Safety Officer")
+
+
+
+def test_get_request_when_missing_malformed_or_anonymous_is_refused(setup):
+    """Summary: Opening a missing or malformed request, or one without signing in, is refused.
+    AC1: Unauthenticated callers cannot access protected equipment requests.
+    AC2: Authenticated access is evaluated with the caller identity and role.
+    Double: Stub (JWKS key lookup and downstream/database answers); Mock (refused database calls checked)
+    """
+    # Arrange (Given)
+    # Arrange (Given): test data and external adapters from fixtures.
+    client, cursor, _ = setup
+    cursor.fetchone.return_value = None
+
+    # Act + Assert (When / Then)
+    # Act + Assert (When / Then): exercise the request/calculation and inspect outcomes.
+    assert client.get(f"/equipment-requests/{REQUEST_ID}", headers=TS).status_code == 404
+    assert client.get("/equipment-requests/not-a-uuid", headers=TS).status_code == 400
+    assert client.get(f"/equipment-requests/{REQUEST_ID}", headers={}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "headers,code",
+    [({}, 401), ({"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}, 401), (bearer(USER_ID, "Attendee"), 403)],
+    ids=["no_token", "dev_headers", "attendee"],
+)
+def test_list_requests_without_reader_role_is_refused_before_database(setup, headers, code):
+    """Summary: Requests are not shown to anonymous callers, retired developer headers or attendees.
+    AC1: Unauthenticated callers cannot access protected equipment requests.
+    AC2: Authenticated access is evaluated with the caller identity and role.
+    Double: Stub (JWKS key lookup and downstream/database answers); Mock (refused database calls checked)
+    """
+    # Arrange (Given)
+    # Review AC1/AC3 (access): require a signed-in user (SCRUM-8) with a permitted reader role.
+    # Arrange (Given): test data and external adapters from fixtures.
+    client, _, connect = setup
+
+    # Act + Assert (When / Then)
+    # Act + Assert (When / Then): exercise the request/calculation and inspect outcomes.
+    assert client.get("/equipment-requests", headers=headers).status_code == code
+    connect.assert_not_called()

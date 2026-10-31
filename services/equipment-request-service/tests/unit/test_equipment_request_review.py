@@ -1,5 +1,4 @@
-"""
-SCRUM-33: Equipment Request Review
+"""SCRUM-33: Equipment Request Review
 
 User Story
 ----------
@@ -16,62 +15,38 @@ AC2: System allows the Technical Support Staff to change the request status
 AC3: Ensure the newly updated status is visible to the assigned Event
      Coordinator.
 
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
-
 Real
 ----
-- GET /equipment-requests (status, eventId and eventIds filters), GET
-  /equipment-requests/<id>, PATCH /equipment-requests/<id> and PATCH
-  /events/<id>/equipment-requests: filter and id validation, the reader and
-  Technical Support role checks, the Pending-only decision update with
-  reviewer, rejection-reason rules, and the 404/409 split run for real.
-- Assertions are on the status, the returned requests and the SQL and values
-  sent to the database.
+- Real review routes, request/response validation and model SQL construction; decision/status visibility is observed.
 
 Doubled
 -------
-- psycopg2.connect: Stub / Mock (tests/unit/conftest.py `setup`) - the cursor
-  returns canned EquipmentRequest rows (or none); SQL is inspected; connect is
-  asserted not called when a request is refused early.
-- Equipment Reservation Service: Fake (CompositeClient in conftest) - adds the
-  internal token and an empty notification context.
+- Stub (database cursor rows), Mock (connection/SQL calls inspected); Fake (trusted composite caller). JWKS key lookup is a Stub.
 
 Not proven
 ----------
-- That equipment type names are shown with each request (AC1): this service
-  returns equipment ids; names are joined in by Equipment Reservation Service
-  (-> equipment-reservation-service unit tests).
-- That the Pending-only update holds under concurrent reviews in real
-  PostgreSQL (-> tests/integration/, throwaway postgres:17.6).
-- That the assigned coordinator sees the new status on the event page (AC3, UI
-  half) (-> frontend EquipmentRequestsPage.test.tsx).
+- Actual database persistence/rollback is not proved by cursor doubles.
+- AC3 browser visibility, equipment-type rendering, and notification delivery are NOT COVERED ANYWHERE in this module.
+- Supporting review validation/transport error regressions retain their original assertions; precise reason/id limits and API status contracts need Jira clarification, not invented ACs.
 """
 
 import psycopg2
+
 import pytest
 
-from tests.unit.factories import EVENT_ID, MIC, REQUEST_ID, TABLE, USER_ID, bearer, db_row, item
+from tests.unit.factories import EVENT_ID, MIC, REQUEST_ID, TABLE, USER_ID, bearer, db_row, item, approval_context
 
 TS = bearer(USER_ID, "Technical Support")
+
 COORDINATOR = bearer(USER_ID, "Event Coordinator")
+
 SAFETY_OFFICER = bearer(USER_ID, "Safety Officer")
+
+
+import pytest
+
+from tests.unit.factories import EVENT_ID, MIC, REQUEST_ID, USER_ID, bearer, db_row, approval_context
+
 
 
 def test_list_requests_returns_equipment_quantity_and_requirements(setup):
@@ -102,6 +77,7 @@ def test_list_requests_returns_equipment_quantity_and_requirements(setup):
     assert "WHERE" not in cursor.execute.call_args[0][0]
 
 
+
 def test_list_requests_with_status_and_event_filters_queries_only_those(setup):
     """
     Summary: Requests can be narrowed to one event and one status.
@@ -116,6 +92,7 @@ def test_list_requests_with_status_and_event_filters_queries_only_those(setup):
     assert response.json == {"requests": []}
     sql, params = cursor.execute.call_args[0]
     assert "status = %s AND event_id = %s" in sql and params == ["Pending", EVENT_ID]
+
 
 
 def test_list_requests_with_several_event_ids_returns_their_requests(setup):
@@ -135,6 +112,7 @@ def test_list_requests_with_several_event_ids_returns_their_requests(setup):
     assert "event_id = ANY(%s::uuid[])" in sql and params == ["Approved", [EVENT_ID, other]]
 
 
+
 def test_list_requests_with_empty_event_ids_returns_nothing(setup):
     """
     Summary: An empty list of events matches no requests rather than every request.
@@ -146,6 +124,7 @@ def test_list_requests_with_empty_event_ids_returns_nothing(setup):
 
     assert client.get("/equipment-requests?eventIds=", headers=TS).json == {"requests": []}
     assert cursor.execute.call_args[0][1] == [[]]
+
 
 
 @pytest.mark.parametrize("value", ["not-a-uuid", f"{EVENT_ID},bad"], ids=["not_a_uuid", "one_bad_in_list"])
@@ -162,6 +141,7 @@ def test_list_requests_with_malformed_event_ids_returns_400_before_database(setu
     connect.assert_not_called()
 
 
+
 def test_list_requests_with_more_than_500_event_ids_returns_400(setup):
     """
     Summary: A lookup for too many events at once is refused.
@@ -171,6 +151,7 @@ def test_list_requests_with_more_than_500_event_ids_returns_400(setup):
     """
     client, _, _ = setup
     assert client.get("/equipment-requests?eventIds=" + ",".join([EVENT_ID] * 501), headers=TS).status_code == 400
+
 
 
 def test_get_request_when_found_returns_it_to_coordinator(setup):
@@ -187,25 +168,6 @@ def test_get_request_when_found_returns_it_to_coordinator(setup):
 
     assert response.status_code == 200 and response.json["request"]["id"] == REQUEST_ID
 
-
-def test_get_request_when_missing_malformed_or_anonymous_is_refused(setup):
-    """
-    Summary: Opening a missing or malformed request, or one without signing in, is refused.
-    AC1: Technical Support Staff can view the requested equipment, equipment
-        type, quantity, and technical requirements for a given event.
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    Double: Stub (cursor finds nothing)
-    """
-    # Arrange (Given)
-    client, cursor, _ = setup
-    cursor.fetchone.return_value = None
-
-    # Act + Assert (When / Then)
-    assert client.get(f"/equipment-requests/{REQUEST_ID}", headers=TS).status_code == 404
-    assert client.get("/equipment-requests/not-a-uuid", headers=TS).status_code == 400
-    assert client.get(f"/equipment-requests/{REQUEST_ID}", headers={}).status_code == 401
 
 
 def test_review_when_caller_is_coordinator_can_read_decision_but_not_decide(setup):
@@ -225,6 +187,7 @@ def test_review_when_caller_is_coordinator_can_read_decision_but_not_decide(setu
     assert client.patch(f"/equipment-requests/{REQUEST_ID}", headers=COORDINATOR, json={"status": "Approved"}).status_code == 403
 
 
+
 def test_review_when_caller_is_safety_officer_can_read_but_not_decide(setup):
     """
     Summary: A Safety Officer can read an event's equipment requests but cannot decide them.
@@ -236,6 +199,7 @@ def test_review_when_caller_is_safety_officer_can_read_but_not_decide(setup):
 
     assert client.get("/equipment-requests", headers=SAFETY_OFFICER).json["requests"][0]["status"] == "Approved"
     assert client.patch(f"/equipment-requests/{REQUEST_ID}", headers=SAFETY_OFFICER, json={"status": "Approved"}).status_code == 403
+
 
 
 @pytest.mark.parametrize("query", ["?status=Broken", "?eventId=not-a-uuid"], ids=["unknown_status", "bad_event_id"])
@@ -252,31 +216,6 @@ def test_list_requests_with_unknown_status_or_bad_event_returns_400_before_datab
     connect.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "headers,code",
-    [({}, 401), ({"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Technical Support"}, 401), (bearer(USER_ID, "Attendee"), 403)],
-    ids=["no_token", "dev_headers", "attendee"],
-)
-def test_list_requests_without_reader_role_is_refused_before_database(setup, headers, code):
-    """
-    Summary: Requests are not shown to anonymous callers, retired developer headers or attendees.
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    SCRUM-8 AC2: Given a system user successfully authenticates, when they
-        access protected information or functionality, then their access is
-        evaluated according to their role and relationship to the relevant
-        event.
-    Double: Mock (connect not called)
-    """
-    # Arrange (Given)
-    # Review AC1/AC3 (access): require a signed-in user (SCRUM-8) with a permitted reader role.
-    client, _, connect = setup
-
-    # Act + Assert (When / Then)
-    assert client.get("/equipment-requests", headers=headers).status_code == code
-    connect.assert_not_called()
-
 
 @pytest.mark.parametrize("decision", ["Approved", "Rejected"], ids=["approve", "reject"])
 def test_review_when_request_pending_sets_approved_or_rejected(setup, decision):
@@ -290,6 +229,8 @@ def test_review_when_request_pending_sets_approved_or_rejected(setup, decision):
     client, cursor, _ = setup
     reason = "Equipment needs servicing." if decision == "Rejected" else None
     cursor.fetchone.return_value = db_row(status=decision, reviewed_by=USER_ID, rejection_reason=reason)
+    if decision == "Approved":
+        cursor.fetchall.side_effect = [[db_row()], [], [cursor.fetchone.return_value]]
 
     response = client.patch(f"/equipment-requests/{REQUEST_ID}", headers=TS, json={"status": decision, "rejectionReason": reason})
 
@@ -298,8 +239,13 @@ def test_review_when_request_pending_sets_approved_or_rejected(setup, decision):
     assert response.json["request"]["reviewedBy"] == USER_ID
     assert response.json["request"]["rejectionReason"] == reason
     sql, params = cursor.execute.call_args[0]
-    assert "rejection_reason = %s" in sql
-    assert "status = 'Pending'" in sql and params == [decision, USER_ID, reason, REQUEST_ID]
+    assert "status = 'Pending'" in sql
+    if decision == "Approved":
+        assert params == [USER_ID, [REQUEST_ID]]
+    else:
+        assert "rejection_reason = %s" in sql
+        assert params == [decision, USER_ID, reason, REQUEST_ID]
+
 
 
 def test_review_when_request_already_decided_returns_409(setup):
@@ -310,11 +256,13 @@ def test_review_when_request_already_decided_returns_409(setup):
     Double: Stub (update matches nothing; the request exists)
     """
     client, cursor, _ = setup
-    cursor.fetchone.side_effect = [None, (1,)]
+    cursor.fetchall.return_value = []
+    cursor.fetchone.return_value = (1,)
 
     response = client.patch(f"/equipment-requests/{REQUEST_ID}", headers=TS, json={"status": "Approved"})
 
     assert response.status_code == 409
+
 
 
 def test_review_when_request_unknown_returns_404(setup):
@@ -325,9 +273,11 @@ def test_review_when_request_unknown_returns_404(setup):
     Double: Stub (update matches nothing; the request does not exist)
     """
     client, cursor, _ = setup
-    cursor.fetchone.side_effect = [None, None]
+    cursor.fetchall.return_value = []
+    cursor.fetchone.return_value = None
 
     assert client.patch(f"/equipment-requests/{REQUEST_ID}", headers=TS, json={"status": "Approved"}).status_code == 404
+
 
 
 @pytest.mark.parametrize("payload", [{"status": "Pending"}, {"status": "Maybe"}, {}, [], None], ids=["back_to_pending", "unknown_status", "no_status", "list_body", "no_body"])
@@ -344,6 +294,7 @@ def test_review_with_status_other_than_approved_or_rejected_returns_400(setup, p
     connect.assert_not_called()
 
 
+
 def test_review_with_malformed_request_id_returns_400_before_database(setup):
     """
     Summary: A decision must name a valid request.
@@ -354,6 +305,7 @@ def test_review_with_malformed_request_id_returns_400_before_database(setup):
     client, _, connect = setup
     assert client.patch("/equipment-requests/abc", headers=TS, json={"status": "Approved"}).status_code == 400
     connect.assert_not_called()
+
 
 
 @pytest.mark.parametrize("decision", ["Approved", "Rejected"], ids=["approve", "reject"])
@@ -372,14 +324,23 @@ def test_bulk_review_when_event_has_pending_requests_decides_all_of_them(setup, 
         db_row(equipment_request_id="3b1bfb57-a3c0-4450-897e-cc5c73690000", status=decision, reviewed_by=USER_ID, rejection_reason=reason),
     ]
 
-    response = client.patch(f"/events/{EVENT_ID}/equipment-requests", headers=TS, json={"status": decision, "rejectionReason": reason})
+    selected_ids = [REQUEST_ID, "3b1bfb57-a3c0-4450-897e-cc5c73690000"]
+    if decision == "Approved":
+        cursor.fetchall.side_effect = [[db_row(equipment_request_id=rid) for rid in selected_ids], [], cursor.fetchall.return_value]
+    response = client.patch(f"/events/{EVENT_ID}/equipment-requests", headers=TS,
+        json={"status": decision, "rejectionReason": reason, "approvalContext": approval_context(request_ids=selected_ids)})
 
     assert response.status_code == 200
     assert [request["status"] for request in response.json["requests"]] == [decision, decision]
     assert [request["rejectionReason"] for request in response.json["requests"]] == [reason, reason]
     sql, params = cursor.execute.call_args[0]
-    assert "event_id = %s AND status = 'Pending'" in sql
-    assert params == [decision, USER_ID, reason, EVENT_ID]
+    assert "status = 'Pending'" in sql
+    if decision == "Approved":
+        assert params == [USER_ID, selected_ids]
+    else:
+        assert "event_id = %s" in sql
+        assert params == [decision, USER_ID, reason, EVENT_ID]
+
 
 
 @pytest.mark.parametrize("reason", [None, "  ", "x" * 501], ids=["missing_reason", "blank_reason", "reason_too_long"])
@@ -395,6 +356,7 @@ def test_review_reject_without_valid_reason_returns_400_before_database(setup, r
         response = client.patch(url, headers=TS, json={"status": "Rejected", "rejectionReason": reason})
         assert response.status_code == 400
     connect.assert_not_called()
+
 
 
 def test_bulk_review_when_event_has_no_pending_requests_returns_409(setup):
@@ -413,6 +375,7 @@ def test_bulk_review_when_event_has_no_pending_requests_returns_409(setup):
     assert response.status_code == 409
 
 
+
 def test_bulk_review_when_event_has_no_requests_returns_404(setup):
     """
     Summary: A bulk decision for an event with no requests is refused.
@@ -429,6 +392,7 @@ def test_bulk_review_when_event_has_no_requests_returns_404(setup):
     assert response.status_code == 404
 
 
+
 def test_bulk_review_with_wrong_role_event_id_or_status_is_refused(setup):
     """
     Summary: A bulk decision needs Technical Support, a valid event and a real decision.
@@ -443,6 +407,7 @@ def test_bulk_review_with_wrong_role_event_id_or_status_is_refused(setup):
     assert client.patch("/events/not-a-uuid/equipment-requests", headers=TS, json={"status": "Approved"}).status_code == 400
     assert client.patch(url, headers=TS, json={"status": "Pending"}).status_code == 400
     connect.assert_not_called()
+
 
 
 @pytest.mark.parametrize(
@@ -466,6 +431,7 @@ def test_review_reject_when_reason_near_limit_accepts_up_to_500_characters(setup
     assert response.status_code == expected_status
 
 
+
 @pytest.mark.parametrize(
     "count, expected_status",
     [(499, 200), (500, 200), (501, 400)],
@@ -483,3 +449,19 @@ def test_list_requests_when_event_id_count_near_limit_accepts_up_to_500(setup, c
     response = client.get("/equipment-requests?eventIds=" + ",".join([EVENT_ID] * count), headers=TS)
 
     assert response.status_code == expected_status
+
+
+
+@pytest.mark.parametrize("bulk", [False, True], ids=["single", "bulk"])
+@pytest.mark.parametrize("exists,expected", [(False, 404), (True, 409)], ids=["missing", "already_decided"])
+def test_rejection_preserves_missing_and_final_decision_responses(setup, bulk, exists, expected):
+    """Summary: Rejection remains independent of catalogue/windows and preserves the 404/409 split.
+    AC2: Rejection retains its missing-versus-already-decided responses without needing stock context (supporting compatibility check).
+    Double: Stub (database lookup rows); Fake (trusted composite caller)
+    """
+    client, cursor, _ = setup
+    cursor.fetchall.return_value = []
+    cursor.fetchone.side_effect = [(1,) if exists else None] if bulk else [None, (1,) if exists else None]
+    path = f"/events/{EVENT_ID}/equipment-requests" if bulk else f"/equipment-requests/{REQUEST_ID}"
+    response = client.patch(path, headers=bearer(USER_ID, "Technical Support"), json={"status": "Rejected", "rejectionReason": "No support available", "approvalContext": None})
+    assert response.status_code == expected

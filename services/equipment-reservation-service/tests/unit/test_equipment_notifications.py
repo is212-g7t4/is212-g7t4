@@ -100,8 +100,10 @@ def test_approve_request_alerts_current_coordinator_not_original_requester(bound
     assert response.status_code == 200
     [call] = mutations(boundary)
     assert call.args == ("PATCH",f"http://owner.invalid/equipment-requests/{R1}")
-    assert call.kwargs["json"] == dict(status="Approved",notificationContext=dict(
-        eventId=EVENT,eventName="Community Fair",equipmentNames={MIC:"Microphone",PROJECTOR:"Projector"},coordinatorId=B))
+    assert call.kwargs["json"]["status"] == "Approved"
+    assert call.kwargs["json"]["notificationContext"] == dict(
+        eventId=EVENT,eventName="Community Fair",equipmentNames={MIC:"Microphone",PROJECTOR:"Projector"},coordinatorId=B)
+    assert call.kwargs["json"]["approvalContext"]["requestIds"] == [R1]
     assert response.json["request"] == boundary.saved[0]
 
 

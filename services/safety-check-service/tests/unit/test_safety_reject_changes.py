@@ -1,5 +1,6 @@
-"""
-SCRUM-151: Reject or Request Changes to Safety Arrangements
+"""SCRUM-151: Reject or Request Changes to Safety Arrangements
+
+Agreed revision from this conversation; pending confirmation that Jira has been updated
 
 User Story
 ----------
@@ -13,9 +14,7 @@ AC1: Given an event is 'Pending Safety Check', when I request changes, then I
      must select at least one affected area (venue arrangement,
      technical/equipment arrangement, event details) and describe the change
      needed; otherwise the decision is not saved.
-AC2: Given changes are requested, then the event status changes to 'Safety
-     Changes Requested', the event returns to the planning stage for each
-     selected area, and its existing arrangements are preserved.
+AC2: Given changes are requested, then the event status changes to 'Safety Changes Requested', the event returns to the planning stage for each selected area, and its existing arrangements are preserved. For equipment requests affected by the requested changes, only requests with status 'Approved' return to 'Pending' for review. Requests already 'Pending' or 'Rejected' remain unchanged, including any recorded reviewer and rejection reason.
 AC3: Given an event is 'Pending Safety Check', when I reject it, then a reason
      is required and I must confirm the rejection before it is saved.
 AC4: Given I confirm a rejection, then the event status changes to 'Cancelled',
@@ -33,6 +32,8 @@ AC7: Given an event is not 'Pending Safety Check', then these actions are not
 
 SCRUM-164: Revise Arrangements and Resubmit for Safety Check
 
+Agreed revision from this conversation; pending confirmation that Jira has been updated
+
 User Story
 ----------
 As an Event Coordinator, I want to see the Safety Officer's feedback and revise
@@ -46,9 +47,7 @@ AC1: Given my event is 'Safety Changes Requested', when I open it, then I see
 AC2: Given the venue arrangement is flagged, then the affected venue booking
      must be reviewed again by Venue Staff (revised booking or replacement
      request) before the event can be resubmitted.
-AC3: Given the technical arrangement is flagged, then the affected equipment
-     request must be reviewed again by Technical Support Staff before the event
-     can be resubmitted.
+AC3: Given the technical arrangement is flagged, then the affected equipment requests that were previously 'Approved' return to 'Pending' and must be approved again by Technical Support Staff before the event can be resubmitted. The safety-change action does not reopen existing 'Rejected' requests or clear their rejection reasons, and requests already 'Pending' remain 'Pending'.
 AC4: Given an arrangement was not flagged, then it stays confirmed and does not
      need to be reviewed again.
 AC5: Given all flagged arrangements are confirmed again, when I resubmit, then

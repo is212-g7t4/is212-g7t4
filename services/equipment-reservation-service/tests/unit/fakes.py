@@ -46,11 +46,11 @@ class World:
     def get_request(self, request_id):
         return next(r for r in self.requests if r["id"] == request_id)
 
-    def review_request(self, request_id, status, rejection_reason=None):
+    def review_request(self, request_id, status, rejection_reason=None, *, approval_context=None):
         self.calls.append(("review_request", request_id, status))
         return {**self.get_request(request_id), "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason}
 
-    def review_event_requests(self, event_id, status, rejection_reason=None):
+    def review_event_requests(self, event_id, status, rejection_reason=None, *, approval_context=None):
         self.calls.append(("review_event_requests", event_id, status))
         return [{**r, "status": status, "reviewedBy": USER, "rejectionReason": rejection_reason} for r in self.requests if r["eventId"] == event_id and r["status"] == "Pending"]
 
