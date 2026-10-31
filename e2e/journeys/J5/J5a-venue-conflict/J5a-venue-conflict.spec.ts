@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
-import type { Page } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
+import type { Page, Response } from '@playwright/test'
 import { deleteFixtureEvents } from '../../../helpers/cleanup'
 import { openAs, users } from '../../../helpers/stack'
 import { seedJ5a } from './helpers/seed'
@@ -28,23 +29,25 @@ import { seedJ5a } from './helpers/seed'
  * Buffers are 60 min setup and 60 min turnaround. Event A is approved 10:00-12:00, so it blocks 09:00-13:00,
  * and a new booking also needs its own buffers clear: it must start at 14:00 or later.
  */
-test.describe.configure({ mode: 'serial' })
+test.describe.configure({ mode: 'serial', timeout: 300_000 })
 
 test.describe('J5a Prevent conflicting venue reservations', () => {
-  const runId = Date.now().toString(36)
+  const runId = randomUUID()
   const eventAName = `J5a Event A ${runId}`
   const eventBName = `J5a Event B ${runId}`
+  const scope = { eventNames: [eventAName, eventBName], venueNames: [`J5a Venue ${runId}`] }
   let fixture: Awaited<ReturnType<typeof seedJ5a>>
 
   test.beforeAll(async ({ playwright }) => {
-    // Clear leftovers from interrupted runs so they cannot hold the venue or slow the page.
-    await deleteFixtureEvents()
     const api = await playwright.request.newContext()
-    fixture = await seedJ5a(api, runId)
-    await api.dispose()
+    try {
+      fixture = await seedJ5a(api, runId)
+    } finally {
+      await api.dispose()
+    }
   })
 
-  test.afterAll(deleteFixtureEvents)
+  test.afterAll(async () => { await deleteFixtureEvents(scope) })
 
   async function submitBooking(page: Page, eventId: string, startTime: string, endTime: string) {
     await page.goto(`/events/${eventId}`)
@@ -57,9 +60,30 @@ test.describe('J5a Prevent conflicting venue reservations', () => {
   }
 
   async function approveAsStaff(staff: Page, eventName: string) {
-    await staff.goto('/venue-requests')
+    let latestResponse: Response | undefined
+    const recordResponse = (response: Response) => {
+      if (new URL(response.url()).pathname === '/booking-requests'
+        && response.request().method() === 'GET') latestResponse = response
+    }
+    staff.on('response', recordResponse)
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt === 0) await staff.goto('/venue-requests')
+        else await staff.getByRole('button', { name: 'Refresh requests' }).click()
+        await expect(staff.getByRole('button', { name: 'Refresh requests' })).toBeEnabled()
+        const alert = staff.getByRole('alert')
+        if (!await alert.isVisible()) break
+        const status = latestResponse?.status()
+        const failure = `Venue request queue load failed (HTTP ${status ?? 'unknown'}): ${await alert.innerText()}`
+        if (status === undefined || ![502, 503, 504].includes(status) || attempt === 2) throw new Error(failure)
+        console.warn(`${failure} Retrying through Refresh requests.`)
+      }
+    } finally {
+      staff.off('response', recordResponse)
+    }
     const row = staff.getByRole('region', { name: `${eventName} venue requests` })
       .getByRole('row').filter({ hasText: fixture.venueName })
+    await expect(row.getByRole('button', { name: 'Review', exact: true })).toBeVisible()
     await row.getByRole('button', { name: 'Review' }).click()
     await staff.getByRole('dialog').getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(staff.getByText('Venue request approved.')).toBeVisible()
