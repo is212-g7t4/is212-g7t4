@@ -63,10 +63,10 @@ These were already role-gated before this story and were not changed: `PUT /venu
 
 ## Internal tokens and RBAC
 
-Two shared secrets still exist. Neither identifies a person, so neither can be replaced by a role check:
+One shared secret (`INTERNAL_SERVICE_TOKEN`) is sent as the `X-Internal-Token` header. It does not identify a person, so it cannot be replaced by a role check. It is used in two ways:
 
-- **`X-Internal-Token`** is presented by the notification dispatchers, which have no signed-in user. The six services they call (User, Venue, Venue Availability, Registration, Event, Equipment Request) accept a request with no `Authorization` header and a valid token. The other services do not; they refuse any request without a user token.
-- **`X-Internal-Service-Token`** proves a call came through the workflow that checks bookings, equipment and rounds first. It is sent by Safety Check Service and Event Workflow Service and checked on Event Service (`/safety-status`, the `/details` re-check and Lead path, `/change-requests*`) and on both `safety-reset` routes.
+- **Notification dispatchers**, which have no signed-in user, present it with no `Authorization` header. The six services they call (User, Venue, Venue Availability, Registration, Event, Equipment Request) accept a request with no `Authorization` header and a valid token. The other services do not; they refuse any request without a user token.
+- **Service-only routes** also require it, alongside the caller's forwarded `Authorization`. It is sent by Safety Check Service and Event Workflow Service and checked on Event Service (`/safety-status`, the `/details` re-check and Lead path, `/change-requests*`) and on both `safety-reset` routes. These routes used to take a second header, `X-Internal-Service-Token`, but it held the same secret, so the two were merged. Because one secret is shared, holding it does not prove a call came through the workflow; separating those would need a second secret.
 
 The token locks are **added to** the role checks, not in place of them: a locked route needs the right role and the token. When `INTERNAL_SERVICE_TOKEN` is not configured on Event Service, the locked routes answer `503 INTERNAL_AUTH_NOT_CONFIGURED` instead of skipping the check. A plain coordinator edit through `/details` needs no token.
 

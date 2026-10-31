@@ -240,7 +240,7 @@ def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_toke
     # Act (When)
     response = client.post(
         SAFETY_RESET, json={"bookingIds": [BOOKING_ID]},
-        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, role)},
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, role)},
     )
 
     # Assert (Then)

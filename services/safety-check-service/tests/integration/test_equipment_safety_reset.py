@@ -101,7 +101,7 @@ def test_only_affected_approved_ids_cross_the_reset_http_boundary(client, stubs,
     if reset is not None:
         assert reset.call_count == 1
         assert json.loads(reset.calls.last.request.content) == {"requestIds": expected}
-        assert reset.calls.last.request.headers["X-Internal-Service-Token"] == TOKEN
+        assert reset.calls.last.request.headers["X-Internal-Token"] == TOKEN
         assert list(stubs.calls).index(decided.calls.last) < list(stubs.calls).index(reset.calls.last)
         assert list(stubs.calls).index(reset.calls.last) < list(stubs.calls).index(moved.calls.last)
     assert {call.request.headers["Authorization"] for call in stubs.calls} == {headers["Authorization"]}

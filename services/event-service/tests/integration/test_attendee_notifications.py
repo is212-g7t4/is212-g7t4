@@ -17,7 +17,7 @@ import pytest
 from tests.integration.factories import make_event_change_event, SAFETY_COORDINATOR
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
-BUSINESS = {"X-Internal-Service-Token": "synthetic"}
+BUSINESS = {"X-Internal-Token": "synthetic"}
 INTERNAL = {"X-Internal-Token": "synthetic"}
 
 

@@ -431,7 +431,7 @@ def test_edit_or_safety_reset_clears_previous_decision(setup):
     client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
     reset = client.post(
         f"/events/{EVENT_ID}/venue-bookings/safety-reset",
-        headers={"X-Internal-Service-Token": "test-token", **bearer(USER_ID, "Safety Officer")},
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, "Safety Officer")},
         json={"bookingIds": [BOOKING_ID]},
     )
     assert reset.status_code == 200

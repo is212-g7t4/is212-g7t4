@@ -221,7 +221,7 @@ pre-safety transitions actually move an event through the review lifecycle.
 SCRUM-152 AC1's guarantee that `Confirmed` can't be reached "through ... the
 API" covers `PATCH /events/<id>/safety-status` too, not just `/progress`:
 that endpoint accepts a direct call only from Safety Check Service, proven by
-`X-Internal-Service-Token`, and only for a caller whose role fits the move
+`X-Internal-Token`, and only for a caller whose role fits the move
 (SCRUM-10, below). `INTERNAL_SERVICE_TOKEN` must be set here and on Safety Check
 Service. If it is unset on this service the endpoint answers
 `503 INTERNAL_AUTH_NOT_CONFIGURED` (it used to skip the check), and a startup
@@ -279,7 +279,7 @@ body is read.
 *Internal token.* Every request must also carry the shared secret:
 
 ```
-X-Internal-Service-Token: <INTERNAL_SERVICE_TOKEN>
+X-Internal-Token: <INTERNAL_SERVICE_TOKEN>
 ```
 
 checked with `hmac.compare_digest`: missing or wrong →
@@ -465,7 +465,7 @@ What happens, by the event's status:
 
   Only [`safety-check-service`](../safety-check-service/) sends this, after it
   has withdrawn round N and opened round N+1. The same
-  `X-Internal-Service-Token` lock as `/safety-status` applies and fails closed
+  `X-Internal-Token` lock as `/safety-status` applies and fails closed
   (SCRUM-10): a request with a `safetyRecheck` block, or one acting as the Lead
   (`actorRole`), gets `503 INTERNAL_AUTH_NOT_CONFIGURED` when the token is not
   configured, and is treated as an ordinary edit and gated when the header is

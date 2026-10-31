@@ -414,7 +414,7 @@ def create_app(config=None):
         token = app.config["INTERNAL_SERVICE_TOKEN"]
         if not token:
             return jsonify(message="Internal service authentication is not configured."), 503
-        if not hmac.compare_digest(token, request.headers.get("X-Internal-Service-Token", "")):
+        if not hmac.compare_digest(token, request.headers.get("X-Internal-Token", "")):
             return jsonify(message="Internal service credentials are required."), 403
         data = request.get_json(silent=True)
         raw_ids = data.get("bookingIds") if isinstance(data, dict) else None

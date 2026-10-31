@@ -59,7 +59,7 @@ Because the status lives in this table, a coordinator reading
 
 `POST /events/<event_id>/equipment-requests/safety-reset` accepts
 `{"requestIds": ["<uuid>"]}` (1-500 distinct IDs). It requires an
-`X-Internal-Service-Token` matching `INTERNAL_SERVICE_TOKEN`, shared with
+`X-Internal-Token` matching `INTERNAL_SERVICE_TOKEN`, shared with
 Safety Check Service, **and** the `Safety Officer` role (SCRUM-10): Safety Check
 Service forwards the signed-in Safety Officer's token, and any other role gets
 `403 {"message": "Your role cannot change this information."}`. This is not a

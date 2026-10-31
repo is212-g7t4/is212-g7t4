@@ -68,7 +68,7 @@ OTHER_COORDINATOR_ID = "22222222-2222-4222-8222-222222222222"
 OFFICER_ID = "33333333-3333-4333-8333-333333333333"
 SAFETY_CHECK_ID = "55555555-5555-4555-8555-555555555555"
 INTERNAL_TOKEN = "test-internal-token"
-INTERNAL_HEADERS = {"X-Internal-Service-Token": INTERNAL_TOKEN}
+INTERNAL_HEADERS = {"X-Internal-Token": INTERNAL_TOKEN}
 
 # Every status an event can hold that must not reach 'Pending Safety Check'.
 # Initial submission and requested-change resubmission are allowed.

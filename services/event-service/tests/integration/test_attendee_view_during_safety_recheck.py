@@ -33,7 +33,7 @@ import pytest
 from tests.integration.factories import SAFETY_COORDINATOR, make_event_change_event, make_safety_event
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
-BUSINESS = {"X-Internal-Service-Token": "synthetic"}
+BUSINESS = {"X-Internal-Token": "synthetic"}
 APPROVED = ("2030-03-01T09:00:00", "2030-03-01T17:00:00")
 NEW = ("2030-03-02T09:00:00", "2030-03-02T18:00:00")
 
