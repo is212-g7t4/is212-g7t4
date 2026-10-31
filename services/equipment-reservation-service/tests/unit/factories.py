@@ -42,7 +42,12 @@ def boundary(monkeypatch):
         if url.startswith("http://owner.invalid"):
             if method in ("POST", "PATCH"):
                 code = 201 if method == "POST" else state.write_code
-                body = dict(requests=deepcopy(state.saved), request=deepcopy(state.saved[0]))
+                saved = deepcopy(state.saved)
+                if method == "PATCH":
+                    saved = [{**item, "status": kwargs["json"]["status"]} for item in saved]
+                # Owner routes return one request for single review, requests for bulk/create.
+                body = ({"request": saved[0]} if method == "PATCH" and "/events/" not in url
+                        else {"requests": saved})
                 if code >= 400:
                     body = {"message": "There are no Pending requests to review."}
             elif url.endswith("/equipment-requests"):
@@ -84,7 +89,7 @@ TEST_SIGNING_KEY = ec.generate_private_key(ec.SECP256R1())
 
 def bearer(user_id, role, key=TEST_SIGNING_KEY, **claims):
     """Authorization header for a signed-in user, as Supabase would issue it."""
-    payload = {"sub": user_id, "aud": "authenticated", "exp": int(time.time()) + 3600, "user_role": role}
+    payload = {"sub": user_id, "aud": "authenticated", "exp": 1893456000 + 3600, "user_role": role}
     payload.update(claims)
     return {"Authorization": f"Bearer {jwt.encode(payload, key, algorithm='ES256')}"}
 

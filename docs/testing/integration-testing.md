@@ -4,7 +4,7 @@ Read [AGENTS.md](../../AGENTS.md) first. This file extends its *Testing
 expectations* section for integration tests only.
 
 Equipment issues 6/7/8: see the [current story/verification map](equipment-regressions.md)
-for agreed wording pending Jira sync, service-specific fixture exceptions and
+for current Jira-confirmed owner wording, service-specific fixture exceptions and
 verification limits. PR115's Issue8 fix and regressions are integrated; the owner
 PostgreSQL suite and Safety Check HTTP-boundary cases passed after integration.
 Collection alone is not execution.
