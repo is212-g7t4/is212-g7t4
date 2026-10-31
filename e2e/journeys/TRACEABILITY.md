@@ -167,6 +167,7 @@ to recover a test.
 | J6a Organiser requests a change | `J6/J6a-organiser-change-request/` | SCRUM-260 | SCRUM-42, 43, 49 | SCRUM-11, 159, 19 | Implemented (pending immutability, comparison, approval/rejection notifications, rejection reason) |
 | J6b Coordinator edits a Confirmed event | `J6/J6b-confirmed-event-safety/` | SCRUM-260 | SCRUM-20, 153 | SCRUM-11, 159, 19, 28, 29, 149, 150 | Implemented (low-impact edit, arrangement conflict, safety withdrawal/history/queue); safety reapproval itself is covered by J1 |
 | J7 Register, reject invalid repeat registration, and withdraw | `J7/` | SCRUM-261 | SCRUM-44–48, including SCRUM-46 | SCRUM-8, 11, 19, 28, 29, 149, 150 | Live pass: registration, duplicate/full/closed/non-Confirmed refusal, withdrawal deadline, notification, staff visibility and place reuse |
+| J8 Save a draft and resolve clarification and amendment requests | `J8/J8-save-draft-and-resolve-requests/` | SCRUM-262 | SCRUM-11, 12, 15, 16, 44, 158, 159 | SCRUM-8 | Live pass: draft privacy/reopen, one unassigned queue row, Lead submission notification opened from bell, clarification/amendment locks, same Coordinator and retained history; clarification/amendment actions themselves do not currently emit notifications |
 
 Other journeys (J4 and J8; SCRUM-258 and 262) get a row here when their spec is added.
 
