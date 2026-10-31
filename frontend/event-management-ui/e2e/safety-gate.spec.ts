@@ -42,6 +42,7 @@ test('a confirmed event has reached preparation and can record progress', async 
   await mock(page, 'venue', '/venues', (route) => json(route, { venues }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [confirmed] }))
   await mock(page, 'event', `/events/${confirmed.id}`, (route) => json(route, confirmed))
+  await mock(page, 'attendeeRegistration', `/events/${confirmed.id}/registrations`, (route) => json(route, { registrations: [] }))
   await mock(page, 'venueBooking', `/events/${confirmed.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   await mock(page, 'event', `/events/${confirmed.id}/progress`, (route) => {
     patched.push(route.request().postDataJSON())
@@ -51,6 +52,8 @@ test('a confirmed event has reached preparation and can record progress', async 
 
   await page.getByRole('button', { name: /Safety Cleared Expo/ }).click()
   await expect(page.getByRole('heading', { name: 'Safety Cleared Expo' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Registrations', exact: true })).toBeVisible()
+  await expect(page.getByText('No registrations yet.', { exact: true })).toBeVisible()
 
   // Past the gate: no hint, and the status stays put while progress is recorded.
   await expect(page.getByRole('note')).toHaveCount(0)

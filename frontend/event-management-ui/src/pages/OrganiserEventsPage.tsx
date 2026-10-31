@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { eventApi } from '../features/event/submission'
 import type { SubmittedEvent } from '../features/event/submission'
-import { fetchRegistrationCounts } from '../features/registration/registrations'
+import { canListEventRegistrations, fetchRegistrationCounts } from '../features/registration/registrations'
 import type { RegistrationCount } from '../features/registration/registrations'
 import { StatusBadge } from '../components/FormControls'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ArrowRightIcon } from '../components/Icon'
 import { EventCardSkeletonList } from '../components/Loading'
-import { PREPARATION_STATUS } from '../features/event/eventStatus'
 import { formatSchedule, getDateTile } from '../features/event/dateFormat'
 
 export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails, onOpenDraft }: { organiserId?: string; organiserName?: string; onViewDetails: (id: string) => void; onOpenDraft?: (id: string) => void }) {
@@ -26,9 +25,9 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
     let active = true
     eventApi(`/events?organiserId=${organiserId}`).then(async (body) => {
       const fetched = body.events as SubmittedEvent[]
-      const confirmedIds = fetched.filter((event) => event.status === PREPARATION_STATUS).map((event) => event.id)
+      const registrationEventIds = fetched.filter((event) => canListEventRegistrations(event.status)).map((event) => event.id)
       // Counts are secondary: if they fail, still show the events.
-      const fetchedCounts = await fetchRegistrationCounts(confirmedIds).catch(() => {
+      const fetchedCounts = await fetchRegistrationCounts(registrationEventIds).catch(() => {
         if (active) setCountsError(true)
         return {}
       })
@@ -102,7 +101,7 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
       {countsError && <p className="field-error" role="alert">Unable to load registration counts.</p>}
       {events.map((event) => {
         const tile = getDateTile(event.preferredStartDate)
-        const confirmed = event.status === PREPARATION_STATUS
+        const registrationsAvailable = canListEventRegistrations(event.status)
         const content = <>
           <span className="event-row-date">
             <span className="event-row-date-month">{tile.month}</span>
@@ -115,11 +114,11 @@ export function OrganiserEventsPage({ organiserId, organiserName, onViewDetails,
             </span>
             <span className="event-row-schedule muted">{formatSchedule(event.preferredStartDate, event.preferredEndDate)}</span>
             <span className="event-row-venue muted">
-              {confirmed
+              {registrationsAvailable
                 ? counts[event.id] ? `${counts[event.id].total} registration${counts[event.id].total === 1 ? '' : 's'}` : 'Registrations unavailable'
                 : event.status === 'Rejected'
                   ? 'The event has been rejected. Submit a new request.'
-                  : 'Registrations are available once the event is confirmed'}
+                  : 'Registrations are available once the event is approved and confirmed'}
             </span>
           </span>
           <ArrowRightIcon size={16} className="icon" />

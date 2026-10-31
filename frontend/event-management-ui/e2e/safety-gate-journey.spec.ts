@@ -29,6 +29,7 @@ test('SCRUM-152: a coordinator is blocked until the Safety Officer approves, the
   await mock(page, 'venueBooking', `/events/${pending.id}/booking-requests`, (route) => json(route, { bookings: [] }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [current] }))
   await mock(page, 'event', `/events/${pending.id}`, (route) => json(route, current))
+  await mock(page, 'attendeeRegistration', `/events/${pending.id}/registrations`, (route) => json(route, { registrations: [] }))
   await mockSafetyQueue(page, () => [current].filter((event) => event.status === 'Pending Safety Check'))
 
   // 1. As the assigned coordinator: no Confirmed option, told to wait.

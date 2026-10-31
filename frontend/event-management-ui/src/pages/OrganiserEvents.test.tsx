@@ -7,6 +7,7 @@ import { fetchRegistrationCounts, fetchRegistrations } from '../features/registr
 
 vi.mock('../features/event/submission', () => ({ eventApi: vi.fn() }))
 vi.mock('../features/registration/registrations', () => ({
+  canListEventRegistrations: (status: string) => status === 'Approved' || status === 'Confirmed',
   fetchRegistrationCounts: vi.fn(),
   fetchRegistrations: vi.fn(),
 }))
@@ -38,20 +39,19 @@ function renderList(onViewDetails = vi.fn()) {
   return onViewDetails
 }
 
-test('organiser list shows every event they created; every event opens; only confirmed ones show a registration count', async () => {
+test('organiser list shows every event they created; approved and confirmed events show registration counts', async () => {
   mockOrganiserApi(async () => ({ events }))
-  vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'confirmed-1': { total: 3, confirmed: 2 } })
+  vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'approved-1': { total: 0, confirmed: 0 }, 'confirmed-1': { total: 3, confirmed: 2 } })
   const onViewDetails = renderList()
 
   expect(await screen.findByText('Confirmed Fair')).toBeInTheDocument()
   expect(eventApi).toHaveBeenCalledWith(`/events?organiserId=${ORGANISER_ID}`)
-  expect(fetchRegistrationCounts).toHaveBeenCalledWith(['confirmed-1'])
+  expect(fetchRegistrationCounts).toHaveBeenCalledWith(['approved-1', 'confirmed-1'])
   expect(screen.getByText('3 registrations')).toBeInTheDocument()
   expect(screen.getByText('Pending Fair')).toBeInTheDocument()
   expect(screen.getByText('Rejected Fair')).toBeInTheDocument()
   expect(screen.getByText('The event has been rejected. Submit a new request.')).toBeInTheDocument()
-  // Approved and Submitted events can't take registrations yet.
-  expect(screen.getAllByText('Registrations are available once the event is confirmed')).toHaveLength(2)
+  expect(screen.getByText('Registrations are available once the event is approved and confirmed')).toBeInTheDocument()
   expect(screen.getAllByRole('button')).toHaveLength(4)
 
   fireEvent.click(screen.getByRole('button', { name: /Approved Fair/ }))
@@ -62,6 +62,16 @@ test('organiser list shows every event they created; every event opens; only con
   expect(onViewDetails).toHaveBeenCalledWith('rejected-1')
 })
 
+test('confirmed events also show registration counts on the organiser list', async () => {
+  mockOrganiserApi(async () => ({ events }))
+  vi.mocked(fetchRegistrationCounts).mockResolvedValue({ 'approved-1': { total: 3, confirmed: 2 }, 'confirmed-1': { total: 1, confirmed: 1 } })
+  renderList()
+
+  expect(await screen.findByText('Confirmed Fair')).toBeInTheDocument()
+  expect(fetchRegistrationCounts).toHaveBeenCalledWith(['approved-1', 'confirmed-1'])
+  expect(screen.getByText('1 registration')).toBeInTheDocument()
+})
+
 test('organiser list still shows events when counts cannot be loaded', async () => {
   mockOrganiserApi(async () => ({ events }))
   vi.mocked(fetchRegistrationCounts).mockRejectedValue(new Error('down'))
@@ -69,7 +79,7 @@ test('organiser list still shows events when counts cannot be loaded', async () 
 
   expect(await screen.findByText('Approved Fair')).toBeInTheDocument()
   expect(screen.getByRole('alert')).toHaveTextContent('Unable to load registration counts.')
-  expect(screen.getByText('Registrations unavailable')).toBeInTheDocument()
+  expect(screen.getAllByText('Registrations unavailable')).toHaveLength(2)
 })
 
 test('organiser with no events sees an empty state', async () => {
@@ -169,12 +179,23 @@ test('organiser who did not create the event sees the refusal and no registratio
   expect(fetchRegistrations).not.toHaveBeenCalled()
 })
 
-test.each([events[0], events[1]])('organiser detail for a $status event shows no registrations', async (event) => {
+test.each([events[1], events[2]])('organiser detail for a $status event shows no registrations', async (event) => {
   vi.mocked(eventApi).mockResolvedValue(event)
   renderDetail()
 
-  expect(await screen.findByText('Registrations are only available for confirmed events.')).toBeInTheDocument()
+  expect(await screen.findByText('Registrations are available once the event is approved and confirmed.')).toBeInTheDocument()
   expect(fetchRegistrations).not.toHaveBeenCalled()
+})
+
+test('organiser detail lists registrations after the safety check confirms the event', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...events[0], status: 'Confirmed' })
+  vi.mocked(fetchRegistrations).mockResolvedValue([
+    { id: 'r1', attendeeName: 'Lena Ho', attendeeEmail: 'lena@example.com', attendeeOrganization: 'Acme', registrationDate: '2026-09-13T09:15:00', status: 'Confirmed' },
+  ])
+  renderDetail()
+
+  expect(await screen.findByText('lena@example.com')).toBeInTheDocument()
+  expect(screen.getByText('Total registrations').nextSibling).toHaveTextContent('1')
 })
 
 test('organiser detail shows a registrations error', async () => {

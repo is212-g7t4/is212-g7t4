@@ -9,7 +9,7 @@ import { ReassignCoordinatorPanel } from '../features/event/ReassignCoordinatorP
 import { EventEditDialog } from '../features/event/EventEditDialog'
 import { fieldLabels } from '../features/event/eventDetails'
 import { canViewAllInternalEvents, canViewInternalEvents, INTERNAL_EVENT_ACCESS_MESSAGE } from '../features/event/permissions'
-import { fetchRegistrations } from '../features/registration/registrations'
+import { canListEventRegistrations, fetchRegistrations } from '../features/registration/registrations'
 import type { Registration } from '../features/registration/registrations'
 import { RegistrationTable } from '../features/registration/RegistrationTable'
 import { RoleWarning, StatusBadge } from '../components/FormControls'
@@ -83,7 +83,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
   }, [eventId, role, refresh, currentCoordinator.id])
 
   useEffect(() => {
-    if (!isCoordinator(role) || event?.status !== 'Approved') return
+    if (!isCoordinator(role) || !canListEventRegistrations(event?.status ?? '')) return
     let active = true
     fetchRegistrations(eventId).then((fetched) => {
       if (active) {
@@ -306,7 +306,7 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
           </dl>}
       </section>
 
-      {event.status === 'Approved' && <div className="event-card-section">
+      {canListEventRegistrations(event.status) && <div className="event-card-section">
         <h3>Registrations</h3>
         {registrationsLoading ? <TableSkeleton rows={3} columns={5} /> : registrationsError ? <p className="field-error" role="alert">{registrationsError}</p> : <>
           {(() => {

@@ -10,7 +10,10 @@ vi.mock('../features/event/submission', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../features/event/submission')>()),
   eventApi: vi.fn(),
 }))
-vi.mock('../features/registration/registrations', () => ({ fetchRegistrations: vi.fn() }))
+vi.mock('../features/registration/registrations', () => ({
+  canListEventRegistrations: (status: string) => status === 'Approved' || status === 'Confirmed',
+  fetchRegistrations: vi.fn(),
+}))
 
 const ORGANISER_ID = '33333333-3333-4333-8333-333333333333'
 const COORDINATOR_ID = '11111111-1111-4111-8111-111111111111'
