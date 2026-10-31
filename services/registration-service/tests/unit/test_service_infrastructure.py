@@ -45,11 +45,11 @@ def client():
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_health_when_called_without_token_returns_ok(client):
+def test_support_health_when_called_without_token_returns_ok(client):
     """
     Summary: Anyone can check that Registration Service is up without signing in.
     Supporting design check: /health answers without a token
-    Double: None
+    Double: Environment stub (FRONTEND_ORIGIN set to blank).
     """
     response = client.get("/health")
 
@@ -62,7 +62,7 @@ def test_health_when_called_without_token_returns_ok(client):
     ["http://localhost:5174", "http://127.0.0.1:5174"],
     ids=["configured_origin", "loopback_twin"],
 )
-def test_preflight_when_origin_is_the_frontend_returns_cors_headers(client, origin):
+def test_support_preflight_when_origin_is_the_frontend_returns_cors_headers(client, origin):
     """
     Summary: The browser's preflight from the frontend (by name or loopback address) is allowed without a token.
     Supporting design check: the configured frontend origin may call
@@ -77,7 +77,7 @@ def test_preflight_when_origin_is_the_frontend_returns_cors_headers(client, orig
     assert "Authorization" in response.headers["Access-Control-Allow-Headers"]
 
 
-def test_preflight_when_origin_is_unknown_sends_no_cors_headers(client):
+def test_support_preflight_when_origin_is_unknown_sends_no_cors_headers(client):
     """
     Summary: A website other than the frontend is not granted browser access.
     Supporting design check: other origins get no CORS grant
@@ -89,7 +89,7 @@ def test_preflight_when_origin_is_unknown_sends_no_cors_headers(client):
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
-def test_preflight_when_frontend_origin_is_blank_allows_no_origin(monkeypatch):
+def test_support_preflight_when_frontend_origin_is_blank_allows_no_origin(monkeypatch):
     """
     Summary: Blanking FRONTEND_ORIGIN switches browser access off rather than allowing everyone.
     Supporting design check: an empty FRONTEND_ORIGIN grants no origin
@@ -103,7 +103,7 @@ def test_preflight_when_frontend_origin_is_blank_allows_no_origin(monkeypatch):
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
-def test_preflight_when_frontend_asks_allows_post_and_patch(client):
+def test_support_preflight_when_frontend_asks_allows_post_and_patch(client):
     """
     Summary: The frontend may send registration (POST) and withdrawal (PATCH) requests from a browser.
     Supporting design check: CORS grants exactly what the frontend needs
@@ -115,7 +115,7 @@ def test_preflight_when_frontend_asks_allows_post_and_patch(client):
     assert "PATCH" in response.headers["Access-Control-Allow-Methods"]
 
 
-def test_registrations_when_database_fails_returns_503_without_internals(setup):
+def test_support_registrations_when_database_fails_returns_503_without_internals(setup):
     """
     Summary: A database outage gives a plain 503 message that leaks no credentials.
     Supporting design check: database errors answer 503 with a safe message
@@ -130,7 +130,7 @@ def test_registrations_when_database_fails_returns_503_without_internals(setup):
     assert "secret" not in response.get_data(as_text=True)
 
 
-def test_attendee_list_when_database_url_missing_returns_503():
+def test_support_attendee_list_when_database_url_missing_returns_503():
     """
     Summary: An attendee's list reports itself unavailable when no database is configured.
     Supporting design check: an unconfigured Registration Service answers 503
@@ -141,7 +141,7 @@ def test_attendee_list_when_database_url_missing_returns_503():
     assert response.status_code == 503
 
 
-def test_event_list_when_database_url_missing_returns_503():
+def test_support_event_list_when_database_url_missing_returns_503():
     """
     Summary: An event's registration list reports itself unavailable when no database is configured.
     Supporting design check: an unconfigured Registration Service answers 503
@@ -152,7 +152,7 @@ def test_event_list_when_database_url_missing_returns_503():
     assert response.status_code == 503
 
 
-def test_counts_when_database_url_missing_returns_503(setup):
+def test_support_counts_when_database_url_missing_returns_503(setup):
     """
     Summary: Registration counts report themselves unavailable when no database is configured.
     Supporting design check: an unconfigured Registration Service answers 503
@@ -163,7 +163,7 @@ def test_counts_when_database_url_missing_returns_503(setup):
     assert client.get(f"/registrations/counts?eventIds={EVENT_ID}").status_code == 503
 
 
-def test_register_when_database_url_missing_returns_503(setup):
+def test_support_register_when_database_url_missing_returns_503(setup):
     """
     Summary: Registering reports itself unavailable when no database is configured.
     Supporting design check: an unconfigured Registration Service answers 503

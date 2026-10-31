@@ -49,6 +49,8 @@ Not proven
   event-service SCRUM-153 tests).
 - What the attendee's browser shows (-> frontend
   AttendeeRegistrationsPage.test.tsx).
+- AC1-AC3 and AC5 state transitions/history are owned by Event and Safety Check
+  Services; this composite proves AC4's attendee-safe projection.
 """
 import pytest
 import respx
@@ -89,7 +91,7 @@ def history(*events):
     return lookup
 
 
-def test_list_my_registrations_during_recheck_shows_approved_details(client, monkeypatch):
+def test_ac4_list_my_registrations_during_recheck_shows_approved_details(client, monkeypatch):
     """
     Summary: While a high-impact change awaits its safety check, a registered attendee still sees the previously approved details, and their registration stays Confirmed.
     AC4: Given a high-impact change to a 'Confirmed' event is waiting for its
@@ -116,7 +118,7 @@ def test_list_my_registrations_during_recheck_shows_approved_details(client, mon
     assert lookup.asked == [{EVENT}]
 
 
-def test_history_adapter_uses_attendee_summaries_and_keeps_venue_name():
+def test_ac4_history_adapter_uses_attendee_summaries_and_keeps_venue_name():
     """
     Summary: The event details shown to attendees come from Event Service's attendee view, which holds the approved details, venue included.
     AC4: Given a high-impact change to a 'Confirmed' event is waiting for its
@@ -139,7 +141,7 @@ def test_history_adapter_uses_attendee_summaries_and_keeps_venue_name():
                        "preferredEndDate": "2030-03-01T17:00:00", "description": "", "purpose": ""}]
 
 
-def test_list_my_registrations_when_summaries_fail_returns_502(client, monkeypatch):
+def test_ac4_list_my_registrations_when_summaries_fail_returns_502(client, monkeypatch):
     """
     Summary: If the approved details cannot be loaded, the attendee gets an error rather than the unapproved changes.
     AC4: Given a high-impact change to a 'Confirmed' event is waiting for its
@@ -166,7 +168,7 @@ def test_list_my_registrations_when_summaries_fail_returns_502(client, monkeypat
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_history_adapter_with_101_events_sends_two_batches():
+def test_support_history_adapter_with_101_events_sends_two_batches():
     """
     Summary: Details for many events are fetched 100 at a time, so a long registration history still loads.
     Supporting design check: event lookups are batched to keep each request

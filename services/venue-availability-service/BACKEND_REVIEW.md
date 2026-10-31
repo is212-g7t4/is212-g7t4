@@ -13,10 +13,10 @@ live DB writes or frontend edits were performed for this implementation.
 | `app/calendar.py` | Separate read-only boundary parser: offset → Singapore naive; no changes to write parser |
 | `app/models.py` | Parameterized half-open read; preserve malformed candidates, fail closed; `blocksSelection` and explicit `+08:00` output |
 | `tests/conftest.py` | Shared isolated DB fixture moved out of the original test module |
-| `tests/test_bookings.py` | Original write tests; existing GET test updated to the required range/header contract |
-| `tests/test_calendar.py` | Route/time/status/role/error/CORS tests plus SQL bind assertions |
-| `tests/test_calendar_sql.py` | Real in-memory SQL predicate execution, including NULL and venue isolation; not a mocked overlap algorithm |
-| `tests/test_write_regressions.py` | Naive write times, Pending Review status, no DEV gate on writes, validation/failure regressions |
+| `tests/unit/test_scrum156_book_multiple_venues.py` | Original write tests; existing GET test updated to the required range/header contract |
+| `tests/unit/test_scrum25_venue_availability_calendar.py` | Route/time/status/role/error/CORS tests plus SQL bind assertions |
+| `tests/unit/test_scrum25_venue_availability_calendar_sql.py` | Real in-memory SQL predicate execution, including NULL and venue isolation; not a mocked overlap algorithm |
+| `tests/unit/test_scrum28_booking_write_regressions.py` | Naive write times, Pending Review status, no DEV gate on writes, validation/failure regressions |
 | `tests/live/test_calendar.py` | Explicit opt-in live GET through Flask; every DB connection set read-only, no personal rows printed |
 | `.env.example`, `README.md`, `uv.lock` | Exact opt-in/header/run contract and reproducible service dependencies |
 | Root `docker-compose.yml` | New existing-service entry on loopback host port 5008, root `.env`, disabled-by-default DEV mode |
@@ -37,7 +37,7 @@ partial calendar. OPTIONS is Flask's unauthenticated preflight; it reads no DB.
 | AC3: never imply availability after malformed data | `test_ac3_malformed_rows_fail_closed`, `test_query_includes_invalid_rows_not_silently_lost`, `test_actual_sql_invalid_candidates_survive_filter`, DB error tests |
 | AC4: internal-role simulation only, external denied | `test_ac4_disabled_by_default`, `test_ac4_reject_identity`, `test_ac4_internal_roles`, exact environment/role tests and live smoke |
 | Browser contract | preflight, untrusted-origin, error-response CORS tests |
-| Write compatibility | Original `test_bookings.py` write tests plus `test_write_regressions.py`; adjacent Venue Booking and Event service suites |
+| Write compatibility | `test_scrum156_book_multiple_venues.py` write tests plus `test_scrum28_booking_write_regressions.py`; adjacent Venue Booking and Event service suites |
 | AC2: rendering, interaction and selection prevention | **Deferred frontend work; not claimed complete** |
 
 Incremental RED→GREEN slices were executed for default denial, role denial,

@@ -1,6 +1,6 @@
 """Shared ids and row builders for the Venue Availability unit tests.
 
-These used to live in test_bookings.py and were imported from there by the
+These used to live in test_scrum156_book_multiple_venues.py and were imported from there by the
 other test modules. A test module should never import another test module, so
 they live here instead.
 """

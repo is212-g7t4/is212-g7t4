@@ -10,7 +10,7 @@ been run.
 
 Automated coverage is separate and runs without the stack:
 
-- Venue Service: `tests/unit/test_venue_safety_information.py` and
+- Venue Service: `tests/unit/test_scrum167_venue_safety_information.py` and
   `tests/integration/test_venue_safety_information.py` (real Postgres; the
   only place the role refusal, the stamp and the `User` foreign key are
   proven).
