@@ -159,6 +159,9 @@ to recover a test.
 | J1 Path B: Coordinator rejects an assigned event | `J1/J1b-coordinator-rejection/` | SCRUM-255 | SCRUM-13, 19, 44–48, 166, 168 (provisional J1 keys; exact attribution pending) | SCRUM-8, 11, 159 | Live pass: rejection with reason, organiser status/reason after refresh, rejection notification and no approval in persisted history |
 | J2A: Refuse protected event access | `J2/J2a-access-denied/` | SCRUM-256 | SCRUM-8, 9, 10 | SCRUM-8, 11, 159 | Live pass: anonymous, wrong-role, non-owner and unassigned access refused; owner retains access and rejected writes leave the event unchanged |
 | J2B: Transfer event responsibility to a new Coordinator | `J2/J2b-responsibility-transfer/` | SCRUM-256 | SCRUM-8, 9, 10, 159, 160, 166 | SCRUM-8, 11 | Live pass: UI assignment/reassignment and history, new Coordinator manages, old access denied, and both reassignment notifications received |
+| J3A: Block safety review until arrangements are ready | `J3/J3a-safety-gate/` | SCRUM-257 | SCRUM-19, 149, 152 | SCRUM-8, 11, 28, 29, 32, 33, 34, 159 | Live pass: pending venue and equipment block submission and direct confirmation; rejecting equipment is non-blocking, then safety approval confirms the event |
+| J3B: Revise flagged arrangements and resubmit for safety review | `J3/J3b-safety-changes/` | SCRUM-257 | SCRUM-150, 151, 164 | SCRUM-8, 11, 28, 29, 31, 32, 33, 149, 159 | Live pass: only flagged venue returns to review, approved equipment remains approved, prior feedback persists, and round two is approved |
+| J3C: Reject unsafe event and release reserved resources | `J3/J3c-safety-rejection/` | SCRUM-257 | SCRUM-151 | SCRUM-8, 11, 28, 29, 31, 32, 33, 34, 149, 159 | Live pass: rejection cancels with history; another event can request the released venue and approve the released equipment stock |
 | J5a Prevent conflicting venue reservations | `J5/J5a-venue-conflict/` | SCRUM-259 | SCRUM-28, 29, 30, 154 | SCRUM-11, 159, 19 | Live pass (buffer conflict, resubmit, both approvals), plus injected queue-failure recovery; SCRUM-155, 145, 146, 147, 156 left to integration tests |
 | J5b Prevent equipment over-allocation | `J5/J5b-equipment-over-allocation/` | SCRUM-259 | SCRUM-32, 33, 34, 35 | SCRUM-31, 11, 159, 19 | Implemented |
 | J6a Organiser requests a change | `J6/J6a-organiser-change-request/` | SCRUM-260 | SCRUM-42, 43, 49 | SCRUM-11, 159, 19 | Implemented (pending immutability, comparison, approval/rejection notifications, rejection reason) |
@@ -166,12 +169,12 @@ to recover a test.
 | J7 Register, reject invalid repeat registration, and withdraw | `J7/` | SCRUM-261 | SCRUM-44–48, including SCRUM-46 | SCRUM-8, 11, 19, 28, 29, 149, 150 | Live pass: registration, duplicate/full/closed/non-Confirmed refusal, withdrawal deadline, notification, staff visibility and place reuse |
 | J8 Save a draft and resolve clarification and amendment requests | `J8/J8-save-draft-and-resolve-requests/` | SCRUM-262 | SCRUM-11, 12, 15, 16, 44, 158, 159 | SCRUM-8 | Live pass: draft privacy/reopen, one unassigned queue row, Lead submission notification opened from bell, clarification/amendment locks, same Coordinator and retained history; clarification/amendment actions themselves do not currently emit notifications |
 
-Other journeys (J3 to J4 and J8; SCRUM-257 to 258 and 262) get a row here when their spec is added.
+Other journeys (J4 and J8; SCRUM-258 and 262) get a row here when their spec is added.
 
 ## Adding a journey
 
 1. Create one `J<n>/` folder for the Jira journey. Keep its main spec and alternate paths in that folder; put distinct paths in child folders or files, such as `J5/J5a-venue-conflict/` and `J5/J5b-equipment-over-allocation/`.
 2. Put reusable helpers for all E2E suites in `e2e/helpers/`. Put helpers and fixture scripts used only by one journey/path alongside it under `J<n>/`; never add journey-specific setup to the global helper folder.
-3. Set up data through service APIs (not UI clicks) and make fixture event names follow `J<n>[a|b] Event ...` (the pattern in `e2e/helpers/cleanup.ts`) so they are removed after the run.
+3. Set up data through service APIs (not UI clicks) and make fixture event names follow `J<n>[a|b|c] Event ...` (the pattern in `e2e/helpers/cleanup.ts`) so they are removed after the run.
 4. Use `test.step` for each stage of the journey.
 5. Add the row above.
