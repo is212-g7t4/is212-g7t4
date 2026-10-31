@@ -1,8 +1,8 @@
 import { Client } from 'pg'
 
-// Fixture events are named "J<n>[a|b] Event ..."; cleanup never touches other events.
-const FIXTURE_NAME = '^J[0-9]+[ab]? Event '
-const FIXTURE_VENUE = '^J[0-9]+[ab]? Venue '
+// Fixture events are named "J<n>[a|b|c] Event ..."; cleanup never touches other events.
+const FIXTURE_NAME = '^J[0-9]+[abc]? Event '
+const FIXTURE_VENUE = '^J[0-9]+[abc]? Venue '
 
 function connect() {
   process.loadEnvFile('.env') // run from the repo root, as the npm scripts do
