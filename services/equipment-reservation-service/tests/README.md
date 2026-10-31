@@ -40,7 +40,7 @@ another owner. The production dispatcher still legitimately depends on pika.
 | `test_scrum48_snapshot_security.py` | Trusted context/token selection; TSS spellings/deduplication/empty recipients; malformed event/missing configuration/upstream outage prevents write |
 | `test_scrum48_dispatch_reliability.py` | Only local dispatcher/publisher code; owner HTTP/AMQP/process doubles check frozen identity, publish-before-finalize, safe failure/retry/backoff/CLI/subprocess contract |
 
-Older service tests remain in their original locations. No test imports another
+Notification suites retain their existing locations; equipment review, availability and reservation tests now use feature filenames (see the current map below). No test imports another
 test module or another service's production package. The original cross-service
 support and its SQL/broker/inbox doubles were externally archived and removed;
 this is a boundary rewrite, not merely relabeling that harness.
@@ -49,7 +49,7 @@ this is a boundary rewrite, not merely relabeling that harness.
 
 A doubled HTTP result does not prove remote Pending-only writes, rollback or
 per-record durable alerts. Those owner rules are independently unit-tested and
-66 real PostgreSQL cases live only in Equipment Request's integration folder.
+the original 66 notification PostgreSQL cases live only in Equipment Request's integration folder. That folder now collects 91 cases including allocation regressions; this reorganisation did not execute its database tier.
 Requested AMQP confirm/durability flags do not prove broker acceptance or delivery;
 subprocess doubles do not prove real OS child kill/reap. No production worker runs.
 Additional Notification PG tests were not duplicated; existing owner-local storage
@@ -62,3 +62,28 @@ Frontend mocked component tests remain separate. Historical chain-test evidence
 is handed off outside the branch. See the
 [Request owner test guide](../../equipment-request-service/tests/README.md)
 for the separate disposable PostgreSQL boundary.
+
+## Issues 6/7/8: current story-based layout
+
+See [the equipment regression map](../../../docs/testing/equipment-regressions.md).
+
+| Feature file under `tests/unit/` | Primary story | Verified cases |
+| --- | --- | ---: |
+| `test_equipment_reservation.py` | SCRUM-35 agreed revision, Jira sync pending | 32 |
+| `test_equipment_availability.py` | SCRUM-34 unavailable-item filtering | 7 |
+| `test_equipment_request_review.py` | SCRUM-33 review/status compatibility | 34 |
+| `test_equipment_review_access.py` | SCRUM-9 assignment-based visibility | 5 |
+
+Authentication/token propagation moved to the existing
+`test_authentication.py` (SCRUM-8). Notification cases remain SCRUM-48.
+`test_equipment_reservation.py` consolidates the former SCRUM-35 module,
+new overallocation regressions and stock-sensitive approval cases formerly
+in the review module. No assertions or parametrized inputs were removed.
+
+Current whole-composite unit result: **208 passed**, **487/487 executable
+statements and 154/154 branch outcomes**, unchanged 100% gate. Focused reverse
+node order: **100 passed**. This service has no integration tier; these doubles
+do not prove owner SQL persistence, concurrency or real HTTP acceptance. The
+owner's 91 integration cases collect, but runtime verification is blocked by
+an unrelated auto-restarting container. Concurrent catalogue/event mutations
+and end-to-end delivery are outside the approval guarantee.

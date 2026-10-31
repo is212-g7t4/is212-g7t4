@@ -85,9 +85,6 @@ See [INDEX.md](INDEX.md) for the concrete list of every service directory.
     also require `X-Internal-Service-Token`, which fails closed when
     `INTERNAL_SERVICE_TOKEN` is not configured. The route-by-route matrix is in
     [docs/scrum-10-role-based-modification-control.md](docs/scrum-10-role-based-modification-control.md).
-  - MongoDB (Atlas) — Forum/Communication Service only. This is the one
-    deliberate polyglot-persistence choice in the system (variable-shape,
-    append-only, no relational joins needed). Do not "fix" this to Postgres.
 - **Messaging:** RabbitMQ — the *only* asynchronous path in the system, used
   exclusively for notification delivery. Every other cross-service call is
   synchronous REST/JSON.
@@ -100,7 +97,7 @@ See [INDEX.md](INDEX.md) for the concrete list of every service directory.
 These rules come directly from the SOA design in `docs/` and are load-bearing
 for the "system design" and "code quality" rubric criteria:
 
-- **Composites orchestrate; atomics never call another service, Forum, or the
+- **Composites orchestrate; atomics never call another service or the
   broker.** Only composite services are allowed to call other services. If a
   task seems to require an atomic to reach into another service, that logic
   belongs in a composite instead — flag it rather than adding the call to the
@@ -116,7 +113,9 @@ for the "system design" and "code quality" rubric criteria:
 ## Working inside a single service
 
 - Install deps: `cd services/<name>-service && uv sync`
-- Run locally: `uv run flask --app app run --debug`
+- Optional host run: `uv run --env-file .env flask --app app run --port <service-port>`
+  after configuring that service's `.env`; use its README for the port and avoid
+  a duplicate Docker binding.
 - Run tests: `uv run pytest` (no flags — see [Testing expectations](#testing-expectations))
 - Run every service's tests: `npm run test:backend` from the repo root
 - Run the whole system together: see below
@@ -130,6 +129,10 @@ npm run dev            # frontend (Vite) + backend (docker compose up)
 npm run dev:frontend   # frontend only — Vite on :5174
 npm run dev:backend    # backend only — docker compose up
 ```
+
+Install root/frontend npm dependencies and configure the required environments
+first; databases/accounts must already be prepared. Full Compose startup includes
+notification workers that can process shared database work: coordinate first.
 
 Run these **from the repo root**. `npm run dev` inside
 `frontend/event-management-ui/` is a different script — it's plain `vite`
@@ -263,18 +266,17 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   root.
 - **Frontend** (`frontend/event-management-ui`): Vitest unit/component tests
   live next to the code in `src/` (`npm test`, `npm run test:coverage`).
-  Playwright e2e smoke tests live in `e2e/` (`npm run test:e2e`) and mock every
-  backend call with `page.route()`, so they need no running services, database
-  or secrets. A request a test hasn't mocked fails the test. Add new mocks via
-  `mock()` in `e2e/fixtures.ts`. First run needs `npx playwright install chromium`.
+  The mocked frontend browser suite and unused lifecycle-helper tests were
+  explicitly archived and retired. Unit/component tests remain unchanged;
+  they do not replace the retired browser coverage.
 
 ## E2E journeys (`e2e/journeys/`)
 
 Real-stack Playwright journeys, one per Jira "E2E Testing J<n>" task. They are
 manual and opt-in, never in CI: start the stack (`npm run dev`), then
 `npm run test:journeys` from the repo root. They are a different tier from the
-mocked suite in `frontend/event-management-ui/e2e/`; preserve both maintained
-suites. The five legacy SCRUM-46/171/173 root Python harnesses were explicitly
+retired mocked frontend browser suite; preserve maintained journeys.
+The five legacy SCRUM-46/171/173 root Python harnesses were explicitly
 archived and retired; preserve `e2e/conftest.py`, `e2e/factories.py`,
 `e2e/signing.py`, journeys and shared helpers. Replacement journey coverage is
 still incomplete; do not claim it replaces all retired checks.
@@ -315,7 +317,7 @@ pushes to `main`, nightly at 02:00 Singapore time, and on demand via the
 **Run workflow** button. No secrets are needed.
 
 **Every run runs every maintained CI test.** Backend unit and integration tests,
-the frontend suite and the mocked Playwright e2e suite are not path-filtered:
+and the frontend unit/component suite are not path-filtered:
 a change in one service can break another
 through a shared contract, so nothing is skipped on the grounds that a PR
 "didn't touch it". A skipped job that reports green is worse than a slow one.
@@ -328,7 +330,6 @@ Only `docker-build` still consults the `changes` job.
 | `integration-tests` (matrix, one per service with `tests/integration/`) | `uv run pytest -m integration --no-cov` against throwaway `postgres:17.6` containers (composites stub their callees with `respx`); uploads `integration-junit.xml` |
 | `dependency-audit` (matrix, one per service) | `pip-audit` on the locked deps, so a vulnerable dependency reports as an audit failure rather than a test failure |
 | `frontend` | `npm audit --audit-level=high`, oxlint, Vitest with coverage, `tsc -b` + Vite build |
-| `e2e` | Playwright smoke tests (mocked APIs); uploads the report if it fails |
 | `docker-build` | `docker compose build` using each service's `.env.example` |
 | `gitleaks` | Secret scan of the full git history (always runs) |
 | `ci-passed` | Summary check — require this one in branch protection |
@@ -357,7 +358,7 @@ Only `docker-build` still consults the `changes` job.
 
 ## Secrets & environment
 
-- Never commit real Supabase keys, Mongo URIs, or RabbitMQ credentials.
+- Never commit real Supabase keys or RabbitMQ credentials.
 - Each service ships a `.env.example` listing required variables; real values
   go in a git-ignored `.env`.
 
@@ -369,8 +370,6 @@ silently resolve them while implementing; surface the question instead:
 - Whether **Event Workflow Service** is needed at all, since edits might
   already be handled by Venue Booking Service / Equipment Reservation
   Service's own edit paths.
-- Whether **Forum Service** is actually needed inside **Coordinator
-  Assignment Service** — most assignments won't have a reason worth logging.
 
 If you (the agent) notice the two architecture docs disagree on something,
 stop and ask rather than picking one silently. This happened once already:
@@ -379,10 +378,12 @@ That's now resolved — **they're merged into one atomic, Venue Availability
 Service** (`services/venue-availability-service/`), which owns both the
 booking records and the overlap/conflict-checking algorithm. This matches
 `docs/supabase-setup.md`'s schema (`public."VenueBooking"`). (The Equipment
-domain is split differently: `Equipment Request` owns only the request
-records, and the availability check lives in the `Equipment Reservation`
-composite, which gathers event windows, stock and held quantities.) It also
-avoids a structural problem with the old split: a stateless Booking Conflict
+domain is split differently: `Equipment Reservation` gathers catalogue/event
+inputs and calculates read-time availability; `Equipment Request` owns request
+records and final stock enforcement, reading current allocations and approving
+the checked selection in one locked owner transaction. External input provenance
+and concurrent catalogue/event changes are outside that transaction's guarantee.)
+It also avoids a structural problem with the old split: a stateless Booking Conflict
 atomic would have needed to read bookings owned by Venue Availabilities,
 which atomics can't do. `INDEX.md`/`docs/microservices-catalog.md` reflect
 this; there is no separate Booking Conflict service/table.

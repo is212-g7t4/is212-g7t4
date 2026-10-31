@@ -4,9 +4,9 @@
  * One Front-End App, one API Application wrapping every backend service,
  * a Hold Checker (a small scheduled job that only triggers the API once a
  * minute; the API does the hold expiry and publishes the 3-day reminder),
- * and a Message Broker for asynchronous in-app notifications, and the two
- * cloud-hosted databases kept OUTSIDE the system boundary (external
- * systems, not containers) — Supabase and MongoDB Atlas.
+ * and a Message Broker for asynchronous in-app notifications, and the
+ * cloud-hosted database kept OUTSIDE the system boundary (external
+ * system, not a container) — Supabase.
  */
 
 workspace "ConnectSphere" "C2 — Containers" {
@@ -40,7 +40,6 @@ workspace "ConnectSphere" "C2 — Containers" {
 
         # ---- External systems — cloud-hosted, kept outside the system boundary ----
         supabase = softwareSystem "Supabase" "Stores user accounts and relational data for the backend." "External System"
-        mongodb  = softwareSystem "MongoDB Atlas" "Stores unstructured forum/communication records." "External System"
 
         # ---- ConnectSphere system boundary ----
         connectSphere = softwareSystem "ConnectSphere" "Event Planning and Venue Booking System." "ConnectSphere System" {
@@ -67,7 +66,6 @@ workspace "ConnectSphere" "C2 — Containers" {
         connectSphere.frontEndApp -> connectSphere.apiApplication "Makes API calls (including notification polling) to" "HTTPS/JSON"
 
         connectSphere.apiApplication -> supabase "Authenticates users & reads/writes relational data in" "HTTPS/SQL"
-        connectSphere.apiApplication -> mongodb "Reads/writes NoSQL communication entries in" "TCP"
 
         # Asynchronous relationships
         connectSphere.apiApplication -> connectSphere.messageBroker "Publishes and consumes notifications via" "AMQP" {

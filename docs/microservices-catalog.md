@@ -3,7 +3,9 @@
 What each service on the `is212 archi diagrams` Miro board does. Based on
 the board state as of the latest edits (5 composite-flow frames + 1 Master
 SOA Overview frame). See `microservices-diagram-notes.md` for the visual
-style conventions and the numbered call sequences.
+style conventions and the numbered call sequences. This is a design reference
+with planned flows, not an exhaustive implementation inventory; use
+[INDEX.md](../INDEX.md) and service READMEs for current implemented scope.
 
 ## UI
 
@@ -13,7 +15,7 @@ needs. No API gateway in front of it.
 
 ## Composite services
 
-Composites hold no data of their own — they orchestrate atomics, Forum, and
+Composites hold no data of their own — they orchestrate atomics and
 the Message Broker to carry out one business process, and are the only
 services allowed to call other services.
 
@@ -22,7 +24,7 @@ services allowed to call other services.
 Covers event lifecycle events that aren't simple CRUD on Event Service:
 re-validating existing venue/equipment commitments when an organiser
 requests a change, and cascading a cancellation. Calls Event Service, Venue
-Availabilities, Equipment Availabilities, Forum Service, and the Message
+Availability, Equipment Request, Equipment and the Message
 Broker (async notify).
 
 **Open question flagged on the board (not yet resolved):** whether this
@@ -34,13 +36,8 @@ composite's scope as provisional until that's settled.
 ### Coordinator Assignment Service
 
 Assigns or reassigns the Event Coordinator on an event: looks up eligible
-coordinators (User Service), updates the event record (Event Service), logs
-the assignment/reassignment reason (Forum Service), and notifies the
+coordinators (User Service), updates the event record (Event Service), and notifies the
 assigned coordinator asynchronously (Message Broker).
-
-**Open question flagged on the board:** whether Forum Service is actually
-needed here (sticky note: "not sure if forum is needed here") — most
-assignments won't have a reason worth logging, only reassignments might.
 
 ### Venue Booking Service
 
@@ -50,30 +47,32 @@ the booking request and checks for double-booking via Venue Availability
 Service (which owns both the records and the conflict check — see the
 Atomic services table below; this merges what used to be two separate
 services, Booking Conflict and Venue Availabilities), and — only on the
-venue staff approval/rejection sub-flow — logs the decision reason to Forum
-Service and notifies asynchronously.
+venue staff approval/rejection sub-flow — records the decision reason on the
+booking and notifies asynchronously.
 
 ### Equipment Reservation Service
 
 Processes equipment requests end-to-end. Two sub-flows in one frame:
-- **Request submission** (ends at step 7): checks availability (event window
-  from Event Service, stock from Equipment Service, quantities already held
-  by other non-rejected events from Equipment Request Service) and
-  records the request as `pending_review`.
+- **Request submission** (ends at step 7): checks assignment, event state and physical availability (event window
+  from Event Service and physical status from Equipment Service) and
+  records the request as `Pending`; submission does not reserve stock.
 - **Approval/rejection** (continues from step 8): Technical Support Staff's
-  decision is validated against the same availability check (Approve is
-  blocked while any line is insufficient) and recorded in Equipment Request
-  Service, logs to Forum Service, and notifies asynchronously. Built so far:
-  the availability check and the review validation (see
-  `services/equipment-reservation-service/README.md`).
+  composite supplies catalogue stock, event/overlap context and the exact
+  Pending request IDs. Equipment Request Service re-reads its current requests
+  after one shared transaction-level PostgreSQL advisory lock (READ COMMITTED),
+  checks own/overlapping Approved quantities plus grouped candidates, and saves
+  only those IDs and their decision outbox records atomically. Rejection needs
+  no stock check. Notifications are asynchronous. Built so far:
+  read-time availability and transactional approval enforcement (see
+  [Equipment Reservation README](../services/equipment-reservation-service/README.md)).
+  This transaction protects owner allocation reads and approval writes; it does
+  not prove external input provenance or coordinate catalogue/event mutations.
 
 ### Attendee Registration Service
 
 Registers/withdraws an attendee for an event: validates the event is
 confirmed and open for registration (Event Service), creates or removes the
-registration record (Registration Service), and notifies asynchronously. No
-Forum Service call — registration doesn't have an approval/rejection
-reason the way venue and equipment requests do.
+registration record (Registration Service), and notifies asynchronously.
 
 Registration rows store only the attendee's ID, so this composite also adds
 the attendee's name, email and organisation from User Service when listing
@@ -93,17 +92,13 @@ data store (Postgres unless noted).
 | **Venue** | Venue catalogue — capacity, facilities, accessibility, layouts. Also runs the suitability-check computation (given an event's requirements as input) |
 | **Venue Availability** | Venue booking records (id, eventId, venueId, status pending/approved/rejected, proposed date/time, decision reason), timed venue holds with expiry, **and** the overlap/conflict-detection algorithm together — merged design; there is no separate Booking Conflict service or table |
 | **Equipment** | Equipment catalogue only — types, quantities owned, location, operational status. Does **not** hold reservation data. Exposes `GET /equipment[?status=]` and `POST /equipment` (Technical Support only); the UI calls it directly |
-| **Equipment Request** | The equipment request records (`public."EquipmentRequest"`) and each request's status (Pending → Approved/Rejected). No availability logic — that is computed on demand by the Equipment Reservation composite |
+| **Equipment Request** | The equipment request records (`public."EquipmentRequest"`) and each request's status (Pending → Approved/Rejected). Final approval stock enforcement under one shared transaction-level advisory lock, using catalogue/event inputs supplied by Equipment Reservation; no external HTTP or other service's database access. Decisions and notification outbox records commit together |
 | **Registration** | Attendee registration records |
 | **Notification** | Notification records; consumes off the Message Broker and calls the Email/SMS Wrapper to deliver |
-| **Forum / Communication** | **NoSQL (MongoDB).** All communication tied to a request — clarification requests, approval/rejection reasons, comments — keyed by entityType + entityId |
 
-> **Current implementation note:** Forum Service is still planned. The event
-> clarification user story is therefore stored provisionally as append-only
-> `clarificationHistory` metadata owned by Event Service. Its dedicated
-> endpoints change only the Event-owned status/metadata and preserve the
-> original request fields. Move that history behind Forum Service when the
-> planned service is built; do not add a second live copy in the meantime.
+> **Current implementation note:** Event Service owns append-only
+> `clarificationHistory` metadata. Its dedicated endpoints change only the
+> Event-owned status/metadata and preserve the original request fields.
 
 ## Infrastructure
 
