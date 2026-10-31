@@ -57,18 +57,19 @@ These fixtures provision their own PostgreSQL, load the complete unmodified migr
 
 The legacy root Python E2E harness has been retired and archived. Its earlier
 results below are historical evidence, not a runnable command or current coverage.
-Service unit/integration tests and frontend lifecycle tests remain; maintained
+Service unit/integration tests and frontend unit/component tests remain; maintained
 real-stack journeys stay in `e2e/journeys/` and remain manual/opt-in.
 
 From `frontend/event-management-ui`, the normal commands are `npm test`, `npm run test:coverage` and `npm run build` (includes TypeScript compilation). An earlier default-parallel run timed out in six existing calendar cases; that evidence is retained. The latest follow-up passed both normal commands without changing scheduling or timeouts, and also passed the equivalent serialized scheduling below:
 
 ```sh
 ./node_modules/.bin/vitest run --coverage --maxWorkers=1
-node --test e2e-real/*.test.mjs
 npm run build
 ```
 
-The four Node tests check journey-adapter cleanup, not browser acceptance.
+The four Node lifecycle tests and their unused adapter were subsequently archived
+and retired. Historical four-test results below describe helper cleanup only,
+not current application-test counts or browser acceptance.
 
 ## Historical test inventory and measurements
 

@@ -254,5 +254,5 @@ The staff queue and `GET /events/<id>/booking-requests` pass `reviewedAt` and
 `rejectionReason` through, so the coordinator sees why a booking was rejected.
 
 The rejection reason is stored on the booking in Venue Availability
-(SCRUM-29), not in Forum Service. No async decision notification yet —
+(SCRUM-29). No async decision notification yet —
 SCRUM-47 owns that (see `INDEX.md`).

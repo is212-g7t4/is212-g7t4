@@ -32,6 +32,13 @@ TABLE = "3ebcd2d3-636b-48e7-8784-d00000000000"
 ORIGIN = "http://localhost:5174"
 
 
+def approval_context(event_id=EVENT_ID, request_ids=None, equipment_ids=None, total=100) -> dict:
+    """Trusted stock/window responses supplied by the reservation composite in tests."""
+    return dict(eventId=event_id, requestIds=[REQUEST_ID] if request_ids is None else request_ids,
+        events=[dict(id=event_id, status="Under Review", startTime="2030-01-01T10:00:00", endTime="2030-01-01T18:00:00")],
+        equipment=[dict(id=eid, status="Available", totalQuantity=total) for eid in (equipment_ids or [MIC, TABLE])])
+
+
 def db_row(**overrides):
     """An EquipmentRequest row as PostgreSQL would return it; override what the test is about."""
     row = {

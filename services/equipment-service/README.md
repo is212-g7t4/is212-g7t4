@@ -1,8 +1,9 @@
 # Equipment Service (atomic)
 
 The equipment catalogue: list and add records in `public."Equipment"`. No
-reservation data (that belongs to the equipment availability and reservation
-services). Called directly by the frontend, and being an atomic it calls no
+reservation data: Equipment Request owns the request rows and final approval
+transaction; Equipment Reservation supplies catalogue/event inputs and read-time
+availability. Called directly by the frontend, and being an atomic it calls no
 other service.
 
 ## OO model
@@ -16,13 +17,14 @@ base class plus `Microphone`, `LightingKit`, `Projector`, `Laptop`,
 ## Run
 
 ```
-cp .env services/equipment-service/.env   # from the repo root
-cd services/equipment-service
-uv sync
+cd services/equipment-service  # from the repo root
+# Configure .env from this service's .env.example first; keep existing settings.
+uv sync --locked --python 3.12
 uv run --env-file .env flask --app app run --port 5002
 ```
 
-Or `docker compose up --build equipment-service` (port 5002).
+Or, from the repository root, `docker compose up --build equipment-service`
+(port 5002); choose host or Docker execution, not both on the same port.
 
 ## Endpoints
 

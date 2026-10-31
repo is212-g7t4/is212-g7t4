@@ -78,7 +78,7 @@ import psycopg2
 import pytest
 
 from app import create_app
-from tests.unit.factories import bearer
+from tests.unit.factories import bearer, approval_context
 
 EVENT, MIC, TABLE, ACTOR, COORDINATOR, TSS1, TSS2, R1, R2, SOURCE, LEASE = [
     f"10000000-0000-4000-8000-{i:012d}" for i in range(1, 12)]
@@ -120,10 +120,12 @@ def intents(boundary):
 
 
 def decide(boundary, *, bulk=False, payload=None, headers=None):
+    payload = dict(payload if payload is not None else {"status": "Approved", "notificationContext": context()})
+    if payload["status"] == "Approved":
+        payload["approvalContext"] = approval_context(EVENT, [R1, R2] if bulk else [R1], [MIC, TABLE])
     return boundary.client.patch(
         f"/events/{EVENT}/equipment-requests" if bulk else f"/equipment-requests/{R1}",
-        headers=STAFF if headers is None else headers,
-        json=payload if payload is not None else {"status": "Approved", "notificationContext": context()})
+        headers=STAFF if headers is None else headers, json=payload)
 
 
 def test_submit_request_notifies_each_technical_support_once_with_full_list(boundary):
@@ -182,6 +184,8 @@ def test_review_decision_notifies_coordinator_once_per_changed_request_without_r
     rows = [request_row(status=status), request_row(R2, TABLE, 2, status)] if bulk else [request_row(status=status)]
     boundary.cursor.fetchall.return_value = rows
     boundary.cursor.fetchone.return_value = rows[0]
+    if status == "Approved":
+        boundary.cursor.fetchall.side_effect = [[{**row, "status": "Pending"} for row in rows], [], rows]
 
     # Act (When)
     response = decide(boundary, bulk=bulk, payload={"status": status,
@@ -189,9 +193,10 @@ def test_review_decision_notifies_coordinator_once_per_changed_request_without_r
 
     # Assert (Then)
     assert response.status_code == 200
-    sql, parameters = boundary.cursor.execute.call_args_list[0].args
+    writes = [call for call in boundary.cursor.execute.call_args_list if call.args[0].lstrip().startswith('UPDATE public."EquipmentRequest"')]
+    sql, parameters = writes[0].args
     assert "status = 'Pending'" in sql
-    assert parameters == [status, ACTOR, "Private staffing reason" if status == "Rejected" else None, EVENT if bulk else R1]
+    assert parameters == ([ACTOR, [R1, R2] if bulk else [R1]] if status == "Approved" else [status, ACTOR, "Private staffing reason", EVENT if bulk else R1])
     jobs = intents(boundary)
     assert len(jobs) == len(rows)
     assert len({p[0] for p in jobs}) == len(rows)
@@ -223,7 +228,7 @@ def test_review_when_nothing_changes_sends_no_alert(boundary, bulk, exists, code
     # Arrange (Given)
     boundary.cursor.fetchall.return_value = []
 
-    boundary.cursor.fetchone.side_effect = ([None, (1,) if exists else None] if not bulk else [(1,) if exists else None])
+    boundary.cursor.fetchone.return_value = (1,) if exists else None
 
     # Act + Assert (When / Then)
     assert decide(boundary, bulk=bulk).status_code == code
@@ -260,6 +265,9 @@ def test_submit_or_review_when_alert_cannot_be_queued_fails_whole_change(boundar
     rows = [request_row(status=status), request_row(R2, TABLE, 2, status)]
     boundary.cursor.fetchone.side_effect = rows
     boundary.cursor.fetchall.return_value = rows
+    if stage != "create":
+        selected = rows if stage == "bulk" else rows[:1]
+        boundary.cursor.fetchall.side_effect = [[{**row, "status": "Pending"} for row in selected], [], selected]
 
     # Act (When)
     if stage == "create":
@@ -291,6 +299,7 @@ def test_review_with_mismatched_alert_details_returns_400_without_alert(boundary
     """
     # Arrange (Given)
     boundary.cursor.fetchone.return_value = request_row()
+    boundary.cursor.fetchall.side_effect = [[request_row(status="Pending")], [], [request_row()]]
 
     snapshot = context(); snapshot.update(change)
 
@@ -391,6 +400,7 @@ def test_review_when_event_has_no_coordinator_decides_without_alert(boundary):
     """
     # Arrange (Given)
     boundary.cursor.fetchone.return_value = request_row()
+    boundary.cursor.fetchall.side_effect = [[request_row(status="Pending")], [], [request_row()]]
 
     snapshot = context(); snapshot["coordinatorId"] = None
 

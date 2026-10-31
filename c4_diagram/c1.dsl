@@ -28,9 +28,6 @@ workspace "ConnectSphere" "Event Planning and Venue Booking System" {
         supabase = softwareSystem "Supabase" "Stores user accounts and relational data for the backend." {
             tags "External System" "Database"
         }
-        mongodb = softwareSystem "MongoDB Atlas" "Stores unstructured forum/communication records." {
-            tags "External System" "Database"
-        }
 
         // --- Core System (ConnectSphere) ---
         // Notice it is completely empty inside now!
@@ -50,7 +47,6 @@ workspace "ConnectSphere" "Event Planning and Venue Booking System" {
 
         // Main system connects directly to the external systems
         connectsphere -> supabase "Authenticates users & reads/writes relational data in" "HTTPS/SQL"
-        connectsphere -> mongodb "Reads/writes NoSQL communication entries in" "TCP"
     }
 
     views {

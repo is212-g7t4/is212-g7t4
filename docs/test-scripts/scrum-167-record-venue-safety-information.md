@@ -1,5 +1,9 @@
 # SCRUM-167 Record Venue Safety Information — manual test script
 
+> Historical browser evidence: the mocked frontend browser suite was retired.
+> Referenced browser specs are archived, not maintained runnable checks;
+> unit/component tests and manual real-stack journeys remain separate tiers.
+
 These are the SCRUM-167 acceptance criteria checked by hand against a running
 stack. Attach this file and `scrum-167-screenshots/` to SCRUM-167 once it has
 been run.

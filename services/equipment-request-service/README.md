@@ -4,21 +4,25 @@ Owns the equipment request records in `public."EquipmentRequest"` and records
 the Technical Support decision on them (SCRUM-33). Being an atomic it calls no
 other service, so it returns raw IDs (`eventId`, `equipmentId`).
 
-It does **not** decide whether stock is available: that needs event dates,
-equipment stock and other events' reservations, so it lives in
-[Equipment Reservation Service](../equipment-reservation-service/README.md),
-which calls this service.
+It owns final approval stock enforcement.
+[Equipment Reservation Service](../equipment-reservation-service/README.md)
+supplies catalogue/event inputs and the exact checked request IDs. After a shared
+transaction-level advisory lock, this owner re-reads current allocations at READ
+COMMITTED, checks same-event and eligible overlapping Approved quantities plus
+grouped candidates, then commits only the checked approvals and their outbox
+records together. Rejection does not require stock. External input provenance
+and concurrent catalogue/event mutations are outside this transaction guarantee.
 
 ## Run
 
 ```
-cp .env services/equipment-request-service/.env   # from the repo root
-cd services/equipment-request-service
-uv sync
+cd services/equipment-request-service  # from the repo root
+# Configure .env from this service's .env.example first; keep existing settings.
+uv sync --locked --python 3.12
 uv run --env-file .env flask --app app run --port 5011
 ```
 
-Or `docker compose up --build equipment-request-service` (port 5011).
+Or, from the repository root, `docker compose up --build equipment-request-service` (port 5011). Choose host or Docker execution, not both on the same port. Prepared database schema/accounts are prerequisites. For isolated unit/integration commands, see [tests/README.md](tests/README.md).
 
 ## Endpoints
 
@@ -37,12 +41,16 @@ without a valid token.
   id/status.
 - `PATCH /events/<event_id>/equipment-requests` — Technical Support only. Body
   `{"status": "Approved" | "Rejected"}`; updates every Pending request for
-  that event and returns them in `{"requests": [...]}`. `409` if the event has
+  that event on rejection; approval changes only the exact checked Pending IDs
+  supplied by the composite. Returns the changed rows in `{"requests": [...]}`. `409` if the event has
   requests but none are Pending, `404` if the event has no requests.
   Both decision endpoints require `rejectionReason` when status is `Rejected`
   (1-500 characters after trimming). The reason is saved to `rejection_reason`
   and returned on reads; bulk rejection applies it to every Pending line.
-  Approval and safety reset clear any previous rejection reason.
+  Approval and this checkout's safety reset clear any previous rejection reason.
+  Approval additionally requires `approvalContext` (catalogue/event inputs and
+  exact `requestIds`); both decisions also require `notificationContext`.
+  Browser clients use Equipment Reservation rather than constructing these inputs.
 - `POST /events/<event_id>/equipment-requests` — Event Coordinator or Event Coordinator Lead (the Lead, for events
   assigned to them, as for venue requests). Body
   `{"items": [{"equipmentId", "quantityRequested", "technicalRequirements"?}]}`
@@ -67,7 +75,9 @@ browser or staff decision endpoint.
 All IDs must belong to the event; otherwise nothing is updated. In one
 transaction, the selected requests become `Pending` and `reviewed_by` is
 cleared. Requests outside the selection are unchanged. Repeating the same
-reset before staff review has the same result.
+reset before staff review has the same result. This describes the older local
+checkout, not the Approved-only reset fix merged in cached `origin/main`; see
+[the equipment regression map](../../docs/testing/equipment-regressions.md#blockers-and-evidence-limits).
 
 
 ### SCRUM-48 transactional notification ownership
@@ -75,10 +85,8 @@ reset before staff review has the same result.
 Create and individual/bulk review also take a `notificationContext` built by
 Equipment Reservation Service. Create needs the `Event Coordinator` or
 `Event Coordinator Lead` role and review needs `Technical Support`, both checked on the
-forwarded user's token. These routes do **not** check an internal token (only the outbox
-routes and `safety-reset` do), and the context is validated for shape only, so this
-service does not itself prove the context came from Equipment Reservation Service; see
-the known gaps in
+forwarded user's token. The composite supplies notification context; the owner
+validates its shape, which does not establish external input provenance. See
 [docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
 The atomic never fetches Event/User/Equipment data or calls RabbitMQ. Browser callers
 should use the composite. Context includes event identity/name, equipment names,

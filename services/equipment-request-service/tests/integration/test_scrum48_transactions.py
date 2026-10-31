@@ -1,8 +1,27 @@
-"""SCRUM48 owner-only PostgreSQL integration for equipment alerts.
-AC1 submission, AC2 approval, AC3 rejection without workflow reason.
-Supporting rules: atomic rollback/visibility, bulk granularity and no false jobs.
-Only Equipment Request production code executes; disposable PostgreSQL is the
-only external system. No composite, dispatcher, consumer, broker or browser.
+"""SCRUM-48: Equipment Request Notification and Decision Alerts
+
+User Story
+----------
+As an Event Coordinator and Technical Support Staff, I want to receive
+notifications about equipment requests and decisions, so that I can coordinate
+equipment arrangements efficiently.
+
+Acceptance Criteria
+-------------------
+AC1: Given an Event Coordinator submits an equipment request, the system sends
+     an in-app notification to Technical Support Staff with the event name,
+     requested equipment list, and a link to review the request.
+AC2: Given equipment is confirmed as available or found to be unavailable, the
+     system sends an in-app notification to the Event Coordinator with the
+     event name, equipment list, and availability status.
+AC3: Given an equipment request is submitted and pending review, the system
+     sends an in-app notification to Technical Support Staff that a request
+     requires their review.
+
+Real: Flask routes, token signature/role checks, models/allocation SQL, separate real PostgreSQL connections in fixture-owned databases.
+Doubled: Synthetic external Event/catalogue snapshots; JWKS key lookup only. No other service or broker runs.
+Not proven: Browser behaviour, real upstream snapshots, concurrent catalogue/schedule edits and notification delivery are not proved. Existing fixture loads selected baseline FK tables plus owner outbox migration, NOT the full migration chain; this is a known integration-guide exception, unchanged here. Execution is collected but not executed during this reorganisation because an unrelated backend-ngrok-1 auto-restarts; the container-preservation guard is unchanged.
+Supporting reliability: transaction atomicity/visibility and alert granularity; delivery is not proved.
 """
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
@@ -120,7 +139,10 @@ def test_failed_and_non_decision_operations_create_no_new_alerts(owner, case, ex
     elif case == "bulk_no_pending":
         response = owner.review()
     elif case == "bulk_empty_event":
-        response = owner.client.patch(f"/events/{uid()}/equipment-requests", headers=owner.identity(), json=dict(status="Approved", notificationContext=owner.context))
+        empty_event = uid()
+        response = owner.client.patch(f"/events/{empty_event}/equipment-requests", headers=owner.identity(),
+            json=dict(status="Approved", notificationContext={**owner.context, "eventId": empty_event},
+                      approvalContext=owner.approval_context([], empty_event)))
     elif case == "unauthorized":
         response = owner.review(identifiers[0], headers=owner.identity("Event Organiser"))
     elif case == "invalid":
@@ -174,3 +196,46 @@ def test_requests_and_entire_fanout_become_visible_only_together_after_commit(ow
                 cursor.execute('SELECT pg_advisory_unlock_all()')
     assert len(owner.db.snapshot()["EquipmentRequest"]) == 2
     assert len(owner.outbox()) == 2
+
+
+from concurrent.futures import ThreadPoolExecutor
+
+from contextlib import closing
+
+import psycopg2
+
+from app.allocation import APPROVAL_LOCK
+
+from tests.integration.owner_postgres import uid, wait_for, TOKEN
+
+import pytest
+
+
+
+def approval_payload(owner, ids, *, event_id=None, events=None, total=20) -> dict:
+    """Trusted external Event/catalogue responses frozen before the owner mutation."""
+    event_id = event_id or owner.event
+    context = {**owner.context, "eventId": event_id}
+    checked = owner.approval_context(ids, event_id)
+    if events is not None:
+        checked["events"] = events
+    for item in checked["equipment"]:
+        item["totalQuantity"] = total
+    return dict(status="Approved", notificationContext=context, approvalContext=checked)
+
+def decide(owner, payload, identifier=None, headers=None):
+    """Each caller gets a separate Flask client and a real new PostgreSQL connection."""
+    path = f"/equipment-requests/{identifier}" if identifier else f"/events/{payload['approvalContext']['eventId']}/equipment-requests"
+    with owner.app.test_client() as client:
+        return client.patch(path, headers=owner.identity() if headers is None else headers, json=payload)
+
+
+
+# AC2 ----
+def test_ac2_bulk_outbox_failure_rolls_back_all_allocations(owner):
+    """Failure: Failure on the second outbox INSERT rolls back the first job and every decision."""
+    ids = owner.seed_requests(3)
+    before = owner.db.snapshot()
+    owner.db.fail_outbox_insert(2)
+    assert decide(owner, approval_payload(owner, ids)).status_code == 503
+    assert owner.db.snapshot() == before
