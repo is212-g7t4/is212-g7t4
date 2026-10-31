@@ -57,7 +57,7 @@ def organiser():
     return signed_in(create_app().test_client(), ORGANISER_ID, "Event Organiser")
 
 
-def test_event_registrations_for_organiser_include_attendee_details(organiser, monkeypatch):
+def test_ac3_event_registrations_for_organiser_include_attendee_details(organiser, monkeypatch):
     """
     Summary: The organiser of an event sees each registered attendee's name, email and organisation with the registration's date and status.
     AC3: The Event Organiser can click on an event to view detailed
@@ -89,7 +89,7 @@ def test_event_registrations_for_organiser_include_attendee_details(organiser, m
     can_view.assert_called_once_with(EVENT_ID, "Event Organiser")
 
 
-def test_event_registrations_for_organiser_of_another_event_returns_403(organiser, monkeypatch):
+def test_ac4_event_registrations_for_organiser_of_another_event_returns_403(organiser, monkeypatch):
     """
     Summary: An organiser cannot see the registrations of an event they did not create, and nothing is read.
     AC4: Given the Event Organiser did not create the event, they cannot view

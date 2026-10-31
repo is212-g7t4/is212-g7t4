@@ -83,7 +83,7 @@ def registrations(monkeypatch):
 # AC1 ----
 
 @pytest.mark.parametrize("role", ["Event Organiser", "Event Coordinator", "Event Coordinator Lead"], ids=["event_organiser", "event_coordinator", "event_coordinator_lead"])
-def test_event_registrations_when_event_team_allowed_returns_list(monkeypatch, registrations, role):
+def test_ac1_event_registrations_when_event_team_allowed_returns_list(monkeypatch, registrations, role):
     """
     Summary: Organisers, coordinators and the Lead get the list once Event Service allows them.
     AC1: Given an authenticated user is permitted to view information based on
@@ -103,7 +103,7 @@ def test_event_registrations_when_event_team_allowed_returns_list(monkeypatch, r
 # AC2 ----
 
 @pytest.mark.parametrize("role", ["Attendee", "Venue Staff", "Technical Support", "Safety Officer"], ids=["attendee", "venue_staff", "technical_support", "safety_officer"])
-def test_event_registrations_when_role_not_on_event_team_returns_403(monkeypatch, registrations, role):
+def test_ac2_event_registrations_when_role_not_on_event_team_returns_403(monkeypatch, registrations, role):
     """
     Summary: Roles outside the event team are refused without even asking Event Service.
     AC2: Given an authenticated user's role does not permit them to view
@@ -123,7 +123,7 @@ def test_event_registrations_when_role_not_on_event_team_returns_403(monkeypatch
 
 # AC3 ----
 
-def test_event_registrations_when_not_related_to_event_returns_403(monkeypatch, registrations):
+def test_ac3_event_registrations_when_not_related_to_event_returns_403(monkeypatch, registrations):
     """
     Summary: A user with no relationship to the event is refused and nothing is read.
     AC3: Given an authenticated user's relationship to an event does not permit
@@ -140,7 +140,7 @@ def test_event_registrations_when_not_related_to_event_returns_403(monkeypatch, 
     registrations.assert_not_called()
 
 
-def test_event_registrations_when_event_unknown_returns_404(monkeypatch, registrations):
+def test_ac3_event_registrations_when_event_unknown_returns_404(monkeypatch, registrations):
     """
     Summary: An event that does not exist is reported as not found, not as an empty list.
     AC3: Given an authenticated user's relationship to an event does not permit
@@ -155,7 +155,7 @@ def test_event_registrations_when_event_unknown_returns_404(monkeypatch, registr
 
 # AC4 ----
 
-def test_event_registrations_for_two_events_returns_only_the_related_one(monkeypatch, registrations):
+def test_ac4_event_registrations_for_two_events_returns_only_the_related_one(monkeypatch, registrations):
     """
     Summary: Asking for two events gives the list for the related one and a refusal for the other.
     AC4: Given a user is permitted to view information for one event but does
@@ -179,7 +179,7 @@ def test_event_registrations_for_two_events_returns_only_the_related_one(monkeyp
 
 # AC5 ----
 
-def test_event_registrations_judge_each_role_on_its_own_relationship(monkeypatch):
+def test_ac5_event_registrations_judge_each_role_on_its_own_relationship(monkeypatch):
     """
     Summary: The Lead and the organiser are each judged on their own relationship to the same event.
     AC5: Given two authenticated users have different roles or relationships to
@@ -200,7 +200,7 @@ def test_event_registrations_judge_each_role_on_its_own_relationship(monkeypatch
     assert organiser_params == {"organiserId": "me"}
 
 
-def test_event_registrations_when_event_service_fails_returns_502(monkeypatch, registrations):
+def test_ac3_event_registrations_when_event_service_fails_returns_502(monkeypatch, registrations):
     """
     Summary: If Event Service cannot answer, nothing is disclosed.
     AC3: Given an authenticated user's relationship to an event does not permit
