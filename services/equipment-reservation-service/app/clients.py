@@ -63,20 +63,24 @@ def get_request(request_id):
     return _call("GET", _request_service(f"/equipment-requests/{request_id}"))["request"]
 
 
-def review_request(request_id, status, rejection_reason=None):
+def review_request(request_id, status, rejection_reason=None, *, approval_context=None):
     row = get_request(request_id)
     payload = {"status": status, "notificationContext": notification_snapshot(row["eventId"])}
     if status == "Rejected":
         payload["rejectionReason"] = rejection_reason
-    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload)
+    if status == "Approved":
+        payload["approvalContext"] = approval_context
+    body = _call("PATCH", _request_service(f"/equipment-requests/{request_id}"), json=payload, headers=_internal_read_headers())
     return body["request"]
 
 
-def review_event_requests(event_id, status, rejection_reason=None):
+def review_event_requests(event_id, status, rejection_reason=None, *, approval_context=None):
     payload = {"status": status, "notificationContext": notification_snapshot(event_id)}
     if status == "Rejected":
         payload["rejectionReason"] = rejection_reason
-    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload)
+    if status == "Approved":
+        payload["approvalContext"] = approval_context
+    body = _call("PATCH", _request_service(f"/events/{event_id}/equipment-requests"), json=payload, headers=_internal_read_headers())
     return body["requests"]
 
 
@@ -88,9 +92,10 @@ def create_event_requests(event_id, items):
 
 
 def _internal_read_headers():
-    """The token Event Service's /internal/* routes require. Equipment Request's create and review
-    routes authenticate the forwarded user and never read it, so mutations do not send it (SCRUM-10).
-    Checked while the snapshot is built, so a missing token stops a mutation before anything is written."""
+    """Existing service credential for internal reads and trusted owner review context.
+
+    The forwarded user token still supplies the reviewer identity and role.
+    """
     token = os.getenv("INTERNAL_SERVICE_TOKEN")
     if not token:
         raise DownstreamError(503, "Internal service authentication is not configured.")

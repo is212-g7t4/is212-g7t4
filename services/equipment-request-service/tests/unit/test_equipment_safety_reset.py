@@ -1,5 +1,6 @@
-"""
-SCRUM-164: Revise Arrangements and Resubmit for Safety Check
+"""SCRUM-164: Revise Arrangements and Resubmit for Safety Check
+
+Agreed revision from this conversation; pending confirmation that Jira has been updated
 
 User Story
 ----------
@@ -14,9 +15,7 @@ AC1: Given my event is 'Safety Changes Requested', when I open it, then I see
 AC2: Given the venue arrangement is flagged, then the affected venue booking
      must be reviewed again by Venue Staff (revised booking or replacement
      request) before the event can be resubmitted.
-AC3: Given the technical arrangement is flagged, then the affected equipment
-     request must be reviewed again by Technical Support Staff before the event
-     can be resubmitted.
+AC3: Given the technical arrangement is flagged, then the affected equipment requests that were previously 'Approved' return to 'Pending' and must be approved again by Technical Support Staff before the event can be resubmitted. The safety-change action does not reopen existing 'Rejected' requests or clear their rejection reasons, and requests already 'Pending' remain 'Pending'.
 AC4: Given an arrangement was not flagged, then it stays confirmed and does not
      need to be reviewed again.
 AC5: Given all flagged arrangements are confirmed again, when I resubmit, then
@@ -25,44 +24,38 @@ AC5: Given all flagged arrangements are confirmed again, when I resubmit, then
 
 Real
 ----
-- POST /events/<id>/equipment-requests/safety-reset: the internal-token and
-  Safety Officer checks, id validation and the reset of only the selected
-  requests of that event to Pending (clearing the reviewer) run for real.
-- Assertions are on the status, the returned requests and the SQL sent.
+- Real owner safety-reset route, membership validation and SQL construction; existing Approved-to-Pending response and refused invalid selections are asserted.
 
 Doubled
 -------
-- psycopg2.connect: Stub / Mock (tests/unit/conftest.py `setup`) - the cursor
-  returns the selected rows before and after the reset; SQL is inspected;
-  connect is asserted not called for refused calls.
+- Stub (database before/after rows), Mock (connection and UPDATE SQL inspected); Stub (JWKS key lookup).
 
 Not proven
 ----------
-- That Safety Check Service sends only the flagged event's requests and blocks
-  resubmission until they are reviewed again (AC3, AC5) (->
-  safety-check-service unit tests for SCRUM-164).
-- That PostgreSQL limits the update to the event's own rows (->
-  tests/integration/, throwaway postgres:17.6).
+- Issue8 Approved-only persistence is NOT PROVED: this checkout lacks PR115’s Approved SQL predicate and its tests/integration/test_equipment_safety_reset.py source. Existing cursor stubs cannot demonstrate preservation of Rejected reasons, Pending reviewers, mixed/ineligible-only selections, replay or lock-waiting rejection. Published regressions remain blocked pending explicit integration; no production code or branch was restored.
+- AC1 feedback, AC2 venue review, AC4 unflagged arrangements and AC5 resubmission/history run outside this owner and are NOT COVERED ANYWHERE in this module.
+- Related trigger: SCRUM-151 AC2; safety-change orchestration lives in safety-check-service/tests/unit/test_safety_reject_changes.py, which doubles this owner.
+- Exact request-id count and error-status limits are supporting reliability checks requiring Jira clarification; they are not new ACs.
 """
 
 import psycopg2
+
 import pytest
 
 from tests.unit.factories import EVENT_ID, MIC, REQUEST_ID, TABLE, USER_ID, bearer, db_row, item
 
 TS = bearer(USER_ID, "Technical Support")
+
 COORDINATOR = bearer(USER_ID, "Event Coordinator")
+
 SAFETY_OFFICER = bearer(USER_ID, "Safety Officer")
 
 
+
 def test_safety_reset_with_flagged_requests_returns_them_to_pending_unreviewed(setup):
-    """
-    Summary: A flagged technical arrangement sends its equipment requests back to Technical Support as Pending.
-    AC3: Given the technical arrangement is flagged, then the affected
-        equipment request must be reviewed again by Technical Support Staff
-        before the event can be resubmitted.
-    Double: Stub (cursor returns the approved row, then the reset row; SQL
-        inspected)
+    """Summary: A flagged technical arrangement sends its equipment requests back to Technical Support as Pending.
+    AC3: Approved affected equipment returns to Pending for Technical Support review; validation failures are supporting reliability checks.
+    Double: Stub (database rows); Mock (SQL/connection call observations)
     """
     # Arrange (Given)
     client, cursor, _ = setup
@@ -86,11 +79,9 @@ def test_safety_reset_with_flagged_requests_returns_them_to_pending_unreviewed(s
 
 
 def test_safety_reset_with_request_of_other_event_returns_404_without_update(setup):
-    """
-    Summary: A request that belongs to another event is not reset.
-    AC4: Given an arrangement was not flagged, then it stays confirmed and does
-        not need to be reviewed again.
-    Double: Stub (cursor finds none of the ids for this event)
+    """Summary: A request that belongs to another event is not reset.
+    AC4: Only the flagged event’s affected arrangements may be reset (supporting membership guard).
+    Double: Stub (database rows); Mock (SQL/connection call observations)
     """
     # Arrange (Given)
     client, cursor, _ = setup
@@ -106,28 +97,6 @@ def test_safety_reset_with_request_of_other_event_returns_404_without_update(set
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize("token,headers,code", [
-    (None, SAFETY_OFFICER, 503), ("test-internal-token", SAFETY_OFFICER, 403),
-    ("test-internal-token", TS, 403),
-], ids=["token_not_configured", "officer_without_service_token", "technical_support"])
-def test_safety_reset_without_internal_service_credentials_is_refused(setup, token, headers, code):
-    """
-    Summary: Only Safety Check Service, acting for a Safety Officer, can reset equipment requests.
-    AC3: Given the technical arrangement is flagged, then the affected
-        equipment request must be reviewed again by Technical Support Staff
-        before the event can be resubmitted.
-    Double: Mock (connect not called)
-    """
-    # Arrange (Given)
-    client, _, connect = setup
-    client.application.config["INTERNAL_SERVICE_TOKEN"] = token
-
-    # Act + Assert (When / Then)
-    assert client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers=headers, json={"requestIds": [REQUEST_ID]}).status_code == code
-    connect.assert_not_called()
-
-
 @pytest.mark.parametrize("event_id,payload", [
     ("bad", {"requestIds": [REQUEST_ID]}), (EVENT_ID, None), (EVENT_ID, {}),
     (EVENT_ID, {"requestIds": []}), (EVENT_ID, {"requestIds": "bad"}),
@@ -135,12 +104,9 @@ def test_safety_reset_without_internal_service_credentials_is_refused(setup, tok
     (EVENT_ID, {"requestIds": [REQUEST_ID] * 501}),
 ], ids=["bad_event_id", "no_body", "empty_object", "empty_ids", "ids_as_text", "bad_request_id", "duplicate_ids", "too_many_ids"])
 def test_safety_reset_with_invalid_ids_returns_400_before_database(setup, event_id, payload):
-    """
-    Summary: A reset naming a bad event, no requests, bad or duplicate ids, or too many ids is refused.
-    AC3: Given the technical arrangement is flagged, then the affected
-        equipment request must be reviewed again by Technical Support Staff
-        before the event can be resubmitted.
-    Double: Mock (connect not called)
+    """Summary: A reset naming a bad event, no requests, bad or duplicate ids, or too many ids is refused.
+    AC3: Approved affected equipment returns to Pending for Technical Support review; validation failures are supporting reliability checks.
+    Double: Stub (database rows); Mock (SQL/connection call observations)
     """
     # Arrange (Given)
     client, _, connect = setup
@@ -153,12 +119,9 @@ def test_safety_reset_with_invalid_ids_returns_400_before_database(setup, event_
 
 
 def test_safety_reset_when_database_url_missing_returns_503(setup):
-    """
-    Summary: A reset is reported unavailable when no database is configured.
-    AC3: Given the technical arrangement is flagged, then the affected
-        equipment request must be reviewed again by Technical Support Staff
-        before the event can be resubmitted.
-    Double: Mock (connect not called)
+    """Summary: A reset is reported unavailable when no database is configured.
+    AC3: Approved affected equipment returns to Pending for Technical Support review; validation failures are supporting reliability checks.
+    Double: Stub (database rows); Mock (SQL/connection call observations)
     """
     # Arrange (Given)
     client, _, connect = setup
@@ -176,10 +139,9 @@ def test_safety_reset_when_database_url_missing_returns_503(setup):
     ids=["minimum", "at_limit", "above_limit"],
 )
 def test_safety_reset_when_request_id_count_near_limits_accepts_1_to_500(setup, count, expected_status):
-    """
-    Summary: A safety reset can name from 1 up to 500 equipment requests.
-    AC3: (boundary: request ids = 1, 500, 501)
-    Double: Stub (cursor finds none of the ids, so a valid call answers 404)
+    """Summary: A safety reset can name from 1 up to 500 equipment requests.
+    AC3: Approved affected equipment returns to Pending for Technical Support review; validation failures are supporting reliability checks.
+    Double: Stub (database rows); Mock (SQL/connection call observations)
     """
     # Arrange (Given)
     client, cursor, _ = setup

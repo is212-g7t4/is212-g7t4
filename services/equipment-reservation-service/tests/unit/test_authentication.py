@@ -34,6 +34,8 @@ Doubled
   call.
 - jwt.PyJWKClient: Mock - verifies the JWKS URL built from SUPABASE_URL.
 
+- Review-access regressions also control the database/HTTP boundary with stubs and the service world with a Fake; refusal and caller-token propagation are checked.
+
 Not proven
 ----------
 - That tokens issued by the real Supabase project verify against its live JWKS
@@ -325,3 +327,60 @@ def test_authenticate_with_blank_subject_returns_401():
         response, status = authenticate()
 
     assert status == 401
+
+
+import httpx
+
+import pytest
+
+from app import clients, create_app
+
+from app.availability import RESERVING_EVENT_STATUSES, effective_available_stock, evaluate_request
+
+from app.clients import DownstreamError
+
+from tests.unit.factories import COORDINATOR, CREATE_URL, LEAD, TS, bearer, new_item, rows
+
+from tests.unit.fakes import END, LAPTOP, MIC, OTHER, START, TABLE, TARGET, THIRD, USER, FakeResponse, equipment, line
+
+HEADERS = {"Authorization": "Bearer user-token", "Cookie": "must-not-be-forwarded"}
+
+MIC_STOCK = {"id": "e1", "status": "Available", "totalQuantity": 10}
+
+
+
+def test_list_requests_client_forwards_only_token_and_filters(sent):
+    """Summary: Request lookups carry the caller's token and filters, never their cookies.
+    AC1: Unauthenticated callers cannot access protected equipment requests.
+    AC2: Authenticated access is evaluated with the caller identity and role.
+    Double: Fake (downstream service world); Stub (HTTP responses); Mock (recorded requests inspected)
+    """
+    # Arrange (Given): test data and external adapters from fixtures.
+    calls, fake = sent
+    fake.response = FakeResponse(body={"requests": [1]})
+
+    # Act + Assert (When / Then): exercise the request/calculation and inspect outcomes.
+    with create_app().test_request_context(headers=HEADERS):
+        assert clients.list_requests("Approved", ["a", "b"]) == [1]
+
+    method, url, kwargs = calls[0]
+    assert (method, url) == ("GET", "http://localhost:5011/equipment-requests")
+    assert kwargs["params"] == {"status": "Approved", "eventIds": "a,b"}
+    assert kwargs["headers"] == {"Authorization": "Bearer user-token"}
+
+
+@pytest.mark.parametrize("headers,code", [({}, 401), ({"X-Dev-User-Id": USER, "X-Dev-Role": "Technical Support"}, 401), (bearer(USER, "Attendee"), 403)], ids=["no_token", "dev_headers", "attendee"])
+def test_review_list_without_permitted_role_is_refused(world, client, headers, code):
+    """Summary: The review list is not shown to anonymous callers, retired developer headers or attendees.
+    AC1: Unauthenticated callers cannot access protected equipment requests.
+    AC2: Authenticated access is evaluated with the caller identity and role.
+    Double: Fake (downstream service world); Stub (HTTP responses); Mock (recorded requests inspected)
+    """
+    # Arrange (Given): world, client, headers, code, from fixtures
+
+    # Act + Assert (When / Then)
+    # Review AC1/AC3 (access): deny anonymous (SCRUM-8: DEV headers are not a sign-in) and unrelated-role readers.
+    # Arrange (Given): test data and external adapters from fixtures.
+    # Act + Assert (When / Then): exercise the request/calculation and inspect outcomes.
+    assert client.get("/equipment-reservations", headers=headers).status_code == code
+    assert world.calls == []

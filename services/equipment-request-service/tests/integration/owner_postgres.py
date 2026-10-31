@@ -114,9 +114,21 @@ class OwnerAPI:
             rows.append(str(row["equipment_request_id"]))
         return rows
 
+    def approval_context(self, request_ids, event_id=None) -> dict:
+        """External service snapshot for owner-only tests; no foreign domain SQL reads."""
+        event_id = event_id or self.event
+        return dict(eventId=event_id, requestIds=request_ids,
+            events=[dict(id=event_id, status="Under Review", startTime="2030-01-01T10:00:00", endTime="2030-01-01T18:00:00")],
+            equipment=[dict(id=eid, status="Available", totalQuantity=20) for eid in self.equipment])
+
     def review(self, identifier=None, status="Approved", context=None, headers=None):
         path = f"/equipment-requests/{identifier}" if identifier else f"/events/{self.event}/equipment-requests"
-        return self.client.patch(path, headers=headers or self.identity(), json=dict(status=status, rejectionReason="Private workflow reason", notificationContext=context or self.context))
+        payload = dict(status=status, rejectionReason="Private workflow reason", notificationContext=context or self.context)
+        if status == "Approved":
+            rows = self.db.execute('SELECT equipment_request_id FROM public."EquipmentRequest" WHERE event_id=%s AND status=%s', [self.event, "Pending"])
+            payload["approvalContext"] = self.approval_context(
+                [identifier] if identifier else [str(row["equipment_request_id"]) for row in rows])
+        return self.client.patch(path, headers=headers or self.identity(), json=payload)
 
     def outbox(self):
         return self.db.execute('SELECT * FROM public."EquipmentNotificationOutbox" ORDER BY source_id')
