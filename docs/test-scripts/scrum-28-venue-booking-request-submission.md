@@ -10,10 +10,10 @@ been run.
 
 Automated coverage is separate and runs without the stack:
 
-- Venue Availability: `tests/unit/test_booking_request_submission.py` and
+- Venue Availability: `tests/unit/test_scrum28_booking_request_submission.py` and
   `tests/integration/test_booking_request_submission.py` (real Postgres; the
   only place the AC6 overlap rule is proven).
-- Venue Booking: `tests/unit/test_booking_request_submission.py` and
+- Venue Booking: `tests/unit/test_scrum28_booking_request_submission.py` and
   `tests/integration/test_booking_request_submission.py` (respx stubs).
 - Frontend: `VenueBookingsPanel.test.tsx`, `VenueRequestsPage.test.tsx`,
   `venueBookings.test.ts` (Vitest) and `e2e/venue-booking-submission.spec.ts`

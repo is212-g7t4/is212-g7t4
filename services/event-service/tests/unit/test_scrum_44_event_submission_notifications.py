@@ -79,13 +79,16 @@ def operate(client, action, **data):
 
 @pytest.mark.parametrize('recipients', [[], [RECIPIENT, RECIPIENT]],
                          ids=['no-leads', 'duplicate-lead'])
-def test_expansion_saves_unique_recipient_deliveries_and_completes_intent(boundary, recipients):
+def test_ac1_ac2_expansion_writes_one_delivery_per_distinct_lead_with_organiser_name_and_times(boundary, recipients):
     """
-    Summary: Repeated Lead IDs prepare only one delivery.
+    Summary: Expanding a submission intent inserts one 'event.submission' delivery per distinct Lead (none for no Leads, one for a Lead listed twice), keyed by a UUID derived from the Lead, carrying the organiser name and start/end times; the intent is marked published either way.
     AC1: Given an Event Organiser submits a new event request, the Lead
         Coordinator receives an in-app notification that a new request requires
         review.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    AC2: The notification includes the event name, Event Organiser name,
+        proposed event date/time, and a link to review the event request.
+    Double: Stub (cursor.fetchone returns the claimed outbox row of type 'event.submission-fanout' with its source event),
+        Mock (the INSERT INTO calls' parameters and the last call's SQL containing published_at=now())
     """
     # Arrange (Given)
     client, cursor, row = boundary
@@ -110,41 +113,58 @@ def test_expansion_saves_unique_recipient_deliveries_and_completes_intent(bounda
     assert 'published_at=now()' in cursor.execute.call_args.args[0]
 
 
-# AC1 — Reject invalid delivery inputs.
+# AC2 — Refuse a delivery with no Event Organiser name.
 
-@pytest.mark.parametrize('kind,recipients,name', [
-    ('event.approval', [], 'Synthetic'),
-    ('event.submission-fanout', None, 'Synthetic'),
-    ('event.submission-fanout', [], None),
-    ('event.submission-fanout', [], ''),
-    ('event.submission-fanout', ['invalid'], 'Synthetic'),
-], ids=['wrong-notification-type', 'missing-recipients', 'missing-organiser-name',
-        'blank-organiser-name', 'invalid-recipient-id'])
-def test_invalid_expansion_is_refused_without_writes(boundary, kind, recipients, name):
+@pytest.mark.parametrize('name', [None, ''], ids=['missing-organiser-name', 'blank-organiser-name'])
+def test_ac2_expansion_without_an_organiser_name_is_refused_with_no_writes(boundary, name):
     """
-    Summary: Invalid delivery inputs return 400 without write SQL.
-    AC1: Given an Event Organiser submits a new event request, the Lead
-        Coordinator receives an in-app notification that a new request requires
-        review.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: Expanding a submission intent with a missing or blank organiserName answers 400 and only the claim query runs, so no delivery is written.
+    AC2: The notification includes the event name, Event Organiser name,
+        proposed event date/time, and a link to review the event request.
+    Double: Stub (cursor.fetchone returns the claimed 'event.submission-fanout' outbox row),
+        Mock (cursor.execute call count is 1: the claim only)
+    """
+    # Arrange (Given)
+    client, cursor, _ = boundary
+
+    # Act + Assert (When / Then)
+    assert operate(client, 'expand', recipientIds=[], organiserName=name).status_code == 400
+    assert len(cursor.execute.call_args_list) == 1
+
+
+# Supporting design check — Refuse malformed fanout input.
+# No Jira acceptance criterion covers these; they guard what the fanout accepts.
+
+@pytest.mark.parametrize('kind,recipients', [
+    ('event.approval', []),
+    ('event.submission-fanout', None),
+    ('event.submission-fanout', ['invalid']),
+], ids=['wrong-notification-type', 'missing-recipients', 'invalid-recipient-id'])
+def test_expansion_of_the_wrong_intent_type_or_bad_recipients_is_refused_with_no_writes(boundary, kind, recipients):
+    """
+    Summary: Expanding an outbox row that is not a submission fanout, or with recipientIds missing or not UUIDs, answers 400 and only the claim query runs, so no delivery is written.
+    Supporting design check: the fanout only accepts a submission intent and a
+        list of valid Lead ids
+    Double: Stub (cursor.fetchone returns the claimed outbox row, its type set per case),
+        Mock (cursor.execute call count is 1: the claim only)
     """
     # Arrange (Given)
     client, cursor, row = boundary
     row['type'] = kind
 
     # Act + Assert (When / Then)
-    assert operate(client, 'expand', recipientIds=recipients, organiserName=name).status_code == 400
+    assert operate(client, 'expand', recipientIds=recipients, organiserName='Synthetic').status_code == 400
     assert len(cursor.execute.call_args_list) == 1
 
 
 # AC2 — Save matching review details.
 
-def test_submission_freeze_preserves_exact_saved_content(boundary):
+def test_ac2_freeze_accepts_an_envelope_matching_the_saved_event_details_message_and_review_link(boundary):
     """
-    Summary: A matching message is accepted for saving before sending.
+    Summary: An envelope whose details, message and event-details destination all match the saved submission is accepted with 200 and comes back unchanged.
     AC2: The notification includes the event name, Event Organiser name,
         proposed event date/time, and a link to review the event request.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed 'event.submission' row, then the same row with the envelope stored)
     """
     client, cursor, row = boundary
     row.update(type='event.submission', source={**SOURCE, 'recipientId': RECIPIENT, 'organiserName': 'Synthetic Organiser'})
@@ -165,12 +185,13 @@ def test_submission_freeze_preserves_exact_saved_content(boundary):
 # AC2 — Reject changed review details.
 
 @pytest.mark.parametrize('changed_field', ['details', 'message', 'destination'])
-def test_altered_submission_context_cannot_be_frozen(boundary, changed_field):
+def test_ac2_freeze_refuses_an_envelope_whose_details_message_or_review_link_was_altered(boundary, changed_field):
     """
-    Summary: Changed event details, approval text or another event link are rejected.
+    Summary: An envelope whose details name a different event, whose message says 'Request already approved.', or whose destination points at another event answers 400 'Invalid outbox input.', and no UPDATE or INSERT runs.
     AC2: The notification includes the event name, Event Organiser name,
         proposed event date/time, and a link to review the event request.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed 'event.submission' row),
+        Mock (no cursor.execute call starts with UPDATE or INSERT)
     """
     client, cursor, row = boundary
     row.update(type='event.submission', source={**SOURCE, 'recipientId': RECIPIENT, 'organiserName': 'Synthetic Organiser'})

@@ -1,7 +1,7 @@
 """Shared payloads and row builders for the Venue Service unit tests.
 
-These used to live in test_add_venue.py and were imported from there by
-test_edit_venue.py. A test module should never import another test module, so
+These used to live in test_scrum22_add_venue.py and were imported from there by
+test_scrum23_edit_venue.py. A test module should never import another test module, so
 they live here instead.
 """
 

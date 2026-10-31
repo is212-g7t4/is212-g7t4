@@ -8,6 +8,7 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "pyjwt[crypto]>=2.10",
     "python-dotenv>=1.0.1",
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [dependency-groups]

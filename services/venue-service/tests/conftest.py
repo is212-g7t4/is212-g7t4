@@ -1,6 +1,9 @@
+import os
 import pytest
 
 from tests.unit.factories import TEST_SIGNING_KEY
+
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
 
 @pytest.fixture(autouse=True)
