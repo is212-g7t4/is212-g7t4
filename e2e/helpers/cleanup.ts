@@ -5,20 +5,23 @@ const FIXTURE_NAME = '^J[0-9]+[abc]? Event '
 const FIXTURE_VENUE = '^J[0-9]+[abc]? Venue '
 
 function connect() {
-  process.loadEnvFile('.env') // run from the repo root, as the npm scripts do
+  const isolated = process.env.E2E_ISOLATED === '1'
+  if (!isolated) process.loadEnvFile('.env') // run from the repo root, as the npm scripts do
   const raw = process.env.DATABASE_URL
   if (!raw) throw new Error('DATABASE_URL is not set in the root .env')
   // Split before decoding so escaped delimiters remain part of the credentials.
   const match = raw.match(/^postgres(?:ql)?:\/\/([^:]+):(.+)@([^@]+?):(\d+)\/(\w+)$/)
   if (!match) throw new Error('DATABASE_URL is not in the expected postgresql://user:password@host:port/db form')
   const [, user, password, host, port, database] = match
+  if (isolated && (host !== '127.0.0.1' || database !== 'journeys'))
+    throw new Error('Isolated cleanup requires the loopback journeys database.')
   return new Client({
     user: decodeURIComponent(user),
     password: decodeURIComponent(password),
     host,
     port: Number(port),
     database,
-    ssl: { rejectUnauthorized: false },
+    ssl: isolated ? false : { rejectUnauthorized: false },
   })
 }
 

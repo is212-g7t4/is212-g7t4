@@ -1,8 +1,8 @@
 import type { APIRequestContext } from '@playwright/test'
 import { expect } from '@playwright/test'
-import { authHeaders, users } from '../../../helpers/stack'
+import { authHeaders, serviceUrl, users } from '../../../helpers/stack'
 
-const venueServiceUrl = 'http://localhost:5006'
+const venueServiceUrl = serviceUrl('venue', '')
 
 export async function createJ1Venue(api: APIRequestContext, runId: string) {
   const venueName = `J1 Venue ${runId}`
