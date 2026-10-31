@@ -17,6 +17,7 @@ export const users = {
   organiser: { id: '3d89d4d2-3502-4bd9-ade8-c9887f2bee45', role: 'Event Organiser', email: 'michaellee@connect.com' },
   safetyOfficer: { id: '5af3e7c1-2b4d-4e8a-9f60-7d1c3b5a9e21', role: 'Safety Officer', email: 'nurul.huda@connectsphere.example' },
   attendee: { id: '207cd4a6-9aa3-481c-882c-e14311f5b7cf', role: 'Attendee', email: 'attendee@example.com' },
+  attendeeTwo: { id: '9bc8b299-36d8-4d3c-a9cd-91ccea38ff13', role: 'Attendee', email: 'jon.tan@example.com' },
   techSupport: { id: 'ad3d6da3-7220-4f80-9157-2ee4abc0455c', role: 'Technical Support', email: 'wei.chen@connectsphere.example' },
   venueStaff: { id: 'd9e4002b-db91-4939-b87e-50f9cceb5e0a', role: 'Venue Staff', email: 'siti.aminah@connectsphere.example' },
 } as const
@@ -32,9 +33,10 @@ const passwordEnv: Record<string, string> = {
   [users.venueStaff.id]: 'E2E_PASSWORD_VENUE_STAFF',
   [users.safetyOfficer.id]: 'E2E_PASSWORD_SAFETY_OFFICER',
   [users.attendee.id]: 'E2E_PASSWORD_ATTENDEE',
+  [users.attendeeTwo.id]: 'E2E_PASSWORD_ATTENDEE_TWO',
 }
 
-const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, safety: 5012 }
+const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, safety: 5012, attendeeRegistration: 5009 }
 const url = (service: keyof typeof ports, path: string) => `http://localhost:${ports[service]}${path}`
 
 type Login = { accessToken: string; expiresAt: number; user: Record<string, string> }
@@ -91,12 +93,19 @@ async function ok(response: { ok(): boolean; status(): number; text(): Promise<s
 }
 
 /** Creates an event the coordinator can request equipment for (status "Under Review"). */
-export async function createUnderReviewEvent(api: APIRequestContext, name: string, window: { start: string; end: string }) {
+export async function createUnderReviewEvent(
+  api: APIRequestContext,
+  name: string,
+  window: { start: string; end: string },
+  options: { expectedAttendance?: number; withdrawalDeadline?: string } = {},
+) {
   const created = await api.post(url('event', '/events'), {
     headers: await authHeaders(users.organiser),
     data: {
       eventName: name, description: 'E2E journey fixture', purpose: 'E2E journey',
-      preferredStartDate: window.start, preferredEndDate: window.end, expectedAttendance: '50',
+      preferredStartDate: window.start, preferredEndDate: window.end,
+      expectedAttendance: String(options.expectedAttendance ?? 50),
+      ...(options.withdrawalDeadline ? { withdrawalDeadline: options.withdrawalDeadline } : {}),
     },
   })
   await ok(created, 'create event')

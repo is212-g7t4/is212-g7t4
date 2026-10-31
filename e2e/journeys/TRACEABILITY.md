@@ -92,6 +92,14 @@ allows both delivery waits and the UI flow. Live diagnosis found a successful
 change approval and a published outbox intent but no matching inbox row; a
 passing concurrent delivery run is not yet verified.
 
+J7 seeds run-owned Confirmed events through service APIs and verifies registration,
+repeat, capacity, withdrawal and notification outcomes across attendee, coordinator
+and organiser views. The full-event fixture is occupied by the second seeded
+Attendee. The closed-registration case reads a past Confirmed event from the seed
+catalogue because the attendee browse page intentionally omits events that have
+already started; the journey only attempts registration against that event and
+never mutates or cleans it.
+
 J1 has passed all nine steps against the live stack with run-scoped cleanup.
 It verifies the persisted safety decision through the assigned Coordinator's
 feedback endpoint (not the pending-review endpoint after confirmation), including
@@ -153,8 +161,9 @@ to recover a test.
 | J5b Prevent equipment over-allocation | `J5/J5b-equipment-over-allocation/` | SCRUM-259 | SCRUM-32, 33, 34, 35 | SCRUM-31, 11, 159, 19 | Implemented |
 | J6a Organiser requests a change | `J6/J6a-organiser-change-request/` | SCRUM-260 | SCRUM-42, 43, 49 | SCRUM-11, 159, 19 | Implemented (pending immutability, comparison, approval/rejection notifications, rejection reason) |
 | J6b Coordinator edits a Confirmed event | `J6/J6b-confirmed-event-safety/` | SCRUM-260 | SCRUM-20, 153 | SCRUM-11, 159, 19, 28, 29, 149, 150 | Implemented (low-impact edit, arrangement conflict, safety withdrawal/history/queue); safety reapproval itself is covered by J1 |
+| J7 Register, reject invalid repeat registration, and withdraw | `J7/` | SCRUM-261 | SCRUM-44–48, including SCRUM-46 | SCRUM-8, 11, 19, 28, 29, 149, 150 | Live pass: registration, duplicate/full/closed/non-Confirmed refusal, withdrawal deadline, notification, staff visibility and place reuse |
 
-Other journeys (J2 to J4 and J7 to J8; SCRUM-256 to 258 and 261 to 262) get a row here when their spec is added.
+Other journeys (J2 to J4 and J8; SCRUM-256 to 258 and 262) get a row here when their spec is added.
 
 ## Adding a journey
 
