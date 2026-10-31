@@ -72,7 +72,7 @@ def test_safety_reset_with_flagged_requests_returns_them_to_pending_unreviewed(s
     # Act (When)
     response = client.post(
         f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"},
+        headers={**SAFETY_OFFICER, "X-Internal-Token": "test-internal-token"},
         json={"requestIds": [REQUEST_ID]},
     )
 
@@ -99,7 +99,7 @@ def test_safety_reset_with_request_of_other_event_returns_404_without_update(set
 
     # Act (When)
     response = client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]})
+        headers={**SAFETY_OFFICER, "X-Internal-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]})
 
     # Assert (Then)
     assert response.status_code == 404
@@ -148,7 +148,7 @@ def test_safety_reset_with_invalid_ids_returns_400_before_database(setup, event_
 
     # Act + Assert (When / Then)
     assert client.post(f"/events/{event_id}/equipment-requests/safety-reset",
-        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"}, json=payload).status_code == 400
+        headers={**SAFETY_OFFICER, "X-Internal-Token": "test-internal-token"}, json=payload).status_code == 400
     connect.assert_not_called()
 
 
@@ -166,7 +166,7 @@ def test_safety_reset_when_database_url_missing_returns_503(setup):
 
     # Act + Assert (When / Then)
     assert client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]}).status_code == 503
+        headers={**SAFETY_OFFICER, "X-Internal-Token": "test-internal-token"}, json={"requestIds": [REQUEST_ID]}).status_code == 503
     connect.assert_not_called()
 
 
@@ -190,7 +190,7 @@ def test_safety_reset_when_request_id_count_near_limits_accepts_1_to_500(setup, 
     # Act (When)
     response = client.post(
         f"/events/{EVENT_ID}/equipment-requests/safety-reset",
-        headers={**SAFETY_OFFICER, "X-Internal-Service-Token": "test-internal-token"},
+        headers={**SAFETY_OFFICER, "X-Internal-Token": "test-internal-token"},
         json={"requestIds": ids},
     )
 

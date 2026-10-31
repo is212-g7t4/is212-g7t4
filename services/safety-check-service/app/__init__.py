@@ -21,7 +21,7 @@ def create_app() -> Flask:
     if not clients.INTERNAL_SERVICE_TOKEN:
         app.logger.warning(
             "INTERNAL_SERVICE_TOKEN is not set: calls to PATCH "
-            "/events/<id>/safety-status won't carry X-Internal-Service-Token, "
+            "/events/<id>/safety-status won't carry X-Internal-Token, "
             "so Event Service's lock (if it has one configured) will reject "
             "them (SCRUM-150/152)."
         )

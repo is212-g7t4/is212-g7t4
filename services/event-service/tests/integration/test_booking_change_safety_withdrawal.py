@@ -29,7 +29,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 @pytest.fixture
 def client(locked_client):
     """These routes are only for other services, which always send the shared token (SCRUM-10)."""
-    locked_client.environ_base["HTTP_X_INTERNAL_SERVICE_TOKEN"] = "synthetic"
+    locked_client.environ_base["HTTP_X_INTERNAL_TOKEN"] = "synthetic"
     return locked_client
 
 ROUND_ID = "55555555-5555-4555-8555-555555555555"

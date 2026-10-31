@@ -93,7 +93,7 @@ ROUND_TWO_ID = "55555555-5555-4555-8555-555555555555"
 ROUND_THREE_ID = "66666666-6666-4666-8666-666666666666"
 OTHER_ROUND_ID = "77777777-7777-4777-8777-777777777777"
 INTERNAL_TOKEN = "test-internal-token"
-INTERNAL_HEADERS = {"X-Internal-Service-Token": INTERNAL_TOKEN}
+INTERNAL_HEADERS = {"X-Internal-Token": INTERNAL_TOKEN}
 
 RECHECK = {
     "withdrawnSafetyCheckId": ROUND_TWO_ID,
@@ -761,7 +761,7 @@ def test_a_confirmed_event_with_no_approval_entry_is_refused(setup):
 
 @pytest.mark.parametrize(
     "headers",
-    [{}, {"X-Internal-Service-Token": "wrong-token"}],
+    [{}, {"X-Internal-Token": "wrong-token"}],
     ids=["missing", "wrong"],
 )
 def test_the_recheck_block_without_the_token_is_still_gated(headers, setup):

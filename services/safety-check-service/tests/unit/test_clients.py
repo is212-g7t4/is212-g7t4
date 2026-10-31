@@ -237,7 +237,7 @@ def test_reset_equipment_client_sends_scoped_ids_with_internal_auth(sent, monkey
     assert clients.reset_equipment_safety_requests(EVENT_ID, ["request-id"])[0]["status"] == "Pending"
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/equipment-requests/safety-reset")
     assert calls[0]["json"] == {"requestIds": ["request-id"]}
-    assert calls[0]["headers"] == {"X-Internal-Service-Token": "test-token"}
+    assert calls[0]["headers"] == {"X-Internal-Token": "test-token"}
 
 
 def test_reset_venue_client_uses_owner_with_internal_auth(sent, monkeypatch):
@@ -254,7 +254,7 @@ def test_reset_venue_client_uses_owner_with_internal_auth(sent, monkeypatch):
     assert clients.reset_venue_safety_bookings(EVENT_ID, [BOOKING_ID]) == []
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/venue-bookings/safety-reset")
     assert calls[0]["json"] == {"bookingIds": [BOOKING_ID]}
-    assert calls[0]["headers"] == {"X-Internal-Service-Token": "test-token"}
+    assert calls[0]["headers"] == {"X-Internal-Token": "test-token"}
 
 
 def test_get_event_client_reads_as_the_coordinator(sent):
@@ -359,7 +359,7 @@ def test_set_safety_status_client_sends_the_round(sent, monkeypatch):
         "safetyCheckId": RECORD_ID,
         "roundNumber": 2,
     }
-    assert calls[0]["headers"] == {"X-Internal-Service-Token": "shared-secret"}
+    assert calls[0]["headers"] == {"X-Internal-Token": "shared-secret"}
 
 
 def test_set_safety_status_client_sends_remarks_on_approve(sent):
@@ -1223,7 +1223,7 @@ def test_update_details_client_sends_edit_and_both_round_ids(sent, monkeypatch):
         # SCRUM-46 forwards the doubled pre-edit venue alongside unchanged round IDs.
         "safetyRecheck": {**safety_recheck, "venueBefore": "Hall A"},
     }
-    assert calls[0]["headers"] == {"X-Internal-Service-Token": "shared-secret"}
+    assert calls[0]["headers"] == {"X-Internal-Token": "shared-secret"}
 
 
 def test_update_details_client_sends_empty_token_when_unconfigured(
@@ -1243,7 +1243,7 @@ def test_update_details_client_sends_empty_token_when_unconfigured(
 
     clients.update_event_details(EVENT_ID, {}, {})
 
-    assert calls[0]["headers"] == {"X-Internal-Service-Token": ""}
+    assert calls[0]["headers"] == {"X-Internal-Token": ""}
 
 
 @pytest.mark.parametrize("status", [400, 409])
