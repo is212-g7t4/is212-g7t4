@@ -46,6 +46,8 @@ Not proven
 ----------
 - That an attendee can only withdraw their own registration (-> SCRUM-39 tests
   here, and registration-service tests).
+- AC3 and AC5 ownership isolation are exercised by those SCRUM-39 cases; this
+  module focuses on route-level role and read-versus-write separation.
 """
 import pytest
 
@@ -62,7 +64,7 @@ ROUTES = [
 
 # AC1 ----
 
-def test_register_when_attendee_reaches_form_validation():
+def test_ac1_register_when_attendee_reaches_form_validation():
     """
     Summary: An attendee is allowed past the role check to register.
     AC1: Given an authenticated user is permitted to modify information based
@@ -85,7 +87,7 @@ def test_register_when_attendee_reaches_form_validation():
     ids=["event_organiser", "event_coordinator", "event_coordinator_lead", "venue_staff", "technical_support", "safety_officer"],
 )
 @pytest.mark.parametrize("method, path", ROUTES, ids=["register", "withdraw"])
-def test_register_or_withdraw_when_not_attendee_returns_403_without_downstream_call(method, path, role):
+def test_ac2_register_or_withdraw_when_not_attendee_returns_403_without_downstream_call(method, path, role):
     """
     Summary: Every role other than Attendee is refused registering or withdrawing, and nothing is changed.
     AC2: Given an authenticated user's role does not permit them to modify
@@ -104,7 +106,7 @@ def test_register_or_withdraw_when_not_attendee_returns_403_without_downstream_c
 
 # AC4 ----
 
-def test_my_registrations_after_refused_change_by_other_role_still_load(monkeypatch):
+def test_ac4_my_registrations_after_refused_change_by_other_role_still_load(monkeypatch):
     """
     Summary: A refused change by another role does not affect what an attendee can view.
     AC4: Given a user is permitted to view particular information but is not

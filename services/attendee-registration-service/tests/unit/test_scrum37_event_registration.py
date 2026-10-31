@@ -64,7 +64,7 @@ from app.validation import event_has_started, validate_registration
 from tests.unit.factories import EVENT_ID, confirmed_event, payload, response
 
 
-def test_register_when_event_open_returns_confirmation(client, monkeypatch):
+def test_ac7_register_when_event_open_returns_confirmation(client, monkeypatch):
     """
     Summary: Registering for an open, confirmed event saves the registration and returns a confirmation naming the event.
     AC7: Upon successful registration, a confirmation message on-screen is
@@ -88,7 +88,7 @@ def test_register_when_event_open_returns_confirmation(client, monkeypatch):
     assert sent["capacity"] == 30
 
 
-def test_register_with_profile_fields_ignores_them(client, monkeypatch):
+def test_ac2_register_with_profile_fields_ignores_them(client, monkeypatch):
     """
     Summary: The attendee's name, email and organisation come from their profile, so values typed into the request are ignored.
     AC2: The Attendee can provides required registration information including
@@ -117,7 +117,7 @@ def test_register_with_profile_fields_ignores_them(client, monkeypatch):
     ],
     ids=["no_body", "blank_event"],
 )
-def test_register_with_missing_event_returns_400_naming_it(client, body, expected):
+def test_ac3_register_with_missing_event_returns_400_naming_it(client, body, expected):
     """
     Summary: A registration that does not say which event it is for is refused, naming what is missing.
     AC3: The system validates that all required fields are completed before
@@ -131,7 +131,7 @@ def test_register_with_missing_event_returns_400_naming_it(client, body, expecte
     assert expected in str(response.json)
 
 
-def test_register_with_malformed_event_id_returns_400(client):
+def test_ac3_register_with_malformed_event_id_returns_400(client):
     """
     Summary: A registration must name a real event, not a malformed id.
     AC3: The system validates that all required fields are completed before
@@ -144,7 +144,7 @@ def test_register_with_malformed_event_id_returns_400(client):
     assert response.json == {"message": "A valid event is required."}
 
 
-def test_register_when_event_not_confirmed_returns_409(client, monkeypatch):
+def test_ac1_register_when_event_not_confirmed_returns_409(client, monkeypatch):
     """
     Summary: An event that is not confirmed is not open for registration.
     AC1: The Attendee can access a registration form from a confirmed event
@@ -162,7 +162,7 @@ def test_register_when_event_not_confirmed_returns_409(client, monkeypatch):
     save.assert_not_called()
 
 
-def test_register_when_event_started_returns_409_closed(client, monkeypatch):
+def test_ac5_register_when_event_started_returns_409_closed(client, monkeypatch):
     """
     Summary: Registration closes once the event has started, and nothing is saved.
     AC5: Given registration has closed for the event, The system does not allow
@@ -195,7 +195,7 @@ def test_register_when_event_started_returns_409_closed(client, monkeypatch):
     ],
     ids=["already_registered", "event_full"],
 )
-def test_register_when_duplicate_or_full_shows_the_reason(client, monkeypatch, code, message):
+def test_ac4_ac6_register_when_duplicate_or_full_shows_the_reason(client, monkeypatch, code, message):
     """
     Summary: An attendee who is already registered, or an event that is full, is refused with a clear message.
     AC4: Given the Attendee is already registered for the event with the same
@@ -219,7 +219,7 @@ def test_register_when_duplicate_or_full_shows_the_reason(client, monkeypatch, c
 
 
 @pytest.mark.parametrize("failing", ["event_lookup", "save"], ids=["event_lookup_fails", "save_fails"])
-def test_register_when_downstream_fails_returns_502_without_details(client, monkeypatch, failing):
+def test_ac7_register_when_downstream_fails_returns_502_without_details(client, monkeypatch, failing):
     """
     Summary: If the event cannot be checked or the registration cannot be saved, the attendee gets an error, never a false confirmation.
     AC7: Upon successful registration, a confirmation message on-screen is
@@ -237,7 +237,7 @@ def test_register_when_downstream_fails_returns_502_without_details(client, monk
     assert "registration" not in response.json
 
 
-def test_validate_registration_trims_ids_and_drops_profile_fields():
+def test_ac3_validate_registration_trims_ids_and_drops_profile_fields():
     """
     Summary: The event id is trimmed and any typed-in profile details are dropped before the registration is checked.
     AC3: The system validates that all required fields are completed before
@@ -254,7 +254,7 @@ def test_validate_registration_trims_ids_and_drops_profile_fields():
     assert cleaned == {"eventId": "event"}
 
 
-def test_event_has_started_compares_in_singapore_time():
+def test_ac5_event_has_started_compares_in_singapore_time():
     """
     Summary: Whether registration has closed is judged in Singapore time, however the start time is written.
     AC5: Given registration has closed for the event, The system does not allow
@@ -271,7 +271,7 @@ def test_event_has_started_compares_in_singapore_time():
     )
 
 
-def test_get_confirmed_event_returns_match_or_none(monkeypatch):
+def test_ac1_get_confirmed_event_returns_match_or_none(monkeypatch):
     """
     Summary: The event is looked up among Event Service's confirmed events, so an unconfirmed event is not found.
     AC1: The Attendee can access a registration form from a confirmed event
@@ -284,7 +284,7 @@ def test_get_confirmed_event_returns_match_or_none(monkeypatch):
     assert clients.get_confirmed_event("missing") is None
 
 
-def test_get_confirmed_event_when_event_service_fails_raises(monkeypatch):
+def test_ac1_get_confirmed_event_when_event_service_fails_raises(monkeypatch):
     """
     Summary: If Event Service fails while checking the event, the failure is passed up rather than treated as "not confirmed".
     AC1: The Attendee can access a registration form from a confirmed event
@@ -297,7 +297,7 @@ def test_get_confirmed_event_when_event_service_fails_raises(monkeypatch):
         clients.get_confirmed_event("event-1")
 
 
-def test_save_registration_returns_saved_registration(monkeypatch):
+def test_ac7_save_registration_returns_saved_registration(monkeypatch):
     """
     Summary: The registration Registration Service saved is what the attendee's confirmation shows.
     AC7: Upon successful registration, a confirmation message on-screen is
@@ -309,7 +309,7 @@ def test_save_registration_returns_saved_registration(monkeypatch):
     assert clients.save_registration({"eventId": "event-1"}) == {"status": "Confirmed"}
 
 
-def test_save_registration_when_refused_raises_conflict_with_code(monkeypatch):
+def test_ac4_ac6_save_registration_when_refused_raises_conflict_with_code(monkeypatch):
     """
     Summary: When Registration Service refuses a duplicate or a full event, its reason is passed on so the attendee can be told.
     AC4: Given the Attendee is already registered for the event with the same
@@ -332,7 +332,7 @@ def test_save_registration_when_refused_raises_conflict_with_code(monkeypatch):
     assert caught.value.message == "Full"
 
 
-def test_save_registration_when_failing_raises_http_error(monkeypatch):
+def test_ac7_save_registration_when_failing_raises_http_error(monkeypatch):
     """
     Summary: Any other Registration Service failure is passed up, so no confirmation is shown.
     AC7: Upon successful registration, a confirmation message on-screen is
@@ -350,7 +350,7 @@ def test_save_registration_when_failing_raises_http_error(monkeypatch):
     [(-1, False), (0, True), (1, True)],
     ids=["one_minute_before", "at_start", "one_minute_after"],
 )
-def test_event_has_started_at_start_time_closes_registration(minutes_after_start, started):
+def test_ac5_event_has_started_at_start_time_closes_registration(minutes_after_start, started):
     """
     Summary: Registration closes at the event's start time exactly, not a minute later.
     AC5: Given registration has closed for the event, The system does not allow
@@ -373,7 +373,7 @@ def test_event_has_started_at_start_time_closes_registration(minutes_after_start
     [(None, 422), ("invalid", 422), ("0", 422), ("1", 201)],
     ids=["missing", "not_a_number", "zero", "one"],
 )
-def test_register_when_event_capacity_unusable_returns_422(client, monkeypatch, capacity, expected_status):
+def test_support_register_when_event_capacity_unusable_returns_422(client, monkeypatch, capacity, expected_status):
     """
     Summary: An event whose capacity is missing, not a number or zero cannot take registrations; a capacity of one can.
     Supporting design check: an event must have a usable capacity before
@@ -390,7 +390,7 @@ def test_register_when_event_capacity_unusable_returns_422(client, monkeypatch, 
     assert response.status_code == expected_status
 
 
-def test_event_has_started_without_date_raises():
+def test_support_event_has_started_without_date_raises():
     """
     Summary: An event without a start time cannot be judged open or closed, so it is not treated as open.
     Supporting design check: missing event data fails safely
