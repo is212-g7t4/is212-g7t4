@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { deleteFixtureEvents } from '../../../helpers/cleanup'
 import { openAs, users } from '../../../helpers/stack'
 import { seedJ6a } from './helpers/seed'
@@ -24,20 +25,28 @@ import { seedJ6a } from './helpers/seed'
  * Fixture data is created through service APIs; organiser and coordinator
  * actions, including checking the organiser's inbox, use the UI.
  */
-test.describe.configure({ mode: 'serial' })
+test.describe.configure({ mode: 'serial', timeout: 360_000 })
 
 test.describe('J6a Organiser requests a change', () => {
-  const runId = Date.now().toString(36)
+  const runId = randomUUID()
+  const approvedName = `J6a Event approved proposal ${runId}`
+  const rejectedName = `J6a Event rejected proposal ${runId}`
+  const scope = {
+    eventNames: [`J6a Event approve ${runId}`, `J6a Event reject ${runId}`, approvedName, rejectedName],
+    venueNames: [],
+  }
   let fixture: Awaited<ReturnType<typeof seedJ6a>>
 
   test.beforeAll(async ({ playwright }) => {
-    await deleteFixtureEvents()
     const api = await playwright.request.newContext()
-    fixture = await seedJ6a(api, runId)
-    await api.dispose()
+    try {
+      fixture = await seedJ6a(api, runId)
+    } finally {
+      await api.dispose()
+    }
   })
 
-  test.afterAll(deleteFixtureEvents)
+  test.afterAll(async () => { await deleteFixtureEvents(scope) })
 
   async function requestChange(organiser: import('@playwright/test').Page, name: string, proposedName: string) {
     await organiser.goto('/my-events')
@@ -54,8 +63,6 @@ test.describe('J6a Organiser requests a change', () => {
   test('pending request leaves event unchanged; approval applies values and rejection preserves them with a reason', async ({ browser }) => {
     const organiser = await openAs(browser, users.organiser)
     const coordinator = await openAs(browser, users.coordinator)
-    const approvedName = `J6a approved proposal ${runId}`
-    const rejectedName = `J6a rejected proposal ${runId}`
 
     await test.step('Organiser requests a change and the submitted event remains unchanged', async () => {
       await requestChange(organiser, fixture.approveName, approvedName)
@@ -75,9 +82,12 @@ test.describe('J6a Organiser requests a change', () => {
 
     await test.step('Organiser sees the approval notification and the approved event values', async () => {
       await organiser.goto('/notifications')
-      await organiser.getByRole('button', { name: 'Refresh notifications' }).click()
-      const approval = organiser.getByRole('listitem').filter({ hasText: approvedName })
-      await expect(approval).toContainText('was approved.')
+      await expect(async () => {
+        await organiser.getByRole('button', { name: 'Refresh notifications' }).click()
+        const approval = organiser.getByRole('listitem').filter({ hasText: approvedName })
+          .filter({ hasText: 'was approved.' })
+        await expect(approval).toHaveCount(1, { timeout: 2_000 })
+      }).toPass({ timeout: 120_000, intervals: [1_000, 3_000, 5_000] })
 
       await organiser.goto('/my-events')
       await organiser.getByRole('button', { name: new RegExp(approvedName) }).click()
@@ -98,12 +108,14 @@ test.describe('J6a Organiser requests a change', () => {
       await expect(organiser.getByRole('heading', { name: fixture.rejectName })).toBeVisible()
       await expect(organiser.getByRole('heading', { name: rejectedName })).toHaveCount(0)
       await organiser.goto('/notifications')
-      await organiser.getByRole('button', { name: 'Refresh notifications' }).click()
-      const rejection = organiser.getByRole('listitem')
-        .filter({ hasText: fixture.rejectName })
-        .filter({ hasText: 'was rejected:' })
-      await expect(rejection).toContainText('was rejected:')
-      await expect(rejection.getByText('The proposed title is not approved.', { exact: true })).toBeVisible()
+      await expect(async () => {
+        await organiser.getByRole('button', { name: 'Refresh notifications' }).click()
+        const rejection = organiser.getByRole('listitem')
+          .filter({ hasText: fixture.rejectName })
+          .filter({ hasText: 'was rejected:' })
+        await expect(rejection).toHaveCount(1, { timeout: 2_000 })
+        await expect(rejection.getByText('The proposed title is not approved.', { exact: true })).toBeVisible({ timeout: 2_000 })
+      }).toPass({ timeout: 120_000, intervals: [1_000, 3_000, 5_000] })
     })
   })
 })

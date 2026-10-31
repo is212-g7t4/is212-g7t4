@@ -15,9 +15,10 @@ export const users = {
   lead: { id: 'e7334aa9-eb3a-4c45-84b5-280501b6c109', role: 'Event Coordinator Lead', email: 'alice.tan@connectsphere.example' },
   coordinator: { id: '7912075d-46f5-405b-9af3-05502f42f173', role: 'Event Coordinator', email: 'marcus.lim@connectsphere.example' },
   organiser: { id: '3d89d4d2-3502-4bd9-ade8-c9887f2bee45', role: 'Event Organiser', email: 'michaellee@connect.com' },
+  safetyOfficer: { id: '5af3e7c1-2b4d-4e8a-9f60-7d1c3b5a9e21', role: 'Safety Officer', email: 'nurul.huda@connectsphere.example' },
+  attendee: { id: '207cd4a6-9aa3-481c-882c-e14311f5b7cf', role: 'Attendee', email: 'attendee@example.com' },
   techSupport: { id: 'ad3d6da3-7220-4f80-9157-2ee4abc0455c', role: 'Technical Support', email: 'wei.chen@connectsphere.example' },
   venueStaff: { id: 'd9e4002b-db91-4939-b87e-50f9cceb5e0a', role: 'Venue Staff', email: 'siti.aminah@connectsphere.example' },
-  safetyOfficer: { id: '5af3e7c1-2b4d-4e8a-9f60-7d1c3b5a9e21', role: 'Safety Officer', email: 'nurul.huda@connectsphere.example' },
 } as const
 export type Actor = (typeof users)[keyof typeof users]
 
@@ -30,6 +31,7 @@ const passwordEnv: Record<string, string> = {
   [users.techSupport.id]: 'E2E_PASSWORD_TECH_SUPPORT',
   [users.venueStaff.id]: 'E2E_PASSWORD_VENUE_STAFF',
   [users.safetyOfficer.id]: 'E2E_PASSWORD_SAFETY_OFFICER',
+  [users.attendee.id]: 'E2E_PASSWORD_ATTENDEE',
 }
 
 const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, safety: 5012 }
@@ -70,7 +72,10 @@ export async function openAs(browser: Browser, actor: Actor): Promise<Page> {
     organization: user.organization, contactDetails: user.contact_details,
   } }
   const context = await browser.newContext()
-  await context.addInitScript((value) => localStorage.setItem('session', value), JSON.stringify(session))
+  const origin = new URL(process.env.FRONTEND_URL ?? 'http://localhost:5174').origin
+  await context.addInitScript(({ origin, value }) => {
+    if (window.location.origin === origin) localStorage.setItem('session', value)
+  }, { origin, value: JSON.stringify(session) })
   return context.newPage()
 }
 

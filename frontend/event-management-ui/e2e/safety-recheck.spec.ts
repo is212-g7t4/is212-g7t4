@@ -69,6 +69,7 @@ async function openAsCoordinator(page: Page, mockApi: MockApi, read: () => Recor
   await mock(page, 'user', '/users', (route) => json(route, { users: allUsers }))
   await mock(page, 'event', '/events', (route) => json(route, { events: [read()] }))
   await mock(page, 'event', `/events/${confirmed.id}`, (route) => json(route, read()))
+  await mock(page, 'attendeeRegistration', `/events/${confirmed.id}/registrations`, (route) => json(route, { registrations: [] }))
   await mockApprovedVenue(page, confirmed.id as string)
   // The venue bookings panel the coordinator also sees on this page.
   await mock(page, 'venueBooking', `/events/${confirmed.id}/booking-requests`, (route) => json(route, { bookings: [] }))

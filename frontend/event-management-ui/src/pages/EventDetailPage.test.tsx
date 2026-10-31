@@ -28,7 +28,10 @@ vi.mock('../features/safety/safetyCheck', async (importOriginal) => ({
 }))
 
 vi.mock('../features/event/submission', () => ({ eventApi: vi.fn(), assignmentApi: vi.fn() }))
-vi.mock('../features/registration/registrations', () => ({ fetchRegistrations: vi.fn() }))
+vi.mock('../features/registration/registrations', () => ({
+  canListEventRegistrations: (status: string) => status === 'Approved' || status === 'Confirmed',
+  fetchRegistrations: vi.fn(),
+}))
 vi.mock('../features/venue/VenueBookingsPanel', () => ({
   VenueBookingsPanel: () => <section aria-label="Venue bookings" />,
 }))
@@ -110,6 +113,14 @@ test('shows the selected event status and full recorded details', async () => {
   expect(screen.getByText(/Assigned to/)).toHaveTextContent('Alicia Tan')
   expect(eventApi).toHaveBeenCalledWith(`/events/${event.id}?coordinatorId=${coordinatorId}`)
   expect(fetchRegistrations).not.toHaveBeenCalled()
+})
+
+test('coordinator can list registrations after the safety check confirms the event', async () => {
+  vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
+  render(<EventDetailPage eventId={event.id} role="Event Coordinator" currentCoordinatorId={coordinatorId} backLabel="my events" onBack={vi.fn()} />)
+
+  expect(await screen.findByText('Total registrations')).toBeInTheDocument()
+  expect(fetchRegistrations).toHaveBeenCalledWith(event.id)
 })
 
 // Assign coordinator: the detail page records the current coordinator, who
