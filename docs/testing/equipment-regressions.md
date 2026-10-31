@@ -2,10 +2,12 @@
 
 **Agreed revision from this conversation; pending confirmation that Jira has been updated.**
 
-This is a test/documentation reorganisation on
-`fix/prevent-equipment-overallocation`, not a production fix or Jira update.
+This map records the story-based test reorganisation on
+`fix/prevent-equipment-overallocation`, alongside the equipment approval fix
+and integrated PR115 safety-reset fix. It is not a Jira update.
 The exact-Jira-copy convention cannot be certified until Jira is synchronized.
-All revised module headers flag this exception; unchanged AC text is preserved.
+Revised story headers flag this exception; incoming Issue8 modules retain their
+original approved narrow-bugfix headers, not the complete story/AC format.
 
 ## Requirement ownership
 
@@ -115,7 +117,7 @@ Paths are relative to the repository root.
 | SCRUM-33 | `services/equipment-reservation-service/tests/unit/test_equipment_request_review.py` / 34 | `services/equipment-request-service/tests/unit/test_equipment_request_review.py` / 40 | No new module: do not invent an empty tier |
 | SCRUM-9 | `services/equipment-reservation-service/tests/unit/test_equipment_review_access.py` / 5 | No new module | No new module |
 | SCRUM-10 reset | No new module | `services/equipment-request-service/tests/unit/test_safety_reset_modification_access.py` / 10 | `services/equipment-request-service/tests/integration/test_equipment_review_modification_access.py` / 4 (review authority) |
-| SCRUM-164 | Existing feedback module unchanged in location | `services/equipment-request-service/tests/unit/test_equipment_safety_reset.py` / 14 existing cases | **Absent PR115 source**, not restored |
+| SCRUM-164 | Existing feedback module unchanged in location | `services/equipment-request-service/tests/unit/test_equipment_safety_reset.py` / 14 existing cases | `services/equipment-request-service/tests/integration/test_equipment_safety_reset.py` / 9 PR115 cases |
 
 Review authentication cases join each service's existing
 `tests/unit/test_authentication.py`; those modules now collect 22 composite
@@ -123,12 +125,13 @@ and 21 owner cases. The extra outbox rollback case joins the existing
 `services/equipment-request-service/tests/integration/test_scrum48_transactions.py`,
 which now collects 21 cases; its legacy filename and unrelated test bodies
 are retained to avoid unrelated broad reformatting. The 46-case claims suite
-is unchanged. Thus the owner integration tier still collects **91** cases.
+is unchanged. The reorganisation originally collected **91** owner integration
+cases; the integrated PR115 module adds 9, for **100**.
 
-## Recorded verification on October 31, 2026
+## Historical pre-main verification on October 31, 2026
 
-The results below predate the documentation refresh; no application tests or
-services were run during that refresh.
+The results below record the earlier reorganisation checkout. They are not
+the post-main counts; see the current verification section below.
 
 From each named `services/<name>-service` directory:
 
@@ -169,36 +172,62 @@ and the scoped fixture-name adjustment. Parametrized input multisets are
 unchanged across deliberate story partitions; only readable IDs changed.
 No assertion was weakened or removed.
 
-## Blockers and evidence limits
+## Current post-main verification and evidence limits
 
-1. **Jira sync pending.** This agreed revision is not asserted to be the current
-   Jira record. Other SCRUM-151/164 ACs and story text are unchanged.
-2. **Issue8 is merged on cached main; this checkout is older.** Cached Git
-   ancestry confirms fix `cdd3112` via PR115 merge `6027e82` is in
-   `origin/main` at `946af5e4055523f7fa83c0b849ffe58a74843252`, not local
-   HEAD `0f00da3ca290bdb9e4f5fd017f306465020ddc0e`. HEAD is an ancestor of
-   cached main; this is not evidence that the merged fix was lost. The local
-   Approved-only reset predicate and its integration module remain absent, so
-   that published regression suite cannot be verified on this checkout. No
-   fetch, branch switch, restore or integration was performed. Existing local
-   doubles do not prove preservation during a concurrent rejection/reset.
-3. **Database execution stopped at preflight.** Docker and the pinned image
-   are available, but unrelated `backend-ngrok-1` was auto-restarting. Read-only
-   inspection observed restart count 90 then 91 and different StartedAt values.
-   This conflicts with the existing integration fixture's strict unchanged-
-   preexisting-container guard. No test container, shared DB, broker or worker
-   was started; no unrelated container was stopped; no guard was weakened.
-   Normal and reverse-order PostgreSQL execution remain unverified until the
-   user stabilizes that unrelated container or authorizes the next step.
-4. **Existing fixture policy exception.** Owner integrations use a pinned
-   PostgreSQL digest, a labelled loopback/tmpfs container, fresh database per
-   case, explicit libpq allowlist and denied Python connections. They install
-   selected baseline FK tables plus the exact owner outbox migration, **not**
-   the full unmodified migration chain required by the general guide. The
-   service uses its local I/O guards, not pytest-socket. This pre-existing
-   exception was documented, not silently repaired or presented as full-guide
-   compliance. Composite HTTP tests remain unit tests, not real-owner tests.
+At `e7ff578` on October 31, 2026, main `7d9d727` was integrated, including
+PR115's Approved-only reset SQL and maintained unit/integration sources.
+The earlier missing-source and restarting-container preflight blockers below
+are historical, not current publication blockers.
 
-No commits, pushes, merges, branch changes, CI/config changes or Jira edits
-were performed. Existing production/C4/.DS_Store dirty bytes and staged
-entries were preserved against an external durable backup.
+- Whole-service unit runs passed their unchanged 100% line/branch gates:
+  Equipment Request **233**, Equipment Reservation **208**, Event **970**,
+  Safety Check **601**, Safety Check Record **219**, Venue Availability **548**,
+  Venue Booking **531**, Event Workflow **212**. The earlier table's statement
+  and branch totals still apply; Safety Check gained 7 PR115 unit cases.
+- Owner integrations: **100 passed**, including 9 PR115 reset cases and real
+  PostgreSQL approval contention, persistence and outbox checks. The fixture's
+  strict guard stayed unchanged: all six pre-existing containers were unchanged,
+  its owned container was independently absent, and cleanup reported no errors.
+- Safety Check PR115 HTTP-boundary integrations: **5 passed**. Real route/httpx;
+  downstream APIs doubled, not real-owner persistence or browser execution.
+- Frontend: **1016 tests / 82 files passed**; lint had 0 errors / 4 warnings;
+  TypeScript/Vite build passed. Local Node 26.8.1 differs from CI's Node 22.
+- Root journeys: **15 collected only**, with dotenv suppressed and Node network
+  denied. No login, shared database setup or journey execution was performed.
+- Notification's initial collection error was an inherited agent-environment
+  collision: `PYTHONPATH` selected Hermes's unrelated `tests` package. With that
+  agent-only variable removed (no project paths injected), the same service
+  Python collected normally and **237 unit tests passed**, 31 integrations
+  deselected, at the unchanged **100%** line/branch gate. No source, package,
+  dependency or coverage changes were required.
+
+From each service directory the isolated host invocation is:
+
+```sh
+env -u PYTHONPATH PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked --python 3.12 python -m pytest
+```
+
+1. **Jira sync pending.** The agreed revision is not asserted to be the current
+   Jira record. Incoming Issue8 narrow-bugfix headers were preserved rather than
+   relabelled as complete Jira convention compliance.
+2. **Historical preflight stop retained.** Before main integration, unrelated
+   `backend-ngrok-1` restarted (counts 90 then 91); no database run was attempted
+   then. The later 100-case run passed preservation/cleanup checks. The earlier
+   focused reverse unit order passed 115 owner / 100 composite cases; reverse
+   PostgreSQL order was not verified.
+3. **Existing fixture policy exception.** Most owner integrations load selected
+   baseline FK tables plus the exact owner outbox migration, not the full chain;
+   PR115's `safety_reset_owner` fixture loads the full unmodified migration chain.
+   Local I/O/libpq guards, pinned PostgreSQL and fresh per-case databases remain;
+   these are documented service-specific exceptions, not full-guide compliance.
+4. **Trust boundary.** The locked owner transaction protects allocation reads and
+   writes against competing approvals. It does not establish provenance of the
+   composite-supplied catalogue/event inputs, nor coordinate catalogue, schedule
+   or assignment mutations. The separately deferred trust concern was not
+   investigated or fixed in this publication work.
+5. **Retired coverage.** Approved mocked frontend browser tests were archived and
+   removed, not replaced. Frontend unit/component tests and maintained root
+   journeys remain; service tests do not prove browser rendering/navigation.
+
+The verification archive is external to Git. Unrelated `.DS_Store`, diagram
+exports, ignored local documentation and their index entries remain preserved.

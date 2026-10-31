@@ -4,9 +4,10 @@ Read [AGENTS.md](../../AGENTS.md) first. This file extends its *Testing
 expectations* section for integration tests only.
 
 Equipment issues 6/7/8: see the [current story/verification map](equipment-regressions.md)
-for agreed wording pending Jira sync, preserved service-specific fixture exceptions,
-and PostgreSQL verification limits. Issue8 is merged in cached main but absent
-from this older local HEAD. Collection is not execution.
+for agreed wording pending Jira sync, service-specific fixture exceptions and
+verification limits. PR115's Issue8 fix and regressions are integrated; the owner
+PostgreSQL suite and Safety Check HTTP-boundary cases passed after integration.
+Collection alone is not execution.
 
 If this file and AGENTS.md disagree, **stop and ask** rather than picking one.
 AGENTS.md still describes the old setup in places; see
@@ -162,7 +163,8 @@ Still to do:
   enforce the 100% unit coverage gate and use `tests/unit/`. They use local I/O
   guards rather than `pytest-socket`. Equipment Request has a fixture-owned
   PostgreSQL tier, but it loads selected baseline FK tables plus the owner outbox
-  migration rather than the full unmodified migration chain. Equipment Reservation
+  migration rather than the full unmodified migration chain; PR115's separate
+  `safety_reset_owner` fixture does load the full chain. Equipment Reservation
   currently has unit HTTP doubles only. These documented exceptions were not
   changed by the test reorganisation; see the [equipment map](equipment-regressions.md).
 

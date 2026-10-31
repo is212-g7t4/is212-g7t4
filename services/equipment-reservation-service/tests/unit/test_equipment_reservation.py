@@ -25,7 +25,7 @@ Doubled
 
 Not proven
 ----------
-- Owner SQL persistence and concurrent approvals (AC5) are not proved by these doubles. The maintained owner regressions are equipment-request-service/tests/integration/test_equipment_reservation.py; collection is verified, but execution is blocked by an unrelated auto-restarting backend-ngrok-1 container. The strict preservation guard is unchanged.
+- Owner SQL persistence and concurrent approvals (AC5) are not proved by these doubles. The maintained owner regressions in equipment-request-service/tests/integration/test_equipment_reservation.py passed on disposable PostgreSQL after main integration; the strict pre-existing-container preservation guard is unchanged.
 - AC1/AC2 approval is simulated at the owner boundary, not persisted here. AC6 arithmetic boundary is checked; concurrent catalogue quantities or event schedule/status changes are outside the approval guarantee.
 - Event Service overlap-query correctness, UI rendering and end-to-end reservation/notification delivery are NOT COVERED ANYWHERE in this module.
 - Supporting reliability checks (missing dates, status eligibility, transport payloads) are not independent new ACs; exact fail-closed/transport contracts need Jira confirmation.

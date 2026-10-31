@@ -32,7 +32,7 @@ Doubled
 
 Not proven
 ----------
-- Issue8 Approved-only persistence is NOT PROVED: this checkout lacks PR115’s Approved SQL predicate and its tests/integration/test_equipment_safety_reset.py source. Existing cursor stubs cannot demonstrate preservation of Rejected reasons, Pending reviewers, mixed/ineligible-only selections, replay or lock-waiting rejection. Published regressions remain blocked pending explicit integration; no production code or branch was restored.
+- These cursor stubs do not prove Approved-only persistence. The integrated PR115 regressions in tests/integration/test_equipment_safety_reset.py passed on disposable PostgreSQL, covering Rejected/Pending metadata preservation, mixed/ineligible-only selections, replay and lock-waiting rejection.
 - AC1 feedback, AC2 venue review, AC4 unflagged arrangements and AC5 resubmission/history run outside this owner and are NOT COVERED ANYWHERE in this module.
 - Related trigger: SCRUM-151 AC2; safety-change orchestration lives in safety-check-service/tests/unit/test_safety_reject_changes.py, which doubles this owner.
 - Exact request-id count and error-status limits are supporting reliability checks requiring Jira clarification; they are not new ACs.
