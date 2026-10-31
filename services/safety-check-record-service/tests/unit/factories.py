@@ -66,3 +66,14 @@ def signed_in(client, user_id="00000000-0000-4000-8000-000000000001", role="Even
     """Send every request from this test client with a signed-in user's token."""
     client.environ_base["HTTP_AUTHORIZATION"] = bearer(user_id, role)["Authorization"]
     return client
+
+
+def flag_row(area="venue arrangement", change_required="Move the stage.", flag_id="55555555-5555-4555-8555-555555555555"):
+    return {
+        "flag_id": flag_id,
+        "safety_check_id": RECORD_ID,
+        "area": area,
+        "booking_id": None,
+        "equip_request_id": None,
+        "change_required": change_required,
+    }

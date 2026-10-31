@@ -16,14 +16,15 @@ Real
 
 Doubled
 -------
-- psycopg2.connect: Stub - raises psycopg2.OperationalError so the database
-  failure handler runs without a database.
-- Supabase JWKS: Stub (conftest) - the verifier trusts a throwaway ES256 key.
+- User records (database): the connection fails, to show the outage
+  message [Stub].
+- Sign-in: a test key signs the caller's token (tests/unit/conftest.py)
+  [Stub].
 
 Not proven
 ----------
-- That a real browser accepts the CORS headers (-> frontend Playwright e2e
-  suite, every spec runs against the configured origin).
+- That a real browser accepts the CORS headers (-> E2E journeys, which run
+  the real frontend against the real services).
 - That a real Postgres outage surfaces as psycopg2.Error (NOT COVERED
   ANYWHERE).
 """
@@ -115,7 +116,7 @@ def test_user_lookup_when_database_fails_returns_503_without_internals(client, m
     """
     Summary: A database outage gives a plain 503 message that leaks no SQL or credentials.
     Supporting design check: database errors answer 503 with a safe message
-    Double: Stub (psycopg2.connect raises OperationalError)
+    Double: The user records cannot be reached [Stub].
     """
     def unavailable(*args, **kwargs):
         raise psycopg2.OperationalError("password authentication failed for user postgres")
