@@ -70,9 +70,9 @@ LEASE = "50000000-0000-4000-8000-000000000001"
 # AC1/AC2 — Successful assignment creates exact independent recipient obligations
 
 @pytest.mark.parametrize("previous", [None, PREVIOUS], ids=["initial", "reassignment"])
-def test_successful_assignment_records_exact_recipient_fanout(previous, mocker):
+def test_ac1_ac2_assignment_queues_notifications_for_the_new_coordinator_and_on_reassignment_the_previous_one(previous, mocker):
     """
-    Summary: Initial assignment or reassignment retains organiser work and captured recipients.
+    Summary: update_event_coordinator, for an event with no coordinator (initial) or with PREVIOUS (reassignment), inserts outbox rows in order: an organiser notice, an "event.coordinator-assigned" row for the new coordinator and, only on reassignment, an "event.coordinator-removed" row for the previous one. The assigned and removed rows capture event name, organiser id and the start/end shown in Singapore time; every row has its own id, and exactly one UPDATE sets the coordinator.
     AC1: Given the Lead Coordinator successfully assigns an Event Coordinator
         to an event that previously had no assigned coordinator, the assigned
         coordinator receives an in-app assignment notification.
@@ -82,7 +82,8 @@ def test_successful_assignment_records_exact_recipient_fanout(previous, mocker):
         been assigned.
         2. The previous coordinator receives an in-app notification that they
         have been removed.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (psycopg2.connect patched to a MagicMock connection; cursor.fetchone returns the locked row, then the updated row),
+        Mock (the INSERT INTO EventNotificationOutbox and UPDATE public."Event" calls' parameters asserted)
     """
     # Arrange (Given)
     assigned = {column: "" for column in FIELDS.values()}
@@ -152,15 +153,16 @@ def request_freeze(row, envelope, mocker):
 
 
 @pytest.mark.parametrize("removed,scheduled", [(False, True), (True, True), (False, False), (True, False)])
-def test_owner_accepts_exact_coordinator_content_and_destination(removed, scheduled, mocker):
+def test_ac3_ac4_freeze_accepts_assignment_and_removal_envelopes_with_their_content_and_link_rules(removed, scheduled, mocker):
     """
-    Summary: Freeze assignment/removal with full SGT or explicitly absent proposed schedule.
+    Summary: Freezing an "event.coordinator-assigned" envelope (message "You have been assigned to ...", event-details link) or an "event.coordinator-removed" envelope (message "You are no longer assigned to ...", no link), each with a full Singapore-time period or "Not provided", answers 200 and stores the envelope unchanged in one "SET envelope=" write.
     AC3: Assignment notifications include the event name, Event Organiser name,
         proposed event date/time, and a link to view the newly assigned event.
     AC4: Removal notifications include the event name, Event Organiser name,
         proposed event date/time, and a clear statement that the recipient is
         no longer assigned to the event.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (psycopg2.connect patched to a MagicMock connection; cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the "SET envelope=" call's stored envelope asserted equal to the one sent)
     """
     row, envelope = freeze_case(removed, scheduled)
     response, cursor = request_freeze(row, envelope, mocker)
@@ -171,15 +173,16 @@ def test_owner_accepts_exact_coordinator_content_and_destination(removed, schedu
 
 
 @pytest.mark.parametrize("defect", ["details", "blank-name", "wrong-message", "changed-event", "removal-link", "assignment-null"])
-def test_owner_rejects_unusable_or_changed_coordinator_content(defect, mocker):
+def test_ac3_ac4_freeze_refuses_envelopes_with_missing_details_blank_organiser_wrong_message_changed_event_or_wrong_link(defect, mocker):
     """
-    Summary: Malformed display content or forbidden navigation never reaches a freeze UPDATE.
+    Summary: A freeze whose details are null, whose organiserName is blank, whose message is unrelated, whose event name differs from the saved one, whose removal envelope carries a link, or whose assignment envelope has no link answers 400 and no "SET envelope=" write runs.
     AC3: Assignment notifications include the event name, Event Organiser name,
         proposed event date/time, and a link to view the newly assigned event.
     AC4: Removal notifications include the event name, Event Organiser name,
         proposed event date/time, and a clear statement that the recipient is
         no longer assigned to the event.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (psycopg2.connect patched to a MagicMock connection; cursor.fetchone returns the claimed outbox row),
+        Mock (no cursor.execute call contains "SET envelope=")
     """
     row, envelope = freeze_case(defect == "removal-link", True)
     if defect == "details":
@@ -201,12 +204,13 @@ def test_owner_rejects_unusable_or_changed_coordinator_content(defect, mocker):
 
 # AC5 — No-op suppression
 
-def test_unchanged_coordinator_has_no_write_or_notification(mocker):
+def test_ac5_saving_the_current_coordinator_raises_no_change_and_writes_nothing(mocker):
     """
-    Summary: Attempt to save the locked event's existing coordinator.
+    Summary: update_event_coordinator, given the coordinator the event already has, raises NoCoordinatorChangeError after the locking SELECT ... FOR UPDATE, so no UPDATE and no outbox row are written.
     AC5: Saving an assignment without changing the assigned coordinator does
         not create new assignment or removal notifications.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (psycopg2.connect patched to a MagicMock connection; cursor.fetchone returns the locked row already holding that coordinator),
+        Mock (cursor.execute call_count is 1 and that call contains FOR UPDATE)
     """
     coordinator = "10000000-0000-4000-8000-000000000002"
     connection = MagicMock()
@@ -222,13 +226,13 @@ def test_unchanged_coordinator_has_no_write_or_notification(mocker):
 
 # Supporting design rule — explicit content-only removal contract
 
-def test_removal_without_destination_key_is_rejected(mocker):
+def test_removal_envelope_without_a_destination_key_is_refused(mocker):
     """
-    Summary: A missing destination is malformed, not deliberate content-only removal.
-    AC1: Given the Lead Coordinator successfully assigns an Event Coordinator
-        to an event that previously had no assigned coordinator, the assigned
-        coordinator receives an in-app assignment notification.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: A removal envelope that omits the destination key altogether (rather than setting it to null) answers 400 and no "SET envelope=" write runs.
+    Supporting design check: a removal that deliberately has no link must say so with destination
+        null; a missing key is malformed, not a link-free removal
+    Double: Stub (psycopg2.connect patched to a MagicMock connection; cursor.fetchone returns the claimed outbox row),
+        Mock (no cursor.execute call contains "SET envelope=")
     """
     # Arrange (Given)
     row, envelope = freeze_case(True, True)
@@ -249,15 +253,16 @@ def test_removal_without_destination_key_is_rejected(mocker):
     ("2030-03-01T15:59:00+00:00", "2030-03-01T16:00:00+00:00"),
     ("2030-03-01T10:59:00-05:00", "2030-03-02T01:00:00+09:00"),
 ], ids=["utc-singapore-midnight", "equivalent-mixed-offsets"])
-def test_owner_freezes_singapore_midnight_period(removed, start, end, mocker):
+def test_ac3_ac4_freeze_keeps_the_singapore_period_across_midnight_for_equivalent_offsets(removed, start, end, mocker):
     """
-    Summary: Equivalent offset intervals freeze the same Singapore dates without changing captured facts.
+    Summary: For assignment and removal envelopes, a period of 23:59-00:00 Singapore time given as UTC or as mixed offsets is frozen as "01 Mar 2030, 23:59 SGT – 02 Mar 2030, 00:00 SGT" with the captured details unchanged: answers 200 and stores one "SET envelope=" write.
     AC3: Assignment notifications include the event name, Event Organiser name,
         proposed event date/time, and a link to view the newly assigned event.
     AC4: Removal notifications include the event name, Event Organiser name,
         proposed event date/time, and a clear statement that the recipient is
         no longer assigned to the event.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (psycopg2.connect patched to a MagicMock connection; cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the "SET envelope=" call's stored envelope asserted equal to the one sent)
     """
     row, value = freeze_case(removed, True)
     row["source"].update(startDateTime=start, endDateTime=end)

@@ -78,13 +78,14 @@ ALL_MESSAGE = (
     ({"expectedAttendance": "40"},
      "Change requested for Workshop. Proposed changes: Expected Attendance: 40."),
 ], ids=["all-ten-fields-utc-crosses-singapore-midnight", "naive-time-is-singapore-not-host-local", "only-attendance-no-phantom-fields"])
-def test_freeze_preserves_all_proposed_values_and_review_target(safety_notification_boundary, changes, message):
+def test_ac1_change_request_notification_freezes_event_name_proposed_changes_and_review_link_in_singapore_time(safety_notification_boundary, changes, message):
     """
-    Summary: All fields and aware/naive dates freeze as complete Singapore display text.
+    Summary: Freezing an 'event.change-request-submitted' envelope for the coordinator stores it unchanged in one 'SET envelope=' write, with the review link and proposed changes shown in Singapore time: all ten fields (UTC dates crossing midnight), a single start time given without an offset, and a single attendance change with no other fields.
     AC1: Given an Event Organiser submits a change request, the system sends an
         in-app notification to the Event Coordinator with the event name,
         proposed changes, and a link to review the request.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the 'SET envelope=' call's stored envelope and job id asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -117,13 +118,14 @@ def test_freeze_preserves_all_proposed_values_and_review_target(safety_notificat
     ("event.change-request-rejected", {"decision": "Rejected", "reason": "Unsafe exits.\n出口需改善。"},
      "Change request for Workshop was rejected: Unsafe exits.\n出口需改善。"),
 ], ids=["approved-unchanged-name", "approved-new-name-retains-former-name", "rejected-full-multiline-unicode-reason"])
-def test_freeze_keeps_decision_name_and_complete_reason(safety_notification_boundary, kind, extra, message):
+def test_ac2_decision_notification_freezes_event_name_decision_and_full_rejection_reason(safety_notification_boundary, kind, extra, message):
     """
-    Summary: Decision text retains the former name or complete rejection reason.
+    Summary: Freezing an organiser's change-request decision stores it unchanged in one 'SET envelope=' write: an approval, an approval after a rename that names the former event name, and a rejection that keeps its whole multi-line, non-ASCII reason.
     AC2: Given an approval or rejection of a change request is successfully
         recorded, the Event Organiser receives an in-app notification with the
         event name, decision, and reason if rejected.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the 'SET envelope=' call's stored envelope and job id asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -149,13 +151,14 @@ def test_freeze_keeps_decision_name_and_complete_reason(safety_notification_boun
     assert writes[0][1] == JOB
 
 
-def test_rename_approval_captures_both_names_in_organiser_intent(safety_notification_boundary):
+def test_ac2_approving_a_rename_queues_an_organiser_notification_naming_the_new_and_former_event_name(safety_notification_boundary):
     """
-    Summary: Approving a renamed event records both names in the decision's notification intent.
+    Summary: Approving a change request that renames the event answers 200 with the new name, inserts one 'event.change-request-approved' outbox row whose source holds the new and previous event names, updates the event name and marks the request Approved by the coordinator.
     AC2: Given an approval or rejection of a change request is successfully
         recorded, the Event Organiser receives an in-app notification with the
         event name, decision, and reason if rejected.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the pending change request, the renamed event, then the decision row),
+        Mock (the outbox INSERT, UPDATE public."Event" and UPDATE public."EventChangeReq" parameters asserted)
     """
     # Arrange (Given)
     client, cursor, row = safety_notification_boundary
@@ -188,14 +191,15 @@ def test_rename_approval_captures_both_names_in_organiser_intent(safety_notifica
 
 
 @pytest.mark.parametrize("entry", ["reject", "progress"])
-def test_event_rejection_keeps_one_organiser_intent_and_notifies_actor(safety_notification_boundary, entry):
+def test_ac3_rejecting_an_event_by_either_route_queues_one_notification_each_for_organiser_and_coordinator(safety_notification_boundary, entry):
     """
-    Summary: Either event-rejection route notifies the organiser and assigned coordinator, even the actor.
+    Summary: Rejecting an event through PATCH /reject or through PATCH /progress with status Rejected answers 200 and inserts exactly two 'event.rejection' outbox rows with distinct ids, one for the organiser and one for the assigned coordinator (who is also the actor), each carrying the event name, decision and reason.
     AC3: Given an event is cancelled or rejected, the system sends an in-app
         notification to both the Event Coordinator and Event Organiser
         confirming the cancellation or rejection, respectively, with the event
         name.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the 'Under Review' event, then the same row as 'Rejected'),
+        Mock (the outbox INSERT calls' ids, types and sources asserted)
     """
     # Arrange (Given)
     # Arrange: only PostgreSQL is doubled; exercise the real route and mutation.
@@ -227,14 +231,15 @@ def test_event_rejection_keeps_one_organiser_intent_and_notifies_actor(safety_no
 
 @pytest.mark.parametrize("role,recipient", [("coordinator", COORDINATOR), ("organiser", ORGANISER)],
                          ids=["coordinator-cancellation", "organiser-cancellation"])
-def test_cancellation_freezes_for_each_recipient_role(safety_notification_boundary, role, recipient):
+def test_ac3_cancellation_notification_freezes_event_name_and_event_link_for_coordinator_and_organiser(safety_notification_boundary, role, recipient):
     """
-    Summary: Either role receives the same event cancellation confirmation and event link.
+    Summary: Freezing an 'event.cancelled' envelope ("Workshop was cancelled.", event-details link) stores it unchanged in one 'SET envelope=' write, for the coordinator recipient and for the organiser recipient.
     AC3: Given an event is cancelled or rejected, the system sends an in-app
         notification to both the Event Coordinator and Event Organiser
         confirming the cancellation or rejection, respectively, with the event
         name.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the 'SET envelope=' call's stored envelope asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -258,14 +263,15 @@ def test_cancellation_freezes_for_each_recipient_role(safety_notification_bounda
     assert writes[0][0].adapted == envelope
 
 
-def test_cancellation_keeps_both_intents_beside_safety_decision(safety_notification_boundary):
+def test_ac3_cancelling_through_a_safety_decision_queues_a_cancellation_for_each_role_besides_the_safety_notification(safety_notification_boundary):
     """
-    Summary: Cancellation queues two distinct role intents without losing the safety decision.
+    Summary: Cancelling a pending event through safety-status answers 200 with status 'Cancelled' and inserts two 'event.cancelled' outbox rows with distinct ids (coordinator, then organiser) plus the one 'safety.review-decision' row.
     AC3: Given an event is cancelled or rejected, the system sends an in-app
         notification to both the Event Coordinator and Event Organiser
         confirming the cancellation or rejection, respectively, with the event
         name.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the pending event, then the same row as 'Cancelled'),
+        Mock (the outbox INSERT calls' types, ids and sources asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -297,13 +303,14 @@ def test_cancellation_keeps_both_intents_beside_safety_decision(safety_notificat
     ("details", {}), ("message", "Workshop was approved."),
 ], ids=["invalid-recipient-400", "null-recipient-400", "changed-timestamp-400",
         "wrong-review-page-400", "lost-proposed-facts-400", "changed-message-400"])
-def test_invalid_change_envelope_never_writes(safety_notification_boundary, field, value):
+def test_ac1_change_request_envelope_with_a_bad_recipient_timestamp_review_link_details_or_message_is_refused(safety_notification_boundary, field, value):
     """
-    Summary: Malformed recipients or altered historical notification content cannot freeze.
+    Summary: A change-request envelope with a non-UUID or null recipient, a changed timestamp, an event-details link instead of the review link, empty details or a different message answers 400 "Invalid outbox input." and no INSERT, UPDATE or DELETE runs.
     AC1: Given an Event Organiser submits a change request, the system sends an
         in-app notification to the Event Coordinator with the event name,
         proposed changes, and a link to review the request.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed 'event.change-request-submitted' row),
+        Mock (no cursor.execute call starts with INSERT, UPDATE or DELETE)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -329,13 +336,17 @@ def test_invalid_change_envelope_never_writes(safety_notification_boundary, fiel
                    for call in cursor.execute.call_args_list)
 
 
-def test_context_returns_organiser_only_on_explicit_opt_in(safety_notification_boundary):
+def test_ac2_ac3_notification_context_returns_the_organiser_only_when_includeorganiser_is_asked_for(safety_notification_boundary):
     """
-    Summary: An explicit organiser lookup supplies both recipients without changing legacy context.
-    AC1: Given an Event Organiser submits a change request, the system sends an
-        in-app notification to the Event Coordinator with the event name,
-        proposed changes, and a link to review the request.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: GET /internal/events/<id>/notification-context?includeOrganiser=true returns the event id, name, coordinatorId and organiserId (the organiser is the recipient of AC2 and AC3 notices), while the same lookup without the flag still returns no organiserId.
+    AC2: Given an approval or rejection of a change request is successfully
+        recorded, the Event Organiser receives an in-app notification with the
+        event name, decision, and reason if rejected.
+    AC3: Given an event is cancelled or rejected, the system sends an in-app
+        notification to both the Event Coordinator and Event Organiser
+        confirming the cancellation or rejection, respectively, with the event
+        name.
+    Double: Stub (cursor.fetchone returns the event row with an organiser)
     """
     # Arrange (Given)
     client, cursor, row = safety_notification_boundary

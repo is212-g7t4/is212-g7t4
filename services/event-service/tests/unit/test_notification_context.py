@@ -49,13 +49,14 @@ from tests.unit.factories import signed_in
 ID = "10000000-0000-0000-0000-000000000001"
 
 
-def test_preparation_requires_internal_token_and_returns_current_assignment(mocker):
+def test_ac1_notification_context_returns_the_current_coordinator_only_with_the_internal_token(mocker):
     """
-    Summary: A notification lookup with the internal token gets the event's current assignment; others are refused.
+    Summary: Without X-Internal-Token the notification-context lookup is refused with 401; with it, the route returns the event's id, name and current coordinatorId, which is who the notification is addressed to.
     AC1: Given a rejection is ready for notification, then the notification is
         addressed to the coordinator assigned to that event when the
         notification is created.
-    Double: Stub (app.get_event returns a canned event or raises)
+    Double: Stub (mocker.patch of app.get_event returns {id, eventName, coordinatorId}); no database is involved,
+        and the Supabase JWKS Stub verifies the caller's signed token
     """
     # Arrange (Given)
     client = signed_in(create_app(
@@ -74,13 +75,13 @@ def test_preparation_requires_internal_token_and_returns_current_assignment(mock
     assert response.json == {"id": ID, "eventName": "Seminar", "coordinatorId": ID}
 
 
-def test_context_missing_config_and_event_are_explicit(mocker):
+def test_notification_context_fails_closed_without_database_event_or_internal_token_config(mocker):
     """
-    Summary: An unconfigured lookup or a missing event gives an explicit error, never a made-up recipient.
-    AC1: Given a rejection is ready for notification, then the notification is
-        addressed to the coordinator assigned to that event when the
-        notification is created.
-    Double: Stub (app.get_event returns a canned event or raises)
+    Summary: With no DATABASE_URL the lookup answers 503, with an unknown event 404, and with no INTERNAL_SERVICE_TOKEN configured 401 even for a caller sending a token, so no recipient is ever invented.
+    Supporting design check: the internal notification-context route fails
+        closed when it is misconfigured or the event does not exist
+    Double: Stub (mocker.patch of app.get_event raises EventNotFoundError for the 404 step); no database is involved,
+        and the Supabase JWKS Stub verifies the caller's signed token
     """
     # Arrange (Given)
     from app import EventNotFoundError
