@@ -79,7 +79,7 @@ def setup(monkeypatch):
     return app.test_client(), cursor
 
 
-def event_row(event_id=EVENT_ID, coordinator_id=COORDINATOR_ID):
+def event_row(event_id=EVENT_ID, coordinator_id=COORDINATOR_ID, **changes):
     row = {column: "" for column in FIELDS.values()}
     row.update(
         event_id=event_id, status="Under Review", coordinator_id=coordinator_id,
@@ -91,18 +91,19 @@ def event_row(event_id=EVENT_ID, coordinator_id=COORDINATOR_ID):
             "actionHistory": [{"note": "internal"}],
         }),
     )
+    row.update(changes)
     return row
 
 
 # AC1 ----
 
-def test_assigned_coordinator_sees_their_event(setup):
+def test_ac1_coordinator_assigned_to_an_event_can_open_it(setup):
     """
-    Summary: The coordinator assigned to an event may open it.
+    Summary: GET /events/<id> as the Event Coordinator the event is assigned to answers 200 with that event.
     AC1: Given an authenticated user is permitted to view information based on
         their role and relationship to the event, when they access that
         information, then the information is made available to them.
-    Double: Stub (cursor returns an event assigned to this coordinator)
+    Double: Stub (cursor.fetchone returns an 'Under Review' event whose coordinator_id is this coordinator)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -116,13 +117,13 @@ def test_assigned_coordinator_sees_their_event(setup):
     assert response.json["id"] == EVENT_ID
 
 
-def test_lead_sees_the_unassigned_queue(setup):
+def test_ac1_lead_role_can_open_the_unassigned_queue(setup):
     """
-    Summary: The Lead's role permits the unassigned queue.
+    Summary: GET /events/unassigned as an Event Coordinator Lead answers 200 with the one unassigned event.
     AC1: Given an authenticated user is permitted to view information based on
         their role and relationship to the event, when they access that
         information, then the information is made available to them.
-    Double: Stub (cursor returns one unassigned event)
+    Double: Stub (cursor.fetchall returns one event with no coordinator)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -134,6 +135,198 @@ def test_lead_sees_the_unassigned_queue(setup):
     # Assert (Then)
     assert response.status_code == 200
     assert len(response.json["events"]) == 1
+
+
+def test_ac1_lead_can_open_an_event_assigned_to_a_different_coordinator(setup):
+    """
+    Summary: GET /events/<id> as an Event Coordinator Lead answers 200 for an event assigned to another coordinator.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchone returns an event assigned to OTHER_COORDINATOR_ID)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead")
+
+    # Assert (Then)
+    assert response.status_code == 200
+    assert response.json["coordinatorId"] == OTHER_COORDINATOR_ID
+
+
+def test_ac1_lead_can_open_an_event_nobody_is_assigned_to(setup):
+    """
+    Summary: GET /events/<id> as an Event Coordinator Lead answers 200 for an event with no coordinator. Overlaps the previous test: both only show the Lead's role opens any event.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchone returns an event with no coordinator)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(coordinator_id=None)
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead")
+
+    # Assert (Then)
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer"])
+def test_ac1_venue_staff_technical_support_and_safety_officer_can_open_any_event(role, setup):
+    """
+    Summary: GET /events/<id> as Venue Staff, Technical Support or a Safety Officer answers 200 with the event, whoever it is assigned to.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(coordinator_id=None)
+
+    # Act (When)
+    response = signed_in(client).get(
+        f"/events/{EVENT_ID}",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": role},
+    )
+
+    # Assert (Then)
+    assert response.status_code == 200
+    assert response.json["id"] == EVENT_ID
+
+
+def test_ac1_organiser_can_open_an_event_they_created(setup):
+    """
+    Summary: GET /events/<id> as the Event Organiser who created the event answers 200 with that organiser's id on it.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchone returns an 'Approved' event created by this organiser)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(status="Approved")
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}")
+
+    # Assert (Then)
+    assert response.status_code == 200
+    assert response.json["organiserId"] == ORGANISER_ID
+
+
+def test_ac1_organiser_lists_only_the_events_they_created_in_every_status(setup):
+    """
+    Summary: GET /events?organiserId=<id> returns that organiser's Approved and Rejected events, and the SQL filters on organiser_id = %s with no status condition other than excluding drafts.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchall returns two events created by this organiser),
+        Mock (cursor.execute SQL and parameters asserted: organiser_id = %s, [ORGANISER_ID])
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchall.return_value = [
+        event_row(status="Approved"),
+        event_row(OTHER_EVENT_ID, status="Rejected"),
+    ]
+
+    # Act (When)
+    response = signed_in(client).get(f"/events?organiserId={ORGANISER_ID}")
+
+    # Assert (Then)
+    assert response.status_code == 200
+    assert [e["status"] for e in response.json["events"]] == ["Approved", "Rejected"]
+    assert response.json["events"][0]["organiserId"] == ORGANISER_ID
+    query, params = cursor.execute.call_args.args
+    # Every status except their drafts, which have their own list (drafts AC2).
+    where = query.split("WHERE")[1]
+    assert "organiser_id = %s" in where
+    assert where.replace("status IS DISTINCT FROM 'Draft'", "").count("status") == 0
+    assert params == [ORGANISER_ID]
+
+
+def test_ac1_lead_lists_every_event_whatever_its_coordinator(setup):
+    """
+    Summary: GET /events as the Lead returns every non-draft event (assigned or not): the SQL has no coordinator_id filter and no parameters.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchall returns one assigned and one unassigned event),
+        Mock (cursor.execute SQL asserted: only the draft exclusion in WHERE; parameters [])
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchall.return_value = [event_row(), event_row(OTHER_EVENT_ID, coordinator_id=None)]
+
+    # Act (When)
+    response = signed_in(client).get(f"/events?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead")
+
+    # Assert (Then)
+    assert response.status_code == 200
+    assert len(response.json["events"]) == 2
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" not in query
+    # The only condition is the draft exclusion (drafts AC1).
+    assert "WHERE status IS DISTINCT FROM 'Draft'\n" in query
+    assert params == []
+
+
+def test_ac1_lead_listing_every_event_can_still_filter_by_status(setup):
+    """
+    Summary: GET /events as the Lead with status=Approved filters on status = %s with only 'Approved' as a parameter and no coordinator_id filter. Overlaps the staff test below, which makes the same assertions for other roles.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchall returns no rows),
+        Mock (cursor.execute SQL and parameters asserted: status = %s, ["Approved"])
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchall.return_value = []
+
+    # Act (When)
+    response = signed_in(client).get(f"/events?coordinatorId={COORDINATOR_ID}&viewerRole=Event+Coordinator+Lead&status=Approved")
+
+    # Assert (Then)
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" not in query
+    assert "status = %s" in query
+    assert params == ["Approved"]
+
+
+@pytest.mark.parametrize("role", ["Venue Staff", "Technical Support", "Safety Officer"])
+def test_ac1_venue_staff_technical_support_and_safety_officer_list_every_event_with_the_status_filter(role, setup):
+    """
+    Summary: GET /events as Venue Staff, Technical Support or a Safety Officer with status=Approved filters on status = %s with only 'Approved' as a parameter and no coordinator_id filter.
+    AC1: Given an authenticated user is permitted to view information based on
+        their role and relationship to the event, when they access that
+        information, then the information is made available to them.
+    Double: Stub (cursor.fetchall returns one event),
+        Mock (cursor.execute SQL and parameters asserted: status = %s, ["Approved"])
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchall.return_value = [event_row()]
+
+    # Act (When)
+    response = signed_in(client).get(
+        "/events",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": role, "status": "Approved"},
+    )
+
+    # Assert (Then)
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" not in query
+    assert "status = %s" in query
+    assert params == ["Approved"]
 
 
 # AC2 ----
@@ -149,13 +342,13 @@ def test_lead_sees_the_unassigned_queue(setup):
         ("/events/overlapping", "Attendee"),
     ],
 )
-def test_a_role_outside_the_routes_allowlist_is_denied(setup, path, role):
+def test_ac2_role_outside_the_allowed_roles_is_denied_on_each_role_gated_read(setup, path, role):
     """
-    Summary: Routes that were open to any signed-in user now refuse the wrong role.
+    Summary: A role not allowed on the route (Coordinator on /events/unassigned, Attendee on /events/active, /events/summaries and /events/overlapping, Organiser on /events/registration and /events/attendee-summaries) gets 403 and no query is sent.
     AC2: Given an authenticated user's role does not permit them to view
         particular information, when they attempt to access that information,
         then access is denied.
-    Double: Mock (cursor.execute asserted not called, so no query is sent)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role check refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -168,15 +361,59 @@ def test_a_role_outside_the_routes_allowlist_is_denied(setup, path, role):
     cursor.execute.assert_not_called()
 
 
+def test_ac2_attendee_cannot_ask_to_view_an_internal_event(setup):
+    """
+    Summary: GET /events/<id> asking for the Attendee view answers 403 and no query is sent.
+    AC2: Given an authenticated user's role does not permit them to view
+        particular information, when they attempt to access that information,
+        then access is denied.
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role check refuses first
+    """
+    # Arrange (Given)
+    client, cursor = setup
+
+    # Act (When)
+    response = signed_in(client).get(
+        f"/events/{EVENT_ID}",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": "Attendee"},
+    )
+
+    # Assert (Then)
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
+
+
+def test_ac2_attendee_cannot_list_every_internal_event(setup):
+    """
+    Summary: GET /events asking for the Attendee view answers 403 and no query is sent.
+    AC2: Given an authenticated user's role does not permit them to view
+        particular information, when they attempt to access that information,
+        then access is denied.
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role check refuses first
+    """
+    # Arrange (Given)
+    client, cursor = setup
+
+    # Act (When)
+    response = signed_in(client).get(
+        "/events",
+        query_string={"coordinatorId": COORDINATOR_ID, "viewerRole": "Attendee"},
+    )
+
+    # Assert (Then)
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
+
+
 # AC3 ----
 
-def test_coordinator_not_assigned_to_the_event_is_denied(setup):
+def test_ac3_coordinator_not_assigned_to_the_event_is_denied(setup):
     """
-    Summary: A coordinator's relationship to the event decides access.
+    Summary: GET /events/<id> as a coordinator whom the event is not assigned to answers 403.
     AC3: Given an authenticated user's relationship to an event does not permit
         them to view that event's information, when they attempt to access the
         information, then access is denied.
-    Double: Stub (cursor returns an event assigned to a different coordinator)
+    Double: Stub (cursor.fetchone returns an event assigned to OTHER_COORDINATOR_ID)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -189,13 +426,13 @@ def test_coordinator_not_assigned_to_the_event_is_denied(setup):
     assert response.status_code == 403
 
 
-def test_organiser_cannot_open_an_event_someone_else_created(setup):
+def test_ac3_organiser_cannot_open_an_event_created_by_someone_else(setup):
     """
-    Summary: An organiser sees only the events they created.
+    Summary: GET /events/<id> as an Event Organiser who did not create the event answers 403, even though the organiserId in the query names that organiser.
     AC3: Given an authenticated user's relationship to an event does not permit
         them to view that event's information, when they attempt to access the
         information, then access is denied.
-    Double: Stub (cursor returns an event created by a different organiser)
+    Double: Stub (cursor.fetchone returns an event whose organiser_id is a different organiser)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -210,16 +447,134 @@ def test_organiser_cannot_open_an_event_someone_else_created(setup):
     assert response.status_code == 403
 
 
+def test_ac3_coordinator_asking_with_their_own_id_cannot_open_an_event_assigned_to_another(setup):
+    """
+    Summary: GET /events/<id>?coordinatorId=<id> as a coordinator answers 403 for an event assigned to OTHER_COORDINATOR_ID. REDUNDANT: test_ac3_coordinator_not_assigned_to_the_event_is_denied above makes the same request with the same stub and assertion.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor.fetchone returns an event assigned to OTHER_COORDINATOR_ID)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}")
+
+    # Assert (Then)
+    assert response.status_code == 403
+
+
+def test_ac3_organiser_asking_with_their_own_id_cannot_open_an_event_another_organiser_created(setup):
+    """
+    Summary: GET /events/<id>?organiserId=<id> as an organiser answers 403 for an event created by a different organiser. REDUNDANT: test_ac3_organiser_cannot_open_an_event_created_by_someone_else above makes the same request with the same stub and assertion.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor.fetchone returns an 'Approved' event created by ORGANISER_ID)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(status="Approved")
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?organiserId={OTHER_ORGANISER_ID}")
+
+    # Assert (Then)
+    assert response.status_code == 403
+
+
+def test_ac3_coordinator_cannot_open_an_event_nobody_is_assigned_to(setup):
+    """
+    Summary: GET /events/<id> as an Event Coordinator answers 403 for an event that has no coordinator.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor.fetchone returns an event with no coordinator)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(coordinator_id=None)
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}")
+
+    # Assert (Then)
+    assert response.status_code == 403
+
+
+def test_ac3_organiser_cannot_open_an_event_with_no_recorded_organiser(setup):
+    """
+    Summary: GET /events/<id> as an Event Organiser answers 403 for an event whose organiser_id is empty.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor.fetchone returns an event with organiser_id None)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(organiser_id=None)
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?organiserId={ORGANISER_ID}")
+
+    # Assert (Then)
+    assert response.status_code == 403
+
+
+def test_ac3_retired_ismanager_flag_does_not_open_another_coordinators_event(setup):
+    """
+    Summary: GET /events/<id>?isManager=true as a coordinator still answers 403 for an event assigned to someone else, so the old flag grants nothing.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor.fetchone returns an event assigned to OTHER_COORDINATOR_ID)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
+
+    # Act (When)
+    response = signed_in(client).get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}&isManager=true")
+
+    # Assert (Then)
+    assert response.status_code == 403
+
+
+def test_ac3_retired_ismanager_flag_does_not_widen_a_coordinators_list(setup):
+    """
+    Summary: GET /events?isManager=true as a coordinator still filters on coordinator_id = %s with only that coordinator as a parameter.
+    AC3: Given an authenticated user's relationship to an event does not permit
+        them to view that event's information, when they attempt to access the
+        information, then access is denied.
+    Double: Stub (cursor.fetchall returns no rows),
+        Mock (cursor.execute SQL and parameters asserted: coordinator_id = %s, [COORDINATOR_ID])
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    cursor.fetchall.return_value = []
+
+    # Act (When)
+    response = signed_in(client).get(f"/events?coordinatorId={COORDINATOR_ID}&isManager=true")
+
+    # Assert (Then)
+    assert response.status_code == 200
+    query, params = cursor.execute.call_args.args
+    assert "coordinator_id = %s" in query
+    assert params == [COORDINATOR_ID]
+
+
 # AC4 ----
 
-def test_coordinator_gets_only_the_event_they_are_assigned_to(setup):
+def test_ac4_coordinator_gets_the_event_assigned_to_them_and_is_refused_the_other(setup):
     """
-    Summary: Asking for both events returns one and refuses the other.
+    Summary: The same coordinator asking for two events gets 200 for the one assigned to them and 403 for the one assigned to someone else.
     AC4: Given a user is permitted to view information for one event but does
         not have the required relationship to another event, when they attempt
         to view information for both events, then they can only view the
         information for which they have the required access.
-    Double: Stub (cursor returns two events in turn: one assigned to this coordinator, one to another)
+    Double: Stub (cursor.fetchone returns, in turn, an event assigned to this coordinator and one assigned to another)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -237,14 +592,14 @@ def test_coordinator_gets_only_the_event_they_are_assigned_to(setup):
 
 # AC5 ----
 
-def test_lead_and_venue_staff_get_different_views_of_the_same_event(setup):
+def test_ac5_lead_sees_organiser_and_action_history_that_venue_staff_do_not(setup):
     """
-    Summary: Staff see the event but not the organiser or internal action history.
+    Summary: For the same event, the Lead's body includes organiserId and actionHistory, while Venue Staff's body has the event id but none of organiserId, actionHistory, decision or decisionHistory.
     AC5: Given two authenticated users have different roles or relationships to
         the same event, when they access information relating to that event,
         then each user can only view the information permitted by their own
         role and relationship to the event.
-    Double: Stub (cursor returns one event; the Lead's and Venue Staff's response bodies are compared)
+    Double: Stub (cursor.fetchone returns one event with an organiser and an action history; the Lead's and Venue Staff's response bodies are compared)
     """
     # Arrange (Given)
     client, cursor = setup

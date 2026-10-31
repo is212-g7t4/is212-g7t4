@@ -41,11 +41,12 @@ from tests.unit.factories import signed_in
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_health_and_browser_cors(setup):
+def test_health_answers_ok_and_cors_is_granted_only_to_the_configured_frontend_origin(setup):
     """
-    Summary: The health check answers and the configured frontend gets a CORS grant.
+    Summary: GET /health returns {"status": "ok"}; a preflight from http://localhost:5174 gets that origin back in Access-Control-Allow-Origin, and one from https://other.example gets no grant.
     Supporting design check: /health and the CORS grant for the frontend origin
-    Double: None
+    Double: Stub (setup fixture: psycopg2.connect returns a MagicMock connection, which neither route ever queries);
+        the Supabase JWKS Stub verifies the signed token
     """
     client = setup[0]
     assert client.get("/health").json == {"status": "ok"}
@@ -62,9 +63,10 @@ def test_health_and_browser_cors(setup):
 
 def test_unconfigured_frontend_origin_does_not_authorise_browser_access():
     """
-    Summary: With no frontend origin configured, no browser origin is granted.
+    Summary: With FRONTEND_ORIGIN empty, /health still answers ok but returns no Access-Control-Allow-Origin header to http://localhost:5174.
     Supporting design check: an empty FRONTEND_ORIGIN grants no origin
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub,
+        which verifies the signed token
     """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None, "FRONTEND_ORIGIN": ""}).test_client())
 
