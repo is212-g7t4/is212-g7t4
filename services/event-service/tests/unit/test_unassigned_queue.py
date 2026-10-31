@@ -44,11 +44,12 @@ from app import create_app
 from tests.unit.factories import saved_row, signed_in
 
 
-def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
+def test_ac1_unassigned_queue_lists_only_submitted_events_with_no_coordinator(setup):
     """
-    Summary: The unassigned queue lists only submitted events with no coordinator.
+    Summary: The queue's SQL selects only 'Submitted' events whose coordinator_id is NULL (not 'Under Review'), oldest submission first, and an entry comes back with coordinatorId null.
     AC1: Queue shows only submitted events with no assigned coordinator
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchall returns one saved_row() with no coordinator),
+        Mock (cursor.execute query text asserted: WHERE status = 'Submitted' AND coordinator_id IS NULL, ORDER BY submission_date ASC NULLS LAST)
     """
     client, _, cursor = setup
     signed_in(client, role="Event Coordinator Lead")
@@ -67,12 +68,13 @@ def test_unassigned_queue_only_submitted_events_with_no_coordinator(setup):
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_unassigned_queue_needs_database(monkeypatch):
+def test_unassigned_queue_answers_503_when_no_database_is_configured():
     """
-    Summary: Unassigned queue needs database.
+    Summary: With no DATABASE_URL set, GET /events/unassigned answers 503 for the Lead.
     Supporting design check: an Event Service with no database configured
         answers 503
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub,
+        which verifies the Lead's signed token
     """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": ""}).test_client(), role="Event Coordinator Lead")
     assert client.get("/events/unassigned").status_code == 503

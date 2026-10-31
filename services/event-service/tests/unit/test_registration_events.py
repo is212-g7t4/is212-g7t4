@@ -87,12 +87,13 @@ def confirmed_row():
     return row
 
 
-def test_attendee_catalogue_returns_confirmed_events(setup):
+def test_ac1_registration_list_returns_confirmed_events_whether_or_not_assigned(setup):
     """
-    Summary: Attendee catalogue returns confirmed events.
+    Summary: GET /events/registration returns a Confirmed event to an Attendee, and its SQL filters on status = 'Confirmed' only, never on coordinator.
     AC1: The Attendee can view a list of confirmed events that are open for
         registration.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchall returns one 'Confirmed' row with no coordinator),
+        Mock (cursor.execute query text asserted: status = 'Confirmed' and no coordinator_id in the WHERE clause)
     """
     client, cursor = setup
     cursor.fetchall.return_value = [confirmed_row()]
@@ -111,12 +112,13 @@ def test_attendee_catalogue_returns_confirmed_events(setup):
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_attendee_catalogue_reports_missing_database_configuration():
+def test_registration_list_answers_503_when_no_database_is_configured():
     """
-    Summary: Attendee catalogue reports missing database configuration.
+    Summary: With no DATABASE_URL set, GET /events/registration answers 503 for an Attendee.
     Supporting design check: an Event Service with no database configured
         answers 503
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub,
+        which verifies the Attendee's signed token
     """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Attendee")
     assert client.get("/events/registration").status_code == 503

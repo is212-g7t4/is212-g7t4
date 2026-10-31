@@ -53,15 +53,14 @@ from tests.unit.factories import (
     pending_safety_notification_row, safety_envelope, safety_outbox_row,
 )
 
-def test_submission_saves_officer_fanout_in_the_business_transaction(safety_notification_boundary):
+def test_ac1_submitting_for_safety_check_saves_a_review_intent_with_event_name_dates_and_round(safety_notification_boundary):
     """
-    Summary: Submitting saves a review intent with the submitted event/date/round.
+    Summary: PATCH safety-status to 'Pending Safety Check' answers 200 and, in the same transaction, inserts exactly one outbox row of type 'safety.review-fanout' whose source holds the event id, name, round 1 and the start/end in Singapore time.
     AC1: Given an event is submitted or resubmitted for a safety check, then
         Safety Officers receive an in-app notification with the event name,
         date and a link to the review.
-    AC4: Given a notification is sent, then it records the event, recipient,
-        type and timestamp.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the event row, then the same row as 'Pending Safety Check'),
+        Mock (the one INSERT INTO EventNotificationOutbox call's type and source asserted)
     """
     # Arrange (Given)
     client, cursor, row = safety_notification_boundary
@@ -87,15 +86,16 @@ def test_submission_saves_officer_fanout_in_the_business_transaction(safety_noti
      'Workshop requires safety review (round 1). Proposed: 01 Mar 2030, 23:59 SGT – 02 Mar 2030, 00:00 SGT.'),
     (None, None, 'Workshop requires safety review (round 1). Proposed: Not provided.'),
 ], ids=['singapore-midnight', 'unscheduled'])
-def test_review_freezes_original_schedule_and_recipient(safety_notification_boundary, start, end, message):
+def test_ac1_ac4_review_notification_freezes_event_name_dates_and_officer_recipient_across_singapore_midnight_or_no_dates(safety_notification_boundary, start, end, message):
     """
-    Summary: Preserve the original interval, including Singapore midnight or no dates.
+    Summary: Freezing a 'safety.review-submitted' envelope for one officer stores it unchanged in one 'SET envelope=' write, whether the event runs 23:59-00:00 Singapore time across midnight or has no dates ("Proposed: Not provided.").
     AC1: Given an event is submitted or resubmitted for a safety check, then
         Safety Officers receive an in-app notification with the event name,
         date and a link to the review.
     AC4: Given a notification is sent, then it records the event, recipient,
         type and timestamp.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the 'SET envelope=' call's stored envelope and job id asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -122,15 +122,16 @@ def test_review_freezes_original_schedule_and_recipient(safety_notification_boun
 
 @pytest.mark.parametrize('recipients', [[OTHER_OFFICER, OFFICER, OTHER_OFFICER], []],
                          ids=['all-officers-deduplicated', 'no-officers'])
-def test_review_fanout_uses_only_supplied_officers_and_completes(safety_notification_boundary, recipients):
+def test_ac1_ac4_review_fanout_creates_one_notification_per_distinct_officer_and_none_when_there_are_no_officers(safety_notification_boundary, recipients):
     """
-    Summary: Expand unique officer jobs or complete an empty lookup without inventing recipients.
+    Summary: Expanding a review fanout with three officer ids (one repeated) inserts one 'safety.review-submitted' row per distinct officer, each with an id derived from the job and officer and the original timestamp; an empty list inserts none; either way the response is 'expanded' and one UPDATE marks the job published.
     AC1: Given an event is submitted or resubmitted for a safety check, then
         Safety Officers receive an in-app notification with the event name,
         date and a link to the review.
     AC4: Given a notification is sent, then it records the event, recipient,
         type and timestamp.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed 'safety.review-fanout' row),
+        Mock (the INSERT and UPDATE calls' parameters and SQL asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -171,15 +172,16 @@ def test_review_fanout_uses_only_supplied_officers_and_completes(safety_notifica
     ('Changes Requested', 'Revise both plans.', ['venue arrangement', 'event details'],
      'Workshop safety review: Changes Requested (round 1). Revise both plans. Affected areas: venue arrangement, event details.'),
 ], ids=['approval-without-remarks', 'approval-with-remarks', 'rejection-reason', 'changes-reason-areas'])
-def test_decision_freezes_complete_content_for_captured_recipient(safety_notification_boundary, decision, reason, areas, message):
+def test_ac2_ac4_decision_notification_freezes_event_decision_reason_and_affected_areas_for_the_coordinator(safety_notification_boundary, decision, reason, areas, message):
     """
-    Summary: Freeze each decision with its full remarks/reason/areas and original coordinator.
+    Summary: Freezing a 'safety.review-decision' envelope for the coordinator stores it unchanged in one 'SET envelope=' write for an approval (with or without remarks), a rejection with its reason, and a changes-requested decision with its reason and affected areas.
     AC2: Given a decision is recorded, then the assigned Event Coordinator
         receives an in-app notification with the event name, the decision and,
         for rejection or requested changes, the reason and affected areas.
     AC4: Given a notification is sent, then it records the event, recipient,
         type and timestamp.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed outbox row, then the same row with the envelope),
+        Mock (the 'SET envelope=' call's stored envelope and job id asserted)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -205,13 +207,14 @@ def test_decision_freezes_complete_content_for_captured_recipient(safety_notific
 
 
 @pytest.mark.parametrize('defect', ['missing-reason', 'missing-areas', 'changed-details', 'changed-destination'])
-def test_incomplete_or_changed_decision_envelope_is_not_frozen(safety_notification_boundary, defect):
+def test_ac2_decision_envelope_that_loses_its_reason_or_areas_or_changes_its_details_or_event_link_is_refused(safety_notification_boundary, defect):
     """
-    Summary: Reject lost decision content, changed captured facts or a wrong event link before writing.
+    Summary: A changes-requested envelope whose message omits the reason, omits the affected areas, whose details carry a different reason, or whose destination points at another event answers 400 "Invalid outbox input." and no INSERT, UPDATE or DELETE runs.
     AC2: Given a decision is recorded, then the assigned Event Coordinator
         receives an in-app notification with the event name, the decision and,
         for rejection or requested changes, the reason and affected areas.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the claimed 'safety.review-decision' row),
+        Mock (no cursor.execute call starts with INSERT, UPDATE or DELETE)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary
@@ -244,13 +247,13 @@ def test_incomplete_or_changed_decision_envelope_is_not_frozen(safety_notificati
 
 # DR ---- missing-recipient compatibility; not coordinator switching
 
-def test_missing_coordinator_does_not_undo_a_valid_safety_decision(safety_notification_boundary, caplog):
+def test_ac3_decision_stays_recorded_and_a_warning_is_logged_when_the_event_has_no_coordinator_to_notify(safety_notification_boundary, caplog):
     """
-    Summary: A legacy pending event without a coordinator records its decision and warns without an invalid alert.
-    AC1: Given an event is submitted or resubmitted for a safety check, then
-        Safety Officers receive an in-app notification with the event name,
-        date and a link to the review.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: Confirming a pending event that has no coordinator answers 200 with status 'Confirmed', writes one UPDATE that appends the decision (officer, round) to the action history, inserts no notification, and logs a warning naming the event.
+    AC3: Given notification delivery fails, then the decision remains recorded
+        and is not rolled back.
+    Double: Stub (cursor.fetchone returns the pending row with coordinator_id None, then the same row as 'Confirmed'),
+        Mock (the UPDATE's parameters asserted, no INSERT call, caplog holds the WARNING)
     """
     # Arrange (Given)
     client, cursor, _ = safety_notification_boundary

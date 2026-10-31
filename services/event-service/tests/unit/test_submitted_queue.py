@@ -26,48 +26,8 @@ AC3: Given an event request already has an assigned Event Coordinator, when the
      - Replaces the existing Event Coordinator with the newly selected one
      - Updates the event's assignment to reflect the new Event Coordinator
 
-SCRUM-11: Event Submission Form
-
-User Story
-----------
-As an Event Organiser, I want to enter my event's details into a structured
-form and submit it for review, so that the Event Coordinator can evaluate it.
-
-Acceptance Criteria
--------------------
-AC1: The form contains: Event Name (required), Description (required), Purpose
-     (required), Preferred Date(s) and Time (required), Expected Attendance
-     (required), Venue Requirements (optional), Accessibility Needs (optional),
-     Equipment Requirements (optional), Registration Needs (optional).
-AC2: Given all required fields (Event Name, Description, Purpose, Preferred
-     Date(s) and Time, Expected Attendance) are filled in, when the Event
-     Organiser submits, then the status changes to 'Submitted', the submission
-     date is recorded, and it appears in the queue of submitted requests
-     visible to Event Coordinators.
-AC3: Given the submission succeeds, the Event Organiser receives a confirmation
-     popup in ConnectSphere referencing the event name and submission date.
-AC4: Given one or more required fields are missing, when the Event Organiser
-     attempts to submit, then submission is blocked and a pop-up is shown,
-     listing exactly which fields are missing.
-
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
+This file covers AC1 only, the list. AC2 and AC3 (assigning and reassigning) are
+in test_coordinator_assignment.py and test_coordinator_reassignment.py.
 
 Real
 ----
@@ -99,35 +59,14 @@ import pytest
 from tests.unit.factories import OTHER_COORDINATOR_ID, saved_row
 
 
-def test_submitted_queue_requires_a_signed_in_coordinator(setup):
+def test_submitted_queue_for_a_coordinator_is_limited_to_the_events_assigned_to_them(setup):
     """
-    Summary: The submitted queue is only shown to a signed-in caller.
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    _, _, cursor = setup
-    client = setup[0].application.test_client()
-
-    # Act (When)
-    response = client.get("/events/submitted")
-
-    # Assert (Then)
-    assert response.status_code == 401
-    cursor.execute.assert_not_called()
-
-
-def test_submitted_queue_filters_to_the_coordinator(setup):
-    """
-    Summary: A coordinator's submitted queue lists only their events.
-    SCRUM-11 AC2: Given all required fields (Event Name, Description, Purpose,
-        Preferred Date(s) and Time, Expected Attendance) are filled in, when
-        the Event Organiser submits, then the status changes to 'Submitted',
-        the submission date is recorded, and it appears in the queue of
-        submitted requests visible to Event Coordinators.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: GET /events/submitted?coordinatorId=<id> as a coordinator answers 200 with an empty list when none of their events are submitted, and the SQL filters on coordinator_id = %s with that id as the only parameter.
+    Supporting design check: a coordinator's own submitted queue is the
+        narrower case of AC1's list; only the Lead's unfiltered view is
+        described by the story
+    Double: Stub (cursor.fetchall returns no rows),
+        Mock (cursor.execute SQL and parameters asserted: coordinator_id = %s, [OTHER_COORDINATOR_ID])
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -144,14 +83,15 @@ def test_submitted_queue_filters_to_the_coordinator(setup):
     assert params == [OTHER_COORDINATOR_ID]
 
 
-def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
+def test_ac1_lead_sees_every_submitted_request_even_when_a_coordinator_id_is_sent(setup):
     """
-    Summary: The Lead sees every submitted request.
+    Summary: GET /events/submitted with viewerRole=Event Coordinator Lead and a coordinatorId answers 200 with the submitted event, and the SQL has no coordinator_id filter and no parameters.
     AC1: Given an event request has status 'Submitted', when the Event
         Coordinator Manager views the list of submitted events, then the system
         displays each event with its name, Event Organiser name, proposed date,
         and current assignment status (Unassigned/Assigned).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchall returns one saved_row() in status 'Submitted'),
+        Mock (cursor.execute SQL asserted to lack coordinator_id = %s; parameters asserted to be [])
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -170,15 +110,11 @@ def test_submitted_queue_manager_sees_all_even_with_coordinator_id(setup):
     assert params == []
 
 
-def test_empty_queue(setup):
+def test_submitted_queue_returns_an_empty_list_when_no_submitted_events_match(setup):
     """
-    Summary: An empty submitted queue returns an empty list.
-    SCRUM-11 AC2: Given all required fields (Event Name, Description, Purpose,
-        Preferred Date(s) and Time, Expected Attendance) are filled in, when
-        the Event Organiser submits, then the status changes to 'Submitted',
-        the submission date is recorded, and it appears in the queue of
-        submitted requests visible to Event Coordinators.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: GET /events/submitted?coordinatorId=<id> returns {"events": []} when the database has no rows. REDUNDANT: the coordinator-limited test above stubs no rows and asserts the same body for the same request.
+    Supporting design check: an empty queue is an empty list, not an error
+    Double: Stub (cursor.fetchall returns no rows)
     """
     # Arrange (Given)
     setup[2].fetchall.return_value = []
@@ -190,14 +126,13 @@ def test_empty_queue(setup):
     assert response.json == {"events": []}
 
 
-def test_submitted_queue_ignores_the_retired_is_manager_flag(setup):
+def test_submitted_queue_ignores_the_retired_ismanager_flag(setup):
     """
-    Summary: A retired manager flag no longer widens the submitted queue.
-    AC1: Given an event request has status 'Submitted', when the Event
-        Coordinator Manager views the list of submitted events, then the system
-        displays each event with its name, Event Organiser name, proposed date,
-        and current assignment status (Unassigned/Assigned).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: GET /events/submitted?coordinatorId=<id>&isManager=true still answers 200 with the coordinator filter in the SQL (coordinator_id = %s with that id), so the old flag cannot widen the queue.
+    Supporting design check: a retired query flag must not widen who sees the
+        submitted queue
+    Double: Stub (cursor.fetchall returns no rows),
+        Mock (cursor.execute SQL and parameters asserted: coordinator_id = %s, [OTHER_COORDINATOR_ID])
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -216,14 +151,14 @@ def test_submitted_queue_ignores_the_retired_is_manager_flag(setup):
 
 
 @pytest.mark.parametrize("role", ["Venue Staff", "Event Coordinator", "Attendee"])
-def test_only_the_lead_can_view_every_submitted_request(role, setup):
+def test_ac1_only_the_lead_can_view_every_submitted_request(role, setup):
     """
-    Summary: Only the Lead sees every submitted request.
+    Summary: GET /events/submitted asking to view every request (viewerRole) as Venue Staff, an Event Coordinator or an Attendee answers 403 and no query is sent.
     AC1: Given an event request has status 'Submitted', when the Event
         Coordinator Manager views the list of submitted events, then the system
         displays each event with its name, Event Organiser name, proposed date,
         and current assignment status (Unassigned/Assigned).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role check refuses first
     """
     # Arrange (Given)
     client, _, cursor = setup

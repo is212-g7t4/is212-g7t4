@@ -38,26 +38,29 @@ AC3: Given a system user's authentication attempt is unsuccessful, when the
 
 Real
 ----
-- GET /workload: the signed-in and Lead checks and the grouping of active
-  events by coordinator (assigned, unassigned, coordinator no longer listed)
-  run for real, as does get_active_events().
-- Assertions are on the grouped response and on Event Service not being asked
-  when the caller may not see the view.
+- GET /workload: the signed-in and Lead checks, the grouping of active events
+  by coordinator (assigned, unassigned, coordinator no longer listed), the
+  events passed through unchanged (AC2), and the refusal of write methods
+  (AC5) run for real, as does get_active_events().
+- Assertions are on the grouped response, on the status for write methods, and
+  on Event Service not being asked when the caller may not see the view.
 
 Doubled
 -------
 - get_available_coordinators, get_active_events: Stub - canned pool and events
-  (or raise); get_active_events is a Mock where the test asserts it is not
-  called.
+  (or raise). The downstream fixture's get_active_events is also a Mock: the
+  tests that refuse a caller (403, 405) assert it is not called.
 - httpx.get (client test): Stub - canned Event Service reply.
 
 Not proven
 ----------
 - That Event Service's /events/active excludes Confirmed, Cancelled and
   Rejected events and carries organiser, date/time and status (AC2, AC4) (->
-  event-service unit tests for SCRUM-161).
-- That the page is read-only (AC5) (-> frontend
-  CoordinatorWorkloadPage.test.tsx).
+  event-service/tests/unit/test_active_events.py). This file only proves that
+  /workload passes through whatever events it is given.
+- That the page itself shows no edit controls (AC5 in the UI) (-> frontend
+  CoordinatorWorkloadPage.test.tsx). Here AC5 is only that the endpoint accepts
+  no writes.
 """
 
 from unittest.mock import Mock
@@ -73,7 +76,7 @@ def workload(headers=None):
     return create_app().test_client().get("/workload", headers=as_lead() if headers is None else headers)
 
 
-def test_workload_when_lead_lists_every_coordinator_with_their_events(downstream):
+def test_ac1_ac3_workload_when_lead_lists_every_coordinator_with_their_events(downstream):
     """
     Summary: The Lead sees every coordinator, themselves included, with their active events, and unassigned events apart.
     AC1: Lead sees every Event Coordinator with the active events currently
@@ -97,7 +100,7 @@ def test_workload_when_lead_lists_every_coordinator_with_their_events(downstream
     }
 
 
-def test_workload_when_coordinator_no_longer_listed_keeps_event_visible(downstream):
+def test_ac1_workload_when_coordinator_no_longer_listed_keeps_event_visible(downstream):
     """
     Summary: An event whose coordinator left the pool still shows up instead of disappearing.
     AC1: Lead sees every Event Coordinator with the active events currently
@@ -115,8 +118,45 @@ def test_workload_when_coordinator_no_longer_listed_keeps_event_visible(downstre
     assert response.json["coordinators"] == [{**COORDINATOR, "events": []}]
 
 
+def test_ac2_workload_when_events_listed_keeps_name_organiser_date_time_and_status(downstream):
+    """
+    Summary: Each event in the workload view keeps the fields the Lead needs to see.
+    AC2: Each event shows: name, organiser, date/time, current status
+    Double: Stub (one assigned event with every field)
+    """
+    downstream.coordinators.return_value = [COORDINATOR]
+    event = {
+        "id": "EVT-004",
+        "eventName": "Community Workshop",
+        "organiserId": "user-organiser",
+        "preferredStartDate": "2030-03-01T09:00:00+08:00",
+        "preferredEndDate": "2030-03-01T17:00:00+08:00",
+        "status": "Under Review",
+        "coordinatorId": "user-coordinator",
+    }
+    downstream.active.return_value = [event]
+
+    response = workload()
+
+    assert response.status_code == 200
+    assert response.json["coordinators"][0]["events"] == [event]
+
+
+@pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+def test_ac5_workload_when_written_to_returns_405_without_fetching(downstream, method):
+    """
+    Summary: The workload view cannot be used to change anything.
+    AC5: The view is read-only: event details cannot be edited from it
+    Double: Mock (get_active_events not called)
+    """
+    response = getattr(create_app().test_client(), method)("/workload", headers=as_lead(), json={"eventName": "Changed"})
+
+    assert response.status_code == 405
+    downstream.active.assert_not_called()
+
+
 @pytest.mark.parametrize("role", ["Event Coordinator", "Event Organiser", "Attendee"], ids=["event_coordinator", "event_organiser", "attendee"])
-def test_workload_when_role_not_lead_returns_403_without_fetching(downstream, role):
+def test_ac6_workload_when_role_not_lead_returns_403_without_fetching(downstream, role):
     """
     Summary: Only the Lead can open the workload view.
     AC6: Only the Lead can access this view
@@ -128,7 +168,7 @@ def test_workload_when_role_not_lead_returns_403_without_fetching(downstream, ro
     downstream.active.assert_not_called()
 
 
-def test_workload_without_token_returns_401(downstream):
+def test_scrum8_ac1_workload_without_token_returns_401(downstream):
     """
     Summary: Nobody can open the workload view without signing in.
     SCRUM-8 AC1: Given a system user has not been successfully authenticated,
@@ -145,7 +185,7 @@ def test_workload_without_token_returns_401(downstream):
     assert response.status_code == 401
 
 
-def test_workload_when_event_service_fails_returns_500(downstream):
+def test_ac1_workload_when_event_service_fails_returns_500(downstream):
     """
     Summary: If active events cannot be read, the Lead sees an error rather than an empty workload.
     AC1: Lead sees every Event Coordinator with the active events currently
@@ -161,7 +201,7 @@ def test_workload_when_event_service_fails_returns_500(downstream):
     assert "Failed to fetch coordinator workload" in response.json["error"]
 
 
-def test_active_events_when_fetched_come_from_event_service(monkeypatch):
+def test_ac1_active_events_when_fetched_come_from_event_service(monkeypatch):
     """
     Summary: Active events come from Event Service's active-events list.
     AC1: Lead sees every Event Coordinator with the active events currently
