@@ -16,6 +16,7 @@ import { authHeaders, openAs, randomWindow, serviceUrl, users } from '../../../h
  *   - SCRUM-12  Save Event Request as Draft (private draft survives reopening)
  *   - SCRUM-15  Request Clarification on Event Submission (locked fields, reply and history)
  *   - SCRUM-16  Request Amendment on Event Submission (field-level lock, resubmission and history)
+ *   - SCRUM-44  Event Submission Notifications (Lead-facing submission alert in the bell panel)
  *   - SCRUM-158 View Unassigned Event Queue (one submitted event appears for the Lead)
  *   - SCRUM-159 Assign Coordinator to an Event (assign the Coordinator used in later paths)
  *
@@ -40,6 +41,22 @@ test.describe('J8 Save a draft and resolve clarification and amendment requests'
       new URL(response.url()).pathname === '/queue' && response.request().method() === 'GET')
     await page.goto('/requests/queue')
     await loaded
+  }
+
+  async function expectSubmissionNotification(page: Page) {
+    await page.goto('/notifications')
+    const refresh = page.getByRole('button', { name: 'Refresh notifications' })
+    const inboxItem = page.locator('.notification-list li').filter({ hasText: eventName })
+    await expect(async () => {
+      await refresh.click()
+      await expect(inboxItem.first()).toContainText(`${eventName}. Review required.`, { timeout: 2_000 })
+    }).toPass({ timeout: 120_000, intervals: [1_000, 3_000, 5_000] })
+
+    await page.getByRole('button', { name: /^Notifications,/ }).click()
+    const recent = page.getByRole('region', { name: 'Recent notifications' })
+    await expect(recent).toBeVisible()
+    await expect(recent.locator('.notification-list li').filter({ hasText: eventName }).first())
+      .toContainText(`${eventName}. Review required.`)
   }
 
   async function readEvent(api: APIRequestContext, actor: typeof users.organiser | typeof users.coordinator, eventId: string) {
@@ -105,7 +122,7 @@ test.describe('J8 Save a draft and resolve clarification and amendment requests'
     })
 
     let eventId = ''
-    await test.step('Organiser completes and submits the reopened draft; Lead sees it once as unassigned', async () => {
+    await test.step('Organiser submits the reopened draft; Lead sees one unassigned row and opens its submission notification', async () => {
       await organiser.getByLabel('Description').fill('A practical workshop for the community.')
       await organiser.getByLabel('Purpose').fill('Share skills and build local connections.')
       await organiser.getByLabel('Preferred Start Date & Time').fill(window.start)
@@ -123,9 +140,15 @@ test.describe('J8 Save a draft and resolve clarification and amendment requests'
       const row = lead.getByRole('row').filter({ hasText: eventName })
       await expect(row).toHaveCount(1)
       await expect(row).toContainText('Unassigned')
-      await row.getByLabel('Coordinator').selectOption(users.coordinator.id)
-      await row.getByRole('button', { name: 'Assign', exact: true }).click()
-      await expect(row).toContainText('Assigned')
+
+      await expectSubmissionNotification(lead)
+      await openLeadQueue(lead)
+      await expect(lead.getByRole('row').filter({ hasText: eventName })).toHaveCount(1)
+
+      const currentRow = lead.getByRole('row').filter({ hasText: eventName })
+      await currentRow.getByLabel('Coordinator').selectOption(users.coordinator.id)
+      await currentRow.getByRole('button', { name: 'Assign', exact: true }).click()
+      await expect(currentRow).toContainText('Assigned')
     })
 
     const coordinator = await openAs(browser, users.coordinator)
