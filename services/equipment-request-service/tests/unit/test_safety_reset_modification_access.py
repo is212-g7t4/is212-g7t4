@@ -82,7 +82,7 @@ def test_safety_reset_when_safety_officer_with_service_token_reaches_validation(
     client, _ = setup
 
     # Act (When)
-    response = client.post(PATH, json={}, headers={**bearer(USER_ID, "Safety Officer"), "X-Internal-Service-Token": TOKEN})
+    response = client.post(PATH, json={}, headers={**bearer(USER_ID, "Safety Officer"), "X-Internal-Token": TOKEN})
 
     # Assert (Then)
     assert response.status_code == 400
@@ -109,7 +109,7 @@ def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_toke
     # Act (When)
     response = client.post(
         PATH, json={"requestIds": [REQUEST_ID]},
-        headers={**bearer(USER_ID, role), "X-Internal-Service-Token": TOKEN},
+        headers={**bearer(USER_ID, role), "X-Internal-Token": TOKEN},
     )
 
     # Assert (Then)

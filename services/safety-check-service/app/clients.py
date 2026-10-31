@@ -215,7 +215,7 @@ def set_event_safety_status(
         "PATCH",
         f"{EVENT_SERVICE_URL}/events/{event_id}/safety-status",
         json=body,
-        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
     )
     if response.status_code == 404:
         raise EventNotFoundError
@@ -245,7 +245,7 @@ def update_event_details(event_id: str, changes: dict, safety_recheck: dict) -> 
             "changes": changes,
             "safetyRecheck": {**safety_recheck, "venueBefore": attendee_venue_name(event_id)},
         },
-        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
     )
     if response.status_code == 404:
         raise EventNotFoundError
@@ -332,7 +332,7 @@ def reset_equipment_safety_requests(event_id: str, request_ids: list) -> list:
         "POST",
         f"{EQUIPMENT_REQUEST_SERVICE_URL}/events/{event_id}/equipment-requests/safety-reset",
         json={"requestIds": request_ids},
-        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
     ))
     return response.json()["requests"]
 
@@ -340,7 +340,7 @@ def reset_equipment_safety_requests(event_id: str, request_ids: list) -> list:
 def reset_venue_safety_bookings(event_id: str, booking_ids: list) -> list:
     response = _ok(_send("POST",
         f"{VENUE_AVAILABILITY_SERVICE_URL}/events/{event_id}/venue-bookings/safety-reset",
-        json={"bookingIds": booking_ids}, headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""}))
+        json={"bookingIds": booking_ids}, headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""}))
     return response.json()["bookings"]
 
 
@@ -503,7 +503,7 @@ def set_event_venue_change_status(
         "PATCH",
         f"{EVENT_SERVICE_URL}/events/{event_id}/safety-status",
         json=body,
-        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
     )
     if response.status_code == 404:
         raise EventNotFoundError

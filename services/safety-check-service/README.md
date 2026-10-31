@@ -176,7 +176,7 @@ UI ──POST /safety-checks/approve──► Safety Check Service (composite, 5
  4. GET  Record Service /safety-check-records?eventId=<id>&status=Pending   409 NO_OPEN_SAFETY_CHECK
  5. PATCH Record Service /safety-check-records/<roundId>/decision
           {status: "Safety Approved", remarks}               409 SAFETY_CHECK_ALREADY_DECIDED
- 6. PATCH Event Service /events/<id>/safety-status   (X-Internal-Service-Token)
+ 6. PATCH Event Service /events/<id>/safety-status   (X-Internal-Token)
           {status: "Confirmed", safetyCheckId, roundNumber, remarks}
         on any failure → POST Record Service /safety-check-records/<roundId>/reopen {decidedAt}
  7. 200 {safetyCheck, event}
@@ -257,7 +257,7 @@ UI ──POST /safety-checks/request-changes──► Safety Check Service (comp
  4. GET  Record Service /safety-check-records?eventId=<id>&status=Pending  409 NO_OPEN_SAFETY_CHECK
  5. PATCH Record Service /safety-check-records/<roundId>/decision
           {status: "Changes Requested", remarks, flags}             409 SAFETY_CHECK_ALREADY_DECIDED
- 6. PATCH Event Service /events/<id>/safety-status   (X-Internal-Service-Token)
+ 6. PATCH Event Service /events/<id>/safety-status   (X-Internal-Token)
           {status: "Safety Changes Requested", safetyCheckId, roundNumber, remarks, areas}
         on any failure → POST Record Service /safety-check-records/<roundId>/reopen {decidedAt}
  7. 200 {safetyCheck, event}

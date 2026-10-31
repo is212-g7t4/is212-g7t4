@@ -196,7 +196,7 @@ def test_preview_details_sends_dry_run_with_internal_token(send, monkeypatch):
         "dryRun": True,
         "actorRole": "Event Coordinator Lead",
     }
-    assert kwargs["headers"] == {"X-Internal-Service-Token": "secret"}
+    assert kwargs["headers"] == {"X-Internal-Token": "secret"}
 
 
 def test_save_details_sends_real_save_without_empty_role(send, monkeypatch):
@@ -217,7 +217,7 @@ def test_save_details_sends_real_save_without_empty_role(send, monkeypatch):
     assert clients.save_event_details("e1", {"eventName": "x"}) == {"id": "e1"}
 
     assert sent[0][2]["json"] == {"changes": {"eventName": "x"}, "dryRun": False}
-    assert sent[0][2]["headers"] == {"X-Internal-Service-Token": ""}
+    assert sent[0][2]["headers"] == {"X-Internal-Token": ""}
 
 
 def test_change_request_clients_call_event_service_as_trusted_service(send, monkeypatch):
@@ -246,7 +246,7 @@ def test_change_request_clients_call_event_service_as_trusted_service(send, monk
     }
     assert "params" not in sent[0][2] and "params" not in sent[1][2]
     assert sent[2][2]["json"] == {"decision": "Rejected", "reason": "No"}
-    assert all(call[2]["headers"] == {"X-Internal-Service-Token": "secret"} for call in sent)
+    assert all(call[2]["headers"] == {"X-Internal-Token": "secret"} for call in sent)
 
 
 def test_approve_change_request_client_sends_no_reason(send):

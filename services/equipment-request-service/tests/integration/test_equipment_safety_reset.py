@@ -27,7 +27,7 @@ def reset(owner, ids):
     """Submit selected IDs through the real reset route as a signed Safety Officer."""
     return owner.client.post(
         f"/events/{owner.event}/equipment-requests/safety-reset",
-        headers={**bearer(owner.other, "Safety Officer"), "X-Internal-Service-Token": TOKEN},
+        headers={**bearer(owner.other, "Safety Officer"), "X-Internal-Token": TOKEN},
         json={"requestIds": ids},
     )
 

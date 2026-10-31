@@ -103,7 +103,7 @@ def _details_call(event_id, changes, actor_role, dry_run):
         "PATCH",
         f"{EVENT_SERVICE_URL}/events/{event_id}/details",
         json=body,
-        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
     )
     if response.status_code in (400, 403, 404, 409):
         raise EventRejectedError(response.status_code, _body(response))
@@ -114,7 +114,7 @@ def _event_workflow_call(method, path, **kwargs):
     response = _send(
         method,
         f"{EVENT_SERVICE_URL}{path}",
-        headers={"X-Internal-Service-Token": INTERNAL_SERVICE_TOKEN or ""},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
         **kwargs,
     )
     if response.status_code in (400, 403, 404, 409):

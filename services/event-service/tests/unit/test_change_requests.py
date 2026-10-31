@@ -188,7 +188,7 @@ def setup(monkeypatch):
     app = create_app({"TESTING": True, "DATABASE_URL": "unused-test-url", "INTERNAL_SERVICE_TOKEN": "workflow-token"})
     client = signed_in(app.test_client(), role="Event Organiser")
     # The review routes are only for Event Workflow Service, which always sends this header (SCRUM-10: fails closed).
-    client.environ_base["HTTP_X_INTERNAL_SERVICE_TOKEN"] = "workflow-token"
+    client.environ_base["HTTP_X_INTERNAL_TOKEN"] = "workflow-token"
     return client, connection, cursor
 
 
@@ -775,7 +775,7 @@ def test_review_unconfigured_database_returns_service_unavailable():
     client = signed_in(create_app({
         "TESTING": True, "DATABASE_URL": None, "INTERNAL_SERVICE_TOKEN": "workflow-token",
     }).test_client())
-    client.environ_base["HTTP_X_INTERNAL_SERVICE_TOKEN"] = "workflow-token"
+    client.environ_base["HTTP_X_INTERNAL_TOKEN"] = "workflow-token"
 
     # Act + Assert (When / Then)
     assert client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}").status_code == 503

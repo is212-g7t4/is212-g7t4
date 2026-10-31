@@ -28,7 +28,7 @@ def setup(monkeypatch):
                 kwargs["json"] = {"notificationContext": {
                     "eventId": EVENT_ID, "eventName": "Fixture event", "recipientIds": [],
                     "coordinatorId": None, "equipmentNames": {MIC: "Microphone", TABLE: "Table"}}, **payload}
-                kwargs["headers"] = {**kwargs.get("headers", {}), "X-Internal-Token": "synthetic"}
+                kwargs["headers"] = {"X-Internal-Token": "synthetic", **kwargs.get("headers", {})}
             return super().open(*args, **kwargs)
 
     app = create_app({"DATABASE_URL": "postgresql://x", "FRONTEND_ORIGIN": ORIGIN,
