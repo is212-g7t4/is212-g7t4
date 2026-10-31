@@ -760,6 +760,10 @@ def _decide(
 ):
     """Steps shared by approve, request-changes and reject (SCRUM-150, SCRUM-151).
 
+    Technical flags select only affected Approved equipment requests for reset;
+    targeted membership is checked against all event requests before eligibility.
+    Pending and Rejected requests are not sent for reset.
+
     Role check -> load the event as the officer -> check it's 'Pending
     Safety Check' (AC7) -> decide the open round (the race guard) -> move
     the event, undoing the decision if that fails. Returns
@@ -826,11 +830,12 @@ def _decide(
         available_ids = {item["id"] for item in equipment}
         targeted_ids = {flag.get("equipmentRequestId") for flag in technical_flags}
         if None in targeted_ids:
-            equipment_ids = [item["id"] for item in equipment]
+            equipment_ids = [item["id"] for item in equipment if item["status"] == "Approved"]
         elif not targeted_ids.issubset(available_ids):
             return None, None, (jsonify(message="Flagged equipment requests must belong to this event."), 400)
         else:
-            equipment_ids = sorted(targeted_ids)
+            equipment_ids = sorted(item["id"] for item in equipment
+                if item["status"] == "Approved" and item["id"] in targeted_ids)
 
     try:
         decided = clients.decide_safety_check_record(
