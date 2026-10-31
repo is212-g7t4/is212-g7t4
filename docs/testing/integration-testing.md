@@ -538,7 +538,7 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 | equipment | atomic | `create_app(config)` | none | Supabase token | none |
 | equipment-request | atomic | `create_app(config)` | none | Supabase token; create = Coordinators, review = Technical Support; `safety-reset` needs the Safety Officer role plus `X-Internal-Token`; outbox routes use `X-Internal-Token` | none (service-specific guard/schema exceptions, see Transition) |
 | registration | atomic | `create_app(config)` | none | Supabase token (the attendee); register and withdraw need the Attendee role (SCRUM-10) | none |
-| safety-check-record | atomic | `create_app(config)` | none | Supabase token; Coordinators open, withdraw, restore and delete rounds, Safety Officer decides and reopens (SCRUM-10); no integration tier yet | none |
+| safety-check-record | atomic | `create_app(config)` | none | Supabase token; Coordinators open, withdraw, restore and delete rounds, Safety Officer decides and reopens (SCRUM-10) | none |
 | notification | atomic | **env only**: `create_app()` takes no config | none | Supabase token (the inbox owner) | consumer (pika) |
 | attendee-registration | composite | n/a | Event, Registration, User (`app/clients.py`, frozen at import) | Supabase token, forwarded; register and withdraw need the Attendee role (SCRUM-10) | none |
 | coordinator-assignment | composite | n/a | User, Event (`app/clients.py`, frozen at import) | Supabase token, forwarded; Lead role looked up via User Service | none |
@@ -584,10 +584,14 @@ changing app code; report them.
   `docker pull`); locally run
   `docker pull postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3`
   first. It does not use `postgres:17.6` like the other suites.
-- **Safety Check Record has no integration tier**, so its SCRUM-10 role gates are
-  proven by unit tests only. The new write-role gates in the composites (Venue
-  Booking, Safety Check, Attendee Registration, Event Workflow) are likewise
-  unit-tested only.
+- **The write-role gates in the composites** (Venue Booking, Safety Check,
+  Attendee Registration, Event Workflow) are unit-tested only. Safety Check
+  Record's gates are now proven in its integration tier.
+- **A foreign-key violation in Safety Check Record reads as a database outage.**
+  A round for an event that doesn't exist, or a flag naming an unknown booking
+  or equipment request, is refused with the generic `503` "check the database
+  connection" message rather than a `4xx`. Its tests assert only that the
+  request is refused and nothing is stored (§9 step 4).
 
 ### 12.3 Doc disagreements to resolve (not by the agent)
 
@@ -621,6 +625,7 @@ able to fail (§6 step 5) before being listed here. Copy the fixture *patterns*
 | DB-backed atomic | `services/registration-service/tests/integration/` | Auditable status transitions, direct persisted-state assertions, and proving that withdrawn rows no longer consume confirmed capacity |
 | Composite | `services/attendee-registration-service/tests/integration/` | `respx` HTTP-boundary stubs, exact downstream request assertions, deadline short-circuiting, and downstream failure handling |
 | DB-backed atomic | `services/venue-service/tests/integration/` | Header-role gate on an atomic and FK-backed editor stamp: refused roles leave persisted values unchanged, a real `User` FK rejects an unknown editor, and a no-change save doesn't restamp |
+| DB-backed atomic | `services/safety-check-record-service/tests/integration/` | Concurrency guards: two requests released together by a barrier (`at_once`), proving `FOR UPDATE` and a `UNIQUE` backstop let exactly one win; multi-statement transactions rolled back by a real FK failure |
 | Composite | `services/safety-check-service/tests/integration/` | First suite for this composite: `ThreadPoolExecutor` fan-out under `respx` (the stubs are hit from worker threads) |
 
 **Adding to this table:** once a new suite passes and every test has been
