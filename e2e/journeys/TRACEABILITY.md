@@ -157,13 +157,15 @@ to recover a test.
 |---|---|---|---|---|---|
 | J1 Path A: Complete an event from submission to attendee registration | `J1/J1-complete-event-to-registration/` | SCRUM-255 | SCRUM-11, 13, 19, 28–30, 32–38, 40–41, 44–48, 149–150, 158–159, 162–163, 166, 168 | SCRUM-8, 31 | Live pass: all nine steps, including persisted safety audit, refreshed attendee registration, role totals and confirmation notification (story keys provisional) |
 | J1 Path B: Coordinator rejects an assigned event | `J1/J1b-coordinator-rejection/` | SCRUM-255 | SCRUM-13, 19, 44–48, 166, 168 (provisional J1 keys; exact attribution pending) | SCRUM-8, 11, 159 | Live pass: rejection with reason, organiser status/reason after refresh, rejection notification and no approval in persisted history |
+| J2A: Refuse protected event access | `J2/J2a-access-denied/` | SCRUM-256 | SCRUM-8, 9, 10 | SCRUM-8, 11, 159 | Live pass: anonymous, wrong-role, non-owner and unassigned access refused; owner retains access and rejected writes leave the event unchanged |
+| J2B: Transfer event responsibility to a new Coordinator | `J2/J2b-responsibility-transfer/` | SCRUM-256 | SCRUM-8, 9, 10, 159, 160, 166 | SCRUM-8, 11 | Live pass: UI assignment/reassignment and history, new Coordinator manages, old access denied, and both reassignment notifications received |
 | J5a Prevent conflicting venue reservations | `J5/J5a-venue-conflict/` | SCRUM-259 | SCRUM-28, 29, 30, 154 | SCRUM-11, 159, 19 | Live pass (buffer conflict, resubmit, both approvals), plus injected queue-failure recovery; SCRUM-155, 145, 146, 147, 156 left to integration tests |
 | J5b Prevent equipment over-allocation | `J5/J5b-equipment-over-allocation/` | SCRUM-259 | SCRUM-32, 33, 34, 35 | SCRUM-31, 11, 159, 19 | Implemented |
 | J6a Organiser requests a change | `J6/J6a-organiser-change-request/` | SCRUM-260 | SCRUM-42, 43, 49 | SCRUM-11, 159, 19 | Implemented (pending immutability, comparison, approval/rejection notifications, rejection reason) |
 | J6b Coordinator edits a Confirmed event | `J6/J6b-confirmed-event-safety/` | SCRUM-260 | SCRUM-20, 153 | SCRUM-11, 159, 19, 28, 29, 149, 150 | Implemented (low-impact edit, arrangement conflict, safety withdrawal/history/queue); safety reapproval itself is covered by J1 |
 | J7 Register, reject invalid repeat registration, and withdraw | `J7/` | SCRUM-261 | SCRUM-44–48, including SCRUM-46 | SCRUM-8, 11, 19, 28, 29, 149, 150 | Live pass: registration, duplicate/full/closed/non-Confirmed refusal, withdrawal deadline, notification, staff visibility and place reuse |
 
-Other journeys (J2 to J4 and J8; SCRUM-256 to 258 and 262) get a row here when their spec is added.
+Other journeys (J3 to J4 and J8; SCRUM-257 to 258 and 262) get a row here when their spec is added.
 
 ## Adding a journey
 
