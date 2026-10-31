@@ -546,7 +546,7 @@ def test_ac3_list_event_bookings_returns_each_booking_separately(setup):
     assert params == [EVENT_ID]
 
 
-def test_scrum157_ac1_scrum157_ac4_edit_booking_changes_only_that_booking_and_resets_review(setup):
+def test_scrum157_ac1_ac4_edit_booking_changes_only_that_booking_and_resets_review(setup):
     """
     Summary: Editing a booking changes only that one and sends it back for review.
     SCRUM-157 AC1: Given an event has one or more venue bookings, when the
@@ -648,7 +648,7 @@ def test_scrum157_ac5_edit_cancelled_booking_returns_409(setup):
     assert "cannot be modified" in response.json["message"]
 
 
-def test_scrum157_ac3_scrum157_ac5_cancel_booking_keeps_row_as_cancelled(setup):
+def test_scrum157_ac3_ac5_cancel_booking_keeps_row_as_cancelled(setup):
     """
     Summary: A cancelled booking stays with the event, marked Cancelled.
     SCRUM-157 AC3: Given an event has multiple venue bookings, when the Event

@@ -144,7 +144,7 @@ def review(client, status, booking=BOOKING, event=EVENT, decided=None, path="rev
 # AC1 ------------------------------------------------------------------------
 
 
-def test_open_request_shows_booking_event_needs_and_venue(client):
+def test_ac1_open_request_shows_booking_event_needs_and_venue(client):
     """
     Summary: Opening a request shows the booking with the event's timing and requirements.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -189,7 +189,7 @@ def test_open_request_shows_booking_event_needs_and_venue(client):
     get_venue.assert_called_once_with("ven-1")
 
 
-def test_open_request_shows_occupied_window_with_buffers(client):
+def test_ac1_open_request_shows_occupied_window_with_buffers(client):
     """
     Summary: The view shows the venue's full occupied time, setup and turnaround included.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -207,7 +207,7 @@ def test_open_request_shows_occupied_window_with_buffers(client):
     assert response.json["booking"]["occupiedTo"] == "2030-03-01T12:45:00"
 
 
-def test_open_request_with_unreadable_times_shows_no_occupied_window(client):
+def test_ac1_open_request_with_unreadable_times_shows_no_occupied_window(client):
     """
     Summary: A booking with unreadable times shows no occupied window.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -225,7 +225,7 @@ def test_open_request_with_unreadable_times_shows_no_occupied_window(client):
     assert response.json["booking"]["occupiedTo"] == "2030-03-01T12:45:00"
 
 
-def test_open_request_shows_unset_event_fields_as_null(client):
+def test_ac1_open_request_shows_unset_event_fields_as_null(client):
     """
     Summary: Unset event fields are shown as nothing, not empty text.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -245,7 +245,7 @@ def test_open_request_shows_unset_event_fields_as_null(client):
     assert response.json["event"]["accessibilityNeeds"] is None
 
 
-def test_open_request_labels_unnamed_venue(client):
+def test_ac1_open_request_labels_unnamed_venue(client):
     """
     Summary: A venue without a name is labelled rather than left blank.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -268,7 +268,7 @@ def test_open_request_labels_unnamed_venue(client):
     [({"Authorization": ""}, 401), (bearer(STAFF_ID, "Event Coordinator"), 403)],
     ids=["blank_token", "coordinator"],
 )
-def test_open_request_when_not_venue_staff_is_refused(client, headers, code):
+def test_ac1_open_request_when_not_venue_staff_is_refused(client, headers, code):
     """
     Summary: Only Venue Staff can open a request.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -288,7 +288,7 @@ def test_open_request_when_not_venue_staff_is_refused(client, headers, code):
     get_venue.assert_not_called()
 
 
-def test_open_unknown_request_returns_404(client, mocker):
+def test_ac1_open_unknown_request_returns_404(client, mocker):
     """
     Summary: A booking that does not exist is reported as not found.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -310,7 +310,7 @@ def test_open_unknown_request_returns_404(client, mocker):
     "error,code", [(RuntimeError("down"), 502), (httpx.ConnectTimeout("slow"), 504)],
     ids=["failure", "timeout"],
 )
-def test_open_request_when_downstream_fails_returns_502_or_504(client, error, code, mocker):
+def test_ac1_open_request_when_downstream_fails_returns_502_or_504(client, error, code, mocker):
     """
     Summary: A downstream failure or timeout never leaks its error text.
     AC1: Given a venue booking request is pending review, when Venue Staff open
@@ -343,7 +343,7 @@ def test_open_request_when_downstream_fails_returns_502_or_504(client, error, co
     ],
     ids=["approved_pending_none", "safety_changes_requested_pending_review_none", "submitted_pending_review_opens_for_review_when_t", "pending_safety_check_pending_review_not_open_for", "under_review_approved_already_decided", "under_review_rejected_already_decided"],
 )
-def test_open_request_says_whether_and_why_it_can_be_decided(
+def test_ac1_ac5_open_request_says_whether_and_why_it_can_be_decided(
     client, event_status, booking_status, reason
 ):
     """
@@ -376,7 +376,7 @@ def test_open_request_says_whether_and_why_it_can_be_decided(
 # AC2 ------------------------------------------------------------------------
 
 
-def test_approve_request_is_recorded_with_venue_buffers(client):
+def test_ac2_approve_request_is_recorded_with_venue_buffers(client):
     """
     Summary: An approval is recorded, checked with the venue's buffers, and returned.
     AC2: Given Venue Staff determine that a pending venue booking request can
@@ -399,7 +399,7 @@ def test_approve_request_is_recorded_with_venue_buffers(client):
     decide.assert_called_once_with("booking-1", "Approved", 30, 45)
 
 
-def test_approve_request_with_buffered_conflict_returns_409(client):
+def test_ac2_approve_request_with_buffered_conflict_returns_409(client):
     """
     Summary: A conflict found when approving reaches Venue Staff.
     AC2: Given Venue Staff determine that a pending venue booking request can
@@ -421,7 +421,7 @@ def test_approve_request_with_buffered_conflict_returns_409(client):
     assert response.json["conflictTypes"] == ["APPROVED_BOOKING", "TENTATIVE_HOLD"]
 
 
-def test_approve_request_when_availability_fails_returns_502(client):
+def test_ac2_approve_request_when_availability_fails_returns_502(client):
     """
     Summary: A failure recording the decision is a dependency failure.
     AC2: Given Venue Staff determine that a pending venue booking request can
@@ -442,7 +442,7 @@ def test_approve_request_when_availability_fails_returns_502(client):
 # AC3 ------------------------------------------------------------------------
 
 
-def test_reject_request_with_reason_records_trimmed_reason(client):
+def test_ac3_ac4_reject_request_with_reason_records_trimmed_reason(client):
     """
     Summary: A rejection is recorded with its trimmed reason.
     AC3: Given Venue Staff determine that a pending venue booking request
@@ -477,7 +477,7 @@ def test_reject_request_with_reason_records_trimmed_reason(client):
      {"rejectionReason": ["x"]}, {"rejectionReason": "x" * 501}],
     ids=["missing", "empty", "blank", "null", "list", "501-chars"],
 )
-def test_reject_request_without_reason_returns_400_before_any_call(client, body):
+def test_ac4_reject_request_without_reason_returns_400_before_any_call(client, body):
     """
     Summary: A rejection without a reason is refused before anything is looked up.
     AC4: Given a venue booking request cannot be accepted, when Venue Staff
@@ -497,7 +497,7 @@ def test_reject_request_without_reason_returns_400_before_any_call(client, body)
     decide.assert_not_called()
 
 
-def test_reject_request_with_500_character_reason_is_accepted(client):
+def test_ac4_reject_request_with_500_character_reason_is_accepted(client):
     """
     Summary: A reason of up to 500 characters is forwarded.
     AC4: (boundary: reason length = 500)
@@ -513,7 +513,7 @@ def test_reject_request_with_500_character_reason_is_accepted(client):
     assert decide.call_args.kwargs["rejection_reason"] == "x" * 500
 
 
-def test_reject_request_when_availability_refuses_reason_returns_400(client):
+def test_ac4_reject_request_when_availability_refuses_reason_returns_400(client):
     """
     Summary: If Venue Availability still refuses the reason, the UI gets a 400 it can show.
     AC4: Given a venue booking request cannot be accepted, when Venue Staff
@@ -537,7 +537,7 @@ def test_reject_request_when_availability_refuses_reason_returns_400(client):
 
 
 @pytest.mark.parametrize("status", ["Approved", "Rejected", "Cancelled"], ids=["approved", "rejected", "cancelled"])
-def test_decide_already_decided_request_returns_409(client, status):
+def test_ac5_decide_already_decided_request_returns_409(client, status):
     """
     Summary: A booking no longer awaiting review is never sent to be decided.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending
@@ -559,7 +559,7 @@ def test_decide_already_decided_request_returns_409(client, status):
     decide.assert_not_called()
 
 
-def test_decide_when_other_staff_decided_first_returns_409(client):
+def test_ac5_decide_when_other_staff_decided_first_returns_409(client):
     """
     Summary: Another staff member deciding first is reported as already decided.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending
@@ -578,7 +578,7 @@ def test_decide_when_other_staff_decided_first_returns_409(client):
 
 
 @pytest.mark.parametrize("event_status", ["Submitted", "Pending Safety Check", "Confirmed", "Cancelled"])
-def test_decide_request_for_event_not_reviewable_returns_409(client, event_status):
+def test_ac5_decide_request_for_event_not_reviewable_returns_409(client, event_status):
     """
     Summary: An event outside review gets its own refusal code.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending
@@ -599,7 +599,7 @@ def test_decide_request_for_event_not_reviewable_returns_409(client, event_statu
     decide.assert_not_called()
 
 
-def test_staff_queue_marks_decided_booking_not_awaiting(client, mocker):
+def test_ac5_staff_queue_marks_decided_booking_not_awaiting(client, mocker):
     """
     Summary: A decided booking is no longer shown as awaiting.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending
@@ -635,7 +635,7 @@ def test_staff_queue_marks_decided_booking_not_awaiting(client, mocker):
 # AC6 ------------------------------------------------------------------------
 
 
-def test_event_requests_show_coordinator_decision_and_reason(client, mocker):
+def test_ac6_event_requests_show_coordinator_decision_and_reason(client, mocker):
     """
     Summary: The coordinator's list carries the decision and rejection reason.
     AC6: Given a booking request has been rejected and Venue Staff have
@@ -666,7 +666,7 @@ def test_event_requests_show_coordinator_decision_and_reason(client, mocker):
 # D7: legacy routes ----------------------------------------------------------
 
 
-def test_legacy_reject_route_requires_staff_and_reason(client):
+def test_ac4_legacy_reject_route_requires_staff_and_reason(client):
     """
     Summary: The older reject route still needs Venue Staff and a reason.
     AC4: Given a venue booking request cannot be accepted, when Venue Staff
@@ -693,7 +693,7 @@ def test_legacy_reject_route_requires_staff_and_reason(client):
     decide.assert_called_once_with("booking-1", "Rejected", rejection_reason=REASON)
 
 
-def test_legacy_approve_route_checks_event_status(client):
+def test_ac5_legacy_approve_route_checks_event_status(client):
     """
     Summary: The older approve route still refuses an event outside review.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending
@@ -722,7 +722,7 @@ def _reply(status, body):
 
 
 @pytest.mark.parametrize("status,sends_reason", [("Approved", False), ("Rejected", True)], ids=["approve", "reject"])
-def test_decide_client_sends_reason_only_for_rejection(monkeypatch, status, sends_reason):
+def test_ac4_decide_client_sends_reason_only_for_rejection(monkeypatch, status, sends_reason):
     """
     Summary: The reason is sent with a rejection and not with an approval.
     AC4: Given a venue booking request cannot be accepted, when Venue Staff
@@ -752,7 +752,7 @@ def test_decide_client_sends_reason_only_for_rejection(monkeypatch, status, send
     ],
     ids=["already_decided", "reason_required", "other_error"],
 )
-def test_decide_client_maps_typed_refusals(monkeypatch, status, code, error):
+def test_ac5_decide_client_maps_typed_refusals(monkeypatch, status, code, error):
     """
     Summary: Venue Availability's typed refusals become typed errors.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending
@@ -766,7 +766,7 @@ def test_decide_client_maps_typed_refusals(monkeypatch, status, code, error):
         clients.decide_booking("booking-1", "Rejected", rejection_reason=REASON)
 
 
-def test_decide_request_for_event_without_status_returns_409(client):
+def test_ac5_decide_request_for_event_without_status_returns_409(client):
     """
     Summary: A malformed event answer is refused, never a crash.
     AC5: Given Venue Staff have recorded an approval or rejection for a pending

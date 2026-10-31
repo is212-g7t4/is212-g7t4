@@ -74,7 +74,7 @@ def client():
     ],
     ids=["create", "list", "get"],
 )
-def test_closure_routes_when_not_venue_staff_are_refused(client, headers, code, method, path):
+def test_ac1_closure_routes_when_not_venue_staff_are_refused(client, headers, code, method, path):
     """
     Summary: Only signed-in Venue Staff can record or read closures.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -104,7 +104,7 @@ def test_closure_routes_when_not_venue_staff_are_refused(client, headers, code, 
     ],
     ids=["venue_closures_bad", "venue_closures", "venue_closures_venueid_bad", "venue_closures_venueid_uid_limit_0", "venue_closures_venueid_uid_limit_101", "venue_closures_venueid_uid_limit_no", "venue_closures_venueid_uid_limit_1_limit_2", "venue_closures_venueid_uid_cursor_bad", "venue_closures_venueid_uid_unknown_1"],
 )
-def test_read_closures_with_bad_id_or_filter_returns_400(client, path):
+def test_ac1_read_closures_with_bad_id_or_filter_returns_400(client, path):
     """
     Summary: Closure reads need a valid id or venue filter.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -150,7 +150,7 @@ BODY = {
     ],
     ids=["none", "empty", "text", "empty_2", "body_venueid_12", "body_venueid_bad", "body_reason_none", "body_reason", "body_startdatetime_12", "body_startdatetime_2099_01_01t10_00_00", "body_startdatetime_bad", "body_enddatetime_body_startdatetime", "body_enddatetime_2000_01_01t00_00_00z", "body_createdby_uid", "body_createdat_2099_01_01"],
 )
-def test_create_closure_with_invalid_input_returns_400(client, body):
+def test_ac2_create_closure_with_invalid_input_returns_400(client, body):
     """
     Summary: A closure without a valid venue, reason, start and later end is refused.
     AC2: Given required information is missing or the end is not later than the
@@ -172,7 +172,7 @@ def test_create_closure_with_invalid_input_returns_400(client, body):
     ],
     ids=["extreme_instant", "end_equals_start"],
 )
-def test_create_closure_with_unsafe_or_equal_times_returns_400(client, start, end):
+def test_ac2_create_closure_with_unsafe_or_equal_times_returns_400(client, start, end):
     """
     Summary: A closure whose end is not later than its start, or at an unsafe extreme, is refused.
     AC2: (boundary: end = start)
@@ -191,7 +191,7 @@ def test_create_closure_with_unsafe_or_equal_times_returns_400(client, start, en
     )
 
 
-def test_create_closure_with_invalid_unicode_reason_returns_400(client):
+def test_ac2_create_closure_with_invalid_unicode_reason_returns_400(client):
     """
     Summary: A reason with invalid characters is refused.
     AC2: Given required information is missing or the end is not later than the
@@ -210,7 +210,7 @@ def test_create_closure_with_invalid_unicode_reason_returns_400(client):
     )
 
 
-def test_create_closure_with_nul_in_reason_returns_400(client):
+def test_ac2_create_closure_with_nul_in_reason_returns_400(client):
     """
     Summary: A reason containing a NUL character is refused.
     AC2: Given required information is missing or the end is not later than the
@@ -232,7 +232,7 @@ def test_create_closure_with_nul_in_reason_returns_400(client):
 
 
 @pytest.mark.parametrize("cursor", ["", "a" * 1025], ids=["empty", "too_long"])
-def test_list_closures_with_empty_or_oversized_cursor_returns_400(client, cursor):
+def test_ac1_list_closures_with_empty_or_oversized_cursor_returns_400(client, cursor):
     """
     Summary: A page cursor must be present and of a sane length.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -254,11 +254,11 @@ def test_list_closures_with_empty_or_oversized_cursor_returns_400(client, cursor
     )
 
 
-def test_create_closure_ending_now_is_refused(client, monkeypatch):
+def test_ac2_create_closure_ending_now_is_refused(client, monkeypatch):
     """
     Summary: A closure that ends right now is refused.
     AC2: (boundary: end = now)
-    Double: None
+    Double: Fake clock fixed at the exact closure boundary.
     """
     # Arrange (Given)
     from datetime import datetime, timezone
@@ -275,7 +275,7 @@ def test_create_closure_ending_now_is_refused(client, monkeypatch):
     assert client.post("/venue-closures", json=BODY, headers=HEADERS).status_code == 400
 
 
-def test_create_closure_with_malformed_json_returns_400(client):
+def test_ac2_create_closure_with_malformed_json_returns_400(client):
     """
     Summary: A body that is not valid JSON is refused.
     AC2: Given required information is missing or the end is not later than the
@@ -316,7 +316,7 @@ def downstream(monkeypatch):
     return mock
 
 
-def test_create_closure_checks_venue_exists_in_any_status(client, downstream):
+def test_ac1_create_closure_checks_venue_exists_in_any_status(client, downstream):
     """
     Summary: A closure can be recorded for any existing venue, whatever its status.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -355,7 +355,7 @@ def test_create_closure_checks_venue_exists_in_any_status(client, downstream):
     ],
     ids=["0_404_404", "0_500_503", "1_400_400", "1_401_401", "1_403_403", "1_404_404", "1_503_503", "1_500_503"],
 )
-def test_closure_routes_map_downstream_errors(client, downstream, stage, code, expected):
+def test_ac3_closure_routes_map_downstream_errors(client, downstream, stage, code, expected):
     """
     Summary: Downstream refusals and failures are mapped to clear statuses.
     AC3: Given the closure cannot be saved, then the system displays a failure
@@ -385,7 +385,7 @@ def test_closure_routes_map_downstream_errors(client, downstream, stage, code, e
     "error", [httpx.ConnectError("private"), httpx.ReadTimeout("private")],
     ids=["connect_error", "timeout"],
 )
-def test_closure_routes_when_unreachable_return_503(client, downstream, error):
+def test_ac3_closure_routes_when_unreachable_return_503(client, downstream, error):
     """
     Summary: An unreachable downstream service is reported without leaking details.
     AC3: Given the closure cannot be saved, then the system displays a failure
@@ -403,7 +403,7 @@ def test_closure_routes_when_unreachable_return_503(client, downstream, error):
     "payload", [None, [], {}, {"venue": None}, {"venue": {"id": "wrong"}}],
     ids=["none", "empty", "empty_2", "venue_none", "venue_id_wrong"],
 )
-def test_create_closure_with_bad_venue_answer_returns_502(client, downstream, payload):
+def test_ac3_create_closure_with_bad_venue_answer_returns_502(client, downstream, payload):
     """
     Summary: A malformed venue answer is a dependency failure.
     AC3: Given the closure cannot be saved, then the system displays a failure
@@ -429,7 +429,7 @@ def test_create_closure_with_bad_venue_answer_returns_502(client, downstream, pa
     ],
     ids=["single_closure", "venue_list"],
 )
-def test_closure_reads_forward_staff_identity(client, downstream, path, payload):
+def test_ac1_closure_reads_forward_staff_identity(client, downstream, path, payload):
     """
     Summary: Closure reads are made as the signed-in staff member.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -462,7 +462,7 @@ def test_closure_reads_forward_staff_identity(client, downstream, path, payload)
     [None, [], {}, {"closure": None}, {"closures": "bad", "nextCursor": None}],
     ids=["none", "empty", "empty_2", "closure_none", "closures_bad_nextcursor_none"],
 )
-def test_closure_reads_with_malformed_answer_return_502(client, downstream, path, payload):
+def test_ac3_closure_reads_with_malformed_answer_return_502(client, downstream, path, payload):
     """
     Summary: A malformed closure answer is a dependency failure.
     AC3: Given the closure cannot be saved, then the system displays a failure
@@ -479,7 +479,7 @@ def test_closure_reads_with_malformed_answer_return_502(client, downstream, path
     assert client.get(path, headers=HEADERS).status_code == 502
 
 
-def test_create_closure_with_malformed_answer_returns_502(client, downstream):
+def test_ac3_create_closure_with_malformed_answer_returns_502(client, downstream):
     """
     Summary: A malformed answer to creating a closure is a dependency failure.
     AC3: Given the closure cannot be saved, then the system displays a failure
@@ -511,7 +511,7 @@ def test_create_closure_with_malformed_answer_returns_502(client, downstream):
     ],
     ids=["empty", "empty_2", "uid_bad_uid", "uid_2099_01_01t00_00_00z_bad", "00000000_0000_0000_0000_000000000002_2099_01_01t"],
 )
-def test_list_closures_with_tampered_cursor_returns_400(client, payload, downstream):
+def test_ac1_list_closures_with_tampered_cursor_returns_400(client, payload, downstream):
     """
     Summary: A tampered or foreign page cursor is refused.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -538,7 +538,7 @@ def test_list_closures_with_tampered_cursor_returns_400(client, payload, downstr
     downstream.assert_not_called()
 
 
-def test_list_closures_forwards_cursor_unchanged(client, downstream):
+def test_ac1_list_closures_forwards_cursor_unchanged(client, downstream):
     """
     Summary: The page cursor is forwarded unchanged.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -570,7 +570,7 @@ def test_list_closures_forwards_cursor_unchanged(client, downstream):
     assert downstream.call_args.kwargs["params"] == params
 
 
-def test_create_ongoing_closure_is_forwarded(client, downstream):
+def test_ac1_create_ongoing_closure_is_forwarded(client, downstream):
     """
     Summary: A closure already in progress is forwarded.
     AC1: Given an existing venue, Venue Staff can view an existing venue and
@@ -596,7 +596,7 @@ def test_create_ongoing_closure_is_forwarded(client, downstream):
     )
 
 
-def test_closure_routes_with_unreadable_answer_return_502(client, downstream):
+def test_ac3_closure_routes_with_unreadable_answer_return_502(client, downstream):
     """
     Summary: An unreadable downstream answer is a dependency failure.
     AC3: Given the closure cannot be saved, then the system displays a failure
@@ -619,7 +619,7 @@ def test_closure_routes_with_unreadable_answer_return_502(client, downstream):
 
 
 @pytest.mark.parametrize("path", ["/venue-closures", "/venue-closures/" + UID], ids=["collection", "single_closure"])
-def test_closure_preflight_from_frontend_is_allowed(client, path):
+def test_support_closure_preflight_from_frontend_is_allowed(client, path):
     """
     Summary: The frontend may manage closures from a browser.
     Supporting design check: CORS for the configured frontend origin
@@ -638,7 +638,7 @@ def test_closure_preflight_from_frontend_is_allowed(client, path):
     assert "Authorization" in r.headers["Access-Control-Allow-Headers"]
 
 
-def test_closure_preflight_from_other_origin_gets_no_grant(client):
+def test_support_closure_preflight_from_other_origin_gets_no_grant(client):
     """
     Summary: Other websites get no browser access.
     Supporting design check: CORS for the configured frontend origin

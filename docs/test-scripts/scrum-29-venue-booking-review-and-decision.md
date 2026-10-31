@@ -14,7 +14,7 @@ Automated coverage is separate and runs without the stack:
   `tests/integration/test_booking_review_decision.py` (real Postgres; the
   only place the stored decision and the "decisions are final" rule are
   proven).
-- Venue Booking: `tests/unit/test_booking_review_decision.py` and
+- Venue Booking: `tests/unit/test_scrum29_booking_review_decision.py` and
   `tests/integration/test_booking_review_decision.py` (respx stubs).
 - Frontend: `VenueRequestReviewDialog.test.tsx`, `VenueRequestsPage.test.tsx`,
   `VenueBookingsPanel.test.tsx`, `venueBookings.test.ts` (Vitest) and

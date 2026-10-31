@@ -156,6 +156,11 @@ Not proven
 ----------
 - That the atomic services behave as stubbed (-> their own unit and integration
   tests, and tests/integration/ here with respx).
+- AC5 is covered only by separate success/conflict paths, not one scenario in
+  which one failed booking coexists with another valid booking for the event.
+- AC6's same-event/different-venue overlap rule is enforced by Venue
+  Availability; this composite does not receive enough booking inventory to
+  prove that rule independently.
 """
 
 from unittest.mock import MagicMock, patch
@@ -221,7 +226,7 @@ STAFF_ID = "d9e4002b-db91-4939-b87e-50f9cceb5e0a"
 STAFF_HEADERS = bearer(STAFF_ID, "Venue Staff")
 
 
-def test_staff_queue_shows_safety_feedback_on_flagged_bookings(mocker):
+def test_scrum164_ac2_staff_queue_shows_safety_feedback_on_flagged_bookings(mocker):
     """
     Summary: Venue Staff see the Safety Officer's feedback on bookings flagged for change.
     SCRUM-164 AC2: Given the venue arrangement is flagged, then the affected
@@ -252,7 +257,7 @@ def test_staff_queue_shows_safety_feedback_on_flagged_bookings(mocker):
 
 
 @pytest.mark.parametrize("headers,code", [({"Authorization": ""}, 401), (bearer(STAFF_ID, "Event Coordinator"), 403)], ids=["blank_token", "coordinator"])
-def test_staff_queue_when_not_venue_staff_is_refused(headers, code):
+def test_scrum28_ac4_staff_queue_when_not_venue_staff_is_refused(headers, code):
     """
     Summary: Only Venue Staff can open the queue.
     SCRUM-28 AC4: Given a venue booking request has been submitted and has not
@@ -270,7 +275,7 @@ def test_staff_queue_when_not_venue_staff_is_refused(headers, code):
 
 
 @pytest.mark.parametrize("status", ["Approved", "Rejected"], ids=["approve", "reject"])
-def test_staff_can_decide_booking_reopened_by_safety_check(status, mocker):
+def test_scrum164_ac2_staff_can_decide_booking_reopened_by_safety_check(status, mocker):
     """
     Summary: A booking sent back by the safety check can be decided again.
     SCRUM-164 AC2: Given the venue arrangement is flagged, then the affected
@@ -297,7 +302,7 @@ def test_staff_can_decide_booking_reopened_by_safety_check(status, mocker):
 
 
 @pytest.mark.parametrize("status,count", [("Pending", 1), ("Approved", 1), ("Rejected", 0)], ids=["pending", "approved", "rejected"])
-def test_staff_queue_filters_and_reads_safety_only_in_revision(status, count, mocker):
+def test_scrum28_ac4_staff_queue_filters_and_reads_safety_only_in_revision(status, count, mocker):
     """
     Summary: The queue filters by status and reads safety feedback only for events in revision.
     SCRUM-28 AC4: Given a venue booking request has been submitted and has not
@@ -326,7 +331,7 @@ def test_staff_queue_filters_and_reads_safety_only_in_revision(status, count, mo
     records.assert_not_called()
 
 
-def test_staff_queue_with_unknown_status_returns_400():
+def test_scrum28_ac4_staff_queue_with_unknown_status_returns_400():
     """
     Summary: An unknown status filter is refused.
     SCRUM-28 AC4: Given a venue booking request has been submitted and has not
@@ -340,7 +345,7 @@ def test_staff_queue_with_unknown_status_returns_400():
 
 
 @pytest.mark.parametrize("error,code", [(httpx.ReadTimeout("timeout"), 504), (RuntimeError(), 502)], ids=["timeout", "failure"])
-def test_staff_queue_when_downstream_fails_returns_error(error, code, mocker):
+def test_scrum28_ac4_staff_queue_when_downstream_fails_returns_error(error, code, mocker):
     """
     Summary: A downstream failure is reported rather than shown as an empty queue.
     SCRUM-28 AC4: Given a venue booking request has been submitted and has not
@@ -358,7 +363,7 @@ def test_staff_queue_when_downstream_fails_returns_error(error, code, mocker):
 
 
 @pytest.mark.parametrize("data", [None, {}, {"status": "Pending"}], ids=["no_body", "empty_object", "pending"])
-def test_staff_review_with_bad_decision_returns_400(data):
+def test_scrum29_ac2_staff_review_with_bad_decision_returns_400(data):
     """
     Summary: A review must be Approved or Rejected.
     SCRUM-29 AC2: Given Venue Staff determine that a pending venue booking
@@ -374,7 +379,7 @@ def test_staff_review_with_bad_decision_returns_400(data):
 
 
 @pytest.mark.parametrize("event_status,booking_status", [("Confirmed", "Pending Review"), ("Under Review", "Approved")], ids=["confirmed_event", "decided_booking"])
-def test_staff_review_of_closed_event_or_decided_booking_returns_409(event_status, booking_status, mocker):
+def test_scrum29_ac5_staff_review_of_closed_event_or_decided_booking_returns_409(event_status, booking_status, mocker):
     """
     Summary: A booking of a closed event, or already decided, cannot be reviewed.
     SCRUM-29 AC5: Given Venue Staff have recorded an approval or rejection for
@@ -394,7 +399,7 @@ def test_staff_review_of_closed_event_or_decided_booking_returns_409(event_statu
 
 
 @pytest.mark.parametrize("error,code", [(BookingNotFoundError(), 404), (RuntimeError(), 502)], ids=["not_found", "failure"])
-def test_staff_review_when_lookup_fails_returns_error(error, code, mocker):
+def test_scrum29_ac2_staff_review_when_lookup_fails_returns_error(error, code, mocker):
     """
     Summary: A failed lookup is reported, not treated as a decision.
     SCRUM-29 AC2: Given Venue Staff determine that a pending venue booking
@@ -412,7 +417,7 @@ def test_staff_review_when_lookup_fails_returns_error(error, code, mocker):
         json={"status": "Approved", "reviewedBy": STAFF_ID}).status_code == code
 
 
-def test_staff_queue_clients_read_events_and_safety_rounds_from_owners(mocker):
+def test_scrum28_ac3_staff_queue_clients_read_events_and_safety_rounds_from_owners(mocker):
     """
     Summary: Queue details come from Event and Safety Check Record Services.
     SCRUM-28 AC3: Given a venue booking request has been submitted, when Venue
@@ -435,7 +440,7 @@ def test_staff_queue_clients_read_events_and_safety_rounds_from_owners(mocker):
     assert get.call_args.kwargs["params"] == {"eventId": "evt-1"}
 
 
-def test_create_request_for_catalogued_available_venue_is_saved(mocker):
+def test_ac1_create_request_for_catalogued_available_venue_is_saved(mocker):
     """
     Summary: A request for an available catalogue venue with enough capacity is saved.
     AC1: Given an event exists, when the Event Coordinator creates venue
@@ -469,7 +474,7 @@ def test_create_request_for_catalogued_available_venue_is_saved(mocker):
     )
 
 
-def test_create_request_without_required_fields_returns_400():
+def test_ac2_create_request_without_required_fields_returns_400():
     """
     Summary: A request missing required fields is refused.
     AC2: Each venue booking records its own venue, date/time, required
@@ -492,7 +497,7 @@ def test_create_request_without_required_fields_returns_400():
     ],
     ids=["requestedstarttime_2030_10_01", "requestedendtime_2030_10_01t08_00", "requiredcapacity_0", "requiredcapacity_true", "venuerequirements_none"],
 )
-def test_create_request_with_invalid_booking_details_returns_400(change):
+def test_ac2_create_request_with_invalid_booking_details_returns_400(change):
     """
     Summary: Each booking's own times, capacity and requirements are validated.
     AC2: Each venue booking records its own venue, date/time, required
@@ -505,7 +510,7 @@ def test_create_request_with_invalid_booking_details_returns_400(change):
     assert response.status_code == 400
 
 
-def test_create_request_for_unknown_event_returns_404(mocker):
+def test_ac1_create_request_for_unknown_event_returns_404(mocker):
     """
     Summary: A request for an unknown event is refused.
     AC1: Given an event exists, when the Event Coordinator creates venue
@@ -529,7 +534,7 @@ def test_create_request_for_unknown_event_returns_404(mocker):
     assert response.status_code == 404
 
 
-def test_create_request_when_not_assigned_coordinator_returns_403(mocker):
+def test_ac1_create_request_when_not_assigned_coordinator_returns_403(mocker):
     """
     Summary: Only the event's assigned coordinator can request its bookings.
     AC1: Given an event exists, when the Event Coordinator creates venue
@@ -553,7 +558,7 @@ def test_create_request_when_not_assigned_coordinator_returns_403(mocker):
     assert response.status_code == 403
 
 
-def test_create_request_for_venue_not_in_catalogue_returns_404(mocker):
+def test_ac4_create_request_for_venue_not_in_catalogue_returns_404(mocker):
     """
     Summary: A venue that does not exist in the catalogue is refused.
     AC4: When a venue booking is submitted, its suitability, availability, and
@@ -575,7 +580,7 @@ def test_create_request_for_venue_not_in_catalogue_returns_404(mocker):
 
 
 @pytest.mark.parametrize("venue_id", ["ven-3", "ven-4"], ids=["under_maintenance", "booked"])
-def test_create_request_for_venue_not_available_returns_409(venue_id, mocker):
+def test_ac4_create_request_for_venue_not_available_returns_409(venue_id, mocker):
     """
     Summary: Venues under maintenance or booked are refused.
     AC4: When a venue booking is submitted, its suitability, availability, and
@@ -597,7 +602,7 @@ def test_create_request_for_venue_not_available_returns_409(venue_id, mocker):
     assert "not currently available for booking" in response.json["message"]
 
 
-def test_create_request_checks_booking_capacity_not_event_total(mocker):
+def test_ac4_create_request_checks_booking_capacity_not_event_total(mocker):
     """
     Summary: Capacity is checked against that booking's own required capacity.
     AC4: When a venue booking is submitted, its suitability, availability, and
@@ -621,7 +626,7 @@ def test_create_request_checks_booking_capacity_not_event_total(mocker):
     assert mock_create.call_args.args[4] == 50
 
 
-def test_create_request_above_venue_capacity_returns_409(mocker):
+def test_ac4_create_request_above_venue_capacity_returns_409(mocker):
     """
     Summary: A booking needing more places than the venue has is refused.
     AC4: When a venue booking is submitted, its suitability, availability, and
@@ -641,7 +646,7 @@ def test_create_request_above_venue_capacity_returns_409(mocker):
     assert response.status_code == 422
 
 
-def test_create_request_for_taken_slot_returns_409(mocker):
+def test_ac4_create_request_for_taken_slot_returns_409(mocker):
     """
     Summary: A slot already taken is reported as a conflict.
     AC4: When a venue booking is submitted, its suitability, availability, and
@@ -664,7 +669,7 @@ def test_create_request_for_taken_slot_returns_409(mocker):
     assert response.status_code == 409
 
 
-def test_event_requests_list_each_booking_separately(mocker):
+def test_ac1_ac3_event_requests_list_each_booking_separately(mocker):
     """
     Summary: An event's bookings are listed separately.
     AC1: Given an event exists, when the Event Coordinator creates venue
@@ -699,7 +704,7 @@ def test_event_requests_list_each_booking_separately(mocker):
     ]
 
 
-def test_approve_request_is_recorded(mocker):
+def test_scrum29_ac2_approve_request_is_recorded(mocker):
     """
     Summary: Venue Staff can approve a request.
     SCRUM-29 AC2: Given Venue Staff determine that a pending venue booking
@@ -730,14 +735,14 @@ def test_approve_request_is_recorded(mocker):
     mock_decide_booking.assert_called_once_with("booking-1", "Approved", 30, 45)
 
 
-def test_reject_request_without_reviewer_is_refused(mocker):
+def test_scrum29_ac3_reject_request_without_reviewer_is_refused(mocker):
     """
     Summary: A rejection needs a signed-in reviewer.
     SCRUM-29 AC3: Given Venue Staff determine that a pending venue booking
         request cannot be accepted, when they reject the request, then the
         booking decision is recorded as rejected and the outcome is available
         to the relevant Event Coordinator.
-    Double: None
+    Double: Mock (decide_booking is asserted unused).
     """
     # Arrange (Given)
     mock_decide_booking = mocker.patch("app.routes.decide_booking")
@@ -751,7 +756,7 @@ def test_reject_request_without_reviewer_is_refused(mocker):
     mock_decide_booking.assert_not_called()
 
 
-def test_approve_unknown_request_returns_404(mocker):
+def test_scrum29_ac2_approve_unknown_request_returns_404(mocker):
     """
     Summary: Approving an unknown request is refused.
     SCRUM-29 AC2: Given Venue Staff determine that a pending venue booking
@@ -776,7 +781,7 @@ def test_approve_unknown_request_returns_404(mocker):
     assert response.status_code == 404
 
 
-def test_review_cancelled_request_returns_409(mocker):
+def test_scrum29_ac5_review_cancelled_request_returns_409(mocker):
     """
     Summary: A cancelled request cannot be reviewed.
     SCRUM-29 AC5: Given Venue Staff have recorded an approval or rejection for
@@ -801,7 +806,7 @@ def test_review_cancelled_request_returns_409(mocker):
     assert "cannot be reviewed" in response.json["message"]
 
 
-def test_edit_request_revalidates_and_resubmits_only_that_booking(mocker):
+def test_scrum157_ac1_ac2_edit_request_revalidates_and_resubmits_only_that_booking(mocker):
     """
     Summary: An edit is re-validated and only that booking is resubmitted.
     SCRUM-157 AC1: Given an event has one or more venue bookings, when the
@@ -842,7 +847,7 @@ def test_edit_request_revalidates_and_resubmits_only_that_booking(mocker):
     )
 
 
-def test_edit_request_rechecks_capacity_before_saving(mocker):
+def test_scrum157_ac2_edit_request_rechecks_capacity_before_saving(mocker):
     """
     Summary: An edit re-checks capacity before saving.
     SCRUM-157 AC2: If a modification changes the venue, date/time, required
@@ -866,7 +871,7 @@ def test_edit_request_rechecks_capacity_before_saving(mocker):
     mock_update_booking.assert_not_called()
 
 
-def test_edit_request_conflict_leaves_other_bookings_unchanged(mocker):
+def test_scrum157_ac4_edit_request_conflict_leaves_other_bookings_unchanged(mocker):
     """
     Summary: A conflicting edit is reported and the event's other bookings are untouched.
     SCRUM-157 AC4: Cancelling or modifying one venue booking does not
@@ -888,7 +893,7 @@ def test_edit_request_conflict_leaves_other_bookings_unchanged(mocker):
     assert "Grand Ballroom" in response.json["message"]
 
 
-def test_edit_cancelled_request_returns_409(mocker):
+def test_scrum157_ac5_edit_cancelled_request_returns_409(mocker):
     """
     Summary: A cancelled request cannot be edited back to life.
     SCRUM-157 AC5: A cancelled booking remains associated with the event with a
@@ -910,7 +915,7 @@ def test_edit_cancelled_request_returns_409(mocker):
     assert "cannot be modified" in response.json["message"]
 
 
-def test_cancel_request_cancels_only_that_booking(mocker):
+def test_scrum157_ac3_cancel_request_cancels_only_that_booking(mocker):
     """
     Summary: Cancelling cancels only the selected booking.
     SCRUM-157 AC3: Given an event has multiple venue bookings, when the Event
@@ -937,7 +942,7 @@ def test_cancel_request_cancels_only_that_booking(mocker):
     mock_cancel_booking.assert_called_once_with("booking-1", "evt-1")
 
 
-def test_cancel_request_when_not_assigned_coordinator_returns_403(mocker):
+def test_scrum157_ac3_cancel_request_when_not_assigned_coordinator_returns_403(mocker):
     """
     Summary: Only the event's assigned coordinator can cancel its bookings.
     SCRUM-157 AC3: Given an event has multiple venue bookings, when the Event
@@ -972,7 +977,7 @@ def test_cancel_request_when_not_assigned_coordinator_returns_403(mocker):
     ],
     ids=["empty", "eventid_evt_1", "request_requiredcapacity_0", "request_venuerequirements_none", "request_requestedstarttime_2030_10_01"],
 )
-def test_edit_request_with_invalid_body_returns_400(payload):
+def test_scrum157_ac2_edit_request_with_invalid_body_returns_400(payload):
     """
     Summary: An edit with an invalid body is refused.
     SCRUM-157 AC2: If a modification changes the venue, date/time, required
@@ -992,7 +997,7 @@ def test_edit_request_with_invalid_body_returns_400(payload):
     [(EventNotFoundError, 404), (EventNotAssignedError, 403), (RuntimeError("down"), 502)],
     ids=["not_found", "not_assigned", "outage"],
 )
-def test_edit_request_when_event_check_fails_is_refused(event_error, expected_status, mocker):
+def test_scrum157_ac1_edit_request_when_event_check_fails_is_refused(event_error, expected_status, mocker):
     """
     Summary: An edit needs access to the booking's event.
     SCRUM-157 AC1: Given an event has one or more venue bookings, when the
@@ -1018,7 +1023,7 @@ def test_edit_request_when_event_check_fails_is_refused(event_error, expected_st
     [("missing", 404), ("ven-3", 409)],
     ids=["missing_venue", "unavailable_venue"],
 )
-def test_edit_request_rechecks_venue_catalogue(venue_id, expected_status, mocker):
+def test_scrum157_ac2_edit_request_rechecks_venue_catalogue(venue_id, expected_status, mocker):
     """
     Summary: An edit to an unknown or unavailable venue is refused.
     SCRUM-157 AC2: If a modification changes the venue, date/time, required
@@ -1037,7 +1042,7 @@ def test_edit_request_rechecks_venue_catalogue(venue_id, expected_status, mocker
     assert response.status_code == expected_status
 
 
-def test_edit_request_when_venue_service_fails_returns_502(mocker):
+def test_scrum157_ac2_edit_request_when_venue_service_fails_returns_502(mocker):
     """
     Summary: A Venue Service failure during an edit is reported.
     SCRUM-157 AC2: If a modification changes the venue, date/time, required
@@ -1061,7 +1066,7 @@ def test_edit_request_when_venue_service_fails_returns_502(mocker):
     [(BookingNotFoundError, 404), (RuntimeError("down"), 502)],
     ids=["not_found", "outage"],
 )
-def test_edit_request_when_save_fails_returns_error(update_error, expected_status, mocker):
+def test_scrum157_ac1_edit_request_when_save_fails_returns_error(update_error, expected_status, mocker):
     """
     Summary: A failed save is reported.
     SCRUM-157 AC1: Given an event has one or more venue bookings, when the
@@ -1086,7 +1091,7 @@ def test_edit_request_when_save_fails_returns_error(update_error, expected_statu
     assert response.status_code == expected_status
 
 
-def test_cancel_request_needs_event_and_coordinator():
+def test_scrum157_ac3_cancel_request_needs_event_and_coordinator():
     """
     Summary: Cancelling needs the event and its coordinator.
     SCRUM-157 AC3: Given an event has multiple venue bookings, when the Event
@@ -1108,7 +1113,7 @@ def test_cancel_request_needs_event_and_coordinator():
     [(BookingNotFoundError, 404), (RuntimeError("down"), 502)],
     ids=["not_found", "outage"],
 )
-def test_cancel_request_when_save_fails_returns_error(cancel_error, expected_status, mocker):
+def test_scrum157_ac3_cancel_request_when_save_fails_returns_error(cancel_error, expected_status, mocker):
     """
     Summary: A failed cancel is reported.
     SCRUM-157 AC3: Given an event has multiple venue bookings, when the Event
@@ -1137,7 +1142,7 @@ def test_cancel_request_when_save_fails_returns_error(cancel_error, expected_sta
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_health_when_called_returns_ok():
+def test_support_health_when_called_returns_ok():
     """
     Summary: Anyone can check the service is up.
     Supporting design check: /health answers without a token

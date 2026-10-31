@@ -78,7 +78,7 @@ def downstream(monkeypatch):
 # AC1 ----
 
 @pytest.mark.parametrize("role", ["Event Organiser", "Event Coordinator Lead", "Venue Staff"], ids=["event_organiser", "event_coordinator_lead", "venue_staff"])
-def test_event_requests_when_related_role_returns_list(monkeypatch, downstream, role):
+def test_ac1_event_requests_when_related_role_returns_list(monkeypatch, downstream, role):
     """
     Summary: The organiser, the Lead and Venue Staff get an event's requests once Event Service allows them.
     AC1: Given an authenticated user is permitted to view information based on
@@ -100,7 +100,7 @@ def test_event_requests_when_related_role_returns_list(monkeypatch, downstream, 
 # AC2 ----
 
 @pytest.mark.parametrize("role", ["Attendee", "Technical Support", "Safety Officer"], ids=["attendee", "technical_support", "safety_officer"])
-def test_event_requests_when_role_has_no_part_returns_403(monkeypatch, downstream, role):
+def test_ac2_event_requests_when_role_has_no_part_returns_403(monkeypatch, downstream, role):
     """
     Summary: Roles with no part in venue requests are refused without asking Event Service.
     AC2: Given an authenticated user's role does not permit them to view
@@ -120,7 +120,7 @@ def test_event_requests_when_role_has_no_part_returns_403(monkeypatch, downstrea
 
 # AC3 ----
 
-def test_event_requests_for_other_organisers_event_returns_403(monkeypatch, downstream):
+def test_ac3_event_requests_for_other_organisers_event_returns_403(monkeypatch, downstream):
     """
     Summary: An organiser cannot see another organiser's event.
     AC3: Given an authenticated user's relationship to an event does not permit
@@ -139,7 +139,7 @@ def test_event_requests_for_other_organisers_event_returns_403(monkeypatch, down
 
 # AC4 ----
 
-def test_event_requests_for_two_events_returns_only_assigned_one(monkeypatch, downstream):
+def test_ac4_event_requests_for_two_events_returns_only_assigned_one(monkeypatch, downstream):
     """
     Summary: Asking for two events gives the assigned one and a refusal for the other.
     AC4: Given a user is permitted to view information for one event but does
@@ -166,7 +166,7 @@ def test_event_requests_for_two_events_returns_only_assigned_one(monkeypatch, do
 
 # AC5 ----
 
-def test_event_requests_ask_event_service_per_role(monkeypatch):
+def test_ac5_event_requests_ask_event_service_per_role(monkeypatch):
     """
     Summary: Each role is judged on its own relationship to the same event.
     AC5: Given two authenticated users have different roles or relationships to
@@ -188,7 +188,7 @@ def test_event_requests_ask_event_service_per_role(monkeypatch):
     ]
 
 
-def test_event_requests_for_unknown_event_returns_404(monkeypatch, downstream):
+def test_ac3_event_requests_for_unknown_event_returns_404(monkeypatch, downstream):
     """
     Summary: An event that does not exist is reported as not found.
     AC3: Given an authenticated user's relationship to an event does not permit

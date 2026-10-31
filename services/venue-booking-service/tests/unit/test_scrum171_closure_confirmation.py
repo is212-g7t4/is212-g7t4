@@ -38,6 +38,8 @@ Not proven
 ----------
 - That the atomic services behave as stubbed (-> their own unit and integration
   tests, and tests/integration/ here with respx).
+- AC2/AC3 persistence and rejection details are owned by Venue Availability;
+  this composite covers preview/confirmation and enriched affected-event data.
 """
 
 import httpx
@@ -125,7 +127,7 @@ def setup(monkeypatch):
     ],
     ids=["venue", "venue_venue_id_wrong_name_hall", "venue_venue_id_uid_name_none", "preview", "preview_dict_closure_body_affectedcount_2_affect", "preview_dict_closure_body_affectedcount_1_affect", "preview_dict_closure_body_affectedcount_2_affect_2", "event_events", "event_events_id_uid_eventname_none"],
 )
-def test_preview_closure_with_incomplete_data_is_not_offered(
+def test_ac1_preview_closure_with_incomplete_data_is_not_offered(
     setup, monkeypatch, stage, body
 ):
     """
@@ -161,7 +163,7 @@ def test_preview_closure_with_incomplete_data_is_not_offered(
     assert "confirmationToken" not in response.json
 
 
-def test_confirm_closure_forwards_token_and_keeps_refresh_conflict(setup, monkeypatch):
+def test_ac1_confirm_closure_forwards_token_and_keeps_refresh_conflict(setup, monkeypatch):
     """
     Summary: Confirming forwards the token, and a changed impact asks to refresh.
     AC1: Given a closure is recorded, then requests for the same venue with
@@ -206,7 +208,7 @@ def test_confirm_closure_forwards_token_and_keeps_refresh_conflict(setup, monkey
     ],
     ids=["unconfirmed", "missing-token", "invalid-token-type", "invalid-preview"],
 )
-def test_confirm_or_preview_with_invalid_input_returns_400(setup, path, body):
+def test_ac1_confirm_or_preview_with_invalid_input_returns_400(setup, path, body):
     """
     Summary: Invalid preview or confirmation input is refused.
     AC1: Given a closure is recorded, then requests for the same venue with
@@ -223,7 +225,7 @@ def test_confirm_or_preview_with_invalid_input_returns_400(setup, path, body):
 
 
 @pytest.mark.parametrize("body", [{"message": "legacy"}, [], None], ids=["legacy_message", "list_body", "null_body"])
-def test_confirm_closure_with_unknown_conflict_is_not_reported_as_refresh(setup, monkeypatch, body):
+def test_ac1_confirm_closure_with_unknown_conflict_is_not_reported_as_refresh(setup, monkeypatch, body):
     """
     Summary: An unrecognised conflict is not mistaken for "please refresh".
     AC1: Given a closure is recorded, then requests for the same venue with
@@ -248,7 +250,7 @@ def test_confirm_closure_with_unknown_conflict_is_not_reported_as_refresh(setup,
     assert response.status_code == 503
 
 
-def test_preview_closure_reads_all_affected_events_in_batches(setup, monkeypatch):
+def test_ac4_preview_closure_reads_all_affected_events_in_batches(setup, monkeypatch):
     """
     Summary: Every affected event is read, in batches, without truncation.
     AC4: Given an affected venue request is rejected, the existing event itself
@@ -290,7 +292,7 @@ def test_preview_closure_reads_all_affected_events_in_batches(setup, monkeypatch
     ]
 
 
-def test_preview_closure_enriches_each_request_from_its_owner(setup):
+def test_ac1_ac4_preview_closure_enriches_each_request_from_its_owner(setup):
     """
     Summary: Each affected request is described using its owning services.
     AC1: Given a closure is recorded, then requests for the same venue with
