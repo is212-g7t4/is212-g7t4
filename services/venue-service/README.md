@@ -153,12 +153,12 @@ with the full migration chain; Docker must be running):
 uv run pytest -m integration --no-cov
 ```
 
-`tests/unit/test_venue_details.py` covers AC1 and the failure cases with
-`psycopg2.connect` mocked; `tests/unit/test_venue_search_filters.py` covers the
+`tests/unit/test_scrum24_venue_details.py` covers AC1 and the failure cases with
+`psycopg2.connect` mocked; `tests/unit/test_scrum26_venue_search_filters.py` covers the
 SCRUM-26 filter parameters above; `tests/unit/test_seed_data.py` checks that
 `scripts/seed_venues.py` writes rows in the shape above. Shared payloads and row
 builders live in `tests/unit/factories.py`.
-`tests/unit/test_venue_safety_information.py` and
+`tests/unit/test_scrum167_venue_safety_information.py` and
 `tests/integration/test_venue_safety_information.py` cover SCRUM-167.
 
 ## Seeding

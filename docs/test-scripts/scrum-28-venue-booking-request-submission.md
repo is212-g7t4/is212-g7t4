@@ -10,7 +10,7 @@ been run.
 
 Automated coverage is separate and runs without the stack:
 
-- Venue Availability: `tests/unit/test_booking_request_submission.py` and
+- Venue Availability: `tests/unit/test_scrum28_booking_request_submission.py` and
   `tests/integration/test_booking_request_submission.py` (real Postgres; the
   only place the AC6 overlap rule is proven).
 - Venue Booking: `tests/unit/test_booking_request_submission.py` and

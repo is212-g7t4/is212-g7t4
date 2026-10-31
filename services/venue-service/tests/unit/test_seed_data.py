@@ -42,7 +42,7 @@ from app.models import serialize
 
 
 @pytest.mark.parametrize("venue", seed_venues.VENUES, ids=lambda v: v["venue_name"])
-def test_seed_venue_when_loaded_matches_live_row_shape(venue):
+def test_support_seed_venue_when_loaded_matches_live_row_shape(venue):
     """
     Summary: Every seed venue uses the live status names, facilities object and layouts list.
     Supporting design check: the seed catalogue is valid catalogue data
@@ -61,7 +61,7 @@ def test_seed_venue_when_loaded_matches_live_row_shape(venue):
     assert isinstance(venue["max_capacity"], int) and venue["max_capacity"] > 0
 
 
-def test_seed_catalogue_when_loaded_has_unique_names():
+def test_support_seed_catalogue_when_loaded_has_unique_names():
     """
     Summary: No two seed venues share a name, so the upsert cannot overwrite one with another.
     Supporting design check: the seed catalogue is valid catalogue data
@@ -71,7 +71,7 @@ def test_seed_catalogue_when_loaded_has_unique_names():
     assert len(names) == len(set(names))
 
 
-def test_seed_row_when_serialized_gives_clean_venue():
+def test_support_seed_row_when_serialized_gives_clean_venue():
     """
     Summary: A seed venue read back through the service gives a clean venue.
     Supporting design check: the seed catalogue is valid catalogue data

@@ -45,7 +45,7 @@ from app import clients
 from tests.unit.factories import EVENT_ID, USER, confirmed_event, registration, response
 
 
-def test_list_my_registrations_returns_status_with_event_details(client, monkeypatch):
+def test_ac1_ac2_ac3_list_my_registrations_returns_status_with_event_details(client, monkeypatch):
     """
     Summary: An attendee sees each registration's status and date, with the event's name, schedule and venue, and their own details.
     AC1: The Attendee can view a list of events they have registered for.
@@ -80,7 +80,7 @@ def test_list_my_registrations_returns_status_with_event_details(client, monkeyp
     assert item["event"]["description"] == "Hands-on session"
 
 
-def test_list_my_registrations_when_none_returns_empty_list(client, monkeypatch):
+def test_ac4_list_my_registrations_when_none_returns_empty_list(client, monkeypatch):
     """
     Summary: An attendee with no registrations gets an empty list, which the page shows as "no registrations".
     AC4: Given the Attendee has not registered for any events, the system
@@ -96,7 +96,7 @@ def test_list_my_registrations_when_none_returns_empty_list(client, monkeypatch)
     assert response.json == {"registrations": []}
 
 
-def test_list_my_registrations_when_lookup_fails_returns_502(client, monkeypatch):
+def test_ac1_list_my_registrations_when_lookup_fails_returns_502(client, monkeypatch):
     """
     Summary: If the list cannot be loaded, the attendee gets an error rather than a misleading "no registrations".
     AC1: The Attendee can view a list of events they have registered for.
@@ -110,7 +110,7 @@ def test_list_my_registrations_when_lookup_fails_returns_502(client, monkeypatch
     assert "secret" not in response.json["message"]
 
 
-def test_get_attendee_registrations_client_reads_callers_own_list(monkeypatch):
+def test_ac1_get_attendee_registrations_client_reads_callers_own_list(monkeypatch):
     """
     Summary: Only the signed-in attendee's own registrations are asked for; no other attendee can be named.
     AC1: The Attendee can view a list of events they have registered for.
@@ -124,7 +124,7 @@ def test_get_attendee_registrations_client_reads_callers_own_list(monkeypatch):
     assert "params" not in get.call_args.kwargs
 
 
-def test_list_my_registrations_when_event_cancelled_keeps_it_with_status(client, monkeypatch):
+def test_ac1_ac2_list_my_registrations_when_event_cancelled_keeps_it_with_status(client, monkeypatch):
     """
     Summary: A registration for an event that is no longer open, such as a cancelled one, still appears in the list with the event's status.
     AC1: The Attendee can view a list of events they have registered for.

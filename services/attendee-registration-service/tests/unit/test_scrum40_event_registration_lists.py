@@ -41,6 +41,7 @@ Not proven
   test_scrum9_event_registrations_access.py).
 - The registration counts, capacity and remaining places (AC2, AC3) (->
   registration-service test_scrum40_registration_lists_and_counts.py).
+- AC1's list of assigned events is owned by Event Service.
 """
 
 from unittest.mock import Mock
@@ -52,7 +53,7 @@ from app import clients
 from tests.unit.factories import EVENT_ID, USER, registration, response
 
 
-def test_event_registrations_include_attendee_name_email_and_organisation(client, monkeypatch):
+def test_ac3_event_registrations_include_attendee_name_email_and_organisation(client, monkeypatch):
     """
     Summary: The coordinator sees each registered attendee's name, email and organisation with the registration's date and status.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -86,7 +87,7 @@ def test_event_registrations_include_attendee_name_email_and_organisation(client
     assert get_user.call_count == 1
 
 
-def test_event_registrations_when_attendee_unknown_still_lists_registration(client, monkeypatch):
+def test_ac3_event_registrations_when_attendee_unknown_still_lists_registration(client, monkeypatch):
     """
     Summary: A registration whose attendee has no profile is still listed, with blank details, so the count stays right.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -111,7 +112,7 @@ def test_event_registrations_when_attendee_unknown_still_lists_registration(clie
     assert [r["attendee_name"] for r in response.json["registrations"]] == ["", ""]
 
 
-def test_event_registrations_when_downstream_fails_returns_502(client, monkeypatch):
+def test_ac3_event_registrations_when_downstream_fails_returns_502(client, monkeypatch):
     """
     Summary: If attendee details cannot be loaded, the coordinator gets an error rather than a partial list.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -133,7 +134,7 @@ def test_event_registrations_when_downstream_fails_returns_502(client, monkeypat
     assert "secret" not in response.json["message"]
 
 
-def test_get_event_registrations_client_reads_event_list(monkeypatch):
+def test_ac3_get_event_registrations_client_reads_event_list(monkeypatch):
     """
     Summary: The registrations listed are those Registration Service holds for this event only.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -152,7 +153,7 @@ def test_get_event_registrations_client_reads_event_list(monkeypatch):
     assert get.call_args.kwargs["params"] == {"eventId": "event-1"}
 
 
-def test_get_user_returns_profile_or_none(monkeypatch):
+def test_ac3_get_user_returns_profile_or_none(monkeypatch):
     """
     Summary: An attendee's details come from their User Service profile, or are reported missing if they have none.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -170,7 +171,7 @@ def test_get_user_returns_profile_or_none(monkeypatch):
     assert clients.get_user("missing") is None
 
 
-def test_get_user_when_user_service_fails_raises(monkeypatch):
+def test_ac3_get_user_when_user_service_fails_raises(monkeypatch):
     """
     Summary: A User Service failure is passed up rather than shown as blank attendee details.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -192,7 +193,7 @@ def test_get_user_when_user_service_fails_raises(monkeypatch):
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_event_registrations_with_malformed_event_id_returns_404(client):
+def test_support_event_registrations_with_malformed_event_id_returns_404(client):
     """
     Summary: A malformed event id is answered as not found.
     Supporting design check: malformed ids are rejected before any lookup
