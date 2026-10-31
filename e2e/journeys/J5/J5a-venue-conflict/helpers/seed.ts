@@ -1,13 +1,13 @@
 import type { APIRequestContext } from '@playwright/test'
 import { expect } from '@playwright/test'
-import { authHeaders, createUnderReviewEvent, randomWindow, users } from '../../../../helpers/stack'
+import { authHeaders, createUnderReviewEvent, randomWindow, serviceUrl, users } from '../../../../helpers/stack'
 
 export const SETUP_MINUTES = 60
 export const TURNAROUND_MINUTES = 60
 export const VENUE_CAPACITY = 100
 
-const venueServiceUrl = 'http://localhost:5006'
-const venueBookingServiceUrl = 'http://localhost:5007'
+const venueServiceUrl = serviceUrl('venue', '')
+const venueBookingServiceUrl = serviceUrl('venueBooking', '')
 
 /** A fixture venue with 60-minute setup and turnaround buffers, configured through the same composite call the venue form uses. */
 export async function createBufferedVenue(api: APIRequestContext, name: string) {

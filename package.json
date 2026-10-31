@@ -7,6 +7,7 @@
     "dev:frontend": "npm --prefix frontend/event-management-ui run dev",
     "dev:backend": "docker compose up",
     "test:journeys": "playwright test -c e2e/journeys",
+    "test:journeys:isolated": "node e2e/isolated/run.mjs",
     "codegen": "playwright codegen http://localhost:5174",
     "journey:fixtures": "tsx e2e/journeys/J5/J5b-equipment-over-allocation/fixtures.ts",
     "journey:fixtures:clean": "tsx e2e/journeys/J5/J5b-equipment-over-allocation/fixtures.ts clean",
@@ -18,6 +19,7 @@
     "@types/pg": "^8.23.1",
     "concurrently": "^9.1.0",
     "pg": "^8.23.1",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "yaml": "^2.9.1"
   }
 }
