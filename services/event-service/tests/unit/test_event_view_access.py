@@ -102,7 +102,7 @@ def test_assigned_coordinator_sees_their_event(setup):
     AC1: Given an authenticated user is permitted to view information based on
         their role and relationship to the event, when they access that
         information, then the information is made available to them.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor returns an event assigned to this coordinator)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -122,7 +122,7 @@ def test_lead_sees_the_unassigned_queue(setup):
     AC1: Given an authenticated user is permitted to view information based on
         their role and relationship to the event, when they access that
         information, then the information is made available to them.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor returns one unassigned event)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -155,7 +155,7 @@ def test_a_role_outside_the_routes_allowlist_is_denied(setup, path, role):
     AC2: Given an authenticated user's role does not permit them to view
         particular information, when they attempt to access that information,
         then access is denied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted not called, so no query is sent)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -176,7 +176,7 @@ def test_coordinator_not_assigned_to_the_event_is_denied(setup):
     AC3: Given an authenticated user's relationship to an event does not permit
         them to view that event's information, when they attempt to access the
         information, then access is denied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor returns an event assigned to a different coordinator)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -195,7 +195,7 @@ def test_organiser_cannot_open_an_event_someone_else_created(setup):
     AC3: Given an authenticated user's relationship to an event does not permit
         them to view that event's information, when they attempt to access the
         information, then access is denied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor returns an event created by a different organiser)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -219,7 +219,7 @@ def test_coordinator_gets_only_the_event_they_are_assigned_to(setup):
         not have the required relationship to another event, when they attempt
         to view information for both events, then they can only view the
         information for which they have the required access.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor returns two events in turn: one assigned to this coordinator, one to another)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -244,7 +244,7 @@ def test_lead_and_venue_staff_get_different_views_of_the_same_event(setup):
         the same event, when they access information relating to that event,
         then each user can only view the information permitted by their own
         role and relationship to the event.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor returns one event; the Lead's and Venue Staff's response bodies are compared)
     """
     # Arrange (Given)
     client, cursor = setup

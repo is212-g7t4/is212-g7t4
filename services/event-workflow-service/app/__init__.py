@@ -21,7 +21,7 @@ def create_app() -> Flask:
     if not clients.INTERNAL_SERVICE_TOKEN:
         app.logger.warning(
             "INTERNAL_SERVICE_TOKEN is not set: the Event Coordinator Lead's "
-            "edits won't carry X-Internal-Service-Token, so Event Service "
+            "edits won't carry X-Internal-Token, so Event Service "
             "will refuse them as unassigned (SCRUM-20)."
         )
 

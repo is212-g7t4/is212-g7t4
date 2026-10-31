@@ -39,7 +39,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 @pytest.fixture
 def client(locked_client):
     """These routes are only for other services, which always send the shared token (SCRUM-10)."""
-    locked_client.environ_base["HTTP_X_INTERNAL_SERVICE_TOKEN"] = "synthetic"
+    locked_client.environ_base["HTTP_X_INTERNAL_TOKEN"] = "synthetic"
     return locked_client
 
 REASON = "More guests accepted the invitation."
@@ -71,7 +71,7 @@ def reviewable_event(db, **overrides):
 
 def internal_headers(client):
     token = client.application.config.get("INTERNAL_SERVICE_TOKEN")
-    return {"X-Internal-Service-Token": token} if token else {}
+    return {"X-Internal-Token": token} if token else {}
 
 
 def submit_request(client, event_id, changes=None, reason=REASON):

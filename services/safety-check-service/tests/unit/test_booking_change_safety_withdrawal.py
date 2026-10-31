@@ -773,7 +773,7 @@ def test_event_client_marks_withdrawal_and_restore_moves(sent, monkeypatch, with
 
     assert calls[0]["method"] == "PATCH"
     assert calls[0]["url"].endswith(f"/events/{EVENT_ID}/safety-status")
-    assert calls[0]["headers"] == {"X-Internal-Service-Token": "secret"}
+    assert calls[0]["headers"] == {"X-Internal-Token": "secret"}
     expected = {"safetyCheckId": RECORD_ID, "roundNumber": 2}
     # SCRUM-46 adds the mocked actual venue only to withdrawal; restoration
     # continues to follow the existing wrapper contract in these inherited cases.
