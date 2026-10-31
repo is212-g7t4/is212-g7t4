@@ -84,6 +84,14 @@ test('two run scopes, including multiple events and SQL wildcard characters, sta
   }
 })
 
+test('cleanup accepts J3c event and venue fixture names', async (t) => {
+  const { queries } = mockDatabase(t)
+  const j3c = { eventNames: ['J3c Event rejected run'], venueNames: ['J3c Venue run'] }
+  await deleteFixtureEvents(j3c)
+  assert.ok(queries.some(({ parameters }) => parameters?.some((names) => names.includes(j3c.eventNames[0]))))
+  assert.ok(queries.some(({ parameters }) => parameters?.some((names) => names.includes(j3c.venueNames[0]))))
+})
+
 test('cleanup fails closed for missing, empty, malformed or non-fixture scopes before connecting', async (t) => {
   const { connect, queries } = mockDatabase(t)
   for (const invalid of [
