@@ -297,7 +297,7 @@ structure (`J5/J5a-venue-conflict/` and `J5/J5b-equipment-over-allocation/`):
   clicks. Log in per role with `openAs()`; the UI reads `activeUserId` from
   localStorage.
 - **Clean up after yourself.** The tests write to the shared Supabase database.
-  Fixture event names must be `J<n>[a|b] Event ...` (the pattern in
+  Fixture event names must be `J<n>[a|b|c] Event ...` (the pattern in
   `e2e/helpers/cleanup.ts`), which runs before and after the journey. Use
   far-future random dates (`randomWindow()`) so runs never collide with real
   events or stock.
