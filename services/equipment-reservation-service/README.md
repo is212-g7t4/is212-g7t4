@@ -106,7 +106,9 @@ PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked --python 3.12 pytest
 Exactly three acceptance criteria: submission alerts each eligible Technical Support
 user once with the full submitted list; approval alerts the event's current
 coordinator once per changed request row; rejection does the same without including
-its workflow reason in message or details. The existing decision API still requires
+its workflow reason in message or details. AC2 covers Approved/Rejected decisions;
+AC3's rejection message states that the Equipment Request was rejected, not
+that the event was rejected and not the private reason why. The existing decision API still requires
 and stores the rejection reason. Bulk decisions emit per changed row, not per unit.
 No edit, withdrawal, reassignment or reminder notification triggers are added.
 
@@ -175,7 +177,7 @@ The driver/dotenv development dependencies used only by that harness were remove
 pika remains a real production dispatcher dependency.
 
 Only Equipment Request owns the optional real PostgreSQL tests (no broker or
-other service). See its [test guide](../equipment-request-service/tests/README.md).
+other service). See its [test guide](../equipment-request-service/README.md).
 Do not run broad integration discovery or start shared workers to test this change.
 The [test guide](tests/README.md) describes these separate test boundaries and
 the known recipient snapshot timing limitation. Local regressions do not verify

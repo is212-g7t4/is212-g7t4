@@ -87,7 +87,7 @@ Each file's header copies the story and lists every AC, including those it does 
 | registration | `tests/unit/test_scrum10_registration_modification_access.py` | |
 | attendee-registration | `tests/unit/test_scrum10_registration_modification_access.py` | |
 | event-workflow | `tests/unit/test_event_details_modification_access.py` | |
-| equipment-request | `tests/unit/test_safety_reset_modification_access.py` | `tests/integration/test_scrum48_transactions.py` (`safety-reset` called as a Safety Officer) |
+| equipment-request | `tests/unit/test_scrum10_equipment_safety_reset_access.py` | `tests/integration/test_scrum48_equipment_notification_transactions.py` (`safety-reset` called as a Safety Officer) |
 
 The lock changes are covered in Event Service by `test_safety_status_access.py`, `test_event_details_recheck.py` and `test_change_requests.py`. Nine services (attendee-registration, coordinator-assignment, equipment, notification, safety-check-record, safety-check, venue-booking, equipment-reservation, event-workflow) carry two tests in their SCRUM-8 authentication modules: an internal token alone is refused, and a token without a subject is refused.
 

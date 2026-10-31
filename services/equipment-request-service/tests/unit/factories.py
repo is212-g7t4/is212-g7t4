@@ -1,6 +1,9 @@
 """Shared unit-test helpers (import as `from tests.unit.factories import ...`)."""
 
-import time
+from datetime import datetime, timezone
+
+AUTH_NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
+AUTH_TIMESTAMP = int(AUTH_NOW.timestamp())
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -13,7 +16,7 @@ TEST_SIGNING_KEY = ec.generate_private_key(ec.SECP256R1())
 
 def bearer(user_id, role, key=TEST_SIGNING_KEY, **claims):
     """Authorization header for a signed-in user, as Supabase would issue it."""
-    payload = {"sub": user_id, "aud": "authenticated", "exp": int(time.time()) + 3600, "user_role": role}
+    payload = {"sub": user_id, "aud": "authenticated", "exp": AUTH_TIMESTAMP + 3600, "user_role": role}
     payload.update(claims)
     return {"Authorization": f"Bearer {jwt.encode(payload, key, algorithm='ES256')}"}
 

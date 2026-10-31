@@ -40,7 +40,7 @@ def _call(method, url, **kwargs):
     except (ValueError, AttributeError):
         message = None
     status = response.status_code if response.status_code in PASSED_THROUGH else 502
-    raise DownstreamError(status, message or "A service this request depends on failed.")
+    raise DownstreamError(status, (message if status != 502 else None) or "A service this request depends on failed.")
 
 
 def _request_service(path):

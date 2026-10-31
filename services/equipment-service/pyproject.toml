@@ -16,6 +16,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-mock>=3.14",
     "pytest-socket>=0.8.1",
+    "testcontainers[postgres]==4.15.0",
 ]
 
 [tool.pytest.ini_options]
