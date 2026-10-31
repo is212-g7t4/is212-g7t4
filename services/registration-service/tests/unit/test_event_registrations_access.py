@@ -43,7 +43,7 @@ Not proven
 ----------
 - AC3/AC4 (the caller's relationship to this event): an atomic cannot ask Event
   Service, so Attendee Registration Service checks it (->
-  attendee-registration-service test_event_registrations_access.py).
+  attendee-registration-service test_scrum9_event_registrations_access.py).
 """
 from unittest.mock import MagicMock
 

@@ -58,7 +58,7 @@ Not proven
 - That only the assigned coordinator or creating organiser can see an event's
   list (SCRUM-40 AC4, SCRUM-41 AC4): an atomic cannot ask Event Service, so
   Attendee Registration Service checks the relationship (->
-  attendee-registration-service test_event_registrations_access.py).
+  attendee-registration-service test_scrum9_event_registrations_access.py).
 - Attendee name, email and organisation (AC3): joined in by Attendee
   Registration Service (-> its unit tests).
 """

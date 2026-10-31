@@ -16,13 +16,12 @@ Real
 
 Doubled
 -------
-- Supabase JWKS: Stub (tests/conftest.py) - never reached: these paths
-  skip sign-in.
+- None: health checks and browser preflights skip sign-in.
 
 Not proven
 ----------
-- That a real browser accepts the CORS headers (-> frontend Playwright e2e
-  suite, which runs against the configured origin).
+- That a real browser accepts the CORS headers (-> E2E journeys, which run
+  the real frontend against the real services).
 """
 
 import pytest
