@@ -55,7 +55,7 @@ LEAD = "Event Coordinator Lead"
 COORDINATOR = "Event Coordinator"
 ORGANISER = "Event Organiser"
 PROGRESS = {"status": "Approved", "actionDetails": "Venue held."}
-SERVICE = {"X-Internal-Service-Token": "synthetic"}
+SERVICE = {"X-Internal-Token": "synthetic"}
 
 
 @pytest.fixture(autouse=True)

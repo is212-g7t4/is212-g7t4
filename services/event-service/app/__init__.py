@@ -277,7 +277,7 @@ def create_app(config=None):
         if origin in allowed_origins:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
-            # Deliberately not listing X-Internal-Service-Token here: a
+            # Deliberately not listing X-Internal-Token here: a
             # browser can't send it, so only a server-to-server caller can.
             response.headers["Access-Control-Allow-Headers"] = (
                 "Content-Type, Authorization, Accept"
@@ -690,7 +690,7 @@ def create_app(config=None):
                 code="INTERNAL_AUTH_NOT_CONFIGURED",
                 message="Internal service authentication is not configured.",
             ), 503
-        presented_token = request.headers.get("X-Internal-Service-Token", "")
+        presented_token = request.headers.get("X-Internal-Token", "")
         if not hmac.compare_digest(presented_token, configured_token):
             return jsonify(code=code, message=message), 403
         return None
@@ -934,7 +934,7 @@ def create_app(config=None):
                 message="Internal service authentication is not configured.",
             ), 503
         internal = bool(configured_token) and hmac.compare_digest(
-            request.headers.get("X-Internal-Service-Token", ""), configured_token
+            request.headers.get("X-Internal-Token", ""), configured_token
         )
 
         if not app.config["DATABASE_URL"]:

@@ -94,6 +94,12 @@ def create_requests(database_url, event_id, items, requester_id, notification_co
 
 
 def reset_safety_requests(database_url, event_id, request_ids):
+    """Validate and lock all selected event requests; return only Approved rows reset to Pending.
+
+    The UPDATE repeats the status guard so stale composite selections cannot
+    reopen Pending or Rejected requests. Invalid membership aborts the transaction.
+    This reset is not a review decision and does not create notification intents.
+    """
     with closing(psycopg2.connect(database_url, connect_timeout=10)) as connection:
         with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -109,6 +115,7 @@ def reset_safety_requests(database_url, event_id, request_ids):
                 f'''UPDATE public."EquipmentRequest"
                     SET status = 'Pending', reviewed_by = NULL, rejection_reason = NULL
                     WHERE event_id = %s AND equipment_request_id = ANY(%s::uuid[])
+                      AND status = 'Approved'
                     RETURNING {COLUMNS}''',
                 [event_id, request_ids],
             )

@@ -16,7 +16,7 @@ the database schema. Closure-rejection writes still require their existing
 migration; normal mode remains the default for migrated databases.
 
 `POST /events/<event_id>/venue-bookings/safety-reset` accepts
-`{"bookingIds": ["<uuid>"]}` and requires `X-Internal-Service-Token` matching
+`{"bookingIds": ["<uuid>"]}` and requires `X-Internal-Token` matching
 `INTERNAL_SERVICE_TOKEN` **and** the `Safety Officer` role (SCRUM-10; Safety Check
 Service forwards the signed-in Safety Officer's token). All selected bookings must
 belong to the event.

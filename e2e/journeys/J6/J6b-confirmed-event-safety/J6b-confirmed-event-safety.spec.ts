@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { deleteFixtureEvents } from '../../../helpers/cleanup'
 import { openAs, users } from '../../../helpers/stack'
 import { createConfirmedEvent } from './helpers/seed'
@@ -28,18 +29,21 @@ import { createConfirmedEvent } from './helpers/seed'
 test.describe.configure({ mode: 'serial' })
 
 test.describe('J6b Coordinator edits a Confirmed event', () => {
-  const runId = Date.now().toString(36)
+  const runId = randomUUID()
   const eventName = `J6b Event confirmed ${runId}`
+  const scope = { eventNames: [eventName], venueNames: [] }
   let fixture: Awaited<ReturnType<typeof createConfirmedEvent>>
 
   test.beforeAll(async ({ playwright }) => {
-    await deleteFixtureEvents()
     const api = await playwright.request.newContext()
-    fixture = await createConfirmedEvent(api, eventName, runId)
-    await api.dispose()
+    try {
+      fixture = await createConfirmedEvent(api, eventName, runId)
+    } finally {
+      await api.dispose()
+    }
   })
 
-  test.afterAll(deleteFixtureEvents)
+  test.afterAll(async () => { await deleteFixtureEvents(scope) })
 
   test('low-impact edit stays Confirmed; contradiction is blocked; safe high-impact edit enters safety review', async ({ browser }) => {
     const coordinator = await openAs(browser, users.coordinator)

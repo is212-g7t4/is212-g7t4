@@ -1,6 +1,6 @@
 """SCRUM-112 Assign Event Coordinator to Submitted Event: integration tests.
 
-Story:      As an Event Coordinator Manager, I want to assign an Event Coordinator to a
+Story:      As an Event Coordinator Lead, I want to assign an Event Coordinator to a
             submitted event, so that the event has a main internal point of contact.
 Real:       Flask app, role checks, assignment orchestration, error translation, and the
             real httpx calls in app/clients.py.
@@ -10,12 +10,11 @@ Not proven: User/Event database persistence, Supabase sign-in itself (the Lead i
             signed with a test key, SCRUM-8), or the frontend; those belong to the atomic
             integration and browser/e2e tiers.
 
-AC1  The Manager sees submitted requests with event name, organiser, proposed date, and
+AC1  The Lead sees submitted requests with event name, organiser, proposed date, and
      Assigned/Unassigned state.
-AC2  Assigning an available coordinator records the Manager, coordinator and timestamp.
+AC2  Assigning an available coordinator records the Lead, coordinator and timestamp.
 AC3  Reassignment replaces the coordinator and reflects the newly assigned coordinator.
 
-The repository's Event Coordinator Manager role is named Event Coordinator Lead.
 """
 
 import json

@@ -133,7 +133,7 @@ def test_wrong_header_is_refused_when_the_lock_is_configured(setup):
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json=body(),
-        headers={"X-Internal-Service-Token": "not-the-token"},
+        headers={"X-Internal-Token": "not-the-token"},
     )
 
     # Assert (Then)
@@ -175,7 +175,7 @@ def test_token_unconfigured_ignores_any_header_sent(unconfigured):
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json=body(),
-        headers={"X-Internal-Service-Token": "anything"},
+        headers={"X-Internal-Token": "anything"},
     )
 
     # Assert (Then)
@@ -198,7 +198,7 @@ def test_right_header_passes_the_lock(setup):
     response = client.patch(
         f"/events/{EVENT_ID}/safety-status",
         json=body(),
-        headers={"X-Internal-Service-Token": INTERNAL_TOKEN},
+        headers={"X-Internal-Token": INTERNAL_TOKEN},
     )
 
     # Assert (Then)
@@ -222,7 +222,7 @@ def test_cors_does_not_allow_the_internal_header(setup):
     )
 
     # Assert (Then)
-    assert "X-Internal-Service-Token" not in response.headers.get(
+    assert "X-Internal-Token" not in response.headers.get(
         "Access-Control-Allow-Headers", ""
     )
 

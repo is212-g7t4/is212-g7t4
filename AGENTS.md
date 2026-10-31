@@ -82,7 +82,7 @@ See [INDEX.md](INDEX.md) for the concrete list of every service directory.
     **Writes are role-gated (SCRUM-10):** each user-facing write route checks the
     token's role first, then the caller's relationship to the record (owner,
     assigned coordinator), then state. The routes only another service may call
-    also require `X-Internal-Service-Token`, which fails closed when
+    also require `X-Internal-Token`, which fails closed when
     `INTERNAL_SERVICE_TOKEN` is not configured. The route-by-route matrix is in
     [docs/scrum-10-role-based-modification-control.md](docs/scrum-10-role-based-modification-control.md).
 - **Messaging:** RabbitMQ — the *only* asynchronous path in the system, used
@@ -299,7 +299,7 @@ structure (`J5/J5a-venue-conflict/` and `J5/J5b-equipment-over-allocation/`):
   clicks. Log in per role with `openAs()`; the UI reads `activeUserId` from
   localStorage.
 - **Clean up after yourself.** The tests write to the shared Supabase database.
-  Fixture event names must be `J<n>[a|b] Event ...` (the pattern in
+  Fixture event names must be `J<n>[a|b|c] Event ...` (the pattern in
   `e2e/helpers/cleanup.ts`), which runs before and after the journey. Use
   far-future random dates (`randomWindow()`) so runs never collide with real
   events or stock.

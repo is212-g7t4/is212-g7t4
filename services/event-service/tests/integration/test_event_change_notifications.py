@@ -18,7 +18,7 @@ from tests.integration.factories import make_event_change_event, CHANGE_ORGANISE
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 HEADERS = {"X-Internal-Token": "synthetic"}
-BUSINESS = {"X-Internal-Service-Token": "synthetic"}
+BUSINESS = {"X-Internal-Token": "synthetic"}
 
 
 def submit(client, identifier):

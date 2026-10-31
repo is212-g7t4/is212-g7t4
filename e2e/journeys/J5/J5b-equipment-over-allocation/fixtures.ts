@@ -1,41 +1,33 @@
-// Manual-recording helper: `npm run journey:fixtures` seeds J5b data, `npm run journey:fixtures:clean` removes it.
+// Manual recording fixtures use an explicit run ID for later cleanup.
+import { randomUUID } from 'node:crypto'
 import { request } from '@playwright/test'
 import { deleteFixtureEvents } from '../../../helpers/cleanup'
 import { seedJ5b } from './helpers/seed'
 
 async function main() {
-  if (process.argv[2] === 'clean') {
-    await deleteFixtureEvents()
-    console.log('Removed all J5 fixture events.')
+  const clean = process.argv[2] === 'clean'
+  const runId = clean ? process.argv[3] : process.argv[2] ?? randomUUID()
+  if (!runId || !/^[a-zA-Z0-9-]+$/.test(runId)) {
+    throw new Error('Provide a run ID containing only letters, numbers and hyphens. Usage: npm run journey:fixtures:clean -- <run-id>')
+  }
+  const scope = { eventNames: [`J5b Event A ${runId}`, `J5b Event B ${runId}`], venueNames: [] }
+  if (clean) {
+    await deleteFixtureEvents(scope)
+    console.log(`Removed only J5b fixture events for run ${runId}.`)
     return
   }
-  await deleteFixtureEvents()
+  console.log(`Run ID: ${runId}. Remove with: npm run journey:fixtures:clean -- ${runId}`)
   const api = await request.newContext()
-  const seeded = await seedJ5b(api, Date.now().toString(36))
-  await api.dispose()
-  console.log(`Seeded J5b. Record against event "${seeded.eventB}" (${seeded.window.start} to ${seeded.window.end}).`)
-  console.log('Event A holds 40 tables; B has a pending request for 20. Run `npm run codegen` next.')
-  console.log('Remove with: npm run journey:fixtures:clean')
-}
-
-main().catch((error) => { console.error(error); process.exit(1) })// Manual-recording helper: `npm run journey:fixtures` seeds J5b data, `npm run journey:fixtures:clean` removes it.
-import { request } from '@playwright/test'
-import { deleteFixtureEvents } from '../../../helpers/cleanup'
-import { seedJ5b } from './helpers/seed'
-
-async function main() {
-  if (process.argv[2] === 'clean') {
-    await deleteFixtureEvents()
-    console.log('Removed all J5 fixture events.')
-    return
+  try {
+    const seeded = await seedJ5b(api, runId)
+    console.log(`Seeded J5b. Record against event "${seeded.eventB}" (${seeded.window.start} to ${seeded.window.end}).`)
+    console.log('Event A holds 40 tables; B has a pending request for 20. Run `npm run codegen` next.')
+  } catch (error) {
+    await deleteFixtureEvents(scope)
+    throw error
+  } finally {
+    await api.dispose()
   }
-  await deleteFixtureEvents()
-  const api = await request.newContext()
-  const seeded = await seedJ5b(api, Date.now().toString(36))
-  await api.dispose()
-  console.log(`Seeded J5b. Record against event "${seeded.eventB}" (${seeded.window.start} to ${seeded.window.end}).`)
-  console.log('Event A holds 40 tables; B has a pending request for 20. Run `npm run codegen` next.')
-  console.log('Remove with: npm run journey:fixtures:clean')
 }
 
-main().catch((error) => { console.error(error); process.exit(1) })
+main().catch((error) => { console.error(error); process.exitCode = 1 })
