@@ -61,6 +61,7 @@ Not proven
   attendee-registration-service test_scrum9_event_registrations_access.py).
 - Attendee name, email and organisation (AC3): joined in by Attendee
   Registration Service (-> its unit tests).
+- SCRUM-40/41 AC1 event lists are owned by Event Service.
 """
 
 from datetime import UTC, datetime
@@ -84,7 +85,7 @@ from tests.unit.factories import ATTENDEE_ID, EVENT_ID, registration_payload, re
 OTHER_EVENT_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def test_list_event_registrations_returns_every_row_with_status(setup):
+def test_scrum41_ac3_list_event_registrations_returns_every_row_with_status(setup):
     """
     Summary: The event team sees every registration of an event, confirmed and withdrawn.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -117,7 +118,7 @@ def test_list_event_registrations_returns_every_row_with_status(setup):
     assert params == [EVENT_ID]
 
 
-def test_list_event_registrations_when_none_returns_empty_list(setup):
+def test_ac3_list_event_registrations_when_none_returns_empty_list(setup):
     """
     Summary: An event with no registrations shows an empty list.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -138,7 +139,7 @@ def test_list_event_registrations_when_none_returns_empty_list(setup):
     assert response.json == {"registrations": []}
 
 
-def test_list_event_registrations_returns_registration_date_as_iso_text(setup):
+def test_ac3_list_event_registrations_returns_registration_date_as_iso_text(setup):
     """
     Summary: Each registration's date is shown in a standard date-time format.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -158,7 +159,7 @@ def test_list_event_registrations_returns_registration_date_as_iso_text(setup):
     assert response.json["registrations"][0]["registration_date"] == "2026-09-13T01:15:00+00:00"
 
 
-def test_list_event_registrations_returns_no_profile_details(setup):
+def test_ac3_list_event_registrations_returns_no_profile_details(setup):
     """
     Summary: Registration rows carry only the attendee id; names and emails are added by the composite.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -182,7 +183,7 @@ def test_list_event_registrations_returns_no_profile_details(setup):
     assert "attendee_email" not in query
 
 
-def test_list_event_registrations_with_missing_date_returns_null(setup):
+def test_ac3_list_event_registrations_with_missing_date_returns_null(setup):
     """
     Summary: A registration with no recorded date is shown as having none rather than failing.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -203,7 +204,7 @@ def test_list_event_registrations_with_missing_date_returns_null(setup):
 
 
 @pytest.mark.parametrize("query_string", ["?eventId=", "?eventId=not-a-uuid"], ids=["blank", "not_a_uuid"])
-def test_list_event_registrations_with_blank_or_bad_event_id_returns_400(query_string, setup):
+def test_ac3_list_event_registrations_with_blank_or_bad_event_id_returns_400(query_string, setup):
     """
     Summary: Listing an event's registrations needs a valid event id.
     AC3: The Event Coordinator can click on an event to view detailed
@@ -221,7 +222,7 @@ def test_list_event_registrations_with_blank_or_bad_event_id_returns_400(query_s
     cursor.execute.assert_not_called()
 
 
-def test_registration_counts_return_total_and_confirmed_with_zero_for_empty(setup):
+def test_scrum41_ac2_registration_counts_return_total_and_confirmed_with_zero_for_empty(setup):
     """
     Summary: Each event's total and confirmed registrations are counted, with zero for events nobody registered for.
     AC2: For each managed event, the Event Coordinator can see the total number
@@ -244,7 +245,7 @@ def test_registration_counts_return_total_and_confirmed_with_zero_for_empty(setu
 
 
 @pytest.mark.parametrize("value", ["", "nope", f"{EVENT_ID},nope"], ids=["empty", "not_a_uuid", "one_bad_in_list"])
-def test_registration_counts_with_missing_or_bad_event_ids_return_400(setup, value):
+def test_ac2_registration_counts_with_missing_or_bad_event_ids_return_400(setup, value):
     """
     Summary: Counts need a list of valid event ids.
     AC2: For each managed event, the Event Coordinator can see the total number
@@ -261,12 +262,13 @@ def test_registration_counts_with_missing_or_bad_event_ids_return_400(setup, val
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_list_registrations_with_internal_token_and_no_event_returns_400(setup, monkeypatch):
+def test_support_list_registrations_with_internal_token_and_no_event_returns_400(setup, monkeypatch):
     """
     Summary: A background worker must say which event's registrations it wants.
     Supporting design check: the dispatcher reads registrations one event at a
         time
-    Double: None
+    Double: Environment stub (configured internal token); the database cursor
+        is a Mock and is asserted unused.
     """
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal-test-token")
     client, _, cursor = setup

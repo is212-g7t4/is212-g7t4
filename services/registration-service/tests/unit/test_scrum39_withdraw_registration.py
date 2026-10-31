@@ -61,7 +61,7 @@ from tests.unit.factories import ATTENDEE_ID, EVENT_ID, registration_payload, re
 OTHER_EVENT_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def test_withdraw_registration_when_confirmed_saves_withdrawn_with_timestamp(setup):
+def test_ac2_ac3_withdraw_registration_when_confirmed_saves_withdrawn_with_timestamp(setup):
     """
     Summary: Withdrawing sets the registration to Withdrawn and records when it happened.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -102,7 +102,7 @@ def test_withdraw_registration_when_confirmed_saves_withdrawn_with_timestamp(set
     ],
     ids=["not_found", "someone_elses", "already_withdrawn"],
 )
-def test_withdraw_registration_when_missing_foreign_or_withdrawn_raises(setup, row, error):
+def test_ac2_withdraw_registration_when_missing_foreign_or_withdrawn_raises(setup, row, error):
     """
     Summary: Withdrawing an unknown registration, someone else's, or one already withdrawn is refused.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -119,7 +119,7 @@ def test_withdraw_registration_when_missing_foreign_or_withdrawn_raises(setup, r
         withdraw_registration("unused-test-url", registration_row()["registration_id"], ATTENDEE_ID)
 
 
-def test_withdraw_when_allowed_returns_withdrawn_registration(setup, monkeypatch):
+def test_ac2_withdraw_when_allowed_returns_withdrawn_registration(setup, monkeypatch):
     """
     Summary: A successful withdrawal returns the updated registration.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -153,7 +153,7 @@ def test_withdraw_when_allowed_returns_withdrawn_registration(setup, monkeypatch
     ],
     ids=["not_found", "not_owned", "already_withdrawn"],
 )
-def test_withdraw_when_refused_returns_status_and_error_code(setup, monkeypatch, error, status, code):
+def test_ac2_withdraw_when_refused_returns_status_and_error_code(setup, monkeypatch, error, status, code):
     """
     Summary: Each kind of refused withdrawal gets its own status and code for the UI.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -175,7 +175,7 @@ def test_withdraw_when_refused_returns_status_and_error_code(setup, monkeypatch,
     assert response.json["code"] == code
 
 
-def test_withdraw_with_bad_id_or_missing_database_is_refused(setup):
+def test_ac2_withdraw_with_bad_id_or_missing_database_is_refused(setup):
     """
     Summary: A withdrawal needs a valid registration id and a configured database.
     AC2: Given the Attendee confirms withdrawal, the system changes the

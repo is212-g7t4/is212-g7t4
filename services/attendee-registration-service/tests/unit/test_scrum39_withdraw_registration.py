@@ -54,7 +54,7 @@ from app.validation import withdrawal_deadline_has_passed
 from tests.unit.factories import confirmed_event, registration, response
 
 
-def test_withdraw_before_deadline_saves_withdrawal_with_timestamp(client, monkeypatch):
+def test_ac2_ac3_withdraw_before_deadline_saves_withdrawal_with_timestamp(client, monkeypatch):
     """
     Summary: An attendee withdraws their own registration before the deadline; it becomes Withdrawn, is timestamped, and a confirmation is shown.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -83,7 +83,7 @@ def test_withdraw_before_deadline_saves_withdrawal_with_timestamp(client, monkey
     assert withdraw.call_args.args[0] == "11111111-1111-4111-8111-111111111111"
 
 
-def test_withdraw_after_organiser_deadline_returns_409_contact_organisers(client, monkeypatch):
+def test_ac4_withdraw_after_organiser_deadline_returns_409_contact_organisers(client, monkeypatch):
     """
     Summary: After the organiser's withdrawal deadline, withdrawal is refused with a message to contact the organisers, even before the event starts.
     AC4: Given the Attendee attempts to withdraw after the registration
@@ -108,7 +108,7 @@ def test_withdraw_after_organiser_deadline_returns_409_contact_organisers(client
     withdraw.assert_not_called()
 
 
-def test_withdraw_after_event_start_without_cutoff_returns_409(client, monkeypatch):
+def test_ac4_withdraw_after_event_start_without_cutoff_returns_409(client, monkeypatch):
     """
     Summary: When the organiser set no deadline, withdrawal closes once the event starts.
     AC4: Given the Attendee attempts to withdraw after the registration
@@ -132,7 +132,7 @@ def test_withdraw_after_event_start_without_cutoff_returns_409(client, monkeypat
     withdraw.assert_not_called()
 
 
-def test_withdraw_already_withdrawn_registration_returns_409_without_saving(client, monkeypatch):
+def test_ac2_withdraw_already_withdrawn_registration_returns_409_without_saving(client, monkeypatch):
     """
     Summary: A registration that is already withdrawn cannot be withdrawn again.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -151,7 +151,7 @@ def test_withdraw_already_withdrawn_registration_returns_409_without_saving(clie
     withdraw.assert_not_called()
 
 
-def test_withdraw_when_event_no_longer_open_is_refused_with_contact_message(client, monkeypatch):
+def test_ac4_withdraw_when_event_no_longer_open_is_refused_with_contact_message(client, monkeypatch):
     """
     Summary: If the event is no longer open (for example cancelled), withdrawal is not done online and the attendee is told to contact the organisers.
     AC4: Given the Attendee attempts to withdraw after the registration
@@ -174,7 +174,7 @@ def test_withdraw_when_event_no_longer_open_is_refused_with_contact_message(clie
 
 
 @pytest.mark.parametrize("failing", ["registration_lookup", "event_lookup", "withdraw"])
-def test_withdraw_when_downstream_fails_returns_502(client, monkeypatch, failing):
+def test_ac2_withdraw_when_downstream_fails_returns_502(client, monkeypatch, failing):
     """
     Summary: If the registration, the event or the withdrawal itself cannot be processed, the attendee gets an error, never a false confirmation.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -193,7 +193,7 @@ def test_withdraw_when_downstream_fails_returns_502(client, monkeypatch, failing
     assert "secret" not in response.json["message"]
 
 
-def test_withdrawal_deadline_uses_cutoff_else_event_start():
+def test_ac4_withdrawal_deadline_uses_cutoff_else_event_start():
     """
     Summary: The withdrawal deadline is the organiser's cutoff when one is set, otherwise the event's start, judged in Singapore time.
     AC4: Given the Attendee attempts to withdraw after the registration
@@ -217,7 +217,7 @@ def test_withdrawal_deadline_uses_cutoff_else_event_start():
     )
 
 
-def test_withdraw_saved_registration_returns_updated_row(monkeypatch):
+def test_ac2_withdraw_saved_registration_returns_updated_row(monkeypatch):
     """
     Summary: The withdrawn registration Registration Service saved is what the attendee's confirmation shows.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -233,7 +233,7 @@ def test_withdraw_saved_registration_returns_updated_row(monkeypatch):
     assert patch.call_args.kwargs["json"] == {}
 
 
-def test_withdraw_saved_registration_when_refused_raises_conflict(monkeypatch):
+def test_ac2_withdraw_saved_registration_when_refused_raises_conflict(monkeypatch):
     """
     Summary: When Registration Service refuses the withdrawal (for example, not this attendee's registration), its reason is passed on.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -252,7 +252,7 @@ def test_withdraw_saved_registration_when_refused_raises_conflict(monkeypatch):
     assert caught.value.code == "REGISTRATION_NOT_OWNED"
 
 
-def test_withdraw_saved_registration_when_failing_raises_http_error(monkeypatch):
+def test_ac2_withdraw_saved_registration_when_failing_raises_http_error(monkeypatch):
     """
     Summary: Any other Registration Service failure is passed up, so no confirmation is shown.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -270,7 +270,7 @@ def test_withdraw_saved_registration_when_failing_raises_http_error(monkeypatch)
     [(-1, False), (0, True), (1, True)],
     ids=["one_minute_before", "at_deadline", "one_minute_after"],
 )
-def test_withdrawal_deadline_at_cutoff_time_closes_withdrawal(minutes_after_deadline, passed):
+def test_ac4_withdrawal_deadline_at_cutoff_time_closes_withdrawal(minutes_after_deadline, passed):
     """
     Summary: Withdrawal closes at the deadline exactly, not a minute later.
     AC4: Given the Attendee attempts to withdraw after the registration
@@ -285,7 +285,7 @@ def test_withdrawal_deadline_at_cutoff_time_closes_withdrawal(minutes_after_dead
     assert withdrawal_deadline_has_passed(event, now) is passed
 
 
-def test_withdraw_registration_not_in_my_list_returns_404(client, monkeypatch):
+def test_ac2_withdraw_registration_not_in_my_list_returns_404(client, monkeypatch):
     """
     Summary: An attendee can only withdraw a registration of their own; anyone else's is treated as not found.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -304,7 +304,7 @@ def test_withdraw_registration_not_in_my_list_returns_404(client, monkeypatch):
     withdraw.assert_not_called()
 
 
-def test_withdraw_when_registration_service_refuses_passes_reason_on(client, monkeypatch):
+def test_ac2_withdraw_when_registration_service_refuses_passes_reason_on(client, monkeypatch):
     """
     Summary: If Registration Service refuses the withdrawal at the last step, the attendee sees its reason and nothing changes.
     AC2: Given the Attendee confirms withdrawal, the system changes the
@@ -329,7 +329,7 @@ def test_withdraw_when_registration_service_refuses_passes_reason_on(client, mon
 # stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_withdraw_when_event_dates_unreadable_returns_502(client, monkeypatch):
+def test_support_withdraw_when_event_dates_unreadable_returns_502(client, monkeypatch):
     """
     Summary: If the event's deadline cannot be read, withdrawal is refused with an error rather than allowed.
     Supporting design check: missing or unreadable event dates fail safely
@@ -350,7 +350,7 @@ def test_withdraw_when_event_dates_unreadable_returns_502(client, monkeypatch):
     withdraw.assert_not_called()
 
 
-def test_withdrawal_deadline_without_any_date_raises():
+def test_support_withdrawal_deadline_without_any_date_raises():
     """
     Summary: Without a deadline or a start time, the deadline cannot be judged, so it is not treated as open.
     Supporting design check: missing event data fails safely

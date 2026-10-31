@@ -28,20 +28,27 @@ Real
 
 Doubled
 -------
-- Event Service: returns the confirmed event [Stub].
-- Venue Availability and Venue Services: return the event's approved booking
-  and the venue's name, or no booking [Stub].
-- Registration Service: accepts the registration or withdrawal [Stub]; we check
-  the notice details it receives [Mock]. Any unexpected outside call fails the
-  test.
+- Event Service: returns the confirmed event in the route-focused tests [Stub].
+- The real `save_registration` HTTP adapter runs against respx routes for Venue
+  Availability, Venue and Registration Services [Stub / Mock]. We inspect the
+  exact registration request, and any unexpected HTTP call fails the test.
+- The route-focused tests replace the Registration Service adapter [Stub]; we
+  inspect the exact registration or withdrawal notice details [Mock].
 - Sign-in: a test key signs the caller's token (tests/unit/conftest.py) [Stub].
 
 Not proven
 ----------
-- That the notices are stored, with the registration reference, and delivered
-  (-> registration-service test_attendee_notifications.py, notification-service
-  tests and E2E journey J7).
-- Cancellation and change notices (AC3) (-> event-service SCRUM-46 tests).
+- AC1's persisted notification, registration reference and delivery are proved
+  by registration-service `test_scrum46_attendee_notifications.py`,
+  Notification Service tests and E2E journey J7; this composite only supplies
+  the event and venue context.
+- AC2's persisted withdrawal notification and delivery are proved by
+  registration-service `test_scrum46_attendee_notifications.py`, Notification
+  Service tests and E2E journey J7; this composite only supplies the event name.
+- AC3 cancellation and approved-change notifications are owned by Event
+  Service's SCRUM-46 tests. The attendee-list test elsewhere only proves that a
+  cancelled event remains visible with its status; it does not prove that a
+  notification was sent.
 """
 
 import pytest
@@ -74,7 +81,7 @@ def service_urls(monkeypatch):
     monkeypatch.setattr(clients, "REGISTRATION_SERVICE_URL", "http://registration.test")
 
 
-def test_register_adds_approved_venue_name_to_confirmation(service_urls):
+def test_ac1_register_adds_approved_venue_name_to_confirmation(service_urls):
     """
     Summary: The registration confirmation notice names the venue the event is actually booked at.
     AC1: Given an Attendee successfully registers for an event, the system
@@ -110,7 +117,7 @@ def test_register_adds_approved_venue_name_to_confirmation(service_urls):
     assert saved == {"registration_id": "ref"}
 
 
-def test_register_when_no_approved_venue_raises_error(service_urls):
+def test_ac1_register_when_no_approved_venue_raises_error(service_urls):
     """
     Summary: If the event has no approved venue to name in the notice, the registration is not sent, rather than confirmed with a missing venue.
     AC1: Given an Attendee successfully registers for an event, the system
@@ -126,7 +133,7 @@ def test_register_when_no_approved_venue_raises_error(service_urls):
             clients.save_registration(SAVE_DATA)
 
 
-def test_register_sends_event_name_and_schedule_for_the_notice(attendee, mocker):
+def test_ac1_register_sends_event_name_and_schedule_for_the_notice(attendee, mocker):
     """
     Summary: Registering passes on the event's name, start and end time for the confirmation notice, as they are when the attendee registers.
     AC1: Given an Attendee successfully registers for an event, the system
@@ -147,7 +154,7 @@ def test_register_sends_event_name_and_schedule_for_the_notice(attendee, mocker)
     }
 
 
-def test_withdraw_sends_event_name_for_the_notice(attendee, mocker):
+def test_ac2_withdraw_sends_event_name_for_the_notice(attendee, mocker):
     """
     Summary: Withdrawing passes on the event's name for the withdrawal notice, as it is when the attendee withdraws.
     AC2: Given an Attendee successfully withdraws their registration, the

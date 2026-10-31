@@ -38,6 +38,7 @@ Not proven
 ----------
 - That tokens issued by the real Supabase project pass this check (-> E2E
   journeys, which sign in for real).
+- AC3's role-specific functionality is proved by the SCRUM-9/SCRUM-10 modules.
 """
 
 import time
@@ -68,7 +69,7 @@ def client(monkeypatch):
     return create_app().test_client()
 
 
-def test_registration_calls_forward_the_attendees_token_downstream(client, monkeypatch):
+def test_ac2_registration_calls_forward_the_attendees_token_downstream(client, monkeypatch):
     """
     Summary: The attendee's own sign-in is passed on to Registration Service, so it judges the same signed-in attendee.
     AC2: Given a system user successfully authenticates, when they access
@@ -91,7 +92,7 @@ def test_registration_calls_forward_the_attendees_token_downstream(client, monke
     assert calls == [headers]
 
 
-def test_register_with_attendee_id_in_body_registers_token_user_instead(client, monkeypatch):
+def test_ac2_register_with_attendee_id_in_body_registers_token_user_instead(client, monkeypatch):
     """
     Summary: A registration is always for the signed-in attendee; an attendee id in the body is ignored.
     AC2: Given a system user successfully authenticates, when they access
@@ -118,13 +119,13 @@ def test_register_with_attendee_id_in_body_registers_token_user_instead(client, 
 
 
 
-def test_authenticate_without_token_returns_401_sign_in_message(client):
+def test_ac1_authenticate_without_token_returns_401_sign_in_message(client):
     """
     Summary: A user who has not signed in is turned away and asked to sign in.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Environment stub (SUPABASE_URL removed).
     """
     response = client.get("/registrations")
 
@@ -132,7 +133,7 @@ def test_authenticate_without_token_returns_401_sign_in_message(client):
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_authenticate_with_non_bearer_scheme_returns_401(client):
+def test_ac1_authenticate_with_non_bearer_scheme_returns_401(client):
     """
     Summary: Credentials sent in any form other than a sign-in token are refused.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -152,7 +153,7 @@ def test_authenticate_with_non_bearer_scheme_returns_401(client):
         pytest.param({"Authorization": "Bearer not-a-jwt"}, id="malformed"),
     ],
 )
-def test_authenticate_with_invalid_token_returns_401_session_expired(client, headers):
+def test_ac1_authenticate_with_invalid_token_returns_401_session_expired(client, headers):
     """
     Summary: Forged, expired, wrong-audience or malformed sign-in tokens are all refused.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -166,7 +167,7 @@ def test_authenticate_with_invalid_token_returns_401_session_expired(client, hea
     assert response.json == {"message": "Your session is invalid or has expired. Sign in again."}
 
 
-def test_authenticate_with_token_missing_subject_returns_401(client):
+def test_ac1_authenticate_with_token_missing_subject_returns_401(client):
     """
     Summary: A sign-in token that names no user is refused.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -179,7 +180,7 @@ def test_authenticate_with_token_missing_subject_returns_401(client):
     assert client.get("/registrations", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
-def test_authenticate_with_dev_identity_headers_returns_401(client):
+def test_ac1_authenticate_with_dev_identity_headers_returns_401(client):
     """
     Summary: The old developer identity headers cannot be used to pose as another user.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -192,7 +193,7 @@ def test_authenticate_with_dev_identity_headers_returns_401(client):
     assert client.get("/registrations", headers=headers).status_code == 401
 
 
-def test_authenticate_with_internal_token_alone_returns_401():
+def test_ac1_authenticate_with_internal_token_alone_returns_401():
     """
     Summary: The internal service token on its own is not a way into this service.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -208,7 +209,7 @@ def test_authenticate_with_internal_token_alone_returns_401():
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_authenticate_with_blank_subject_returns_401():
+def test_ac1_authenticate_with_blank_subject_returns_401():
     """
     Summary: A sign-in token naming an empty user is refused.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -223,7 +224,7 @@ def test_authenticate_with_blank_subject_returns_401():
     assert status == 401
 
 
-def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client):
+def test_ac1_authenticate_with_bad_user_token_and_internal_token_returns_401(client):
     """
     Summary: A bad sign-in token is refused even when the internal service token is also sent.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -236,7 +237,7 @@ def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client)
     assert client.get("/registrations", headers=headers).status_code == 401
 
 
-def test_authenticate_with_wrong_internal_token_returns_401(client):
+def test_ac1_authenticate_with_wrong_internal_token_returns_401(client):
     """
     Summary: Guessing the internal service token does not get a caller in.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -247,7 +248,7 @@ def test_authenticate_with_wrong_internal_token_returns_401(client):
     assert client.get("/registrations", headers={"X-Internal-Token": "guess"}).status_code == 401
 
 
-def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch):
+def test_ac1_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch):
     """
     Summary: When sign-in checking is not configured, protected pages stay closed rather than open.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -260,7 +261,7 @@ def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch)
     assert client.get("/registrations", headers=bearer(USER_ID, "Attendee")).status_code == 503
 
 
-def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
+def test_ac1_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
     """
     Summary: When Supabase's signing keys cannot be fetched, protected pages stay closed rather than open.
     AC1: Given a system user has not been successfully authenticated, when they
@@ -276,7 +277,7 @@ def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
     assert client.get("/registrations", headers=bearer(USER_ID, "Attendee")).status_code == 503
 
 
-def test_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch):
+def test_ac1_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch):
     """
     Summary: Tokens are verified against the Supabase project's published signing keys.
     AC1: Given a system user has not been successfully authenticated, when they

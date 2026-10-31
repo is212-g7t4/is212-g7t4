@@ -37,6 +37,8 @@ Not proven
 ----------
 - That Event Service only lists the event as confirmed after the approval (->
   event-service SCRUM-150 tests).
+- AC1-AC3 approval state, history and invalid-state rejection are owned by
+  Safety Check and Event Services; this composite owns only AC4's attendee view.
 """
 
 import pytest
@@ -61,7 +63,7 @@ def client(monkeypatch):
     return signed_in(create_app({"TESTING": True}).test_client(), ATTENDEE, "Attendee")
 
 
-def test_list_my_registrations_after_approval_shows_changed_details(client, monkeypatch):
+def test_ac4_list_my_registrations_after_approval_shows_changed_details(client, monkeypatch):
     """
     Summary: Once the Safety Officer approves the safety check that followed a high-impact change, registered attendees see the changed details.
     AC4: Given the safety check I approve follows a high-impact change, when I

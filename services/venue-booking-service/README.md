@@ -81,7 +81,7 @@ new story alerts and do not change existing booking eligibility.
 Initial development checks (not the full coverage/release gate):
 
 ```sh
-PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked pytest -q --no-cov tests/unit/test_venue_booking_notifications.py
+PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked pytest -q --no-cov tests/unit/test_scrum47_venue_booking_notifications.py
 ```
 
 These three backend cases cover submission, approval and rejection with owner,
