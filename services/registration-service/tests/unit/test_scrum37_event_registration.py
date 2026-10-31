@@ -71,7 +71,7 @@ from tests.unit.factories import ATTENDEE_ID, EVENT_ID, registration_payload, re
 OTHER_EVENT_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def test_register_when_place_available_returns_confirmed_registration(setup, monkeypatch):
+def test_ac7_register_when_place_available_returns_confirmed_registration(setup, monkeypatch):
     """
     Summary: A successful registration returns the confirmed registration.
     AC7: Upon successful registration, a confirmation message on-screen is
@@ -102,7 +102,7 @@ def test_register_when_place_available_returns_confirmed_registration(setup, mon
     assert received == [("unused-test-url", EVENT_ID, ATTENDEE_ID, 30)]
 
 
-def test_register_without_profile_fields_still_registers(setup, monkeypatch):
+def test_ac2_register_without_profile_fields_still_registers(setup, monkeypatch):
     """
     Summary: Registration needs only the event and capacity; profile details come from User Service.
     AC2: name, email and organisation are held on the attendee's User profile
@@ -128,7 +128,7 @@ def test_register_without_profile_fields_still_registers(setup, monkeypatch):
      registration_payload(capacity=0), registration_payload(capacity="many")],
      ids=["no_body", "empty_object", "bad_event_id", "zero_capacity", "capacity_as_text"],
 )
-def test_register_with_missing_or_invalid_values_returns_400(setup, payload):
+def test_ac3_register_with_missing_or_invalid_values_returns_400(setup, payload):
     """
     Summary: A registration without a valid event or a positive whole capacity is refused.
     AC3: The system validates that all required fields are completed before
@@ -144,7 +144,7 @@ def test_register_with_missing_or_invalid_values_returns_400(setup, payload):
     [(DuplicateRegistrationError, "DUPLICATE_REGISTRATION"), (CapacityReachedError, "EVENT_FULL")],
     ids=["already_registered", "event_full"],
 )
-def test_register_when_duplicate_or_full_returns_409_with_reason(setup, monkeypatch, error, code):
+def test_ac4_ac6_register_when_duplicate_or_full_returns_409_with_reason(setup, monkeypatch, error, code):
     """
     Summary: A second registration or one for a full event is refused with a reason the UI can show.
     AC4: Given the Attendee is already registered for the event with the same
@@ -167,7 +167,7 @@ def test_register_when_duplicate_or_full_returns_409_with_reason(setup, monkeypa
     assert response.json["code"] == code
 
 
-def test_create_registration_when_place_available_locks_counts_and_inserts(setup):
+def test_ac6_ac7_create_registration_when_place_available_locks_counts_and_inserts(setup):
     """
     Summary: A registration locks the event, counts confirmed places and then saves a Confirmed row.
     AC6: Given the event has reached capacity, the system displays a message
@@ -199,7 +199,7 @@ def test_create_registration_when_place_available_locks_counts_and_inserts(setup
     assert values[1:3] == [EVENT_ID, ATTENDEE_ID]
 
 
-def test_create_registration_when_already_registered_raises_duplicate(setup):
+def test_ac4_create_registration_when_already_registered_raises_duplicate(setup):
     """
     Summary: An attendee who is already registered cannot register again.
     AC4: Given the Attendee is already registered for the event with the same
@@ -218,7 +218,7 @@ def test_create_registration_when_already_registered_raises_duplicate(setup):
     assert cursor.execute.call_count == 2
 
 
-def test_create_registration_after_withdrawal_reconfirms_the_same_row(setup):
+def test_ac4_ac7_create_registration_after_withdrawal_reconfirms_the_same_row(setup):
     """
     Summary: Registering again after withdrawing reconfirms the same registration.
     AC4: Given the Attendee is already registered for the event with the same
@@ -247,7 +247,7 @@ def test_create_registration_after_withdrawal_reconfirms_the_same_row(setup):
     assert values[1] == "withdrawn-row"
 
 
-def test_create_registration_after_withdrawal_when_full_raises_capacity_reached(setup):
+def test_ac6_create_registration_after_withdrawal_when_full_raises_capacity_reached(setup):
     """
     Summary: Re-registering after withdrawal still needs a free place.
     AC6: Given the event has reached capacity, the system displays a message
@@ -266,7 +266,7 @@ def test_create_registration_after_withdrawal_when_full_raises_capacity_reached(
         create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
 
 
-def test_create_registration_when_database_reports_duplicate_raises_duplicate(setup):
+def test_ac4_create_registration_when_database_reports_duplicate_raises_duplicate(setup):
     """
     Summary: If the database's own uniqueness rule fires, it is still reported as already registered.
     AC4: Given the Attendee is already registered for the event with the same
@@ -283,7 +283,7 @@ def test_create_registration_when_database_reports_duplicate_raises_duplicate(se
         create_registration("unused-test-url", EVENT_ID, ATTENDEE_ID, 3)
 
 
-def test_create_registration_when_event_full_raises_capacity_reached(setup):
+def test_ac6_create_registration_when_event_full_raises_capacity_reached(setup):
     """
     Summary: A full event takes no more registrations.
     AC6: Given the event has reached capacity, the system displays a message
@@ -307,7 +307,7 @@ def test_create_registration_when_event_full_raises_capacity_reached(setup):
     [(0, 400), (1, 201), (2, 201)],
     ids=["below_minimum", "at_minimum", "above_minimum"],
 )
-def test_register_when_capacity_near_minimum_accepts_one_or_more(setup, monkeypatch, capacity, expected_status):
+def test_ac6_register_when_capacity_near_minimum_accepts_one_or_more(setup, monkeypatch, capacity, expected_status):
     """
     Summary: An event must have room for at least one attendee to take registrations.
     AC6: (boundary: capacity = 0, 1, 2)

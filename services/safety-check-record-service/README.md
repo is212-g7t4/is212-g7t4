@@ -231,7 +231,17 @@ uv run pytest
 ```
 
 `uv run pytest` takes no flags: every pytest and coverage setting is in
-`pyproject.toml`.
+`pyproject.toml`. It runs the unit tier only.
+
+The integration tier (`tests/integration/`) runs the real app against a
+throwaway `postgres:17.6` container loaded with the full migration chain, so
+Docker must be running:
+
+```
+PYTHON_DOTENV_DISABLED=1 uv run pytest -m integration --no-cov
+```
+
+See [`docs/testing/integration-testing.md`](../../docs/testing/integration-testing.md).
 
 ## Schema
 

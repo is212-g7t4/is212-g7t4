@@ -25,7 +25,7 @@ Not proven
 ----------
 - These cursor stubs do not prove Approved-only persistence. The integrated PR115 regressions in tests/integration/test_scrum164_equipment_safety_reset.py passed on disposable PostgreSQL, covering Rejected/Pending metadata preservation, mixed/ineligible-only selections, replay and lock-waiting rejection.
 - AC1 feedback, AC2 venue review, AC4 unflagged arrangements and AC5 resubmission/history run outside this owner and are NOT COVERED ANYWHERE in this module.
-- Related trigger: SCRUM-151 AC2; safety-change orchestration lives in safety-check-service/tests/unit/test_safety_reject_changes.py, which doubles this owner.
+- Related trigger: SCRUM-151 AC2; safety-change orchestration lives in safety-check-service/tests/unit/test_scrum151_reject_or_request_changes.py, which doubles this owner.
 - Exact request-id count and error-status limits are supporting reliability checks requiring Jira clarification; they are not new ACs.
 
 - Scope: supporting validation boundary; the precise numeric API limit is not specified by this AC. Applies to: `test_safety_reset_when_request_id_count_near_limits_accepts_1_to_500`.

@@ -5,6 +5,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
+from flask import g
 from flask.testing import FlaskClient
 
 EVENT_ID = "00000000-0000-0000-0000-000000000001"
@@ -181,3 +182,96 @@ def signed_in(client, user_id="00000000-0000-4000-8000-000000000001", role="Even
     client.__class__ = ActingClient
     client.environ_base["HTTP_AUTHORIZATION"] = bearer(user_id, role)["Authorization"]
     return client
+
+
+NEXT_RECORD_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
+class Response:
+    """A stand-in for an httpx response from another service."""
+
+    def __init__(self, status_code=200, payload=None, text="{}"):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    @property
+    def is_success(self):
+        return 200 <= self.status_code < 300
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not JSON")
+        return self._payload
+
+
+class SubmissionDownstream:
+    """Recorded stand-ins for every service the safety submission calls (SCRUM-149, SCRUM-164)."""
+
+    def __init__(self):
+        self.event = event("Approved")
+        self.bookings = [booking("Approved")]
+        self.requests = []
+        self.rounds = []
+        self.created = record()
+        self.updated = event("Pending Safety Check")
+        self.calls = []
+        self.fail = {}
+
+    def _maybe_fail(self, name):
+        error = self.fail.get(name)
+        if error:
+            raise error
+
+    def get_event(self, event_id):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
+        self.calls.append(("get_event", event_id, coordinator_id))
+        self._maybe_fail("get_event")
+        return self.event
+
+    def get_event_venue_bookings(self, event_id):
+        self.calls.append(("bookings", event_id))
+        self._maybe_fail("bookings")
+        return self.bookings
+
+    def get_event_equipment_requests(self, event_id):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
+        self.calls.append(("requests", event_id, coordinator_id))
+        self._maybe_fail("requests")
+        return self.requests
+
+    def list_safety_check_records(self, event_id, status=None):
+        self.calls.append(("list_records", event_id, status))
+        self._maybe_fail("list_records")
+        return self.rounds
+
+    def create_safety_check_record(self, event_id, placement=None, crowd=None):
+        submitted_by = g.user_id  # The downstream service reads this from the forwarded token.
+        self.calls.append(("create", event_id, submitted_by, placement, crowd))
+        self._maybe_fail("create")
+        return self.created
+
+    def set_event_safety_status(
+        self,
+        event_id,
+        status,
+        safety_check_id,
+        round_number,
+        remarks=None,
+    ):
+        coordinator_id = g.user_id  # The downstream service reads this from the forwarded token.
+        self.calls.append(
+            ("patch_event", event_id, status, coordinator_id, safety_check_id, round_number)
+        )
+        self._maybe_fail("patch_event")
+        return self.updated
+
+    def delete_safety_check_record(self, safety_check_id):
+        self.calls.append(("delete", safety_check_id))
+        self._maybe_fail("delete")
+
+    def names(self):
+        return [call[0] for call in self.calls]
+
+    def call(self, name):
+        return next(call for call in self.calls if call[0] == name)

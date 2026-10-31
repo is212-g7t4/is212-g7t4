@@ -116,13 +116,13 @@ def client(monkeypatch):
     ],
     ids=["post_events_drafts_internal", "get_events_drafts_none_internal", "patch_f_events_drafts_event_internal", "post_f_events_drafts_event_submit_internal", "delete_f_events_drafts_event_none_internal", "get_events_submitted_none_internal", "get_f_events_organiserid_other_none_internal", "get_events_none_internal", "get_f_events_event_organiserid_other_none_intern", "get_f_events_event_none_internal", "post_f_events_event_change_requests_internal", "get_change_requests_none_internal", "get_f_change_requests_event_none_internal", "patch_f_change_requests_event_decision_internal", "patch_f_events_event_assignedcoordinatorid_other", "patch_f_events_event_progress_internal", "patch_f_events_event_details_internal", "patch_f_events_event_safety_status_status_pendin", "patch_f_events_event_safety_status_status_confir", "patch_f_events_event_approve_internal", "patch_f_events_event_clarification_request_inter", "patch_f_events_event_clarification_response_inte", "patch_f_events_event_amendment_request_internal", "patch_f_events_event_amendment_response_internal", "patch_f_events_event_reject_internal"],
 )
-def test_internal_token_when_action_needs_a_user_returns_401(client, method, path, body, headers):
+def test_ac1_internal_token_alone_is_refused_with_401_on_every_route_that_acts_for_a_user(client, method, path, body, headers):
     """
-    Summary: An internal token alone cannot be used to act on a user's behalf.
+    Summary: Each route that acts on behalf of a user (drafts, event views, change requests, assignment, progress, details, safety-status, approve, clarification, amendment, reject) answers 401 "Sign in to continue." when only X-Internal-Token is sent.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: Stub (test signing key from tests/conftest.py; unused because only an internal token is sent)
+    Double: Stub (the client fixture replaces app.list_unassigned; no database is reached because authentication refuses first, and the JWKS key is unused since no user token is sent)
     """
     # Arrange (Given): client, method, path, body, headers, from fixtures
 
@@ -134,13 +134,13 @@ def test_internal_token_when_action_needs_a_user_returns_401(client, method, pat
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_save_draft_owner_comes_from_token_not_body(client, monkeypatch):
+def test_ac2_saved_draft_belongs_to_the_token_user_whatever_organiser_id_the_body_names(client, monkeypatch):
     """
-    Summary: A draft belongs to the signed-in organiser, whatever organiser id the body names.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key), Mock (app.save_draft records the owner it was given; asserted to be the token's user)
+    Summary: POST /events/drafts as the signed-in organiser with a different organiserId in the body saves the draft under the token's user id, not the body's.
+    AC2: Given a system user successfully authenticates, when they access
+        protected information or functionality, then their access is evaluated
+        according to their role and relationship to the relevant event.
+    Double: Stub (JWKS test signing key signs the Event Organiser token), Mock (app.save_draft records its arguments; the owner asserted to be the token's user)
     """
     # Arrange (Given)
     calls = []
@@ -156,13 +156,13 @@ def test_save_draft_owner_comes_from_token_not_body(client, monkeypatch):
     assert calls[0][1] == USER_ID
 
 
-def test_view_all_uses_token_role_not_query(client):
+def test_ac2_viewing_all_events_depends_on_the_token_role_not_a_viewer_role_query_parameter(client):
     """
-    Summary: Seeing every event depends on the token's role, not on a query parameter.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; the token carries the Event Coordinator role)
+    Summary: An Event Coordinator token asking for GET /events?viewerRole=Event+Coordinator+Lead is still answered 403 "This role cannot view all internal events.", so a role named in the query is ignored.
+    AC2: Given a system user successfully authenticates, when they access
+        protected information or functionality, then their access is evaluated
+        according to their role and relationship to the relevant event.
+    Double: Stub (JWKS test signing key signs an Event Coordinator token; no database is reached because the role check refuses first)
     """
     # Arrange (Given): client, from fixtures
 
@@ -174,42 +174,14 @@ def test_view_all_uses_token_role_not_query(client):
     assert response.json == {"message": "This role cannot view all internal events."}
 
 
-def test_submit_with_internal_token_records_no_organiser(client, monkeypatch):
+
+def test_ac1_request_with_no_token_is_refused_with_a_sign_in_prompt(client):
     """
-    Summary: A background submission with the internal token is recorded with no organiser.
+    Summary: GET /events/unassigned with no Authorization header answers 401 "Sign in to continue."
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: Mock (app.submit_event records the details it was given; asserted to carry no organiserId)
-    """
-    # Arrange (Given)
-    submitted = []
-    monkeypatch.setattr("app.submit_event", lambda database_url, details: submitted.append(details) or {})
-
-    body = {
-        "eventName": "Community Workshop",
-        "description": "A workshop",
-        "purpose": "Learning",
-        "preferredStartDate": "2026-10-01T09:00",
-        "preferredEndDate": "2026-10-01T17:00",
-        "expectedAttendance": "25",
-    }
-
-    # Act (When)
-    response = client.post("/events", json=body, headers=INTERNAL)
-
-    # Assert (Then)
-    assert response.status_code == 201
-    assert "organiserId" not in submitted[0]
-
-
-def test_authenticate_without_token_returns_401_sign_in_message(client):
-    """
-    Summary: A request with no sign-in token is turned away with a sign-in prompt.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; not reached because no token is sent)
+    Double: None beyond the client fixture (it replaces app.list_unassigned, which is never reached); no token is sent, so the JWKS key is unused
     """
     # Arrange (Given): client, from fixtures
 
@@ -221,13 +193,13 @@ def test_authenticate_without_token_returns_401_sign_in_message(client):
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_authenticate_with_non_bearer_scheme_returns_401(client):
+def test_ac3_credentials_sent_with_a_non_bearer_scheme_are_refused(client):
     """
-    Summary: Credentials sent in any form other than a bearer token are refused.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; not reached because the scheme is Basic)
+    Summary: GET /events/unassigned with "Authorization: Basic abc" answers 401.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: None beyond the client fixture (it replaces app.list_unassigned, which is never reached); the JWKS key is unused because the scheme is rejected first
     """
     # Arrange (Given): client, from fixtures
 
@@ -244,13 +216,13 @@ def test_authenticate_with_non_bearer_scheme_returns_401(client):
         pytest.param({"Authorization": "Bearer not-a-jwt"}, id="malformed"),
     ],
 )
-def test_authenticate_with_invalid_token_returns_401_session_expired(client, headers):
+def test_ac3_forged_expired_wrong_audience_or_malformed_token_is_refused_as_an_invalid_session(client, headers):
     """
-    Summary: Forged, expired, wrong-audience or malformed tokens are all refused.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; the forged, expired, wrong-audience and malformed tokens are each checked against it)
+    Summary: GET /events/unassigned with a token signed by another key, an expired token, a token for audience "anon", or a non-JWT string answers 401 "Your session is invalid or has expired. Sign in again."
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: Stub (the JWKS test signing key is the only key that would verify; each case is built to fail against it)
     """
     # Arrange (Given): client, headers, from fixtures
 
@@ -262,13 +234,13 @@ def test_authenticate_with_invalid_token_returns_401_session_expired(client, hea
     assert response.json == {"message": "Your session is invalid or has expired. Sign in again."}
 
 
-def test_authenticate_with_token_missing_subject_returns_401(client):
+def test_ac3_validly_signed_token_with_no_subject_is_refused(client):
     """
-    Summary: A token that names no user is refused.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; the token is validly signed but has no subject)
+    Summary: A token signed with the test key and the right audience, but carrying no sub claim, gets 401 from GET /events/unassigned.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: Stub (the JWKS test signing key verifies the token; the missing subject is what is refused)
     """
     # Arrange (Given)
     token = jwt.encode({"aud": "authenticated", "exp": int(time.time()) + 60}, TEST_SIGNING_KEY, algorithm="ES256")
@@ -277,13 +249,13 @@ def test_authenticate_with_token_missing_subject_returns_401(client):
     assert client.get("/events/unassigned", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
-def test_authenticate_with_dev_identity_headers_returns_401(client):
+def test_ac1_old_developer_identity_headers_without_a_token_are_refused(client):
     """
-    Summary: Old developer identity headers cannot be used to impersonate a user.
+    Summary: GET /events/unassigned carrying only X-Dev-User-Id and X-Dev-Role headers (no Authorization) answers 401, so those headers cannot stand in for a signed-in user.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: Stub (test signing key; not reached because no Authorization header is sent)
+    Double: None beyond the client fixture (it replaces app.list_unassigned, which is never reached); no Authorization header is sent, so the JWKS key is unused
     """
     # Arrange (Given)
     headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
@@ -292,13 +264,13 @@ def test_authenticate_with_dev_identity_headers_returns_401(client):
     assert client.get("/events/unassigned", headers=headers).status_code == 401
 
 
-def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client):
+def test_ac3_a_malformed_user_token_is_refused_even_when_the_internal_token_is_also_sent(client):
     """
-    Summary: A bad user token is refused even when an internal token is also sent.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; the malformed bearer token is checked against it despite the internal token)
+    Summary: GET /events/unassigned with the right X-Internal-Token and "Authorization: Bearer not-a-jwt" answers 401, so the internal token cannot rescue a bad user token.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: Stub (the JWKS test signing key is asked to verify the malformed bearer token, which fails)
     """
     # Arrange (Given)
     headers = {"X-Internal-Token": "internal-test-token", "Authorization": "Bearer not-a-jwt"}
@@ -307,13 +279,13 @@ def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client)
     assert client.get("/events/unassigned", headers=headers).status_code == 401
 
 
-def test_authenticate_with_wrong_internal_token_returns_401(client):
+def test_ac3_a_wrong_internal_token_is_refused(client):
     """
-    Summary: Guessing the internal token does not get a caller in.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; not reached because no Authorization header is sent)
+    Summary: GET /events/unassigned with X-Internal-Token "guess" and no Authorization header answers 401.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: None beyond the client fixture (it replaces app.list_unassigned, which is never reached); the JWKS key is unused because no user token is sent
     """
     # Arrange (Given): client, from fixtures
 
@@ -321,13 +293,13 @@ def test_authenticate_with_wrong_internal_token_returns_401(client):
     assert client.get("/events/unassigned", headers={"X-Internal-Token": "guess"}).status_code == 401
 
 
-def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch):
+def test_ac3_protected_routes_stay_closed_with_503_when_supabase_url_is_not_configured(client, monkeypatch):
     """
-    Summary: When sign-in checking is not configured, protected endpoints stay closed.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (test signing key; not reached because SUPABASE_URL is removed first)
+    Summary: With SUPABASE_URL removed, GET /events/unassigned with an otherwise valid Event Coordinator token answers 503 instead of granting access.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: Stub (the client fixture replaces app.list_unassigned, which is never reached; the JWKS key is not reached because SUPABASE_URL is removed first)
     """
     # Arrange (Given)
     monkeypatch.delenv("SUPABASE_URL")
@@ -336,13 +308,13 @@ def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch)
     assert client.get("/events/unassigned", headers=bearer(USER_ID, "Event Coordinator")).status_code == 503
 
 
-def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
+def test_ac3_protected_routes_stay_closed_with_503_when_the_jwks_cannot_be_fetched(client, monkeypatch):
     """
-    Summary: When Supabase's signing keys cannot be fetched, protected endpoints stay closed.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (signing_key raises PyJWKClientConnectionError)
+    Summary: When app.auth.signing_key raises PyJWKClientConnectionError, GET /events/unassigned with a validly signed token answers 503 instead of granting access.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the
+        authentication attempt is completed, then they remain unable to access
+        protected information or functionality.
+    Double: Stub (app.auth.signing_key replaced by a function that raises PyJWKClientConnectionError)
     """
     # Arrange (Given)
     def unreachable(token):
@@ -354,22 +326,69 @@ def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
     assert client.get("/events/unassigned", headers=bearer(USER_ID, "Event Coordinator")).status_code == 503
 
 
-def test_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch):
+def test_ac1_assigning_a_coordinator_with_no_token_is_refused_before_any_assignment(client, monkeypatch):
     """
-    Summary: Tokens are verified against the Supabase project's published signing keys.
-    AC1: tokens are checked against Supabase's keys before access is granted
-    Double: Mock (jwt.PyJWKClient records the JWKS URL and returns a key)
+    Summary: PATCH /events/<id> naming an assignedCoordinatorId, with no Authorization header, answers 401 and update_event_coordinator is never called.
+    AC1: Given a system user has not been successfully authenticated, when they
+        attempt to access protected information or functionality, then access
+        is denied.
+    Double: Mock (app.update_event_coordinator replaced; asserted never called); no token is sent, so the JWKS key is unused
     """
-    jwks = MagicMock()
-    created = []
-    monkeypatch.setattr("app.auth.jwt.PyJWKClient", lambda url: created.append(url) or jwks)
-    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.test/")
+    # Arrange (Given)
+    assign = MagicMock()
+    monkeypatch.setattr("app.update_event_coordinator", assign)
 
-    key = real_signing_key("token")
+    # Act (When)
+    response = client.patch(f"/events/{EVENT}", json={"assignedCoordinatorId": OTHER})
 
-    assert created == ["https://project.supabase.test/auth/v1/.well-known/jwks.json"]
-    jwks.get_signing_key_from_jwt.assert_called_once_with("token")
-    assert key is jwks.get_signing_key_from_jwt.return_value.key
+    # Assert (Then)
+    assert response.status_code == 401
+    assign.assert_not_called()
+
+def test_ac1_submitted_queue_with_no_token_is_refused_before_any_query(client, monkeypatch):
+    """
+    Summary: GET /events/submitted with no Authorization header answers 401 and list_submitted is never called.
+    AC1: Given a system user has not been successfully authenticated, when they
+        attempt to access protected information or functionality, then access
+        is denied.
+    Double: Mock (app.list_submitted replaced; asserted never called); no token is sent, so the JWKS key is unused
+    """
+    # Arrange (Given)
+    listing = MagicMock()
+    monkeypatch.setattr("app.list_submitted", listing)
+
+    # Act (When)
+    response = client.get("/events/submitted")
+
+    # Assert (Then)
+    assert response.status_code == 401
+    listing.assert_not_called()
+
+@pytest.mark.parametrize("path", [
+    f"/events/{EVENT}",
+    f"/events/{EVENT}?coordinatorId={USER_ID}",
+    "/events",
+    f"/events?coordinatorId={USER_ID}",
+    f"/events?organiserId={OTHER}",
+], ids=["details", "details-with-coordinator-id", "list", "list-with-coordinator-id", "list-with-organiser-id"])
+def test_ac1_event_reads_naming_a_user_in_the_query_but_sending_no_token_are_refused(client, monkeypatch, path):
+    """
+    Summary: GET /events and GET /events/<id> with no Authorization header answer 401, even when the query names a coordinatorId or organiserId, and no database connection is opened; a query id alone grants nothing.
+    AC1: Given a system user has not been successfully authenticated, when they
+        attempt to access protected information or functionality, then access
+        is denied.
+    Double: Mock (the psycopg2.connect patch is asserted never called); no token is sent, so the JWKS key is unused
+    """
+    # Arrange (Given)
+    connect = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", connect)
+
+    # Act (When)
+    response = client.get(path)
+
+    # Assert (Then)
+    assert response.status_code == 401
+    connect.assert_not_called()
 
 
 # --- Supporting/supplementary design checks ----------------------------------
@@ -397,3 +416,49 @@ def test_health_and_preflight_without_token_are_answered(client):
     """
     assert client.get("/health").status_code == 200
     assert client.options("/events/unassigned").status_code == 200
+
+
+def test_internal_token_submission_is_accepted_and_records_no_organiser(client, monkeypatch):
+    """
+    Summary: POST /events with only the internal token answers 201 and the details handed to submit_event carry no organiserId.
+    Supporting design check: a service-to-service submission is accepted on X-Internal-Token and
+        is not attributed to any organiser
+    Double: Mock (app.submit_event records the details it was given; organiserId asserted absent); no user token is sent, so the JWKS key is unused
+    """
+    # Arrange (Given)
+    submitted = []
+    monkeypatch.setattr("app.submit_event", lambda database_url, details: submitted.append(details) or {})
+
+    body = {
+        "eventName": "Community Workshop",
+        "description": "A workshop",
+        "purpose": "Learning",
+        "preferredStartDate": "2026-10-01T09:00",
+        "preferredEndDate": "2026-10-01T17:00",
+        "expectedAttendance": "25",
+    }
+
+    # Act (When)
+    response = client.post("/events", json=body, headers=INTERNAL)
+
+    # Assert (Then)
+    assert response.status_code == 201
+    assert "organiserId" not in submitted[0]
+
+def test_signing_key_is_fetched_from_the_supabase_project_jwks_url(monkeypatch):
+    """
+    Summary: signing_key("token") builds a PyJWKClient for https://project.supabase.test/auth/v1/.well-known/jwks.json (trailing slash handled), asks it for the key of that token once, and returns that key.
+    Supporting design check: tokens are verified against the project's published Supabase signing
+        keys (the check behind AC1 to AC3)
+    Double: Mock (app.auth.jwt.PyJWKClient replaced by a factory that records the JWKS URL and returns a mock client; SUPABASE_URL set by monkeypatch)
+    """
+    jwks = MagicMock()
+    created = []
+    monkeypatch.setattr("app.auth.jwt.PyJWKClient", lambda url: created.append(url) or jwks)
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.test/")
+
+    key = real_signing_key("token")
+
+    assert created == ["https://project.supabase.test/auth/v1/.well-known/jwks.json"]
+    jwks.get_signing_key_from_jwt.assert_called_once_with("token")
+    assert key is jwks.get_signing_key_from_jwt.return_value.key

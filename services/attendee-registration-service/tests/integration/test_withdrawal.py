@@ -25,7 +25,7 @@ import respx
 from httpx import Response
 
 import app.clients as service_clients
-from tests.integration.factories import EVENT_ID, REGISTRATION_ID, event, registration
+from tests.integration.factories import REGISTRATION_ID, event, registration
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
 

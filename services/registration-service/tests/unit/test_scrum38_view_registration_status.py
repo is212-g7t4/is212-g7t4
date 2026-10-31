@@ -52,8 +52,9 @@ Doubled
 
 Not proven
 ----------
-- Event name, date, time, venue and the "no registrations" message (AC2-AC4):
-  joined in and shown by Attendee Registration Service and the UI (->
+- AC1's attendee list plus event name, date, time, venue and the "no
+  registrations" message (AC2-AC4) are joined in and shown by Attendee
+  Registration Service and the UI (->
   attendee-registration-service unit tests and frontend
   AttendeeRegistrationsPage.test.tsx).
 """
@@ -79,7 +80,7 @@ from tests.unit.factories import ATTENDEE_ID, EVENT_ID, registration_payload, re
 OTHER_EVENT_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def test_list_registrations_when_attendee_returns_only_their_own(setup):
+def test_scrum8_ac2_list_registrations_when_attendee_returns_only_their_own(setup):
     """
     Summary: An attendee sees the list of their own registrations and nobody else's.
     AC1: The Attendee can view a list of events they have registered for.
@@ -105,7 +106,7 @@ def test_list_registrations_when_attendee_returns_only_their_own(setup):
     assert params == [ATTENDEE_ID]
 
 
-def test_list_registrations_when_attendee_has_none_returns_empty_list(setup):
+def test_ac4_list_registrations_when_attendee_has_none_returns_empty_list(setup):
     """
     Summary: An attendee with no registrations gets an empty list.
     AC4: Given the Attendee has not registered for any events, the system
@@ -124,7 +125,7 @@ def test_list_registrations_when_attendee_has_none_returns_empty_list(setup):
     assert response.json == {"registrations": []}
 
 
-def test_list_registrations_with_forged_attendee_id_uses_token_user(setup):
+def test_scrum8_ac2_list_registrations_with_forged_attendee_id_uses_token_user(setup):
     """
     Summary: An attendee id in the query is ignored; the list is always the caller's own.
     AC1: The Attendee can view a list of events they have registered for.

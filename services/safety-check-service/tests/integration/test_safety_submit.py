@@ -25,16 +25,16 @@ AC2  Given any venue booking or equipment request for the event is still pending
      submission is blocked and the outstanding arrangements are listed.
 AC3  Given the Event Coordinator is submitting, when they enter equipment placement and
      expected crowd movement notes, then the notes are saved with the safety check.
-     Not covered here: unchanged by the rejected-requests fix; tests/unit/test_safety_submit.py
+     Not covered here: unchanged by the rejected-requests fix; tests/unit/test_scrum149_safety_check_submission.py
      covers the notes reaching the record service, and the record service stores them.
 AC4  Given the event is already 'Pending Safety Check', when the Event Coordinator submits
      it again, then no duplicate safety check is created.
      Not covered here: unchanged by the rejected-requests fix; the duplicate guard is the
-     record service's, and tests/unit/test_safety_submit.py covers this service's 409.
+     record service's, and tests/unit/test_scrum149_safety_check_submission.py covers this service's 409.
 AC5  Given the Event Coordinator is not the assigned coordinator, then the submit action is
      not available and an API call is rejected.
      Not covered here: unchanged by the rejected-requests fix; Event Service makes the
-     assignment check, and tests/unit/test_safety_submit.py covers this service's 403.
+     assignment check, and tests/unit/test_scrum149_safety_check_submission.py covers this service's 403.
 """
 
 import json
