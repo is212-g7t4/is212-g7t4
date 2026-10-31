@@ -1,13 +1,20 @@
 # Equipment regressions: issues 6/7/8
 
-**Agreed revision from this conversation; pending confirmation that Jira has been updated.**
+**Current owner-test update (October 31, 2026):** read-only live Jira captures
+now confirm the story text; current owner test headers use the exact captured
+wording, including SCRUM-35 AC3. Owner paths below follow the ticket-bearing
+renames. Equipment Request now passes 233 unit / 105 integration cases in both
+normal and exact reverse order; original 333 cases retained, 5 integrations added.
+See the [owner service README](../../services/equipment-request-service/README.md)
+and [integration guide](integration-testing.md) for ownership limits and test commands. Historical verification sections
+below describe their named earlier checkouts, not this update.
 
 This map records the story-based test reorganisation on
 `fix/prevent-equipment-overallocation`, alongside the equipment approval fix
 and integrated PR115 safety-reset fix. It is not a Jira update.
-The exact-Jira-copy convention cannot be certified until Jira is synchronized.
-Revised story headers flag this exception; incoming Issue8 modules retain their
-original approved narrow-bugfix headers, not the complete story/AC format.
+The original pending-sync exception is historical: current Equipment Request
+headers (including Issue8) now carry the captured live story and all ACs. Other
+services were not rewritten or certified by this owner-only update.
 
 ## Requirement ownership
 
@@ -19,7 +26,7 @@ original approved narrow-bugfix headers, not the complete story/AC format.
 | Authenticated access and token propagation | Existing SCRUM-8 |
 | Assignment-based viewing | Existing SCRUM-9 |
 | Review/reset modification authority | Existing SCRUM-10 |
-| Decision alerts and outbox rollback | Existing SCRUM-48 AC2; rollback is a supporting reliability guarantee |
+| Decision alerts and outbox rollback | Existing SCRUM-48 AC2; rejection-specific context/content also relates to AC3; rollback is a supporting reliability guarantee |
 | Reset previously Approved equipment only | SCRUM-164 AC3; triggered by SCRUM-151 AC2 |
 
 Exact malformed snapshot/ID/reason limits, transport details and status-code
@@ -35,7 +42,7 @@ reassignment and notification delivery are outside its guarantee.
 
 SCRUM-35: Equipment Reservation
 
-Agreed revision from this conversation; pending confirmation that Jira has been updated
+Live Jira description verified October 31, 2026 (read-only)
 
 User Story
 ----------
@@ -45,14 +52,14 @@ Acceptance Criteria
 -------------------
 AC1: Given a Pending equipment request has sufficient available stock for the event’s duration, when I approve it, then its status changes to Approved and its quantity is immediately counted as reserved when checking further requests.
 AC2: Given an equipment request is approved, then its reservation remains associated with the specific event ID for which it was approved.
-AC3: Given equipment already has Approved requests for the same event or other overlapping events whose reservations still apply, when the system checks a new approval, then it subtracts those reserved quantities from the usable stock. Pending and Rejected requests do not reserve stock.
+AC3: Given an equipment request is being checked for approval, then the system calculates the remaining usable quantity for that event’s time period by subtracting quantities already reserved through Approved requests for the same event and other overlapping events whose reservations remain active. Pending and Rejected requests do not reserve equipment.
 AC4: Given I select multiple Pending equipment requests for bulk approval, when the system checks availability, then it adds together the selected quantities for each equipment item. If every item has sufficient stock, all selected requests are approved. If any item has insufficient stock, none of the selected requests is approved and all remain Pending.
 AC5: Given multiple approval actions compete for the same available equipment, when they are processed at the same time, then the total approved quantity must not exceed the available stock. Any approval that no longer has sufficient stock leaves its selected requests Pending.
 AC6: Given the quantity being approved exactly equals the remaining available quantity, when I approve it, then approval succeeds. If the quantity exceeds the remaining available quantity, approval is refused and the selected requests remain Pending.
 
 SCRUM-151: Reject or Request Changes to Safety Arrangements
 
-Agreed revision from this conversation; pending confirmation that Jira has been updated
+Live Jira description verified October 31, 2026 (read-only)
 
 User Story
 ----------
@@ -84,7 +91,7 @@ AC7: Given an event is not 'Pending Safety Check', then these actions are not
 
 SCRUM-164: Revise Arrangements and Resubmit for Safety Check
 
-Agreed revision from this conversation; pending confirmation that Jira has been updated
+Live Jira description verified October 31, 2026 (read-only)
 
 User Story
 ----------
@@ -112,21 +119,21 @@ Paths are relative to the repository root.
 
 | Story | Equipment Reservation unit path / cases | Equipment Request unit path / cases | Equipment Request integration path / collected cases |
 | --- | --- | --- | --- |
-| SCRUM-35 | `services/equipment-reservation-service/tests/unit/test_equipment_reservation.py` / 32 | `services/equipment-request-service/tests/unit/test_equipment_reservation.py` / 28 | `services/equipment-request-service/tests/integration/test_equipment_reservation.py` / 19 |
-| SCRUM-34 | `services/equipment-reservation-service/tests/unit/test_equipment_availability.py` / 7 | `services/equipment-request-service/tests/unit/test_equipment_availability.py` / 2 | `services/equipment-request-service/tests/integration/test_equipment_availability.py` / 1 |
-| SCRUM-33 | `services/equipment-reservation-service/tests/unit/test_equipment_request_review.py` / 34 | `services/equipment-request-service/tests/unit/test_equipment_request_review.py` / 40 | No new module: do not invent an empty tier |
-| SCRUM-9 | `services/equipment-reservation-service/tests/unit/test_equipment_review_access.py` / 5 | No new module | No new module |
-| SCRUM-10 reset | No new module | `services/equipment-request-service/tests/unit/test_safety_reset_modification_access.py` / 10 | `services/equipment-request-service/tests/integration/test_equipment_review_modification_access.py` / 4 (review authority) |
-| SCRUM-164 | Existing feedback module unchanged in location | `services/equipment-request-service/tests/unit/test_equipment_safety_reset.py` / 14 existing cases | `services/equipment-request-service/tests/integration/test_equipment_safety_reset.py` / 9 PR115 cases |
+| SCRUM-35 | `services/equipment-reservation-service/tests/unit/test_scrum35_equipment_reservation.py` / 32 | `services/equipment-request-service/tests/unit/test_scrum35_equipment_reservation.py` / 28 | `services/equipment-request-service/tests/integration/test_scrum35_equipment_reservation.py` / 21 |
+| SCRUM-34 | `services/equipment-reservation-service/tests/unit/test_scrum34_equipment_availability.py` / 7 | `services/equipment-request-service/tests/unit/test_scrum34_equipment_availability.py` / 2 | `services/equipment-request-service/tests/integration/test_scrum34_equipment_availability.py` / 3 |
+| SCRUM-33 | `services/equipment-reservation-service/tests/unit/test_scrum33_equipment_request_review.py` / 34 | `services/equipment-request-service/tests/unit/test_scrum33_equipment_request_review.py` / 40 | No new module: do not invent an empty tier |
+| SCRUM-9 | `services/equipment-reservation-service/tests/unit/test_scrum9_equipment_review_access.py` / 5 | No new module | No new module |
+| SCRUM-10 reset | No new module | `services/equipment-request-service/tests/unit/test_scrum10_equipment_safety_reset_access.py` / 10 | `services/equipment-request-service/tests/integration/test_scrum10_equipment_review_modification_access.py` / 4 (review authority) |
+| SCRUM-164 | Existing feedback module unchanged in location | `services/equipment-request-service/tests/unit/test_scrum164_equipment_safety_reset.py` / 14 existing cases | `services/equipment-request-service/tests/integration/test_scrum164_equipment_safety_reset.py` / 9 PR115 cases |
 
-Review authentication cases join each service's existing
-`tests/unit/test_authentication.py`; those modules now collect 22 composite
-and 21 owner cases. The extra outbox rollback case joins the existing
-`services/equipment-request-service/tests/integration/test_scrum48_transactions.py`,
-which now collects 21 cases; its legacy filename and unrelated test bodies
-are retained to avoid unrelated broad reformatting. The 46-case claims suite
-is unchanged. The reorganisation originally collected **91** owner integration
-cases; the integrated PR115 module adds 9, for **100**.
+Review authentication: the composite retains `tests/unit/test_scrum8_equipment_authentication.py`
+(22 cases in the historical run); the owner uses
+`tests/unit/test_scrum8_equipment_authentication.py` (24 current cases). The extra outbox rollback case joins the existing
+`services/equipment-request-service/tests/integration/test_scrum48_equipment_notification_transactions.py`,
+which collects 21 cases; the 46-case claims suite has its ticket-bearing
+notification-leases/permissions name. Current stock modules collect 21 SCRUM-35
+and 3 SCRUM-34 cases; the new SCRUM-32 FK module adds 1. With the other retained
+cases, the current owner integration total is **105** (formerly 100).
 
 ## Historical pre-main verification on October 31, 2026
 
@@ -207,7 +214,7 @@ From each service directory the isolated host invocation is:
 env -u PYTHONPATH PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked --python 3.12 python -m pytest
 ```
 
-1. **Jira sync pending.** The agreed revision is not asserted to be the current
+1. **Historical Jira-sync limit (superseded for current Equipment Request headers).** The agreed revision is not asserted to be the current
    Jira record. Incoming Issue8 narrow-bugfix headers were preserved rather than
    relabelled as complete Jira convention compliance.
 2. **Historical preflight stop retained.** Before main integration, unrelated

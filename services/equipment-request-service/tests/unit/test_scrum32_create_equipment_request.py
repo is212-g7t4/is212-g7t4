@@ -3,38 +3,13 @@ SCRUM-32: Create Event Equipment Request
 
 User Story
 ----------
-As an Event Coordinator and Event Coordinator Lead, I want to record the
-equipment required for an event so that the technical team is informed of the
-resources needed as requested.
+As an Event Coordinator and Event Coordinator Lead, I want to record the equipment required for an event so that the technical team is informed of the resources needed as requested.
 
 Acceptance Criteria
 -------------------
-AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-     record the equipment, equipment type, quantity, and relevant technical
-     requirements for an event.
-AC2: Recorded equipment request accurately reflects the date and time of the
-     corresponding event
-AC3: Ensure newly recorded equipment requests default to an initial status such
-     as "Pending"
-
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
+AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+AC2: Recorded equipment request accurately reflects the date and time of the corresponding event
+AC3: Ensure newly recorded equipment requests default to an initial status such as "Pending"
 
 Real
 ----
@@ -60,7 +35,9 @@ Not proven
   only the event id; the event's dates are joined in by Equipment Reservation
   Service (-> equipment-reservation-service unit tests).
 - That PostgreSQL really rejects unknown event/equipment ids and rolls the
-  whole request back (-> tests/integration/, throwaway postgres:17.6).
+  whole request back (-> tests/integration/, fixture-owned pinned PostgreSQL (observed 17.11)).
+
+- Scope: supporting validation boundary; the precise numeric API limit is not specified by this AC. Applies to: `test_create_request_when_item_count_near_limit_accepts_up_to_50_lines`, `test_create_request_when_quantity_near_minimum_accepts_one_or_more`, `test_create_request_when_requirements_near_limit_accepts_up_to_1000_characters`.
 """
 
 import psycopg2
@@ -74,15 +51,10 @@ SAFETY_OFFICER = bearer(USER_ID, "Safety Officer")
 
 
 def test_create_request_with_several_lines_saves_each_as_pending_for_the_event(setup):
-    """
-    Summary: Every equipment line a coordinator records is saved against the event as Pending.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    AC3: Ensure newly recorded equipment requests default to an initial status
-        such as "Pending"
-    Double: Stub (cursor returns both saved rows), Mock (connect called once;
-        SQL inspected)
+    """Summary: Every equipment line a coordinator records is saved against the event as Pending.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    AC3: Ensure newly recorded equipment requests default to an initial status such as "Pending"
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
     client, cursor, connect = setup
     cursor.fetchone.side_effect = [
@@ -112,16 +84,9 @@ def test_create_request_with_several_lines_saves_each_as_pending_for_the_event(s
 
 
 def test_create_request_with_forged_audit_fields_records_caller_and_database_time(setup):
-    """
-    Summary: Who recorded a request and when come from the token and the database clock, never from the body.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    SCRUM-8 AC2: Given a system user successfully authenticates, when they
-        access protected information or functionality, then their access is
-        evaluated according to their role and relationship to the relevant
-        event.
-    Double: Stub (cursor returns the saved row; insert values inspected)
+    """Summary: Who recorded a request and when come from the token and the database clock, never from the body.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
     # Arrange (Given)
     client, cursor, _ = setup
@@ -143,12 +108,9 @@ def test_create_request_with_forged_audit_fields_records_caller_and_database_tim
 
 
 def test_create_request_when_event_or_equipment_unknown_returns_404(setup):
-    """
-    Summary: A request naming an event or equipment that no longer exists is refused as a whole.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    Double: Stub (second insert raises ForeignKeyViolation)
+    """Summary: A simulated second-line foreign-key failure returns a safe refusal; real rollback is checked separately.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
     client, cursor, _ = setup
     cursor.execute.side_effect = [None, psycopg2.errors.ForeignKeyViolation()]
@@ -161,12 +123,9 @@ def test_create_request_when_event_or_equipment_unknown_returns_404(setup):
 
 
 def test_create_request_when_caller_is_lead_saves_request(setup):
-    """
-    Summary: The Event Coordinator Lead can record equipment needs like a coordinator.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    Double: Stub (cursor returns the saved row)
+    """Summary: The Event Coordinator Lead can record equipment needs like a coordinator.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
     client, cursor, _ = setup
     cursor.fetchone.return_value = db_row()
@@ -177,24 +136,6 @@ def test_create_request_when_caller_is_lead_saves_request(setup):
     assert response.status_code == 201
 
 
-@pytest.mark.parametrize("headers,code", [({}, 401), (TS, 403), (bearer(USER_ID, "Attendee"), 403)], ids=["no_token", "technical_support", "attendee"])
-def test_create_request_when_not_a_coordinator_is_refused_before_database(setup, headers, code):
-    """
-    Summary: Only a signed-in Event Coordinator or Lead can record equipment needs.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    Double: Mock (connect not called)
-    """
-    # Arrange (Given)
-    client, _, connect = setup
-
-    # Act + Assert (When / Then)
-    assert client.post(f"/events/{EVENT_ID}/equipment-requests", headers=headers, json={"items": [item()]}).status_code == code
-    connect.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -220,12 +161,9 @@ def test_create_request_when_not_a_coordinator_is_refused_before_database(setup,
     ids=["no_body", "list_body", "empty_object", "empty_items", "items_as_text", "item_as_text", "bad_equipment_id", "zero_quantity", "negative_quantity", "fractional_quantity", "quantity_as_text", "quantity_as_bool", "requirements_not_text", "requirements_too_long", "duplicate_equipment", "too_many_items"],
 )
 def test_create_request_with_invalid_items_returns_400_before_database(setup, payload):
-    """
-    Summary: A submission with no items, a bad equipment id, quantity or requirement text is refused before saving.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    Double: Mock (connect not called)
+    """Summary: A submission with no items, a bad equipment id, quantity or requirement text is refused before saving.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
     # Create request AC1 (validation): reject malformed equipment, quantity and technical requirements.
     client, _, connect = setup
@@ -234,12 +172,9 @@ def test_create_request_with_invalid_items_returns_400_before_database(setup, pa
 
 
 def test_create_request_with_malformed_event_id_returns_400_before_database(setup):
-    """
-    Summary: A request must name a valid event.
-    AC1: The system allows the Event Coordinator and Event Coordinator Lead to
-        record the equipment, equipment type, quantity, and relevant technical
-        requirements for an event.
-    Double: Mock (connect not called)
+    """Summary: A request must name a valid event.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
     client, _, connect = setup
     assert client.post("/events/abc/equipment-requests", headers=COORDINATOR, json={"items": [item()]}).status_code == 400
@@ -256,14 +191,13 @@ def distinct_items(count):
     ids=["below_limit", "at_limit", "above_limit"],
 )
 def test_create_request_when_item_count_near_limit_accepts_up_to_50_lines(setup, count, expected_status):
+    """Summary: One request can record up to 50 equipment lines.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
-    Summary: One request can record up to 50 equipment lines.
-    AC1: (boundary: lines = 49, 50, 51)
-    Double: Stub (cursor returns a saved row for each line)
-    """
-    client, cursor, _ = setup
+    client, cursor, connect = setup
     items = distinct_items(count)
-    cursor.fetchone.side_effect = [db_row(equipment_id=line["equipmentId"]) for line in items]
+    cursor.fetchone.side_effect = [db_row(equipment_id=line["equipmentId"], quantity_requested=line["quantityRequested"], technical_requirements=line["technicalRequirements"].strip()) for line in items]
     context = {"eventId": EVENT_ID, "eventName": "Fixture event", "recipientIds": [], "coordinatorId": None,
                "equipmentNames": {line["equipmentId"]: "Microphone" for line in items}}
 
@@ -272,6 +206,15 @@ def test_create_request_when_item_count_near_limit_accepts_up_to_50_lines(setup,
     )
 
     assert response.status_code == expected_status
+    if expected_status == 201:
+        saved = response.json["requests"]
+        assert len(saved) == count
+        assert [(row["equipmentId"], row["quantityRequested"], row["technicalRequirements"], row["status"], row["eventId"]) for row in saved] == [
+            (line["equipmentId"], line["quantityRequested"], line["technicalRequirements"].strip(), "Pending", EVENT_ID) for line in items]
+        assert [call.args[1] for call in cursor.execute.call_args_list] == [
+            [EVENT_ID, line["equipmentId"], line["quantityRequested"], line["technicalRequirements"].strip(), USER_ID] for line in items]
+    else:
+        connect.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -280,17 +223,21 @@ def test_create_request_when_item_count_near_limit_accepts_up_to_50_lines(setup,
     ids=["below_minimum", "at_minimum", "above_minimum"],
 )
 def test_create_request_when_quantity_near_minimum_accepts_one_or_more(setup, quantity, expected_status):
+    """Summary: Each line must ask for at least one unit.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
-    Summary: Each line must ask for at least one unit.
-    AC1: (boundary: quantity = 0, 1, 2)
-    Double: Stub (cursor returns the saved row)
-    """
-    client, cursor, _ = setup
+    client, cursor, connect = setup
     cursor.fetchone.return_value = db_row(quantity_requested=quantity)
 
     response = client.post(f"/events/{EVENT_ID}/equipment-requests", headers=COORDINATOR, json={"items": [item(quantity=quantity)]})
 
     assert response.status_code == expected_status
+    if expected_status == 201:
+        assert response.json["requests"][0]["quantityRequested"] == quantity
+        assert cursor.execute.call_args.args[1] == [EVENT_ID, MIC, quantity, "Two handheld", USER_ID]
+    else:
+        connect.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -299,16 +246,20 @@ def test_create_request_when_quantity_near_minimum_accepts_one_or_more(setup, qu
     ids=["below_limit", "at_limit", "above_limit"],
 )
 def test_create_request_when_requirements_near_limit_accepts_up_to_1000_characters(setup, length, expected_status):
+    """Summary: Technical requirements can be up to 1000 characters.
+    AC1: The system allows the Event Coordinator and Event Coordinator Lead to record the equipment, equipment type, quantity, and relevant technical requirements for an event.
+    Double: Stub (canned database results/errors); Mock (database interactions inspected); Stub (test JWKS public key for user-token verification); Fake (CompositeClient adds synthetic service context to JSON writes; no HTTP service runs)
     """
-    Summary: Technical requirements can be up to 1000 characters.
-    AC1: (boundary: requirements length = 999, 1000, 1001)
-    Double: Stub (cursor returns the saved row)
-    """
-    client, cursor, _ = setup
-    cursor.fetchone.return_value = db_row()
+    client, cursor, connect = setup
+    cursor.fetchone.return_value = db_row(quantity_requested=2, technical_requirements="x" * length)
 
     response = client.post(
         f"/events/{EVENT_ID}/equipment-requests", headers=COORDINATOR, json={"items": [item(requirements="x" * length)]}
     )
 
     assert response.status_code == expected_status
+    if expected_status == 201:
+        assert response.json["requests"][0]["technicalRequirements"] == "x" * length
+        assert cursor.execute.call_args.args[1] == [EVENT_ID, MIC, 2, "x" * length, USER_ID]
+    else:
+        connect.assert_not_called()
