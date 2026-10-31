@@ -258,10 +258,14 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   the happy path (e.g. double-booking, over-capacity venues, insufficient
   equipment, rejected approvals).
 - Tests should be traceable back to a user story / acceptance criterion —
-  favor test names and docstrings that make that link obvious. File names are
-  story-based (`test_event_submission.py`, `test_event_progress.py`) rather than
-  mirroring `app/` modules, deliberately: that is what traces a test back to
-  its Jira story. Don't rename them to match `app/`.
+  favor test names and docstrings that make that link obvious. Unit test file
+  names are story-based and start with the Jira key
+  (`test_scrum149_safety_check_submission.py`, `test_scrum13_approve_event_request.py`),
+  one story per file, rather than mirroring `app/` modules, deliberately: that
+  is what traces a test back to its Jira story. Don't rename them to match
+  `app/`. How a unit test file is laid out (story header, docstrings, doubles,
+  supporting design checks) is in
+  [docs/testing/unit-test-convention.md](docs/testing/unit-test-convention.md).
 - Run the whole backend before pushing: `npm run test:backend` from the repo
   root.
 - **Frontend** (`frontend/event-management-ui`): Vitest unit/component tests
