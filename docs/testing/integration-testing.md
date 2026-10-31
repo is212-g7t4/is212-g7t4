@@ -1,7 +1,13 @@
 # Integration Testing — Instructions for AI Agents
 
 Read [AGENTS.md](../../AGENTS.md) first. This file extends its *Testing
-expectations* section for integration tests only. 
+expectations* section for integration tests only.
+
+Equipment issues 6/7/8: see the [current story/verification map](equipment-regressions.md)
+for agreed wording pending Jira sync, service-specific fixture exceptions and
+verification limits. PR115's Issue8 fix and regressions are integrated; the owner
+PostgreSQL suite and Safety Check HTTP-boundary cases passed after integration.
+Collection alone is not execution.
 
 If this file and AGENTS.md disagree, **stop and ask** rather than picking one.
 AGENTS.md still describes the old setup in places; see
@@ -28,12 +34,19 @@ conventions in [§6.1](#61-naming-and-documenting-tests-traceability).
 *Why:* unit tests check each side of a boundary in isolation, and both sides
 can pass while the boundary itself is broken. Integration tests exist to exercise the boundary.
 
-| | Unit (`tests/unit/`) | Integration (`tests/integration/`) | Frontend e2e (`frontend/.../e2e/`) | Repo e2e (`e2e/` at the repo root) |
-|---|---|---|---|---|
-| Scope | One function/class | One service, route to DB | UI journey in a browser | Maintained real-stack Playwright journeys |
-| Database | Mocked (`psycopg2.connect` patched) | Real Postgres in a throwaway container | Mocked via `page.route()` | Shared development stack (manual journeys only) |
-| Other services | Mocked | Stubbed/faked at the HTTP layer | Mocked | Real stack; never run by service integration tests |
-| Speed | Milliseconds | Seconds | Seconds to minutes | Minutes |
+| | Unit (`tests/unit/`) | Integration (`tests/integration/`) | Repo e2e (`e2e/` at the repo root) |
+|---|---|---|---|
+| Scope | One function/class | One service, route to DB | Maintained real-stack Playwright journeys |
+| Database | Mocked (`psycopg2.connect` patched) | Real Postgres in a throwaway container | Shared development stack (manual journeys only) |
+| Other services | Mocked | Stubbed/faked at the HTTP layer | Real stack; never run by service integration tests |
+| Speed | Milliseconds | Seconds | Minutes |
+
+Frontend unit/component tests remain in `frontend/event-management-ui/src/`.
+The mocked frontend browser suite and unused lifecycle helper/tests were
+archived and retired; that browser coverage has not been replaced. Existing
+service-test docstrings naming former frontend smoke specs are historical
+cross-references, not current runnable browser coverage; service tests were
+preserved byte-for-byte during retirement.
 
 ### 1.1 Single-service scope
 
@@ -138,15 +151,22 @@ Already done:
   Venue Booking's `integration` marker description now matches the others.
 - `.github/workflows/ci.yml` retains the `integration-tests` matrix job (one per
   service with `tests/integration/`), required by `ci-passed`. Only the retired
-  root-harness job and its gate references were removed.
+  root-harness job and, subsequently, the approved mocked frontend browser job
+  and their matching gate references were removed; all other jobs remain.
 
 Still to do:
 
 - **Register a `live` marker in any other service** that grows such a test,
   using the same pattern (`-m "not integration and not live"`).
-- **Make Equipment Request and Equipment Reservation tier-ready.** They need
-  `pytest-socket`, a registered `integration` marker, `-m "not integration"`,
-  `fail_under`, and their tests moved under `tests/unit/`.
+- **Reconcile Equipment Request and Equipment Reservation with this guide.**
+  Their current configs already register `integration`, deselect it by default,
+  enforce the 100% unit coverage gate and use `tests/unit/`. They use local I/O
+  guards rather than `pytest-socket`. Equipment Request has a fixture-owned
+  PostgreSQL tier, but it loads selected baseline FK tables plus the owner outbox
+  migration rather than the full unmodified migration chain; PR115's separate
+  `safety_reset_owner` fixture does load the full chain. Equipment Reservation
+  currently has unit HTTP doubles only. These documented exceptions were not
+  changed by the test reorganisation; see the [equipment map](equipment-regressions.md).
 
 If a task depends on any of these and they're not in place yet, **stop and
 say so**. Don't work around it.
@@ -516,13 +536,13 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 | venue | atomic | `create_app(config)` | none | Supabase token; Venue Staff role on `POST /venues`, `PUT /venues/<id>` and `PUT /venues/<id>/safety-info` (SCRUM-167, SCRUM-10) | none |
 | venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | Supabase token (requester/reviewer from it); write roles: Coordinators create/edit/cancel, Venue Staff approve/reject, Safety Officer plus `X-Internal-Token` (config) on `safety-reset`; outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
 | equipment | atomic | `create_app(config)` | none | Supabase token | none |
-| equipment-request | atomic | `create_app(config)` | none | Supabase token; create = Coordinators, review = Technical Support; `safety-reset` needs the Safety Officer role plus `X-Internal-Token`; outbox routes use `X-Internal-Token` | none (not tier-ready, see Transition) |
+| equipment-request | atomic | `create_app(config)` | none | Supabase token; create = Coordinators, review = Technical Support; `safety-reset` needs the Safety Officer role plus `X-Internal-Token`; outbox routes use `X-Internal-Token` | none (service-specific guard/schema exceptions, see Transition) |
 | registration | atomic | `create_app(config)` | none | Supabase token (the attendee); register and withdraw need the Attendee role (SCRUM-10) | none |
 | safety-check-record | atomic | `create_app(config)` | none | Supabase token; Coordinators open, withdraw, restore and delete rounds, Safety Officer decides and reopens (SCRUM-10); no integration tier yet | none |
 | notification | atomic | **env only**: `create_app()` takes no config | none | Supabase token (the inbox owner) | consumer (pika) |
 | attendee-registration | composite | n/a | Event, Registration, User (`app/clients.py`, frozen at import) | Supabase token, forwarded; register and withdraw need the Attendee role (SCRUM-10) | none |
 | coordinator-assignment | composite | n/a | User, Event (`app/clients.py`, frozen at import) | Supabase token, forwarded; Lead role looked up via User Service | none |
-| equipment-reservation | composite | n/a | Equipment Request, Event, Equipment, Safety Check Record (`app/clients.py`, **read per call**) | Supabase token, forwarded | none (not tier-ready, see Transition) |
+| equipment-reservation | composite | n/a | Equipment Request, Event, Equipment, Safety Check Record (`app/clients.py`, **read per call**) | Supabase token, forwarded | none (service-specific guard/schema exceptions, see Transition) |
 | event-workflow | composite | n/a | Event, User, Venue Availability, Venue, Equipment Request, Equipment (`app/clients.py`, frozen at import, plus `INTERNAL_SERVICE_TOKEN`) | Supabase token, forwarded; role via User Service; `PATCH /events/<id>/details` also needs a coordinator role on the token (SCRUM-10) | none |
 | safety-check | composite | n/a | Event, Venue Availability, Equipment Request, Safety Check Record, User, Venue, Equipment (`app/clients.py`, frozen at import; uses a `ThreadPoolExecutor`) | Supabase token, forwarded; Safety Officer role via User Service for decisions; submit, re-check and venue-change routes need a coordinator role on the token (SCRUM-10) | none |
 | venue-booking | composite | n/a | Event, Venue, Venue Availability, Safety Check Record (`app/clients.py`, mostly frozen at import) | Supabase token, forwarded; Venue Staff role for review (`GET /booking-requests/<id>`, `/review`, and since SCRUM-29 the legacy `/approve` and `/reject`) and for `PUT /venues/<id>`; create, edit and cancel need a coordinator role (SCRUM-10) | **the only publisher**: `app/dispatcher.py`, queue `notifications.v1`; in-process seam `dispatch_once(api, publish)` |
@@ -553,8 +573,8 @@ changing app code; report them.
   dispatcher runs as its own process. Test it in-process through
   `dispatch_once(api, publish)` with a recording fake `publish` and the outbox
   endpoints stubbed.
-- **Equipment Request and Equipment Reservation aren't tier-ready** (see
-  Transition).
+- **Equipment Request and Equipment Reservation retain service-specific guard
+  and schema exceptions** (see Transition and the [equipment map](equipment-regressions.md)).
 - **Equipment Request's integration suite needs a pinned image.** Its
   `tests/integration/conftest.py` sets `PG_IMAGE` to
   `postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3`
@@ -572,19 +592,20 @@ changing app code; report them.
 ### 12.3 Doc disagreements to resolve (not by the agent)
 
 - **INDEX.md duplicates and status errors:**
-  - Equipment Reservation, Attendee Registration and Registration each appear
-    twice, with conflicting callees or status.
-  - Notification is marked "planned", but working code exists.
-- **Equipment Availability:** INDEX lists it as a planned atomic, while
-  AGENTS.md and the catalog put availability inside the Equipment Reservation
-  composite.
-- **Event Workflow callees:** the catalog says Event, Venue Availabilities,
-  Equipment Availabilities, Forum, Broker; INDEX and the code say Event, User,
-  Venue Availability, Venue, Equipment Request, Equipment.
+  - Attendee Registration and Registration still appear twice with conflicting
+    status. Equipment Reservation's stale duplicate and the separate Equipment
+    Availability row have been removed.
+- **Equipment ownership (aligned):** Equipment Reservation supplies catalogue/event
+  inputs and read-time availability; Equipment Request owns current allocation
+  reads and final approval in one locked transaction. This is not proof of
+  external input provenance or concurrent catalogue/event mutation safety.
+- **Event Workflow scope:** equipment reads now name Equipment Request and
+  Equipment consistently. The catalogue still describes planned Broker
+  work rather than the complete implemented edit-validation callee list in INDEX.
 - **Missing services:** Safety Check and Safety Check Record are absent from
   `docs/microservices-catalog.md`.
-- **Undocumented callees:** Venue Booking and Equipment Reservation call Safety
-  Check Record Service, which neither INDEX row lists.
+- **Safety Check Record callee:** INDEX lists it for Venue Booking and Equipment
+  Reservation; the architecture catalogue is not yet an exhaustive service list.
 - **AGENTS.md says "one Supabase project/schema per atomic"**; the migrations
   use one shared schema (§12.2).
 

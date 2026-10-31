@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "vitest run && node --test e2e-real/*.test.mjs",
-    "test:coverage": "vitest run --coverage && node --test e2e-real/*.test.mjs",
-    "test:e2e": "playwright test -c e2e",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"

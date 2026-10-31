@@ -28,7 +28,7 @@ None — this is an academic project (IS212, Software Project Management) built 
 - Monorepo: Flask microservices (`services/`, one per bounded concern, no shared library) + a React/TypeScript SPA (`frontend/event-management-ui/`), no API gateway — the UI calls composite/atomic services directly.
 - Composites orchestrate atomics; atomics never call out. Notifications are the only async path (RabbitMQ), everything else synchronous REST/JSON.
 - Currently built and visible in the UI: submitting an event request, viewing/managing submitted requests, reviewing requests, an event detail/record view, and a venue catalogue + venue detail view (read-only, gated to Event Coordinator and Venue Staff per SCRUM-24), and an equipment catalogue page where Technical Support can list equipment (filter by status, default Available) and add new records, including types not in the predefined list.
-- Planned, not yet built: equipment reservation flow (the catalogue itself is built), notifications, forum/communication (clarifications and decision reasons).
+- Planned, not yet built: equipment reservation flow (the catalogue itself is built), notifications.
 
 ## Capabilities and Constraints
 

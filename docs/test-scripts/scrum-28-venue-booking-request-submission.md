@@ -1,5 +1,9 @@
 # SCRUM-28 Venue Booking Request Submission — manual test script
 
+> Historical browser evidence: the mocked frontend browser suite was retired.
+> Referenced browser specs are archived, not maintained runnable checks;
+> unit/component tests and manual real-stack journeys remain separate tiers.
+
 These are the SCRUM-28 acceptance criteria checked by hand against a running
 stack. Attach this file and `scrum-28-screenshots/` to SCRUM-28 once it has
 been run.

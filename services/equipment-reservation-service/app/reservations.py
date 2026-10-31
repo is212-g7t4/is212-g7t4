@@ -30,13 +30,15 @@ def _equipment_view(item):
 
 
 def _reserved_by_equipment(event):
-    """Quantity per equipment held by *other* non-rejected events overlapping this event's window."""
+    """Approved quantity held by this event and other eligible overlapping events."""
     start, end = event.get("startTime"), event.get("endTime")
     if not start or not end:
         return {}
     others = clients.get_overlapping_events(start, end, RESERVING_EVENT_STATUSES, event["id"])
     totals = defaultdict(int)
     for item in clients.list_requests("Approved", [other["id"] for other in others]):
+        totals[item["equipmentId"]] += item["quantityRequested"]
+    for item in clients.list_requests("Approved", [event["id"]]):
         totals[item["equipmentId"]] += item["quantityRequested"]
     return totals
 
@@ -98,30 +100,60 @@ def _safety_feedback(safety_round, request_id):
 def _ensure_sufficient(event_id, pending):
     event = next(iter(clients.get_event_summaries([event_id])), {"id": event_id})
     catalogue = _catalogue()
+    # Every candidate for the same equipment competes for the same remaining pool.
+    grouped = defaultdict(int)
+    for item in pending:
+        grouped[item["equipmentId"]] += item["quantityRequested"]
     availability = _evaluate_pending(event, pending, catalogue)
     short = [
         f"{(catalogue.get(item['equipmentId']) or {}).get('description', 'Unknown equipment')} "
-        f"(requested {item['quantityRequested']}, available {availability[item['id']]['availableStock']})"
+        f"(requested {grouped[item['equipmentId']]}, available {availability[item['id']]['availableStock']})"
         for item in pending
-        if availability[item["id"]]["isInsufficient"]
+        if grouped[item["equipmentId"]] > availability[item["id"]]["availableStock"]
     ]
     if short:
-        raise InsufficientStockError("Cannot approve, insufficient stock: " + "; ".join(short) + ".")
+        raise InsufficientStockError("Cannot approve, insufficient stock: " + "; ".join(dict.fromkeys(short)) + ".")
+
+
+def _approval_context(event_id, pending):
+    """Include ALL eligible overlaps, even events with no Approved request yet.
+
+    Holder summaries additionally let the owner distinguish released/non-overlapping
+    Approved rows from missing context after waiting for its global approval lock.
+    """
+    holders = clients.list_requests()
+    ids = list(dict.fromkeys([event_id, *(item["eventId"] for item in holders)]))
+    events = {event["id"]: event for event in clients.get_event_summaries(ids)}
+    target = events.get(event_id)
+    if target is None or not target.get("startTime") or not target.get("endTime"):
+        raise InsufficientStockError("Cannot approve without the event window. Refresh and try again.")
+    for event in clients.get_overlapping_events(target["startTime"], target["endTime"], RESERVING_EVENT_STATUSES, event_id):
+        events[event["id"]] = event
+    return dict(eventId=event_id, requestIds=[item["id"] for item in pending],
+                events=list(events.values()), equipment=clients.list_equipment())
 
 
 def review_request(request_id, status, rejection_reason=None):
     if status == "Approved":
         request = clients.get_request(request_id)
-        if request["status"] == "Pending":
-            _ensure_sufficient(request["eventId"], [request])
+        if request["status"] != "Pending":
+            raise InsufficientStockError("Only Pending equipment requests can be reviewed.")
+        _ensure_sufficient(request["eventId"], [request])
+        checked = _approval_context(request["eventId"], [request])
+        return clients.review_request(request_id, status, rejection_reason, approval_context=checked)
     return clients.review_request(request_id, status, rejection_reason)
 
 
 def review_event(event_id, status, rejection_reason=None):
     if status == "Approved":
         pending = clients.list_requests("Pending", [event_id])
-        if pending:
-            _ensure_sufficient(event_id, pending)
+        if not pending:
+            if not clients.list_requests(event_ids=[event_id]):
+                raise RequestNotAllowedError(404, "No equipment requests found for this event.")
+            raise InsufficientStockError("This event has no Pending equipment requests.")
+        _ensure_sufficient(event_id, pending)
+        checked = _approval_context(event_id, pending)
+        return clients.review_event_requests(event_id, status, rejection_reason, approval_context=checked)
     return clients.review_event_requests(event_id, status, rejection_reason)
 
 

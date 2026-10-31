@@ -20,7 +20,7 @@ from app.models import (
     review_request,
 )
 
-from app import outbox
+from app import outbox, allocation
 from app.auth import authenticate
 
 STATUSES = ("Pending", "Approved", "Rejected")
@@ -85,6 +85,10 @@ def create_app(config=None):
     )
     app.config.update(config or {})
     app.register_blueprint(outbox.bp)
+
+    @app.errorhandler(allocation.AllocationConflict)
+    def allocation_conflict(error):
+        return jsonify(message=str(error)), 409
 
     @app.errorhandler(outbox.NotificationValidationError)
     def invalid_notification_context(error):
@@ -227,7 +231,8 @@ def create_app(config=None):
             return jsonify(message=error), 400
         try:
             context = outbox.decision_context(payload)
-            updated = review_event_requests(app.config["DATABASE_URL"], event_id, status, reviewer_id, reason, notification_context=context)
+            checked = allocation.context(payload, event_id=event_id) if status == "Approved" else None
+            updated = review_event_requests(app.config["DATABASE_URL"], event_id, status, reviewer_id, reason, notification_context=context, approval_context=checked)
         except RequestNotFoundError:
             return jsonify(message="No equipment requests found for this event."), 404
         except RequestAlreadyReviewedError:
@@ -251,7 +256,8 @@ def create_app(config=None):
             return jsonify(message=error), 400
         try:
             context = outbox.decision_context(payload)
-            updated = review_request(app.config["DATABASE_URL"], request_id, status, reviewer_id, reason, notification_context=context)
+            checked = allocation.context(payload, request_id=request_id) if status == "Approved" else None
+            updated = review_request(app.config["DATABASE_URL"], request_id, status, reviewer_id, reason, notification_context=context, approval_context=checked)
         except RequestNotFoundError:
             return jsonify(message="Equipment request not found."), 404
         except RequestAlreadyReviewedError:

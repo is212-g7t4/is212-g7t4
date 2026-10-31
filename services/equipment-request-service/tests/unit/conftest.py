@@ -3,7 +3,7 @@ from flask.testing import FlaskClient
 from unittest.mock import MagicMock
 
 from app import create_app
-from tests.unit.factories import EVENT_ID, MIC, ORIGIN, TABLE
+from tests.unit.factories import EVENT_ID, MIC, ORIGIN, TABLE, approval_context
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def setup(monkeypatch):
         def open(self, *args, **kwargs):
             payload = kwargs.get("json")
             if isinstance(payload, dict):
-                kwargs["json"] = {"notificationContext": {
+                kwargs["json"] = {"approvalContext": approval_context(), "notificationContext": {
                     "eventId": EVENT_ID, "eventName": "Fixture event", "recipientIds": [],
                     "coordinatorId": None, "equipmentNames": {MIC: "Microphone", TABLE: "Table"}}, **payload}
                 kwargs["headers"] = {"X-Internal-Token": "synthetic", **kwargs.get("headers", {})}

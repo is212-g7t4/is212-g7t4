@@ -117,9 +117,11 @@ def test_change_request_with_spoofed_headers_sends_trusted_context_and_token(ups
     # Act + Assert (When / Then)
     assert method == ("POST" if operation == "submit" else "PATCH")
     assert url.startswith("http://owner.invalid/")
-    # SCRUM-10: Equipment Request authenticates the forwarded user and never reads an internal token on
-    # create/review, so the mutation carries only the caller's token, not the attacker's or the configured one.
-    assert kwargs["headers"] == {"Authorization": "Bearer coordinator-token"}
+    # Reviews carry the configured credential, never a caller-supplied token.
+    expected_headers = {"Authorization": "Bearer coordinator-token"}
+    if operation != "submit":
+        expected_headers["X-Internal-Token"] = "trusted-config-token"
+    assert kwargs["headers"] == expected_headers
     expected = dict(eventId=EVENT, eventName="Community Fair", equipmentNames={MIC: "Microphone"})
     if operation == "submit":
         expected["recipientIds"] = [TSS1, TSS2]

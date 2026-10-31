@@ -37,14 +37,14 @@ Real
 
 Doubled
 -------
-- psycopg2.connect: Stub (`setup`) - a MagicMock connection.
+- psycopg2.connect: Stub (`safety_role_setup`) - a MagicMock connection.
 
 Not proven
 ----------
 - That a refused reset leaves the stored requests unchanged in real PostgreSQL
   (NOT COVERED ANYWHERE).
 - Create and review role refusals (-> test_scrum32_create_equipment_request.py
-  and test_scrum33_equipment_request_review.py).
+  and test_equipment_request_review.py).
 """
 from unittest.mock import MagicMock
 
@@ -61,7 +61,7 @@ PATH = f"/events/{EVENT}/equipment-requests/safety-reset"
 
 
 @pytest.fixture
-def setup(monkeypatch):
+def safety_role_setup(monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
     app = create_app({"DATABASE_URL": "postgresql://x", "INTERNAL_SERVICE_TOKEN": TOKEN})
@@ -70,7 +70,7 @@ def setup(monkeypatch):
 
 # AC1 ----
 
-def test_safety_reset_when_safety_officer_with_service_token_reaches_validation(setup):
+def test_safety_reset_when_safety_officer_with_service_token_reaches_validation(safety_role_setup):
     """
     Summary: A Safety Officer acting through Safety Check Service gets past both checks.
     AC1: Given an authenticated user is permitted to modify information based
@@ -79,7 +79,7 @@ def test_safety_reset_when_safety_officer_with_service_token_reaches_validation(
     Double: Stub (MagicMock connection)
     """
     # Arrange (Given)
-    client, _ = setup
+    client, _ = safety_role_setup
 
     # Act (When)
     response = client.post(PATH, json={}, headers={**bearer(USER_ID, "Safety Officer"), "X-Internal-Token": TOKEN})
@@ -94,7 +94,7 @@ def test_safety_reset_when_safety_officer_with_service_token_reaches_validation(
     "role", ["Event Coordinator", "Event Coordinator Lead", "Technical Support", "Venue Staff", "Event Organiser", "Attendee"],
     ids=["event_coordinator", "event_coordinator_lead", "technical_support", "venue_staff", "event_organiser", "attendee"],
 )
-def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_token(setup, role):
+def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_token(safety_role_setup, role):
     """
     Summary: The service token proves the route, not the person: any other role is refused.
     AC2: Given an authenticated user's role does not permit them to modify
@@ -104,7 +104,7 @@ def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_toke
     Double: Stub (MagicMock connection)
     """
     # Arrange (Given)
-    client, connection = setup
+    client, connection = safety_role_setup
 
     # Act (When)
     response = client.post(
@@ -116,3 +116,36 @@ def test_safety_reset_when_not_safety_officer_returns_403_even_with_service_toke
     assert response.status_code == 403
     assert response.json["message"] == "Your role cannot change this information."
     connection.cursor.assert_not_called()
+
+
+import psycopg2
+
+import pytest
+
+from tests.unit.factories import EVENT_ID, MIC, REQUEST_ID, TABLE, USER_ID, bearer, db_row, item
+
+TS = bearer(USER_ID, "Technical Support")
+
+COORDINATOR = bearer(USER_ID, "Event Coordinator")
+
+SAFETY_OFFICER = bearer(USER_ID, "Safety Officer")
+
+
+
+@pytest.mark.parametrize("token,headers,code", [
+    (None, SAFETY_OFFICER, 503), ("test-internal-token", SAFETY_OFFICER, 403),
+    ("test-internal-token", TS, 403),
+], ids=["token_not_configured", "officer_without_service_token", "technical_support"])
+def test_safety_reset_without_internal_service_credentials_is_refused(setup, token, headers, code):
+    """Summary: Only Safety Check Service, acting for a Safety Officer, can reset equipment requests.
+    AC2: A caller without the required Safety Officer/service authority cannot modify equipment requests.
+    Double: Mock (database connection must not be reached)
+    """
+    # Arrange (Given)
+    client, _, connect = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = token
+
+    # Act + Assert (When / Then)
+    assert client.post(f"/events/{EVENT_ID}/equipment-requests/safety-reset",
+        headers=headers, json={"requestIds": [REQUEST_ID]}).status_code == code
+    connect.assert_not_called()

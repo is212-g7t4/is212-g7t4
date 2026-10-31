@@ -1,10 +1,9 @@
-import { configDefaults, defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
-    exclude: [...configDefaults.exclude, 'e2e/**', 'e2e-real/**'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: {
       // Machine-readable totals accompany the visible report; no paths are hidden.

@@ -5,7 +5,6 @@ Final structure after the Week 7 customer changes (as of 11 Oct 2026). It is cre
 **Conventions**
 
 - One Supabase (Postgres) project; each service owns its own tables, so foreign keys across services are real FKs.
-- The Forum service uses MongoDB and is planned (bonus feature), so its references to SQL rows are logical only.
 - Every time column is `TIMESTAMPTZ` (timezone-aware).
 - Column names are `snake_case` in the database (`registration_enabled`); table names are PascalCase and need double quotes in SQL (`public."VenueBooking"`). New columns follow the `xxx_at` / `xxx_by` pattern.
 - `status` columns stay `VARCHAR(50)`; the allowed values are still to be defined by the team.
@@ -324,40 +323,11 @@ flags to decide which areas need review again.
 
 ---
 
-## Forum service (MongoDB, planned)
-
-Will hold comments, decision reasons and the event-specific history log.
-
-### Thread
-
-| Field | Type | Change | What it is for and how it is used |
-|---|---|---|---|
-| _id | ObjectId (PK) | | Unique ID of a conversation thread. |
-| entityId | UUID (indexed) | | The SQL record the thread is about, such as an event or booking, used to load its thread. |
-| entityType | String | | The kind of record `entityId` points at, so the ID is looked up in the right table. |
-| status | String | | Whether the thread is open or closed. |
-| participants | Array | | User IDs allowed to read and post in the thread. |
-
-### Message
-
-| Field | Type | Change | What it is for and how it is used |
-|---|---|---|---|
-| _id | ObjectId (PK) | was messageId UUID | Unique ID of one message, in MongoDB's standard key field. |
-| threadId | ObjectId (logical FK Thread) | | The thread the message belongs to. |
-| senderId | UUID | | The user who posted it (or the system for log entries). |
-| type | String | new | Whether it is a comment, a decision reason or a change-log entry, used to filter the history view. |
-| content | String | changed | The message text. |
-| timestamp | Date | changed | When it was posted, used to order the thread. |
-| attachments | Array | changed | Any files attached to the message. |
-
----
-
 ## Still open
 
 - **Status values:** the allowed values for every `status` column are still to be listed by the team. `On Hold` should require `hold_expires_at` (the Venue Availability service always sets it). Bookings and equipment requests need a status for "sent back for safety re-review". The Venue Availability service already treats `Rejected`, `Cancelled` and `Expired` as no longer blocking.
 - **Suitability checking:** `Venue.accessibility` and the event's requirement fields are free text, so the system cannot compare them automatically.
-- **Assignment history:** only the latest assignment is stored on `Event`; full reassignment history waits for the Forum service.
+- **Assignment history:** only the latest assignment is stored on `Event`; full reassignment history is not implemented.
 - **Optional columns:** `Venue.operating_info` and `VenueBooking.reminder_sent_at` can be dropped without breaking a Week 7 requirement.
 - **Story pool:** the "Reject Affected Bookings" story still says auto-reject and needs rewording to match flagging.
-- **Forum (MongoDB):** the `Thread` and `Message` collections above are the design only; nothing has been created yet.
 - **`Venue.operational_status`:** the design proposed narrowing it to Active/Inactive. It was kept as Available / Booked / Under Maintenance, so the Venue Staff screens need no change.

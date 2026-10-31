@@ -1,5 +1,6 @@
-"""
-SCRUM-151: Reject or Request Changes to Safety Arrangements
+"""SCRUM-151: Reject or Request Changes to Safety Arrangements
+
+Agreed revision from this conversation; pending confirmation that Jira has been updated
 
 User Story
 ----------
@@ -13,9 +14,7 @@ AC1: Given an event is 'Pending Safety Check', when I request changes, then I
      must select at least one affected area (venue arrangement,
      technical/equipment arrangement, event details) and describe the change
      needed; otherwise the decision is not saved.
-AC2: Given changes are requested, then the event status changes to 'Safety
-     Changes Requested', the event returns to the planning stage for each
-     selected area, and its existing arrangements are preserved.
+AC2: Given changes are requested, then the event status changes to 'Safety Changes Requested', the event returns to the planning stage for each selected area, and its existing arrangements are preserved. For equipment requests affected by the requested changes, only requests with status 'Approved' return to 'Pending' for review. Requests already 'Pending' or 'Rejected' remain unchanged, including any recorded reviewer and rejection reason.
 AC3: Given an event is 'Pending Safety Check', when I reject it, then a reason
      is required and I must confirm the rejection before it is saved.
 AC4: Given I confirm a rejection, then the event status changes to 'Cancelled',

@@ -1,5 +1,4 @@
-"""
-SCRUM-156: Book Multiple Venues for an Event
+"""SCRUM-156: Book Multiple Venues for an Event
 
 User Story
 ----------
@@ -82,6 +81,8 @@ AC6: Given a booking request has been rejected and Venue Staff have provided
 
 SCRUM-164: Revise Arrangements and Resubmit for Safety Check
 
+Agreed revision from this conversation; pending confirmation that Jira has been updated
+
 User Story
 ----------
 As an Event Coordinator, I want to see the Safety Officer's feedback and revise
@@ -95,9 +96,7 @@ AC1: Given my event is 'Safety Changes Requested', when I open it, then I see
 AC2: Given the venue arrangement is flagged, then the affected venue booking
      must be reviewed again by Venue Staff (revised booking or replacement
      request) before the event can be resubmitted.
-AC3: Given the technical arrangement is flagged, then the affected equipment
-     request must be reviewed again by Technical Support Staff before the event
-     can be resubmitted.
+AC3: Given the technical arrangement is flagged, then the affected equipment requests that were previously 'Approved' return to 'Pending' and must be approved again by Technical Support Staff before the event can be resubmitted. The safety-change action does not reopen existing 'Rejected' requests or clear their rejection reasons, and requests already 'Pending' remain 'Pending'.
 AC4: Given an arrangement was not flagged, then it stays confirmed and does not
      need to be reviewed again.
 AC5: Given all flagged arrangements are confirmed again, when I resubmit, then

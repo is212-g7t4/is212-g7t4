@@ -2,13 +2,16 @@
 
 Checks whether the equipment an event asked for is actually available, and
 validates Technical Support's decision against that check. It owns no data: it
-orchestrates three atomics and never reads their databases.
+orchestrates atomic APIs and never reads their databases. Equipment Request owns
+the final allocation transaction; this composite supplies catalogue/event inputs
+and exact checked IDs, not a commit-time reservation of its own.
 
 | Calls | For |
 |---|---|
 | Event Service | the event's `startTime`/`endTime`, and other events overlapping that window |
 | Equipment Service | the catalogue: `totalQuantity` and physical `status` |
-| Equipment Request Service | the requests, and recording approve/reject |
+| Equipment Request Service | requests, final stock enforcement and recording approve/reject |
+| User Service | eligible submission-notification recipients |
 | Safety Check Record Service | latest-round feedback for equipment in safety revision |
 
 ## Availability rules
@@ -18,15 +21,20 @@ polled or stored, and `Equipment.operational_status` is never changed.
 
 1. **Physical check** — equipment that is not `Available` has effective stock `0`.
 2. **Temporal check** — stock is a shared pool. `reserved` is the sum of
-   `quantityRequested` over **Approved** requests belonging to *other* events
-  whose status is `Approved`, `Confirmed`, `Under Review`, `Clarification Requested`,
-  `Pending Safety Check` or `Safety Changes Requested`
+   `quantityRequested` over **Approved** requests belonging to the same event
+   and other overlapping events whose status is `Approved`, `Confirmed`,
+   `Under Review`, `Clarification Requested`, `Amendment Requested`,
+   `Pending Safety Check` or `Safety Changes Requested`
   (Submitted events do not reserve stock) and whose window overlaps:
    `other.start < target.end AND other.end > target.start`.
    `availableStock = max(0, totalQuantity - reserved)`.
 3. `isInsufficient = quantityRequested > availableStock`.
 
-Each line is compared to the pool on its own.
+Read-time results are snapshots, not stock holds. Bulk approval groups the selected
+quantities per equipment item. Equipment Request re-reads owner allocations after
+its shared transaction lock and makes the final stock check before saving the exact
+checked selection and its outbox records. That transaction does not prove external
+input provenance or coordinate concurrent catalogue/event mutations.
 
 ## Endpoints
 
@@ -69,15 +77,27 @@ Technical Support sees this in the final Safety change reason column of the
 horizontally scrollable equipment-review table.
 
 `EQUIPMENT_REQUEST_SERVICE_URL`, `EVENT_SERVICE_URL`, `EQUIPMENT_SERVICE_URL`,
-`SAFETY_CHECK_RECORD_SERVICE_URL`, `FRONTEND_ORIGIN` — see `.env.example`.
+`SAFETY_CHECK_RECORD_SERVICE_URL`, `USER_SERVICE_URL`, `INTERNAL_SERVICE_TOKEN`,
+`FRONTEND_ORIGIN` — see `.env.example`.
 Port 5010 under docker compose.
 
 ## Commands
 
+Optional host execution, from the repository root, after configuring this
+service's `.env` and its downstream URLs (keep existing settings):
+
+```bash
+cd services/equipment-reservation-service
+uv sync --locked --python 3.12
+uv run --env-file .env flask --app app run --port 5010
 ```
-uv sync
-uv run flask --app app run --debug
-uv run pytest
+
+Alternatively use Docker Compose from the root; do not bind port 5010 twice.
+Prepared databases/accounts and running downstream services are prerequisites.
+For isolated tests, from this service directory:
+
+```bash
+PYTHON_DOTENV_DISABLED=1 uv run --no-env-file --locked --python 3.12 pytest
 ```
 
 
@@ -95,10 +115,10 @@ TSS recipients (both `Technical Support` and `Technical Support Staff`) or the
 current coordinator. The Event Service read (`/internal/events/<id>/notification-context`)
 needs `X-Internal-Token` matching `INTERNAL_SERVICE_TOKEN`; if that token is not
 configured here the action is refused with `503` before anything is saved. The create and
-review calls to Equipment Request Service carry only the caller's own token (SCRUM-10):
-Equipment Request authenticates the forwarded user and checks the role, and it validates
-only the shape of the snapshot (see the known gaps in
-[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md)).
+review calls supply notification context; approvals also supply catalogue/event
+inputs and exact checked request IDs. The owner transaction protects its allocation
+reads and approval writes, not external input provenance (see
+[access-control documentation](../../docs/scrum-10-role-based-modification-control.md)).
 Existing browser callers continue using this composite, without sending internal tokens.
 Configure the same token in Event, Equipment Request (its outbox routes) and Equipment
 Reservation services. Cross-service reads remain outside the atomic. An unavailable context service refuses the action before saving;
