@@ -10,7 +10,7 @@ from uuid import uuid4
 import psycopg2
 from psycopg2.extensions import parse_dsn
 import pytest
-from tests.integration.owner_postgres import Database, OwnerAPI, install_schema, wait_for
+from tests.integration.equipment_request_db_helpers import Database, OwnerAPI, install_schema, wait_for
 
 PG_IMAGE = "postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3"
 

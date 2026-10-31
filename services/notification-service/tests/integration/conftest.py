@@ -26,7 +26,7 @@ from app import create_app  # noqa: E402
 MIGRATIONS = Path(__file__).resolve().parents[4] / "database" / "supabase" / "migrations"
 LOCAL_HOSTS = {"localhost", "127.0.0.1"}
 OWNED_DATABASES = {}
-LABEL = "scrum47-notification-integration"
+LABEL = "notification-integration"
 
 
 def assert_local(url):
@@ -92,6 +92,8 @@ def database_url():
                         # This does not model hosted Supabase permissions or credentials.
                         cursor.execute("CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;")
                         print("BOOTSTRAP: synthetic Supabase API roles only", flush=True)
+                        cursor.execute("SELECT version()")
+                        print("POSTGRES_VERSION " + cursor.fetchone()[0], flush=True)
                         for migration in sorted(MIGRATIONS.glob("*.sql")):
                             payload = migration.read_bytes()
                             digest = hashlib.sha256(payload).hexdigest()
