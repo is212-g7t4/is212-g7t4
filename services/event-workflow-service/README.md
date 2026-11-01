@@ -94,7 +94,6 @@ requires caller-owned process groups, log handles and exact container names and
 returns failure diagnostics. These helpers are not an acceptance suite or service
 integration fixtures.
 Existing teammate E2E is unchanged.
-See `docs/scrum-45-manual-testing.md` for the separate shared-development gates.
 
 ### Initial assignment preparation and name repair (AC4 / DR6)
 

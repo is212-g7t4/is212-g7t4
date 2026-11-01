@@ -83,8 +83,8 @@ See [INDEX.md](INDEX.md) for the concrete list of every service directory.
     token's role first, then the caller's relationship to the record (owner,
     assigned coordinator), then state. The routes only another service may call
     also require `X-Internal-Token`, which fails closed when
-    `INTERNAL_SERVICE_TOKEN` is not configured. The route-by-route matrix is in
-    [docs/scrum-10-role-based-modification-control.md](docs/scrum-10-role-based-modification-control.md).
+    `INTERNAL_SERVICE_TOKEN` is not configured. Each service README lists
+    the roles its routes require.
 - **Messaging:** RabbitMQ — the *only* asynchronous path in the system, used
   exclusively for notification delivery. Every other cross-service call is
   synchronous REST/JSON.
@@ -259,9 +259,12 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   equipment, rejected approvals).
 - Tests should be traceable back to a user story / acceptance criterion —
   favor test names and docstrings that make that link obvious. File names are
-  story-based (`test_scrum11_event_submission.py`, `test_scrum19_event_progress.py`) rather than
-  mirroring `app/` modules, deliberately: that is what traces a test back to
-  its Jira story. Don't rename them to match `app/`.
+  story-based (`test_scrum11_event_submission.py`, `test_scrum19_event_progress.py`),
+  one story per file, rather than mirroring `app/` modules, deliberately: that
+  is what traces a test back to its Jira story. Don't rename them to match
+  `app/`. How a unit test file is laid out (story header, docstrings, doubles,
+  supporting design checks) is in
+  [docs/testing/unit-test-convention.md](docs/testing/unit-test-convention.md).
 - Run the whole backend before pushing: `npm run test:backend` from the repo
   root.
 - **Frontend** (`frontend/event-management-ui`): Vitest unit/component tests

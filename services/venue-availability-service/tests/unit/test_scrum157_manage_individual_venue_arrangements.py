@@ -79,8 +79,7 @@ Doubled
 Not proven
 ----------
 - The whole chain across Venue Booking, Safety Check, Safety Check Record and
-  Event Services (-> docs/test-scripts/scrum-28-venue-booking-request-
-  submission.md, Part B, run by hand against the stack).
+  Event Services (run by hand against the stack).
 - SCRUM-157 AC2-AC5 are exercised by
   `test_scrum156_book_multiple_venues.py`; this focused module proves the
   safety-state gate and SCRUM-28 resubmission timing only.

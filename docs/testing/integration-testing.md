@@ -3,9 +3,7 @@
 Read [AGENTS.md](../../AGENTS.md) first. This file extends its *Testing
 expectations* section for integration tests only.
 
-Equipment issues 6/7/8: see the [current story/verification map](equipment-regressions.md)
-for current Jira-confirmed owner wording, service-specific fixture exceptions and
-verification limits. PR115's Issue8 fix and regressions are integrated; the owner
+Equipment issues 6/7/8: PR115's Issue8 fix and regressions are integrated; the owner
 PostgreSQL suite and Safety Check HTTP-boundary cases passed after integration.
 Collection alone is not execution.
 
@@ -166,7 +164,7 @@ Still to do:
   migration rather than the full unmodified migration chain; PR115's separate
   `safety_reset_owner` fixture does load the full chain. Equipment Reservation
   currently has unit HTTP doubles only. These documented exceptions were not
-  changed by the test reorganisation; see the [equipment map](equipment-regressions.md).
+  changed by the test reorganisation.
 
 If a task depends on any of these and they're not in place yet, **stop and
 say so**. Don't work around it.
@@ -531,7 +529,7 @@ call `load_dotenv()` at import. Composites have no database and use `httpx`.
 | Service | Kind | How the DB URL reaches the app | Outbound HTTP (where base URLs are set) | Identity today | RabbitMQ |
 |---|---|---|---|---|---|
 | user | atomic | `create_app(config)["DATABASE_URL"]` | none | Supabase token; `POST /auth/login` is public | none |
-| event | atomic | `create_app(config)` | none | Supabase token (`?viewerRole=` asks for a wider view, judged on the token's role); `X-Internal-Token` (outbox, notification-context and workflow-only routes) checked against `app.config["INTERNAL_SERVICE_TOKEN"]`, failing closed with `503` when unset; write roles per route (Organiser, Lead, Coordinators; Safety Officer on `/safety-status` decisions), see docs/scrum-10-role-based-modification-control.md | none |
+| event | atomic | `create_app(config)` | none | Supabase token (`?viewerRole=` asks for a wider view, judged on the token's role); `X-Internal-Token` (outbox, notification-context and workflow-only routes) checked against `app.config["INTERNAL_SERVICE_TOKEN"]`, failing closed with `503` when unset; write roles per route (Organiser, Lead, Coordinators; Safety Officer on `/safety-status` decisions) | none |
 | venue | atomic | `create_app(config)` | none | Supabase token; Venue Staff role on `POST /venues`, `PUT /venues/<id>` and `PUT /venues/<id>/safety-info` (SCRUM-167, SCRUM-10) | none |
 | venue-availability | atomic | `create_app(config)`; closures and outbox read `current_app.config` | none | Supabase token (requester/reviewer from it); write roles: Coordinators create/edit/cancel, Venue Staff approve/reject, Safety Officer plus `X-Internal-Token` (config) on `safety-reset`; outbox token read via `os.getenv` | owns the outbox table; doesn't publish |
 | equipment | atomic | `create_app(config)` | none | Supabase token | none |
@@ -573,7 +571,7 @@ changing app code; report them.
   `dispatch_once(api, publish)` with a recording fake `publish` and the outbox
   endpoints stubbed.
 - **Equipment Request and Equipment Reservation retain service-specific guard
-  and schema exceptions** (see Transition and the [equipment map](equipment-regressions.md)).
+  and schema exceptions** (see Transition).
 - **Equipment Request's integration suite needs a pinned image.** Its
   `tests/integration/conftest.py` sets `PG_IMAGE` to
   `postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3`
