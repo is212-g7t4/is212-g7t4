@@ -116,6 +116,6 @@ test('AC3: reassignment replaces the displayed coordinator without removing the 
 test('only the Event Coordinator Lead can view assignment controls', () => {
   render(<UnassignedQueuePage role="Event Coordinator" currentUserId={coordinatorId} onViewDetails={vi.fn()} />)
 
-  expect(screen.getByText('Coordinator assignments are visible only to the Event Coordinator Lead.')).toBeInTheDocument()
+  expect(screen.getByText('Unassigned events are visible only to the Event Coordinator Lead.')).toBeInTheDocument()
   expect(assignmentApi).not.toHaveBeenCalled()
 })

@@ -49,7 +49,7 @@ Run the new owner persistence suites, substituting `registration-service` or `ev
 ```sh
 env -i HOME="$HOME" PATH="$PATH" PYTHON_DOTENV_DISABLED=1 UV_NO_ENV_FILE=1 \
   DATABASE_URL=postgresql://synthetic:synthetic@127.0.0.1:1/unused \
-  uv run --no-env-file --locked pytest tests/integration/test_attendee_notifications.py \
+  uv run --no-env-file --locked pytest tests/integration/test_scrum46_attendee_notifications.py \
   -m integration --no-cov -q -s
 ```
 
@@ -73,7 +73,7 @@ not current application-test counts or browser acceptance.
 
 ## Historical test inventory and measurements
 
-Each Python story module is named `test_attendee_notifications.py` and documents ACs, boundaries and limitations. The pre-retirement counts below are parameter-expanded cases, not function counts: **120 cases**, including supporting recovery/migration rules and the now-archived root E2E sequence. The earlier execution measurements following the table are historical; the latest follow-up results appear at the end.
+Each Python story module is named `test_scrum46_attendee_notifications.py` and documents ACs, boundaries and limitations. The pre-retirement counts below are parameter-expanded cases, not function counts: **120 cases**, including supporting recovery/migration rules and the now-archived root E2E sequence. The earlier execution measurements following the table are historical; the latest follow-up results appear at the end.
 
 | Owner / tier | New story cases | Observable outcomes |
 | --- | ---: | --- |
@@ -150,7 +150,7 @@ A small external AST/source-contract inspection passed: it checks the current-on
 
 Actual RED->GREEN logs were retained outside Git for registration intent, dispatcher content, cancellation, fan-out, effective updates, consumer acceptance, original venue, historical visibility, UI destination, registration snapshot, legacy schedule, target switching and private-outbox grants. Intermediate unsuccessful files labelled `green` were retained as failures; later successful reruns are identified separately. Other additions characterize existing behavior rather than manufacturing RED.
 
-Existing generic worker tests are reused for freeze-before-publish, freeze failure, owner-returned envelope, broker confirmation/NACK, per-job failure isolation and ambiguous publish/completion replay: `test_scrum45_notifications.py`, `test_event_change_notifications.py` and their service-integration counterparts. Existing Notification persistence/dedup tests and the real E2E cover inbox replay/read preservation. Reuse is not a new attendee-specific fault-injection claim.
+Existing generic worker tests are reused for freeze-before-publish, freeze failure, owner-returned envelope, broker confirmation/NACK, per-job failure isolation and ambiguous publish/completion replay: `test_scrum45_notifications.py` (Event and Event Workflow service integration: `test_scrum45_organiser_decision_notifications.py`), `test_scrum49_event_change_notifications.py` (integration: `test_scrum49_event_change_notifications.py`) and their service-integration counterparts. Existing Notification persistence/dedup tests and the real E2E cover inbox replay/read preservation. Reuse is not a new attendee-specific fault-injection claim.
 
 Remaining limits:
 

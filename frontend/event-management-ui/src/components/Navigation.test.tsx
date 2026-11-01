@@ -6,17 +6,17 @@ test('Event Coordinators get one Events entry instead of separate event pages', 
   render(<Sidebar route="dashboard" role="Event Coordinator" onNavigate={vi.fn()} />)
   expect(screen.getByRole('button', { name: 'Events' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'My events' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Request review' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Event requests' })).not.toBeInTheDocument()
 })
 
-test('Events opens My events for a coordinator and the unassigned queue for the Lead', () => {
+test('Events opens My events for a coordinator and for the Lead', () => {
   const onNavigate = vi.fn()
   const { rerender } = render(<Sidebar route="dashboard" role="Event Coordinator" onNavigate={onNavigate} />)
   screen.getByRole('button', { name: 'Events' }).click()
   expect(onNavigate).toHaveBeenLastCalledWith('myEvents')
   rerender(<Sidebar route="dashboard" role="Event Coordinator Lead" onNavigate={onNavigate} />)
   screen.getByRole('button', { name: 'Events' }).click()
-  expect(onNavigate).toHaveBeenLastCalledWith('queue')
+  expect(onNavigate).toHaveBeenLastCalledWith('myEvents')
 })
 
 test('shows My events to Event Organisers', () => {
@@ -44,15 +44,15 @@ test('shows Browse events only to attendees', () => {
   expect(screen.queryByRole('button', { name: 'My registrations' })).not.toBeInTheDocument()
 })
 
-test('Request review tab is hidden from Event Organisers', () => {
+test('Event requests tab is hidden from Event Organisers', () => {
   render(<Sidebar route="myEvents" role="Event Organiser" onNavigate={vi.fn()} />)
-  expect(screen.queryByRole('button', { name: 'Request review' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Event requests' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'My events' })).toBeInTheDocument()
 })
 
-test('Request review is still its own entry for Venue Staff', () => {
+test('Event requests is still its own entry for Venue Staff', () => {
   render(<Sidebar route="review" role="Venue Staff" onNavigate={vi.fn()} />)
-  expect(screen.getByRole('button', { name: 'Request review' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Event requests' })).toBeInTheDocument()
 })
 
 test('Safety checks tab is shown only to Safety Officers', () => {
