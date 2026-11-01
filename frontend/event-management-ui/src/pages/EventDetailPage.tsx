@@ -280,8 +280,9 @@ function CoordinatorEventDetail({ eventId, targetBookingId, role, currentCoordin
           </p>
         })()}
 
-        <h3>Action history</h3>
-        {event.actionHistory.length === 0 ? <p className="muted">No actions recorded yet.</p> :
+        {/* SCRUM-9: the service withholds the action history from operational staff roles. */}
+        {event.actionHistory && <h3>Action history</h3>}
+        {!event.actionHistory ? null : event.actionHistory.length === 0 ? <p className="muted">No actions recorded yet.</p> :
           <dl className="event-details">
             {event.actionHistory.map((action, index) => <div className="event-detail full" key={`${action.recordedAt}-${index}`}>
               <dt>

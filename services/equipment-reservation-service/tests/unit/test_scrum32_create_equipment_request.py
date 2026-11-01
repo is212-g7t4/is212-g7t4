@@ -225,7 +225,7 @@ Double: Stub (canned downstream HTTP responses), Mock (recorded outbound method,
     method, url, kwargs = calls[0]
     assert (method, url) == ("POST", "http://localhost:5011/events/ev/equipment-requests")
     assert kwargs["json"] == {"items": items, "notificationContext": {"eventId": "ev"}}
-    assert kwargs["headers"] == {"Authorization": "Bearer user-token"}
+    assert kwargs["headers"] == {"Authorization": "Bearer user-token", "X-Internal-Token": "synthetic"}
 
 
 def distinct_items(count):

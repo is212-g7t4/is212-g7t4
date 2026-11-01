@@ -1309,7 +1309,7 @@ def test_set_safety_status_client_omits_absent_areas(sent):
     assert "areas" not in calls[0]["json"]
 
 
-def test_cancel_booking_client_sends_event_id(sent):
+def test_cancel_booking_client_sends_event_id(sent, monkeypatch):
     """
     Summary: Releasing a booking on rejection names the event.
     AC5: Given an event is cancelled by a safety rejection, then its venue
@@ -1319,6 +1319,7 @@ def test_cancel_booking_client_sends_event_id(sent):
         request sent to it [Mock].
     """
     calls, queue = sent
+    monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "test-token")
     queue.append(Response(200, booking("Cancelled")))
 
     cancelled = clients.cancel_venue_booking(BOOKING_ID, EVENT_ID)
@@ -1327,6 +1328,7 @@ def test_cancel_booking_client_sends_event_id(sent):
     assert calls[0]["method"] == "PATCH"
     assert calls[0]["url"].endswith(f"/venue-bookings/{BOOKING_ID}/cancel")
     assert calls[0]["json"] == {"eventId": EVENT_ID}
+    assert calls[0]["headers"] == {"X-Internal-Token": "test-token"}
 
 
 def test_cancel_booking_client_missing_is_not_found(sent):
