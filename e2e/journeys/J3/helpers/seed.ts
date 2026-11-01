@@ -1,5 +1,6 @@
 import type { APIRequestContext, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { journeyServiceUrl } from '../../../helpers/environment'
 import {
   approveAllEquipment,
   authHeaders,
@@ -172,9 +173,9 @@ export async function openJ3SafetyEvent(officer: Page, eventName: string) {
 }
 
 export function bookingServiceUrl(path: string) {
-  return `http://localhost:5007${path}`
+  return serviceUrl('venueBooking', path)
 }
 
 export function equipmentRequestServiceUrl(path: string) {
-  return `http://localhost:5011${path}`
+  return journeyServiceUrl(5011, path)
 }

@@ -2,6 +2,43 @@
 
 Real-stack Playwright journeys. Manual and opt-in (never in CI): start the stack, then `npm run test:journeys` from the repo root.
 
+## Isolated local runs
+
+With Docker Desktop running, execute from the repository root:
+
+```powershell
+npm run test:journeys:isolated
+npm run test:journeys:isolated -- --grep J2
+```
+
+Install root/frontend npm dependencies and Playwright Chromium first. No manual
+frontend/backend startup or Supabase CLI is required. Each run creates a unique
+Compose project with loopback-only dynamic ports, a fresh Postgres database,
+real Supabase Auth (ES256/JWKS and role hook), RabbitMQ, all backend services,
+notification dispatchers/consumer and a Vite frontend. All journeys in that run
+share this disposable stack; it is separate from development and teammates.
+The committed migrations and seed catalogue provision matching Auth accounts
+with generated passwords. Development `.env` files are not loaded. Storage,
+Studio and Realtime are omitted because journeys do not use them.
+
+Reports/traces use run-specific subfolders under `report/` and `test-results/`;
+the runner prints the report command. Exit, failures and Ctrl+C trigger teardown
+of that run's containers and volumes. Force-killing the process or stopping
+Docker can prevent cleanup. The temporary configuration path is printed at
+startup; on teardown failure it is preserved with an exact recovery command.
+It contains generated credentials: do not share or commit it.
+
+Isolated helpers refuse missing service mappings or a non-loopback cleanup
+database rather than falling back to shared data. The existing manual command
+and existing unit tests are unchanged. This restores isolation only, not the
+application fixes identified in earlier runs: equipment submission, staff
+event-detail rendering and safety-rejection venue release can still fail their
+journeys until addressed separately. Isolation does not guarantee green tests.
+No CI changes are included.
+
+Check isolation wiring without starting Docker:
+`node --import tsx --test e2e/helpers/environment.test.ts e2e/isolated/model.test.mjs`.
+
 The shared `openAs` helper injects the role session only on the app's origin
 (`FRONTEND_URL`, default `http://localhost:5174`). It skips the initial
 `about:blank` document and unrelated origins, avoiding storage-access errors
