@@ -31,11 +31,11 @@ def authenticate():
     Sets g.user_id and g.role for the signed-in user.
     """
     g.user_id = g.role = None
-    if request.method == "OPTIONS" or request.path in PUBLIC_PATHS or request.path.startswith("/internal/"):
+    if request.method == "OPTIONS" or request.path in PUBLIC_PATHS:
         return None
     authorization = request.headers.get("Authorization")
     # SCRUM-10: only a signed-in user reaches this service. No background worker calls it, so an
-    # internal token alone is not a way in.
+    # internal token is not a way in.
     if authorization is None:
         return jsonify(message="Sign in to continue."), 401
     scheme, _, token = authorization.partition(" ")

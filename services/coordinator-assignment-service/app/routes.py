@@ -45,9 +45,9 @@ def get_coordinators():
 @bp.get("/queue")
 def get_queue():
     """
-    The Event Coordinator Lead's assignment worklist. It contains unassigned
-    Submitted requests and assigned Under Review requests, oldest submission
-    first, so the Lead can assign and reassign from one list.
+    The Event Coordinator Lead's unassigned queue: Submitted requests with no
+    coordinator assigned, oldest submission first. A request leaves the queue
+    once a coordinator is assigned.
 
     The caller is the signed-in user (SCRUM-8). Only the Event Coordinator
     Lead may see the queue.
@@ -55,8 +55,6 @@ def get_queue():
     Response (200):
     {"events": [...]}
     """
-    acting_user_id = g.user_id
-
     # SCRUM-9: the role is the token's, not a User Service lookup.
     if g.role != LEAD_ROLE:
         return jsonify(
@@ -88,8 +86,6 @@ def get_workload():
     otherAssigned holds events whose coordinator is no longer an Event
     Coordinator, so they still show up rather than silently disappear.
     """
-    acting_user_id = g.user_id
-
     if g.role != LEAD_ROLE:
         return jsonify(
             error="Only the Event Coordinator Lead can view coordinator workload"
@@ -153,7 +149,7 @@ def assign_coordinator(event_id, coordinator_id):
     # and is available
     try:
         available_coordinators = get_available_coordinators()
-        coordinator_ids = [c.get("user_id", c.get("id")) for c in available_coordinators]
+        coordinator_ids = [c.get("user_id") for c in available_coordinators]
         
         if coordinator_id not in coordinator_ids:
             return jsonify(
@@ -173,12 +169,13 @@ def assign_coordinator(event_id, coordinator_id):
         # change) reach the Lead as they are; anything else is a failure.
         if 400 <= e.response.status_code < 500:
             try:
-                message = e.response.json().get("message")
+                body = e.response.json()
             except ValueError:
-                message = None
-            return jsonify(
-                error=message or "Event Service refused the assignment."
-            ), e.response.status_code
+                body = None
+            message = body.get("message") if isinstance(body, dict) else None
+            if not isinstance(message, str) or not message:
+                message = "Event Service refused the assignment."
+            return jsonify(error=message), e.response.status_code
         return jsonify(
             error=f"Failed to assign coordinator to event: {str(e)}"
         ), 500

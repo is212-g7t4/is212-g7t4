@@ -6,10 +6,10 @@ import { NO_CHANGE_MESSAGE } from './eventStatus'
 
 /**
  * The Lead's one reassignment control, used on the event detail page and on
- * each Request review card. Render it only for the Lead; Coordinator
+ * each Event requests card. Render it only for the Lead; Coordinator
  * Assignment Service rejects anyone else with 403.
  *
- * Pass `coordinators` when the page already has the list (Request review
+ * Pass `coordinators` when the page already has the list (Event requests
  * loads it once for every card); otherwise it is fetched on first open.
  */
 export function ReassignCoordinatorPanel({ event, leadId, coordinators: provided, onReassigned }: { event: SubmittedEvent; leadId: string; coordinators?: Coordinator[]; onReassigned: (updated: SubmittedEvent) => void }) {

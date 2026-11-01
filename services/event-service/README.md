@@ -61,10 +61,11 @@ must be the assigned coordinator to approve or reject, the same as anyone else.
 The retired `isManager=true` flag is ignored.
 
 `GET /events/unassigned` returns `Submitted` events with no `coordinator_id`,
-oldest submission first. It remains available for consumers needing only
-unassigned requests. The Lead's assignment worklist instead uses
-`GET /events/submitted` with the Lead role so assigned `Under Review` requests
-remain visible for reassignment. The frontend calls neither endpoint directly.
+oldest submission first. It backs the Lead's unassigned queue, which
+`coordinator-assignment-service` serves at `GET /queue` after checking that the
+caller is the Lead. Assigned `Under Review` requests are not in it; the Lead
+reassigns them from the event's detail page. The frontend calls neither endpoint
+directly.
 
 `GET /events/active` returns every event that isn't `Confirmed`, `Rejected` or
 `Cancelled`, assigned or not, ordered by start date. It backs the Lead's
