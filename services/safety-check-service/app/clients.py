@@ -296,6 +296,7 @@ def cancel_venue_booking(booking_id: str, event_id: str) -> dict:
         "PATCH",
         f"{VENUE_AVAILABILITY_SERVICE_URL}/venue-bookings/{booking_id}/cancel",
         json={"eventId": event_id},
+        headers={"X-Internal-Token": INTERNAL_SERVICE_TOKEN or ""},
     )
     if response.status_code == 404:
         raise RecordNotFoundError
