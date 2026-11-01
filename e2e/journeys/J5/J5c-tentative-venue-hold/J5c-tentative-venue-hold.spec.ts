@@ -24,9 +24,28 @@ import { requestVenue, seedJ5c, sgt } from './helpers/seed'
  *   - SCRUM-159 Assign Coordinator to an Event
  *   - SCRUM-19  Update Event Status (Under Review, required before a venue can be requested)
  *
- * A hold always spans "now" to its expiry, so "the held interval" is the stretch before expiry. That interval is
- * in the past once the hold expires, so step 7 books a fresh future interval on the same venue.
- * Expiry is evaluated by time: no record is ever labelled "Expired"; the venue simply returns to Available.
+ * Flow, and how each step is implemented:
+ *   1. Venue Staff places a hold on a free venue with an expiry; the venue shows On Hold.
+ *   2. A hold with no expiry (form requires one) or overlapping an existing booking is refused.
+ *   3. The Coordinator cannot book the held venue for the held interval while the hold is active.
+ *   4. The Coordinator sees the correct expiry on the venue details.
+ *   5. A hold within 3 days of expiry reminds the Coordinator (venue and expiry); an expired hold does not.
+ *   6. After the expiry time the venue shows Available.
+ *   7. The Coordinator books the venue as Pending Review and Venue Staff approves it.
+ *
+ * How the 6-minute expiry works (HOLD_MINUTES = 6):
+ *   - Step 1 enters an expiry of "now + 6 minutes" in Singapore time, computed once by sgt(HOLD_MINUTES) at the
+ *     start of the test and reused as the expected value in steps 3 and 4. The datetime-local field has minute
+ *     precision, so the real hold lasts between 5 and 6 minutes.
+ *   - A hold always spans "now" to its expiry, so "the held interval" is the time before expiry: step 3 tries
+ *     [now + 1 min, expiry]. Six minutes leaves room for steps 1-3 to finish while the hold is still active.
+ *   - Step 6 reloads the venue page every 10 seconds until it shows Available, for up to HOLD_MINUTES + 2 minutes.
+ *     This real wait is why the journey takes about 8 minutes and is left out of the CI journeys job.
+ *   - The hold's interval is in the past after expiry, so step 7 books a fresh future interval
+ *     (now + 10 to now + 70 minutes) on the same venue instead of the original one.
+ *   - Expiry is evaluated by time: no record is ever labelled "Expired"; the venue simply returns to Available.
+ *   - The reminder in step 5 uses a separate hold on the `reminded` venue expiring in 2 days 23 hours, because
+ *     reminders only cover holds expiring within 3 days. It is seeded as a fixture, not waited on.
  */
 const HOLD_MINUTES = 6
 test.describe.configure({ mode: 'serial', timeout: 900_000 })
