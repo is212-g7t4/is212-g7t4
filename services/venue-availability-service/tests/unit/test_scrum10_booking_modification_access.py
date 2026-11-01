@@ -135,6 +135,7 @@ def test_ac2_requester_booking_actions_when_other_role_return_403(setup, method,
     """
     # Arrange (Given)
     client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
 
     # Act (When)
     response = send(client, method, path, role)
@@ -216,6 +217,56 @@ def test_ac4_event_bookings_after_refused_approval_still_viewable_by_coordinator
     # Assert (Then)
     assert (before.status_code, refused.status_code, after.status_code) == (200, 403, 200)
     assert before.json == after.json
+
+
+# AC2: safety-reset is called by Safety Check Service with the caller's own token ----
+
+SAFETY_RELEASE = f"/venue-bookings/{BOOKING_ID}/cancel"
+
+
+def test_ac1_cancel_booking_when_safety_officer_rejection_presents_service_token_is_allowed(setup):
+    """
+    Summary: A safety rejection releases bookings as the Safety Officer, but only with the service token.
+    AC1: Given an authenticated user is permitted to modify information based
+        on their role and relationship to the event, when they make a valid
+        change to that information, then the change is allowed.
+    Double: Stub (cursor returns the booking)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
+    cursor.fetchone.side_effect = [booking_row(status="Approved"), booking_row(status="Cancelled")]
+
+    # Act (When)
+    response = client.patch(
+        SAFETY_RELEASE, json={"eventId": EVENT_ID},
+        headers={"X-Internal-Token": "test-token", **bearer(USER_ID, "Safety Officer")},
+    )
+
+    # Assert (Then)
+    assert response.status_code == 200
+    assert response.json["status"] == "Cancelled"
+
+
+def test_ac2_cancel_booking_when_safety_officer_has_no_service_token_returns_403(setup):
+    """
+    Summary: A Safety Officer cannot cancel a booking directly, only through Safety Check Service.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (cursor not executed)
+    """
+    # Arrange (Given)
+    client, cursor = setup
+    client.application.config["INTERNAL_SERVICE_TOKEN"] = "test-token"
+
+    # Act (When)
+    response = client.patch(SAFETY_RELEASE, json={"eventId": EVENT_ID}, headers=bearer(USER_ID, "Safety Officer"))
+
+    # Assert (Then)
+    assert response.status_code == 403
+    cursor.execute.assert_not_called()
 
 
 # AC2: safety-reset is called by Safety Check Service with the caller's own token ----

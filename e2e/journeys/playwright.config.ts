@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-// Manual real-stack journeys; the isolated runner starts its own stack. Neither mode runs in CI.
+// Real-stack journeys; the isolated runner starts its own stack, and CI runs a subset on it.
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
