@@ -677,3 +677,47 @@ def test_edit_cycle_keeps_original_a_through_b_and_emits_one_combined_c_update(
         and call.args[0].lstrip().startswith(("DELETE", "UPDATE"))
         for call in cursor.execute.call_args_list
     )
+
+
+VENUE_BASELINE = dict(status="Pending Safety Check", attendeeBaseline={"venueName": "Hall A"})
+SCHEDULE_BASELINE = dict(
+    status="Pending Safety Check",
+    attendeeBaseline={"startDateTime": "2030-03-01T09:00:00+08:00"},
+)
+
+
+@pytest.mark.parametrize(
+    "history, required",
+    [
+        ([], False),
+        ([VENUE_BASELINE], True),
+        ([SCHEDULE_BASELINE], False),
+        ([VENUE_BASELINE, dict(status="Confirmed")], False),
+    ],
+    ids=["no-baseline", "venue-baseline", "schedule-only-baseline", "already-confirmed"],
+)
+def test_event_says_whether_confirming_needs_the_final_venue(history, required):
+    """
+    Summary: The event carries attendeeVenueRequired, derived from the same
+        baseline the Confirmed move enforces, so Safety Check Service can see
+        it without actionHistory (hidden from Safety Officers by SCRUM-9).
+    AC3: Given an event cancellation takes effect, or a change to its date,
+        time or venue is approved and applied, all currently registered
+        Attendees receive an in-app notification with the event name and
+        cancellation status or updated details, as applicable.
+    Double: none (pure serialisation)
+    """
+    # Arrange (Given)
+    from app.models import serialize
+    from tests.unit.factories import safety_notification_row
+
+    row = safety_notification_row()
+    metadata = json.loads(row["description"])
+    metadata["actionHistory"] = history
+    row["description"] = json.dumps(metadata)
+
+    # Act (When)
+    event = serialize(row)
+
+    # Assert (Then)
+    assert event["attendeeVenueRequired"] is required
