@@ -232,6 +232,37 @@ jobs:
       - run: npm run test:coverage
       - run: npm run build
 
+  # J1, J3, J5a/b and J7 on the isolated stack: throwaway Postgres, local
+  # Supabase Auth, RabbitMQ, every service and Vite, all started by the runner.
+  # No secrets and no shared Supabase. One retry absorbs a service cold-start blip.
+  journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/event-management-ui/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: frontend/event-management-ui
+      - run: npx playwright install --with-deps chromium
+      - name: Run journeys
+        run: npm run test:journeys:isolated -- --grep "J1|J3|J5a|J5b|J7" --retries=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: journey-reports
+          path: |
+            e2e/journeys/report/
+            e2e/journeys/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
   docker-build:
     needs: changes
     if: contains(fromJSON(needs.changes.outputs.changes), 'docker')
@@ -274,6 +305,7 @@ jobs:
         integration-tests,
         dependency-audit,
         frontend,
+        journeys,
         docker-build,
         gitleaks,
       ]
@@ -294,6 +326,7 @@ jobs:
             unit-tests=${{ needs.unit-tests.result }}
             integration-tests=${{ needs.integration-tests.result }}
             dependency-audit=${{ needs.dependency-audit.result }}
+            journeys=${{ needs.journeys.result }}
         run: |
           status=0
           for entry in $RESULTS; do

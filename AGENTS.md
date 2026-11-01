@@ -275,11 +275,11 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
 `npm run test:journeys:isolated` starts and tears down a disposable local
 database, real Supabase Auth, RabbitMQ, services/workers and frontend for all
 journeys in a run. It requires Docker and installed root/frontend dependencies,
-does not load development `.env` files and is not added to CI. See
+does not load development `.env` files. CI runs J1, J3, J5a/b and J7 this way (`journeys` job). See
 `e2e/journeys/TRACEABILITY.md` for reports, recovery and known application blockers.
 
 Real-stack Playwright journeys, one per Jira "E2E Testing J<n>" task. They are
-manual and opt-in, never in CI: start the stack (`npm run dev`), then
+manual and opt-in against your own stack (CI runs a subset on the isolated stack): start the stack (`npm run dev`), then
 `npm run test:journeys` from the repo root. They are a different tier from the
 retired mocked frontend browser suite; preserve maintained journeys.
 The five legacy SCRUM-46/171/173 root Python harnesses were explicitly
@@ -357,7 +357,7 @@ Only `docker-build` still consults the `changes` job.
   `.env.example`) are listed in `.github/.gitleaksignore`. Run it locally with
   `gitleaks detect --gitleaks-ignore-path .github/.gitleaksignore`.
 - **Not covered:** Python lint/format, frontend formatting, browser tests
-  against the real stack (the `e2e/journeys/` Playwright journeys stay manual),
+  against the real stack beyond the J1, J3, J5a/b and J7 subset above,
   and the opt-in live Supabase test
   (`venue-availability-service/tests/live/test_calendar.py`, `live` marker) — it
   needs Supabase credentials, which CI deliberately does not have.

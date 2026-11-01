@@ -1,6 +1,6 @@
 # E2E journeys: traceability
 
-Real-stack Playwright journeys. Manual and opt-in (never in CI): start the stack, then `npm run test:journeys` from the repo root.
+Real-stack Playwright journeys. Manual and opt-in locally (CI runs J1, J3, J5a/b and J7 via the isolated runner): start the stack, then `npm run test:journeys` from the repo root.
 
 ## Isolated local runs
 
