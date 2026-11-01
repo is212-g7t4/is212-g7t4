@@ -18,7 +18,7 @@ export const INTERNAL_EVENT_ACCESS_MESSAGE =
   'Event information is visible to Event Coordinators, Venue Staff, Technical Support, and Safety Officers.'
 
 // Event Coordinators (and the Lead) see their event screens as tabs of one
-// Events page. The assignment worklist is Lead-only.
+// Events page. The unassigned events tab and the workload tab are Lead-only.
 export function coordinatorEventTabs(role: Role): Route[] {
-  return isLead(role) ? ['queue', 'workload', 'myEvents', 'review', 'changeRequests'] : ['myEvents', 'review', 'changeRequests']
+  return isLead(role) ? ['myEvents', 'queue', 'review', 'changeRequests', 'workload'] : ['myEvents', 'review', 'changeRequests']
 }

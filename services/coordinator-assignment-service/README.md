@@ -37,11 +37,11 @@ header to `user-service` and `event-service`.
 - `GET /coordinators` — everyone an event can be assigned to: the Event
   Coordinator Lead (so the Lead can take an event on themselves) and every
   Event Coordinator, fetched from `user-service`.
-- `GET /queue` — the Lead's assignment worklist:
-  unassigned `Submitted` requests and assigned `Under Review` requests, oldest
-  submission first (from `event-service`'s `GET /events/submitted`). Only the
-  Event Coordinator Lead may view it — `403` for everyone else. Assigned requests remain visible so the Lead can reassign
-  them without leaving the worklist.
+- `GET /queue` — the Lead's unassigned queue: `Submitted` requests with no
+  coordinator, oldest submission first (from `event-service`'s
+  `GET /events/unassigned`). A request leaves the queue once a coordinator is
+  assigned; reassignment is done from the event's detail page. Only the
+  Event Coordinator Lead may view it — `403` for everyone else.
 - `GET /workload` — the Lead's read-only workload
   view: every coordinator from `GET /coordinators` (the Lead included, and
   those with nothing assigned) with their active events under `events`, plus

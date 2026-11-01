@@ -56,18 +56,12 @@ def assign_event_coordinator(event_id: str, coordinator_id: str) -> dict:
 
 
 def get_assignment_events() -> list:
-    """Return the Lead's submitted-request assignment worklist.
+    """Return the Lead's assignment queue: Submitted events with no coordinator, oldest first.
 
-    Event Service uses ``Under Review`` after the first assignment, so the
-    submitted-request endpoint deliberately returns both ``Submitted`` and
-    ``Under Review`` events.  Asking for the Lead's view (with the Lead's own
-    token) lets Event Service return assigned and unassigned requests together.
+    Event Service moves an event to ``Under Review`` on assignment, so an assigned
+    event drops out of this list.
     """
-    response = httpx.get(
-        f"{EVENT_SERVICE_URL}/events/submitted",
-        params={"viewerRole": "Event Coordinator Lead"},
-        headers=_forwarded_auth(),
-    )
+    response = httpx.get(f"{EVENT_SERVICE_URL}/events/unassigned", headers=_forwarded_auth())
     response.raise_for_status()
     return response.json()["events"]
 

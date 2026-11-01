@@ -9,7 +9,7 @@ Doubled:    nothing (Event Service makes no outbound calls).
 Not proven: Supabase sign-in itself (the caller is a token signed with a test key, SCRUM-8);
             the grouping by coordinator, the read-only view and the Lead-only access, which
             belong to GET /workload (-> coordinator-assignment-service
-            tests/unit/test_coordinator_workload.py).
+            tests/unit/test_scrum161_coordinator_workload.py).
 
 Only the acceptance criteria that /events/active itself decides are covered here.
 

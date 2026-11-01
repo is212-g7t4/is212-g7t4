@@ -260,6 +260,25 @@ def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
     assert client.get("/equipment-requests/2a1bfb57-a3c0-4450-897e-cc5c73690000", headers=bearer(USER_ID, "Technical Support")).status_code == 503
 
 
+def test_authenticate_when_token_key_not_in_jwks_returns_401(client, monkeypatch):
+    """Summary: GET /equipment-requests/<id> with a token whose key id is not in Supabase's published keys is answered 401 "Your session is invalid or has expired. Sign in again.", not 500 or 503.
+    AC3: Given a system user's authentication attempt is unsuccessful, when the authentication attempt is completed, then they remain unable to access protected information or functionality. (a token signed by an unknown key is a failed sign-in, unlike an unreachable JWKS, which is a 503)
+    Double: Stub (the conftest signing-key stub is switched back to the real auth.signing_key; auth._jwks_client is replaced so its get_signing_key_from_jwt raises PyJWKClientError("Unable to find a signing key that matches"); the `client` fixture's database cursor finds no request, never reached)
+    """
+    # Arrange (Given)
+    unknown_key = MagicMock()
+    unknown_key.get_signing_key_from_jwt.side_effect = jwt.PyJWKClientError("Unable to find a signing key that matches")
+    monkeypatch.setattr("app.auth.signing_key", real_signing_key)
+    monkeypatch.setattr("app.auth._jwks_client", lambda url: unknown_key)
+
+    # Act (When)
+    response = client.get("/equipment-requests/2a1bfb57-a3c0-4450-897e-cc5c73690000", headers=bearer(USER_ID, "Technical Support"))
+
+    # Assert (Then)
+    assert response.status_code == 401
+    assert response.json == {"message": "Your session is invalid or has expired. Sign in again."}
+
+
 def test_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch, isolated_jwks_cache):
     """Summary: The verifier asks the configured Supabase JWKS adapter for the token’s signing key.
     AC1: Given a system user has not been successfully authenticated, when they attempt to access protected information or functionality, then access is denied.
