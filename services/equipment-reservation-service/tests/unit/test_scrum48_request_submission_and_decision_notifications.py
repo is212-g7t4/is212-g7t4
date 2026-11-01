@@ -66,7 +66,7 @@ def test_submit_request_sends_full_list_and_technical_support_recipients(boundar
         dict(equipmentId=MIC,quantityRequested=5,technicalRequirements=""),
         dict(equipmentId=PROJECTOR,quantityRequested=2,technicalRequirements="")],notificationContext=dict(
         eventId=EVENT,eventName="Community Fair",equipmentNames={MIC:"Microphone",PROJECTOR:"Projector"},recipientIds=[TSS1,TSS2]))
-    assert "X-Internal-Token" not in call.kwargs["headers"]  # the owner authenticates the forwarded user (SCRUM-10)
+    assert call.kwargs["headers"]["X-Internal-Token"] == "synthetic"  # the owner only accepts the composite's context
     assert response.json["requests"] == boundary.saved
 
 
@@ -188,7 +188,7 @@ def test_submit_request_with_forged_context_sends_only_server_resolved_recipient
     # Assert (Then)
     assert response.status_code == 201
     [call] = mutations(boundary)
-    assert "X-Internal-Token" not in call.kwargs["headers"]  # the forged token is not forwarded (SCRUM-10)
+    assert call.kwargs["headers"]["X-Internal-Token"] == "synthetic"  # the forged token is replaced by the configured one (SCRUM-10)
     assert call.kwargs["json"]["notificationContext"]["recipientIds"] == [
         "10000000-0000-4000-8000-000000000006", "10000000-0000-4000-8000-000000000007"]
     assert call.kwargs["json"]["notificationContext"]["eventName"] == "Community Fair"
