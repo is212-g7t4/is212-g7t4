@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
 import { deleteNamedFixtureEvents } from '../../../helpers/cleanup'
-import { openAs, randomWindow, users } from '../../../helpers/stack'
+import { openAs, randomWindow, serviceUrl, users } from '../../../helpers/stack'
 import { createJ1Venue } from '../helpers/seed'
 
 /**
@@ -206,19 +206,19 @@ test.describe('J1 Complete an event from submission to attendee registration', (
       await safetyOfficer.getByRole('button', { name: 'Yes, approve' }).click()
       await expect(safetyOfficer.locator('.event-card-header .status-badge').first()).toHaveText('Confirmed')
 
-      const audit = await coordinator.evaluate(async (id) => {
+      const audit = await coordinator.evaluate(async (url) => {
         const storedSession = localStorage.getItem('session')
         if (!storedSession) throw new Error('The Coordinator session is missing.')
         const session = JSON.parse(storedSession) as { accessToken: string }
         const response = await fetch(
-          `http://localhost:5012/safety-checks/feedback?eventId=${encodeURIComponent(id)}`,
+          url,
           { headers: { Authorization: `Bearer ${session.accessToken}` } },
         )
         return {
           status: response.status,
           body: await response.json() as { safetyChecks: { status: string; remarks: string | null; decidedBy: string | null; decidedAt: string | null }[] },
         }
-      }, eventId)
+      }, serviceUrl('safety', `/safety-checks/feedback?eventId=${encodeURIComponent(eventId)}`))
       expect(audit.status).toBe(200)
       expect(audit.body.safetyChecks).toHaveLength(1)
       expect(audit.body.safetyChecks[0]).toMatchObject({

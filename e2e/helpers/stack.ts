@@ -1,9 +1,10 @@
 import type { APIRequestContext, Browser, Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { journeyServiceUrl } from './environment'
 
 // Load local journey credentials when the runner is launched without exported
 // shell variables. The file is git-ignored; callers may still supply env vars.
-try {
+if (process.env.E2E_ISOLATED !== '1') try {
   process.loadEnvFile('.env')
 } catch {
   // `.env` is optional when credentials are provided by the invoking shell.
@@ -41,7 +42,7 @@ const passwordEnv: Record<string, string> = {
 }
 
 const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, safety: 5012, attendeeRegistration: 5009 }
-const url = (service: keyof typeof ports, path: string) => `http://localhost:${ports[service]}${path}`
+const url = (service: keyof typeof ports, path: string) => journeyServiceUrl(ports[service], path)
 
 type Login = { accessToken: string; expiresAt: number; user: Record<string, string> }
 const logins = new Map<string, Promise<Login>>()

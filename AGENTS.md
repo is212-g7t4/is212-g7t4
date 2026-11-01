@@ -272,6 +272,12 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
 
 ## E2E journeys (`e2e/journeys/`)
 
+`npm run test:journeys:isolated` starts and tears down a disposable local
+database, real Supabase Auth, RabbitMQ, services/workers and frontend for all
+journeys in a run. It requires Docker and installed root/frontend dependencies,
+does not load development `.env` files and is not added to CI. See
+`e2e/journeys/TRACEABILITY.md` for reports, recovery and known application blockers.
+
 Real-stack Playwright journeys, one per Jira "E2E Testing J<n>" task. They are
 manual and opt-in, never in CI: start the stack (`npm run dev`), then
 `npm run test:journeys` from the repo root. They are a different tier from the
