@@ -103,9 +103,7 @@ def test_change_request_with_spoofed_headers_sends_trusted_context_and_token(ups
     assert method == ("POST" if operation == "submit" else "PATCH")
     assert url.startswith("http://owner.invalid/")
     # Reviews carry the configured credential, never a caller-supplied token.
-    expected_headers = {"Authorization": "Bearer coordinator-token"}
-    if operation != "submit":
-        expected_headers["X-Internal-Token"] = "trusted-config-token"
+    expected_headers = {"Authorization": "Bearer coordinator-token", "X-Internal-Token": "trusted-config-token"}
     assert kwargs["headers"] == expected_headers
     expected = dict(eventId=EVENT, eventName="Community Fair", equipmentNames={MIC: "Microphone"})
     if operation == "submit":

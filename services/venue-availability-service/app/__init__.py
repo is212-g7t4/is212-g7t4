@@ -407,15 +407,21 @@ def create_app(config=None):
             ), 409
         return jsonify(booking), 201
 
-    @app.post("/events/<uuid:event_id>/venue-bookings/safety-reset")
-    def safety_reset_bookings(event_id):
-        if (forbidden := _cannot_modify(SAFETY_RESET_ROLES)):
-            return forbidden
+    def _internal_token_refusal():
+        """The 503/403 unless the caller presents Safety Check Service's X-Internal-Token."""
         token = app.config["INTERNAL_SERVICE_TOKEN"]
         if not token:
             return jsonify(message="Internal service authentication is not configured."), 503
         if not hmac.compare_digest(token, request.headers.get("X-Internal-Token", "")):
             return jsonify(message="Internal service credentials are required."), 403
+        return None
+
+    @app.post("/events/<uuid:event_id>/venue-bookings/safety-reset")
+    def safety_reset_bookings(event_id):
+        if (forbidden := _cannot_modify(SAFETY_RESET_ROLES)):
+            return forbidden
+        if (refused := _internal_token_refusal()):
+            return refused
         data = request.get_json(silent=True)
         raw_ids = data.get("bookingIds") if isinstance(data, dict) else None
         if not isinstance(raw_ids, list) or not 1 <= len(raw_ids) <= 500:
@@ -530,7 +536,9 @@ def create_app(config=None):
 
     @app.patch("/venue-bookings/<uuid:booking_id>/cancel")
     def cancel_booking_route(booking_id):
-        if (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
+        # A safety rejection releases bookings as the Safety Officer, through Safety Check Service's service token.
+        released_by_safety_check = g.role == "Safety Officer" and _internal_token_refusal() is None
+        if not released_by_safety_check and (forbidden := _cannot_modify(BOOKING_REQUESTER_ROLES)):
             return forbidden
         data = request.get_json(silent=True)
         event_id = _parse_uuid(data.get("eventId")) if isinstance(data, dict) else None

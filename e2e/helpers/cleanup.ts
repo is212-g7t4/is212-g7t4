@@ -56,6 +56,7 @@ export async function deleteFixtureEvents(scope: FixtureScope) {
     const foreignBookings = await db.query(
       `SELECT 1 FROM public."VenueBooking" b
        WHERE b.venue_id IN ${venues}
+         AND b.event_id IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM public."Event" e WHERE e.event_id = b.event_id AND e.event_name = ANY($2::text[]))
        LIMIT 1`,
       [scope.venueNames, scope.eventNames],
@@ -71,6 +72,8 @@ export async function deleteFixtureEvents(scope: FixtureScope) {
       `DELETE FROM public."VenueNotificationOutbox" WHERE booking_id IN (SELECT booking_id FROM public."VenueBooking" WHERE venue_id IN ${venues}) OR closure_id IN (SELECT closure_id FROM public."VenueClosure" WHERE venue_id IN ${venues})`,
       venueNames,
     )
+    // Tentative holds have no event; they belong to the fixture venue.
+    await db.query(`DELETE FROM public."VenueBooking" WHERE event_id IS NULL AND venue_id IN ${venues}`, venueNames)
     for (const table of ['EventNotificationOutbox', 'EquipmentNotificationOutbox', 'RegistrationNotificationOutbox']) {
       await db.query(
         `DELETE FROM public."${table}" WHERE source->>'eventName' = ANY($1::text[])

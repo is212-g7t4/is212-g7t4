@@ -91,7 +91,8 @@ test.describe('J6b Coordinator edits a Confirmed event', () => {
       await eventRow.click()
       await expect(officer.getByRole('heading', { name: 'Safety review information' })).toBeVisible()
       await expect(officer.getByRole('heading', { name: 'Round 1 · Approval Withdrawn' })).toBeVisible()
-      await expect(officer.getByText('E2E fixture approval.')).toBeVisible()
+      // The review shows the withdrawal reason in place of the original approval remarks.
+      await expect(officer.getByText('Date/time changed')).toBeVisible()
     })
   })
 })
