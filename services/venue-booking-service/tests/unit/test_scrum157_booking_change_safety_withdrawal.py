@@ -82,8 +82,7 @@ Doubled
 Not proven
 ----------
 - The whole chain across Venue Booking, Safety Check, Safety Check Record and
-  Event Services (-> docs/test-scripts/scrum-28-venue-booking-request-
-  submission.md, Part B, run by hand against the stack).
+  Event Services (run by hand against the stack).
 - That Safety Check Service withdraws and restores correctly (->
   safety-check-service and safety-check-record-service tests).
 - AC4 and AC5 isolation/record-keeping behaviour is covered by

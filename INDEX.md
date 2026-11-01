@@ -16,9 +16,8 @@ this file is a directory, not a design rationale.
 > that service's row below and its README for why.
 >
 > **Access control:** every user-facing write route checks the caller's role
-> from the token before anything else (SCRUM-10). The route-by-route matrix,
-> the tests and the known gaps are in
-> [docs/scrum-10-role-based-modification-control.md](docs/scrum-10-role-based-modification-control.md).
+> from the token before anything else (SCRUM-10). The per-service READMEs list
+> the roles each route requires.
 
 ## Repo map
 

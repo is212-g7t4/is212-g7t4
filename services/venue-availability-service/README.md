@@ -70,7 +70,6 @@ written. Create, edit and cancel a booking (`POST /venue-bookings`,
 `POST /venue-holds`: `Venue Staff`. `POST /venues/<id>/legacy-conflicts/reconcile`
 follows the booking-view roles (coordinators, Venue Staff, Technical Support) because
 reading legacy conflicts triggers it. The closure routes were already Venue Staff only.
-See [docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
 
 `GET /venue-bookings` is for internal roles: `Event Coordinator`,
 `Event Coordinator Lead`, `Venue Staff`, `Technical Support` and the canonical

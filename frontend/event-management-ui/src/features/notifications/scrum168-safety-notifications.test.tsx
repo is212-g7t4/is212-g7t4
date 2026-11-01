@@ -1,6 +1,6 @@
 /**
  * SCRUM-168 — Safety review notification presentation (component tests).
- * AC mapping follows docs/scrum-168-safety-notifications.md:
+ * AC mapping:
  * AC1: submitted-review name, proposed Singapore date/time, round and event-details
  *      href render for an officer; submission/recheck triggers and all-officer
  *      recipient selection are covered by Event/Workflow story tests, not here.

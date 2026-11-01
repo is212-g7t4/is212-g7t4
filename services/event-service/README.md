@@ -93,9 +93,6 @@ read, and nothing is written. "Coordinators" means `Event Coordinator` and
 | `PATCH /change-requests/<id>/decision` | Coordinators | assigned to the event; internal token |
 | `PATCH /events/<id>/safety-status` | submit, withdraw, restore: Coordinators; confirm, request changes, cancel: Safety Officer | internal token |
 
-The full matrix for every service, the tests that prove each acceptance criterion and
-the known gaps are in
-[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
 
 ## Event clarification
 
