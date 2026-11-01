@@ -101,7 +101,13 @@ npm run lint
 npm run build
 ```
 
-The mocked frontend browser suite and unused lifecycle-helper tests were retired, not replaced. Unit/component tests do not replace that browser coverage. Real-stack journeys remain manual/opt-in: read `e2e/journeys/TRACEABILITY.md` before `npm run test:journeys` from the root; they write shared test data and do not yet replace all retired coverage.
+The mocked frontend browser suite and unused lifecycle-helper tests were retired, not replaced. Unit/component tests do not replace that browser coverage. Real-stack journeys (`e2e/journeys/`) are opt-in locally: read `e2e/journeys/TRACEABILITY.md` before `npm run test:journeys` from the root; against your own stack they write shared test data, and they do not yet replace all retired coverage.
+
+**Journeys in CI.** The `journeys` job in `.github/workflows/ci.yml` runs J1 (A and B), J3 (a, b, c), J5a, J5b and J7 on every pull request, push to `main` and nightly run. It uses the isolated runner (`npm run test:journeys:isolated`), which starts a throwaway database, local Supabase Auth, RabbitMQ, every service and Vite with no secrets and no shared Supabase, and retries a failed test once. J2, J4, J5c, J6b and J8 are not in CI; J5c is excluded because it waits about 8 minutes for a real hold to expire. Reproduce the CI run locally with Docker running:
+
+```
+npm run test:journeys:isolated -- --grep "J1|J3|J5a|J5b|J7"
+```
 
 ### Test locations
 
