@@ -588,5 +588,4 @@ it, every call to `/safety-status` is refused.
 or sent downstream. Approve, request-changes and reject stay Safety Officer only
 (looked up in User Service). Downstream, Event Service checks the same roles on
 `/safety-status` and now answers `503` instead of skipping the token check when
-`INTERNAL_SERVICE_TOKEN` is not configured there. The full matrix is in
-[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
+`INTERNAL_SERVICE_TOKEN` is not configured there.

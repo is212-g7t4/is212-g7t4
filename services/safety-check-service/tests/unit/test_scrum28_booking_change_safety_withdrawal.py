@@ -62,8 +62,7 @@ Doubled
 Not proven
 ----------
 - The whole chain across Venue Booking, Safety Check, Safety Check Record and
-  Event Services (-> docs/test-scripts/scrum-28-venue-booking-request-
-  submission.md, Part B, run by hand against the stack).
+  Event Services (run by hand against the stack).
 """
 import logging
 

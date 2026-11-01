@@ -81,8 +81,6 @@ complete acceptance-criterion delivery evidence.
 
 ## Issues 6/7/8: current story-based layout
 
-See [the equipment regression map](../../../docs/testing/equipment-regressions.md).
-
 | Feature file under `tests/unit/` | Primary story | Historical cases before this audit |
 | --- | --- | ---: |
 | `test_scrum35_equipment_reservation.py` | SCRUM-35 current Jira requirements | 32 |
