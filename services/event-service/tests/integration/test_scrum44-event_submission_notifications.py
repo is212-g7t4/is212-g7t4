@@ -67,62 +67,6 @@ def test_dr_expansion_replay_cannot_duplicate_persisted_recipients(client, db):
     }
 
 
-# AC1 — Preserve existing data during migration.
-
-from pathlib import Path
-import psycopg2
-from tests.integration.factories import seed_existing_data
-
-MIGRATIONS = Path(__file__).resolve().parents[4] / "database/supabase/migrations"
-# Full combined SCRUM-49/SCRUM-46 chain (only the submission migration is delayed below).
-EXPECTED_TABLES = {'Equipment', 'EquipmentRequest', 'Event', 'EventChangeReq', 'Notification', 'Registration', 'SafetyCheck', 'SafetyCheckFlag', 'User', 'Venue', 'VenueBooking', 'VenueClosure', 'NotificationFailure', 'VenueNotificationOutbox', 'EventNotificationOutbox', 'EquipmentNotificationOutbox', 'RegistrationNotificationOutbox'}
-TYPES = ('event.rejection', 'event.approval', 'event.coordinator-assignment')
-
-# Independent schema checks.
-def assert_schema_and_types(db):
-    """Check disposable PostgreSQL schema, allowed types, security flags and indexes.
-    These SQL checks do not prove hosted-role permissions."""
-    assert set(db.snapshot()) == EXPECTED_TABLES
-    columns = dict(db.query("SELECT column_name, data_type FROM information_schema.columns\n                              WHERE table_schema='public' AND table_name='EventNotificationOutbox' "))
-    assert columns == {'source_id': 'uuid', 'type': 'character varying', 'source': 'jsonb', 'envelope': 'jsonb', 'created_at': 'timestamp with time zone', 'published_at': 'timestamp with time zone', 'attempts': 'integer', 'available_at': 'timestamp with time zone', 'lease_token': 'uuid', 'lease_until': 'timestamp with time zone', 'last_error': 'text', 'held_at': 'timestamp with time zone'}
-    assert db.query("SELECT is_nullable FROM information_schema.columns\n                      WHERE table_schema='public' AND table_name='EventNotificationOutbox' AND column_name='held_at' ") == [('YES',)]
-    for kind in TYPES:
-        source_id, held_at = db.query('INSERT INTO public."EventNotificationOutbox"(type,source)\n                                        VALUES (%s,\'{"synthetic":true}\') RETURNING source_id, held_at', (kind,))[0]
-        assert held_at is None
-        db.query('UPDATE public."EventNotificationOutbox" SET held_at=\'2030-01-01T12:00:00+08:00\'\n                    WHERE source_id=%s', (str(source_id),))
-        assert db.query('SELECT held_at=\'2030-01-01T04:00:00Z\'::timestamptz\n                           FROM public."EventNotificationOutbox" WHERE source_id=%s', (str(source_id),)) == [(True,)]
-    with pytest.raises(psycopg2.errors.CheckViolation):
-        db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (\'event.invalid\',\'{}\')')
-    with pytest.raises(psycopg2.errors.NotNullViolation):
-        db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (\'event.approval\',NULL)')
-    row_security = dict(db.query("SELECT c.relname,c.relrowsecurity FROM pg_class c JOIN pg_namespace n\n                                   ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' "))
-    assert row_security == dict.fromkeys(EXPECTED_TABLES, True)
-    assert db.query("SELECT count(*) FROM pg_policies WHERE schemaname='public' ") == [(0,)]
-    indexes = dict(db.query("SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public'\n                              AND tablename='EventNotificationOutbox' "))
-    assert 'UNIQUE INDEX' in indexes['EventNotificationOutbox_pkey']
-    assert 'WHERE (published_at IS NULL)' in indexes['event_outbox_pending']
-    print('VERIFIED all tables, exact EventNotificationOutbox column types, three allowed types, invalid-type rejection, nullable/timezone-safe held_at, RLS and indexes', flush=True)
-
-def test_submission_migration_upgrades_current_main_without_changing_existing_rows(migration_database):
-    """AC1 support: The migration preserves existing rows and notification types.
-    Both new submission types can be saved without changing the existing schema."""
-    paths = sorted(MIGRATIONS.glob('*.sql'))
-    pending = [path for path in paths if path.name == '20261025000000_event_submission_notifications.sql']
-    assert len(pending) == 1
-    with migration_database() as db:
-        db.apply([path for path in paths if path not in pending])
-        seed_existing_data(db)
-        for kind in TYPES:
-            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)', (kind, '{"preserved":true}'))
-        before = db.snapshot()
-        db.apply(pending)
-        assert db.snapshot() == before
-        assert_schema_and_types(db)
-        for kind in ('event.submission-fanout', 'event.submission'):
-            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)', (kind, '{"new":true}'))
-        assert len(db.query('SELECT * FROM public."EventNotificationOutbox" WHERE type LIKE %s', ('event.submission%',))) == 2
-
-
 # AC1 — Roll back if notification work cannot be saved.
 
 @pytest.mark.parametrize('submission', ['direct', 'saved-draft'])

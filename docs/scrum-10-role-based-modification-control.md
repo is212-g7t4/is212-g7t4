@@ -78,7 +78,7 @@ Each file's header copies the story and lists every AC, including those it does 
 
 | Service | Unit | Integration |
 |---|---|---|
-| event | `tests/unit/test_scrum10_event_modification_access.py` | `tests/integration/test_event_modification_access.py` |
+| event | `tests/unit/test_scrum10_event_modification_access.py` | `tests/integration/test_scrum10-event_modification_access.py` |
 | venue | `tests/unit/test_scrum10_venue_modification_access.py` | `tests/integration/test_venue_modification_access.py` |
 | venue-availability | `tests/unit/test_scrum10_booking_modification_access.py` | `tests/integration/test_booking_modification_access.py` |
 | venue-booking | `tests/unit/test_scrum10_booking_request_modification_access.py` | |

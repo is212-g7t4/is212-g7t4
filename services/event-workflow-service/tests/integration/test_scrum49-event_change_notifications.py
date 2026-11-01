@@ -150,3 +150,21 @@ def test_dr_unassigned_event_delivers_to_sole_lead_without_waiting(api, http, ki
     assert dispatch_once(api, published.append) == 1
     # Assert: strict respx only allows context GET, Lead GET, freeze and completion, never assignment writes.
     assert published == [expected]
+
+
+@pytest.mark.parametrize("leads", [0, 2], ids=["no-lead", "two-leads"])
+def test_dr_unassigned_event_without_exactly_one_lead_is_retried_not_published(api, http, leads):
+    """Failure: with no or several Leads there is no single recipient, so the job is retried unfrozen."""
+    item = job("event.cancelled")
+    http.post(BASE + "/claim").respond(200, json={"jobs": [item]})
+    http.get(f"https://event.test/internal/events/{EVENT}/notification-context", params={"includeOrganiser": "true"}).respond(
+        200, json=dict(id=EVENT, eventName="Workshop", coordinatorId=None, organiserId=ORGANISER))
+    users = [{"user_id": str(uuid4()), "role": "Event Coordinator Lead", "username": f"Lead {n}"} for n in range(leads)]
+    http.get("https://user.test/users", params={"role": "Event Coordinator Lead"}).respond(200, json={"users": users})
+    retry = http.post(f"{BASE}/{item['id']}/retry", json=dict(leaseToken=item["leaseToken"], error="ValueError")).respond(200, json={})
+    published = []
+
+    assert dispatch_once(api, published.append) == 1
+
+    assert published == []
+    assert retry.call_count == 1

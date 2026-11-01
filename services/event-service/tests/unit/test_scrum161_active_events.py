@@ -29,7 +29,7 @@ AC3: an unassigned event is returned with coordinatorId null. There is no
      separate "unassigned" flag, so null is the marker.
 AC4: the query excludes Confirmed, Rejected and Cancelled with a parameter. The
      database is stubbed here, so the filtering itself is run in
-     tests/integration/test_active_events.py.
+     tests/integration/test_scrum161-active_events.py.
 
 Real
 ----
@@ -55,7 +55,7 @@ Not proven
 Proven elsewhere
 ----------------
 - That the SQL runs against the real Postgres schema and returns only active
-  events (AC2, AC3, AC4): tests/integration/test_active_events.py against a
+  events (AC2, AC3, AC4): tests/integration/test_scrum161-active_events.py against a
   throwaway postgres:17.6.
 - AC1 (every coordinator with their events), AC5 (read-only) and AC6 (Lead only)
   are properties of GET /workload, tested in

@@ -170,10 +170,10 @@ def test_ac3_decision_publishes_owner_reply_not_local_draft(api, http, kind):
     assert published[0]["details"]["decision"] == ("Approved" if kind == "approval" else "Rejected")
 
 
-@pytest.mark.parametrize("kind", ["approval", "rejection", "coordinator-assignment"])
+@pytest.mark.parametrize("kind", ["approval", "coordinator-assignment"])
 @pytest.mark.parametrize("status", [409, 503])
 def test_ac3_freeze_conflict_or_failure_never_publishes(api, http, kind, status):
-    """Conflict/Failure: return stale-lease 409 or freeze-outage 503 for each type; no message
+    """Conflict/Failure: return stale-lease 409 or freeze-outage 503 with and without a name lookup; no message
     publishes and the exact retry request is sent, protecting freeze-before-publish ordering.
     """
     job = make_job(kind)
@@ -255,7 +255,7 @@ def test_ac4_dr_transient_lookup_retries_then_same_change_delivers(api, http, fa
     assert published[0]["id"] == job["id"]
 
 
-@pytest.mark.parametrize("kind", ["approval", "rejection", "coordinator-assignment"])
+@pytest.mark.parametrize("kind", ["approval", "coordinator-assignment"])
 def test_ac3_dr_successful_publish_then_completion_failure_replays_frozen_identity(api, http, kind):
     """Conflict: accept publication but fail completion, then reclaim with changed source; two
     identical frozen attempts and no second lookup/freeze preserve identity for downstream

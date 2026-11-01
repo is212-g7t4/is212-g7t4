@@ -221,9 +221,8 @@ def test_ac3_decision_freezes_original_facts_and_owner_can_read_details(client, 
 # AC4 — Initial assignment and reassignment
 
 def test_ac4_initial_and_reassignment_record_separate_saved_coordinators(client, db):
-    """Normal: assign then replace the coordinator and repeat the replacement; SQL shows two
-    distinct saved IDs and no third intent, preserving both changes without a no-op
-    notification.
+    """Normal: assign then replace the coordinator; SQL shows two distinct saved IDs, preserving
+    both changes for the organiser.
     """
     event_id = make_event(db, status="Submitted")
     assert assignment(client, event_id, COORDINATOR_ID).status_code == 200
@@ -238,8 +237,7 @@ def test_ac4_initial_and_reassignment_record_separate_saved_coordinators(client,
         assert row["source"]["eventName"] == "Spring Fair"
         assert row["source"]["eventId"] == event_id
     assert str(db.event(event_id)["coordinator_id"]) == LEAD_ID
-    assert assignment(client, event_id, LEAD_ID).status_code == 409
-    assert pending(db) == rows
+    # Repeating the same coordinator is a no-op; see test_scrum166-coordinator_assignment_notifications.py.
 
 
 # Supporting DR1/DR2/DR3/DR4/DR5/DR6/DR8 — owner transaction, recovery and identity
@@ -257,10 +255,11 @@ def test_ac1_dr_approval_and_assignment_are_distinct_intents(client, db):
     assert len({row["source_id"] for row in rows}) == 2
 
 
-@pytest.mark.parametrize("change", ["approval", "rejection", "initial", "reassignment"])
+@pytest.mark.parametrize("change", ["approval", "rejection", "initial"])
 def test_ac4_dr_intent_insert_failure_rolls_back_entire_mutation(client, db, change):
     """Failure: a PostgreSQL trigger rejects the intent INSERT for each change; HTTP fails and
     fresh SQL reads show unchanged event state and no outbox row, proving atomic rollback (DR2).
+    Reassignment rollback is covered in test_scrum166-coordinator_assignment_notifications.py.
     """
     event_id = make_event(db, status="Submitted" if change == "initial" else "Under Review",
                           coordinator_id=None if change == "initial" else COORDINATOR_ID)
@@ -273,7 +272,7 @@ def test_ac4_dr_intent_insert_failure_rolls_back_entire_mutation(client, db, cha
     try:
         response = (decision(client, event_id, "Approved" if change == "approval" else "Rejected")
                     if change in ("approval", "rejection") else
-                    assignment(client, event_id, COORDINATOR_ID if change == "initial" else LEAD_ID))
+                    assignment(client, event_id, COORDINATOR_ID))
         assert response.status_code >= 400
         assert db.event(event_id) == before
         assert db.execute('SELECT * FROM public."EventNotificationOutbox"') == []
