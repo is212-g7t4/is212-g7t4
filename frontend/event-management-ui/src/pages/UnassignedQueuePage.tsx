@@ -8,8 +8,8 @@ import { RoleWarning } from '../components/FormControls'
 import { RefreshIcon } from '../components/Icon'
 import { Spinner } from '../components/Loading'
 
-// The Event Coordinator Lead's assignment worklist: unassigned Submitted
-// requests plus assigned Under Review requests. Coordinator-assignment-service
+// The Event Coordinator Lead's unassigned queue: Submitted requests with no
+// coordinator yet. Coordinator-assignment-service
 // enforces the Lead-only rule; this role gate avoids a request that would 403.
 export function UnassignedQueuePage({ role, currentUserId, resolveUserName, onViewDetails }: { role: Role; currentUserId?: string; resolveUserName?: (userId: string | null | undefined) => string | null; onViewDetails: (id: string) => void }) {
   const [events, setEvents] = useState<SubmittedEvent[]>([])
@@ -66,14 +66,14 @@ export function UnassignedQueuePage({ role, currentUserId, resolveUserName, onVi
     }
   }
 
-  if (!isLead(role)) return <RoleWarning>Coordinator assignments are visible only to the Event Coordinator Lead.</RoleWarning>
+  if (!isLead(role)) return <RoleWarning>Unassigned events are visible only to the Event Coordinator Lead.</RoleWarning>
 
   return <div className="page-stack">
-    <section className="intro"><h1>Coordinator assignments</h1><p className="muted">Submitted event requests and their current assignment status, oldest first. Times are Singapore time (SGT).</p>
-      <button className="button" onClick={() => { setLoading(true); setError(''); setNotice(''); setRefresh((value) => value + 1) }}><RefreshIcon size={14} /> Refresh assignments</button></section>
+    <section className="intro"><h1>Unassigned events</h1><p className="muted">Submitted event requests that have no coordinator yet, oldest first. Times are Singapore time (SGT).</p>
+      <button className="button" onClick={() => { setLoading(true); setError(''); setNotice(''); setRefresh((value) => value + 1) }}><RefreshIcon size={14} /> Refresh unassigned events</button></section>
     {notice && <p className="notice success" role="status">{notice}</p>}
-    {loading ? <p className="muted"><Spinner size={12} /> Loading assignments…</p> : error ? <p className="field-error" role="alert">{error}</p> :
-      events.length === 0 ? <p>No submitted event requests yet.</p> :
+    {loading ? <p className="muted"><Spinner size={12} /> Loading unassigned events…</p> : error ? <p className="field-error" role="alert">{error}</p> :
+      events.length === 0 ? <p>No unassigned event requests.</p> :
       <section className="panel table-panel"><div className="table-scroll"><table>
         <thead><tr><th>Event</th><th>Event Organiser</th><th>Proposed date/time</th><th>Assignment status</th><th>Coordinator</th><th>Assign / reassign</th></tr></thead>
         <tbody>{events.map((event) => <tr key={event.id}>

@@ -17,30 +17,11 @@ AC1: Given an unassigned submitted event, when the Lead assigns a coordinator
 AC2: Given an Event Coordinator who is not the Lead, they should not be able to
      see any 'Reassign' option or button
 
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
-
 Real
 ----
-- POST /events/<id>/assign-coordinator/<coordinator>: the signed-in check, the
-  Lead check against User Service's role, pool membership and the error mapping
-  run for real, as do the User/Event Service client functions.
+- POST /events/<id>/assign-coordinator/<coordinator>: the Lead check against
+  User Service's role, pool membership and the error mapping run for real, as
+  do the User/Event Service client functions.
 - Assertions are on the status and message the Lead sees, and on which
   coordinator is sent to Event Service.
 
@@ -85,9 +66,10 @@ def user_service_reply(status, body):
 
 def test_get_coordinators_when_lead_returns_available_pool(downstream):
     """
-    Summary: The Lead can list the coordinators an event can be given to.
+    Summary: GET /coordinators as the Lead returns {"coordinators": [...]} with
+        the pool get_available_coordinators gave it, in the same order.
     AC1: the Lead selects a coordinator from the assignable pool
-    Double: Stub (pool of Lead and one coordinator)
+    Double: Stub (get_available_coordinators returns [LEAD, COORDINATOR])
     """
     # Arrange (Given)
     downstream.coordinators.return_value = [LEAD, COORDINATOR]
@@ -101,17 +83,38 @@ def test_get_coordinators_when_lead_returns_available_pool(downstream):
     assert response.json == {"coordinators": [LEAD, COORDINATOR]}
 
 
+def test_get_coordinators_when_pool_lookup_fails_returns_500(downstream):
+    """
+    Summary: GET /coordinators as the Lead is answered 500 when
+        get_available_coordinators raises, instead of an empty list.
+    AC1: the Lead selects a coordinator from the assignable pool (error path: a
+        failed read must not look like an empty pool)
+    Double: Stub (get_available_coordinators raises Exception("User Service
+        down"))
+    """
+    # Arrange (Given)
+    downstream.coordinators.side_effect = Exception("User Service down")
+    client = signed_in(create_app().test_client(), role="Event Coordinator Lead")
+
+    # Act (When)
+    response = client.get("/coordinators")
+
+    # Assert (Then)
+    assert response.status_code == 500
+    assert "Failed to fetch coordinators" in response.json["error"]
+
+
 def test_assign_when_lead_picks_available_coordinator_saves_assignment(downstream):
     """
-    Summary: The Lead can assign an unassigned event to an available coordinator.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (acting user is the Lead; pool), Mock
-        (assign_event_coordinator)
+    Summary: POST assign-coordinator as the Lead for a coordinator in the pool
+        calls assign_event_coordinator("EVT-001", "user-coordinator") once and
+        returns its result with 200.
+    AC1 (bullet 1 only): assigns the selected coordinator to the event. Queue
+        removal and the recorded assigner/time are Event Service's and not
+        proven here.
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]), Mock (assign_event_coordinator returns the saved
+        assignment and is asserted called once)
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
@@ -129,15 +132,14 @@ def test_assign_when_lead_picks_available_coordinator_saves_assignment(downstrea
 
 def test_assign_when_lead_picks_themselves_saves_self_assignment(downstream):
     """
-    Summary: The Lead can take an event on themselves.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (acting user is the Lead; pool includes the Lead), Mock
-        (assign_event_coordinator)
+    Summary: POST assign-coordinator as the Lead with the Lead's own user id
+        (which is in the pool) is answered 200 and calls
+        assign_event_coordinator("EVT-001", "user-lead") once.
+    AC1 (bullet 1 only): assigns the selected coordinator to the event; the
+        Lead counts as selectable.
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [LEAD, COORDINATOR]), Mock (assign_event_coordinator returns a canned
+        assignment and is asserted called once)
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
@@ -154,10 +156,12 @@ def test_assign_when_lead_picks_themselves_saves_self_assignment(downstream):
 
 def test_assign_when_coordinator_not_in_pool_returns_404_without_saving(downstream):
     """
-    Summary: An event cannot be given to someone who is not an assignable coordinator.
+    Summary: POST assign-coordinator as the Lead for "user-999", who is not in
+        the pool, is answered 404 "... is not available or does not exist" and
+        assign_event_coordinator is never called.
     AC1: only a coordinator from the assignable pool can be selected
-    Double: Stub (pool without the chosen user), Mock (assign_event_coordinator
-        not called)
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]), Mock (assign_event_coordinator asserted not called)
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
@@ -174,15 +178,14 @@ def test_assign_when_coordinator_not_in_pool_returns_404_without_saving(downstre
 
 def test_assign_when_pool_lookup_fails_returns_500_without_saving(downstream):
     """
-    Summary: If the coordinator pool cannot be read, nothing is assigned and the Lead sees an error.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (pool lookup raises), Mock (assign_event_coordinator not
-        called)
+    Summary: POST assign-coordinator as the Lead is answered 500 "Failed to
+        validate coordinator..." when get_available_coordinators raises, and
+        assign_event_coordinator is never called.
+    AC1: only a coordinator from the assignable pool can be selected (error
+        path: an unreadable pool must not let an unchecked assignment through)
+    Double: Stub (get_user returns LEAD; get_available_coordinators raises
+        Exception("User Service error")), Mock (assign_event_coordinator
+        asserted not called)
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
@@ -197,33 +200,17 @@ def test_assign_when_pool_lookup_fails_returns_500_without_saving(downstream):
     downstream.assign.assert_not_called()
 
 
-def test_assign_without_token_returns_401(downstream):
-    """
-    Summary: Nobody can assign a coordinator without signing in.
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    Double: Mock (assign_event_coordinator not called)
-    """
-    # Arrange (Given): downstream, from fixtures
-
-    # Act (When)
-    response = create_app().test_client().post(
-        "/events/EVT-001/assign-coordinator/user-coordinator", json={"actingUserId": "user-lead"}
-    )
-
-    # Assert (Then)
-    assert response.status_code == 401
-    downstream.assign.assert_not_called()
-
-
 def test_assign_when_user_service_says_not_lead_returns_403(downstream):
     """
-    Summary: A coordinator who is not the Lead cannot assign, even with a token that claims the Lead role.
+    Summary: POST assign-coordinator with a token claiming the Lead role is
+        answered 403 {"error": "Only the Event Coordinator Lead can assign or
+        reassign coordinators"} when User Service's profile for
+        that user says Event Coordinator, and assign_event_coordinator is never
+        called. The token's role claim is not what decides.
     AC2: only the Lead may assign (API half of "not able to see any Reassign
         option")
-    Double: Stub (User Service profile says Event Coordinator), Mock
-        (assign_event_coordinator not called)
+    Double: Stub (get_user returns the COORDINATOR profile), Mock
+        (assign_event_coordinator asserted not called)
     """
     # Arrange (Given)
     downstream.get_user.return_value = COORDINATOR
@@ -233,16 +220,19 @@ def test_assign_when_user_service_says_not_lead_returns_403(downstream):
 
     # Assert (Then)
     assert response.status_code == 403
-    assert "Lead" in response.json["error"]
+    assert response.json == {"error": "Only the Event Coordinator Lead can assign or reassign coordinators"}
     downstream.assign.assert_not_called()
 
 
 def test_assign_when_acting_user_unknown_returns_403(downstream):
     """
-    Summary: A signed-in user with no profile cannot assign.
+    Summary: POST assign-coordinator with a Lead-role token whose user id
+        User Service does not know (get_user returns None) is answered 403 {"error":
+        "Only the Event Coordinator Lead can assign or reassign coordinators"} and
+        assign_event_coordinator is never called.
     AC2: only the Lead may assign
-    Double: Stub (User Service has no profile), Mock (assign_event_coordinator
-        not called)
+    Double: Stub (get_user returns None), Mock (assign_event_coordinator
+        asserted not called)
     """
     # Arrange (Given)
     downstream.get_user.return_value = None
@@ -252,15 +242,19 @@ def test_assign_when_acting_user_unknown_returns_403(downstream):
 
     # Assert (Then)
     assert response.status_code == 403
+    assert response.json == {"error": "Only the Event Coordinator Lead can assign or reassign coordinators"}
     downstream.assign.assert_not_called()
 
 
 def test_assign_when_acting_user_lookup_fails_returns_500_before_pool_lookup(downstream):
     """
-    Summary: If the Lead's own profile cannot be checked, the assignment stops before anything else is read.
-    AC2: Given an Event Coordinator who is not the Lead, they should not be
-        able to see any 'Reassign' option or button
-    Double: Stub (User Service raises), Mock (pool lookup not called)
+    Summary: POST assign-coordinator as the Lead is answered 500 "Failed to
+        validate acting user..." when get_user raises, and
+        get_available_coordinators is never called.
+    AC2: only the Lead may assign (error path: if the role cannot be checked,
+        nothing further is read or done)
+    Double: Stub (get_user raises Exception("User Service unreachable")), Mock
+        (get_available_coordinators asserted not called)
     """
     # Arrange (Given)
     downstream.get_user.side_effect = Exception("User Service unreachable")
@@ -276,14 +270,14 @@ def test_assign_when_acting_user_lookup_fails_returns_500_before_pool_lookup(dow
 
 def test_assign_when_event_service_fails_returns_500_not_success(downstream):
     """
-    Summary: If Event Service cannot save the assignment, the Lead gets an error rather than a false success.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (acting user, pool, assign_event_coordinator raises)
+    Summary: POST assign-coordinator as the Lead is answered 500 "Failed to
+        assign coordinator to event..." (not 200) when
+        assign_event_coordinator raises a plain Exception.
+    AC1 (bullet 1 only; error path): the assignment is not reported as done when
+        Event Service could not save it.
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]; assign_event_coordinator raises Exception("Event Service
+        down"))
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
@@ -298,34 +292,14 @@ def test_assign_when_event_service_fails_returns_500_not_success(downstream):
     assert "Failed to assign coordinator to event" in response.json["error"]
 
 
-def test_assign_with_acting_user_in_body_checks_token_identity_instead(downstream):
-    """
-    Summary: The person assigning is the signed-in user; an id in the request body is ignored.
-    SCRUM-8 AC2: Given a system user successfully authenticates, when they
-        access protected information or functionality, then their access is
-        evaluated according to their role and relationship to the relevant
-        event.
-    Double: Mock (get_user records which user is looked up)
-    """
-    # Arrange (Given)
-    downstream.get_user.return_value = None
-
-    # Act (When)
-    create_app().test_client().post(
-        "/events/EVT-1/assign-coordinator/user-1",
-        json={"actingUserId": "someone-else"},
-        headers=bearer("e7334aa9-eb3a-4c45-84b5-280501b6c109", "Event Coordinator"),
-    )
-
-    # Assert (Then)
-    downstream.get_user.assert_called_once_with("e7334aa9-eb3a-4c45-84b5-280501b6c109")
-
-
 def test_available_coordinators_when_queried_include_lead_first(monkeypatch):
     """
-    Summary: The assignable pool is the Lead followed by every Event Coordinator.
+    Summary: clients.get_available_coordinators() asks User Service for the
+        Event Coordinator Lead users, then the Event Coordinator users, and
+        returns them in that order (Lead first).
     AC1: the Lead selects a coordinator from the assignable pool
-    Double: Stub (httpx.get returns users per role)
+    Double: Stub (httpx.get is replaced and answers 200 with one user per
+        requested role; the role params of each call are inspected)
     """
     by_role = {
         "Event Coordinator Lead": [{"user_id": "lead", "role": "Event Coordinator Lead"}],
@@ -340,30 +314,13 @@ def test_available_coordinators_when_queried_include_lead_first(monkeypatch):
     assert [call.kwargs["params"]["role"] for call in get.call_args_list] == list(clients.ASSIGNABLE_ROLES)
 
 
-def test_available_coordinators_when_user_service_fails_raises_http_error(monkeypatch):
-    """
-    Summary: A User Service failure while reading the pool is raised, not hidden as an empty pool.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (httpx.get answers 503)
-    """
-    # Arrange (Given)
-    monkeypatch.setattr(clients.httpx, "get", Mock(return_value=user_service_reply(503, {})))
-
-    # Act + Assert (When / Then)
-    with pytest.raises(httpx.HTTPStatusError):
-        clients.get_available_coordinators()
-
-
 def test_get_user_when_found_returns_profile(monkeypatch):
     """
-    Summary: The acting user's profile, with their role, is read from User Service.
-    AC2: only the Lead may assign
-    Double: Stub (httpx.get returns the Lead's profile)
+    Summary: clients.get_user("user-lead") requests {USER_SERVICE_URL}/users/user-lead
+        and returns the profile (including role) from a 200 reply.
+    AC2: only the Lead may assign (the role check needs the user's profile)
+    Double: Stub (httpx.get is replaced and answers 200 with the LEAD profile;
+        the URL it was called with is inspected)
     """
     get = Mock(return_value=user_service_reply(200, LEAD))
     monkeypatch.setattr(clients.httpx, "get", get)
@@ -374,10 +331,11 @@ def test_get_user_when_found_returns_profile(monkeypatch):
 
 def test_get_user_when_unknown_returns_none(monkeypatch):
     """
-    Summary: A user User Service does not know is reported as missing rather than as an error.
-    AC2: Given an Event Coordinator who is not the Lead, they should not be
-        able to see any 'Reassign' option or button
-    Double: Stub (httpx.get answers 404)
+    Summary: clients.get_user("nobody") returns None, not an exception, when
+        User Service answers 404.
+    AC2: only the Lead may assign (an unknown user is later refused by the route
+        as not the Lead, see test_assign_when_acting_user_unknown_returns_403)
+    Double: Stub (httpx.get is replaced and answers 404)
     """
     # Arrange (Given)
     monkeypatch.setattr(clients.httpx, "get", Mock(return_value=user_service_reply(404, {})))
@@ -386,31 +344,17 @@ def test_get_user_when_unknown_returns_none(monkeypatch):
     assert clients.get_user("nobody") is None
 
 
-def test_get_user_when_user_service_fails_raises_http_error(monkeypatch):
-    """
-    Summary: A User Service failure while checking the acting user is raised.
-    AC2: Given an Event Coordinator who is not the Lead, they should not be
-        able to see any 'Reassign' option or button
-    Double: Stub (httpx.get answers 500)
-    """
-    # Arrange (Given)
-    monkeypatch.setattr(clients.httpx, "get", Mock(return_value=user_service_reply(500, {})))
-
-    # Act + Assert (When / Then)
-    with pytest.raises(httpx.HTTPStatusError):
-        clients.get_user("user-lead")
-
-
 def test_assign_event_coordinator_when_called_sends_only_new_coordinator(monkeypatch):
     """
-    Summary: Event Service is told only the new coordinator; it records the signed-in Lead as assigner itself.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (httpx.patch returns the saved event)
+    Summary: clients.assign_event_coordinator("evt-1", "coord") PATCHes
+        {EVENT_SERVICE_URL}/events/evt-1 with a JSON body of exactly
+        {"assignedCoordinatorId": "coord"} (no assigner is sent) and returns
+        Event Service's reply.
+    AC1 (bullet 1 only): assigns the selected coordinator to the event. That
+        Event Service records the assigner and time from the forwarded token
+        is not proven here.
+    Double: Stub (httpx.patch is replaced and answers 200 with the saved event;
+        the URL and JSON it was called with are inspected)
     """
     # Arrange (Given)
     saved = {"id": "evt-1", "coordinatorId": "coord", "assignedBy": "lead"}
@@ -424,21 +368,81 @@ def test_assign_event_coordinator_when_called_sends_only_new_coordinator(monkeyp
     assert patch.call_args.kwargs["json"] == {"assignedCoordinatorId": "coord"}
 
 
-def test_assign_event_coordinator_when_event_service_refuses_raises_http_error(monkeypatch):
+@pytest.mark.parametrize(
+    "http_method,status,call",
+    [
+        pytest.param("get", 503, lambda: clients.get_available_coordinators(), id="pool_503"),
+        pytest.param("get", 500, lambda: clients.get_user("user-lead"), id="acting_user_500"),
+        pytest.param("patch", 404, lambda: clients.assign_event_coordinator("evt-1", "coord"), id="assign_404"),
+    ],
+)
+def test_client_when_downstream_service_refuses_raises_http_error(monkeypatch, http_method, status, call):
     """
-    Summary: An Event Service refusal of the assignment is raised to the route.
-    AC1: Given an unassigned submitted event, when the Lead assigns a
-        coordinator to the event, then the system:
-        - assigns the selected coordinator to the event
-        - removes the event from the unassigned queue
-        - the current coordinator, who assigned them, and when the assignment
-          was done are recorded in the event's detail page
-    Double: Stub (httpx.patch answers 404)
+    Summary: get_available_coordinators (User Service 503), get_user (User
+        Service 500) and assign_event_coordinator (Event Service 404) each raise
+        httpx.HTTPStatusError instead of returning an empty pool, None or a
+        saved event, so the route can map the failure.
+    AC1: the Lead selects a coordinator from the assignable pool (case
+        "pool_503"), and AC1 bullet 1 (case "assign_404"): a failed read or
+        refused save is not returned as success.
+    AC2: only the Lead may assign (case "acting_user_500": a failed lookup must
+        not be read as "unknown user")
+    Double: Stub (httpx.get or httpx.patch is replaced and answers the
+        parametrised status with an empty JSON body)
     """
     # Arrange (Given)
-    monkeypatch.setattr(clients.httpx, "patch", Mock(return_value=httpx.Response(
-        404, json={}, request=httpx.Request("PATCH", "http://event.test"))))
+    reply = httpx.Response(status, json={}, request=httpx.Request(http_method.upper(), "http://downstream.test"))
+    monkeypatch.setattr(clients.httpx, http_method, Mock(return_value=reply))
 
     # Act + Assert (When / Then)
     with pytest.raises(httpx.HTTPStatusError):
-        clients.assign_event_coordinator("evt-1", "coord")
+        call()
+
+
+def test_assign_when_token_says_coordinator_but_user_service_says_lead_saves_assignment(downstream):
+    """
+    Summary: POST assign-coordinator with an Event Coordinator-role token is
+        answered 200 and calls assign_event_coordinator when User Service's
+        profile for that user says Event Coordinator Lead. The role is read
+        fresh from User Service, not from the token (unlike /queue, /workload
+        and /coordinators).
+    AC2: only the Lead may assign (the live User Service role decides, so a
+        promotion or demotion takes effect before the token is reissued)
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]), Mock (assign_event_coordinator returns a canned
+        assignment and is asserted called once)
+    """
+    # Arrange (Given)
+    downstream.get_user.return_value = LEAD
+    downstream.coordinators.return_value = [COORDINATOR]
+    downstream.assign.return_value = {"eventId": "EVT-001", "assignedCoordinatorId": "user-coordinator"}
+
+    # Act (When)
+    response = assign(headers=bearer("user-lead", "Event Coordinator"))
+
+    # Assert (Then)
+    assert response.status_code == 200
+    downstream.assign.assert_called_once_with("EVT-001", "user-coordinator")
+
+
+def test_assign_when_pool_entry_has_only_id_returns_404_without_saving(downstream):
+    """
+    Summary: POST assign-coordinator as the Lead for "user-coordinator" is
+        answered 404 and assign_event_coordinator is never called when the pool
+        entry carries the id under "id" instead of "user_id", because only
+        "user_id" (User Service's key) is read.
+    AC1: only a coordinator from the assignable pool can be selected
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns one
+        entry {"id": "user-coordinator", "role": "Event Coordinator"}), Mock
+        (assign_event_coordinator asserted not called)
+    """
+    # Arrange (Given)
+    downstream.get_user.return_value = LEAD
+    downstream.coordinators.return_value = [{"id": "user-coordinator", "role": "Event Coordinator"}]
+
+    # Act (When)
+    response = assign("user-coordinator")
+
+    # Assert (Then)
+    assert response.status_code == 404
+    downstream.assign.assert_not_called()

@@ -63,26 +63,38 @@ def event_service_refusal(status, body=None, text=None):
 
 def test_reassign_when_lead_picks_different_coordinator_saves_new_coordinator(downstream):
     """
-    Summary: The Lead can move an assigned event to a different coordinator.
-    AC1: Given an event with an assigned coordinator that is not completed or
-        rejected, when the Lead selects a different coordinator and confirms:
-        - the new coordinator replaces the previous one
-        - the previous coordinator loses access to manage the event
-        - the Lead, previous coordinator, new coordinator, and timestamp are
-          recorded in the event's detail page
-    Double: Stub (acting Lead; pool of two), Mock (assign_event_coordinator)
+    Summary: POST assign-coordinator as the Lead for "user-456" (in the pool) on
+        an event already assigned to another coordinator is answered 200 with
+        exactly what assign_event_coordinator returned, including the
+        previousCoordinatorId, assignedBy and assignedAt Event Service adds on a
+        reassignment, and calls it once with ("EVT-001", "user-456").
+    AC1 (bullets 1 and 3, pass-through only): the new coordinator replaces the
+        previous one, and the Lead, previous coordinator and timestamp reach the
+        caller as Event Service reports them. That Event Service really records
+        them, and that the previous coordinator loses access, are not proven
+        here.
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR, SECOND_COORDINATOR]), Mock (assign_event_coordinator
+        returns a reassignment result and is asserted called once)
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
     downstream.coordinators.return_value = [COORDINATOR, SECOND_COORDINATOR]
-    downstream.assign.return_value = {"eventId": "EVT-001", "assignedCoordinatorId": "user-456"}
+    reassigned = {
+        "eventId": "EVT-001",
+        "assignedCoordinatorId": "user-456",
+        "previousCoordinatorId": "user-coordinator",
+        "assignedBy": "user-lead",
+        "assignedAt": "2030-03-01T09:00:00+08:00",
+    }
+    downstream.assign.return_value = reassigned
 
     # Act (When)
     response = reassign("user-456")
 
     # Assert (Then)
     assert response.status_code == 200
-    assert response.json == {"eventId": "EVT-001", "assignedCoordinatorId": "user-456"}
+    assert response.json == reassigned
     downstream.assign.assert_called_once_with("EVT-001", "user-456")
 
 
@@ -93,11 +105,17 @@ def test_reassign_when_lead_picks_different_coordinator_saves_new_coordinator(do
 ], ids=["no_change", "cancelled_event", "unknown_event"])
 def test_reassign_when_event_service_refuses_returns_its_status_and_message(downstream, status, message):
     """
-    Summary: A no-change, closed-event or unknown-event refusal reaches the Lead with Event Service's status and reason.
+    Summary: When assign_event_coordinator raises an Event Service 4xx refusal
+        (409 no change, 409 Cancelled event, 404 unknown event), the Lead gets
+        the same status and {"error": <Event Service's message>}.
     AC2: Given the Lead selects the current coordinator, then the system
-        rejects it as no change.
-    AC1: only an event that is not completed or rejected can be reassigned
-    Double: Stub (assign_event_coordinator raises Event Service's refusal)
+        rejects it as no change. (case "no_change")
+    AC1: only an event that is not completed or rejected can be reassigned.
+        (case "cancelled_event"; "unknown_event" is the same pass-through and
+        belongs to no AC)
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]; assign_event_coordinator raises an httpx.HTTPStatusError
+        carrying the parametrised status and {"message": ...})
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
@@ -112,17 +130,33 @@ def test_reassign_when_event_service_refuses_returns_its_status_and_message(down
     assert response.json == {"error": message}
 
 
-def test_reassign_when_refusal_has_no_message_returns_fallback_message(downstream):
+@pytest.mark.parametrize(
+    "refusal_body",
+    [
+        pytest.param({"text": "not json"}, id="not_json"),
+        pytest.param({"body": ["nope"]}, id="json_list"),
+        pytest.param({"body": {}}, id="no_message_key"),
+        pytest.param({"body": {"message": 5}}, id="message_not_a_string"),
+        pytest.param({"body": {"message": ""}}, id="message_empty"),
+    ],
+)
+def test_reassign_when_refusal_has_no_message_returns_fallback_message(downstream, refusal_body):
     """
-    Summary: A refusal without a readable reason still tells the Lead it was refused.
+    Summary: When Event Service refuses with 409 and a body that is not JSON, is
+        a JSON list, has no "message", or has a "message" that is not a
+        non-empty string, the Lead gets 409 and {"error": "Event Service refused
+        the assignment."}, never an HTML error page or a non-string error.
     AC2: Given the Lead selects the current coordinator, then the system
-        rejects it as no change.
-    Double: Stub (Event Service answers 409 with a non-JSON body)
+        rejects it as no change. (a no-change refusal still reaches the Lead
+        when Event Service gives no readable reason)
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]; assign_event_coordinator raises an httpx.HTTPStatusError
+        with status 409 and the parametrised body)
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD
     downstream.coordinators.return_value = [COORDINATOR]
-    downstream.assign.side_effect = event_service_refusal(409, text="not json")
+    downstream.assign.side_effect = event_service_refusal(409, **refusal_body)
 
     # Act (When)
     response = reassign()
@@ -132,47 +166,35 @@ def test_reassign_when_refusal_has_no_message_returns_fallback_message(downstrea
     assert response.json == {"error": "Event Service refused the assignment."}
 
 
-def test_reassign_when_event_service_has_outage_returns_500(downstream):
-    """
-    Summary: An Event Service outage is reported as a failure, not as a refusal.
-    AC1: Given an event with an assigned coordinator that is not completed or
-        rejected, when the Lead selects a different coordinator and confirms:
-        - the new coordinator replaces the previous one
-        - the previous coordinator loses access to manage the event
-        - the Lead, previous coordinator, new coordinator, and timestamp are
-          recorded in the event's detail page
-    Double: Stub (Event Service answers 503)
-    """
-    # Arrange (Given)
-    downstream.get_user.return_value = LEAD
-    downstream.coordinators.return_value = [COORDINATOR]
-    downstream.assign.side_effect = event_service_refusal(503, {"message": "db down"})
-
-    # Act (When)
-    response = reassign()
-
-    # Assert (Then)
-    assert response.status_code == 500
-    assert "Failed to assign coordinator to event" in response.json["error"]
-
-
 @pytest.mark.parametrize(
     "status, expected_status, expected_error",
     [
         (400, 400, "Refused by Event Service."),
         (499, 499, "Refused by Event Service."),
         (500, 500, "Failed to assign coordinator to event: refused"),
+        (503, 500, "Failed to assign coordinator to event: refused"),
     ],
-    ids=["lowest_refusal", "highest_refusal", "lowest_outage"],
+    ids=["lowest_refusal", "highest_refusal", "lowest_outage", "service_unavailable"],
 )
 def test_reassign_when_event_service_status_near_refusal_range_separates_refusal_from_outage(
     downstream, status, expected_status, expected_error
 ):
     """
-    Summary: Every 4xx from Event Service reaches the Lead as a refusal with its reason, and a 5xx as a failure.
-    AC2: (boundary: Event Service status = 400, 499, 500)
-    Double: Stub (assign_event_coordinator raises Event Service's
-        HTTPStatusError)
+    Summary: An Event Service status of 400 or 499 is passed to the Lead with
+        {"error": <Event Service's message>}; a status of 500 or 503 becomes
+        {"error": "Failed to assign coordinator to event: refused"} with status
+        500 and the Event Service message is not shown. Checks both edges of
+        the 4xx range and a typical outage.
+    AC2 (mechanism, not the AC itself): the refusal a no-change attempt gets
+        from Event Service is a 4xx and is passed through; boundary statuses
+        400, 499 and 500.
+    AC1 (bullet 1 only; error path, cases "lowest_outage" and
+        "service_unavailable"): a reassignment is not reported as done, or as a
+        refusal, when Event Service is down.
+    Double: Stub (get_user returns LEAD; get_available_coordinators returns
+        [COORDINATOR]; assign_event_coordinator raises an httpx.HTTPStatusError
+        with the parametrised status and {"message": "Refused by Event
+        Service."})
     """
     # Arrange (Given)
     downstream.get_user.return_value = LEAD

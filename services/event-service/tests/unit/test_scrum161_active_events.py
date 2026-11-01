@@ -20,7 +20,7 @@ AC6: Only the Lead can access this view
 Scope of this file
 ------------------∏∏
 The view itself is GET /workload in coordinator-assignment-service; its tests
-are in that service (test_coordinator_workload.py). That route calls
+are in that service (test_scrum161_coordinator_workload.py). That route calls
 this service's GET /events/active for the events, so this file covers only what
 /events/active supplies:
 AC2: name (eventName), organiser (organiserId, an id and not a display name),
@@ -59,7 +59,7 @@ Proven elsewhere
   throwaway postgres:17.6.
 - AC1 (every coordinator with their events), AC5 (read-only) and AC6 (Lead only)
   are properties of GET /workload, tested in
-  coordinator-assignment-service/tests/unit/test_coordinator_workload.py.
+  coordinator-assignment-service/tests/unit/test_scrum161_coordinator_workload.py.
 - That the UI shows no edit controls (AC5) is left to the frontend
   CoordinatorWorkloadPage.test.tsx.
 """

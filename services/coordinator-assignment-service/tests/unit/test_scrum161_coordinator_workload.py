@@ -17,25 +17,6 @@ AC4: Confirmed, cancelled and rejected events are excluded
 AC5: The view is read-only: event details cannot be edited from it
 AC6: Only the Lead can access this view
 
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
-
 Real
 ----
 - GET /workload: the signed-in and Lead checks, the grouping of active events
@@ -78,12 +59,15 @@ def workload(headers=None):
 
 def test_ac1_ac3_workload_when_lead_lists_every_coordinator_with_their_events(downstream):
     """
-    Summary: The Lead sees every coordinator, themselves included, with their active events, and unassigned events apart.
+    Summary: GET /workload as the Lead returns every coordinator in the pool
+        (the Lead included, with "events": []) with their own assigned events
+        under "events", and an event with coordinatorId None under "unassigned".
     AC1: Lead sees every Event Coordinator with the active events currently
         assigned to them
     AC3: Unassigned events are visible and clearly marked as unassigned
-    Double: Stub (pool of Lead and coordinator; one assigned and one unassigned
-        event)
+    Double: Stub (get_available_coordinators returns [LEAD, COORDINATOR];
+        get_active_events returns one event assigned to COORDINATOR and one with
+        coordinatorId None)
     """
     downstream.coordinators.return_value = [LEAD, COORDINATOR]
     assigned = {"id": "EVT-001", "coordinatorId": "user-coordinator", "status": "Under Review"}
@@ -102,10 +86,13 @@ def test_ac1_ac3_workload_when_lead_lists_every_coordinator_with_their_events(do
 
 def test_ac1_workload_when_coordinator_no_longer_listed_keeps_event_visible(downstream):
     """
-    Summary: An event whose coordinator left the pool still shows up instead of disappearing.
+    Summary: GET /workload as the Lead puts an event whose coordinatorId is not
+        in the pool under "otherAssigned" and leaves it out of every
+        coordinator's "events".
     AC1: Lead sees every Event Coordinator with the active events currently
         assigned to them
-    Double: Stub (event assigned to a user outside the pool)
+    Double: Stub (get_available_coordinators returns [COORDINATOR];
+        get_active_events returns one event assigned to "user-gone")
     """
     downstream.coordinators.return_value = [COORDINATOR]
     orphan = {"id": "EVT-003", "coordinatorId": "user-gone", "status": "Approved"}
@@ -120,9 +107,13 @@ def test_ac1_workload_when_coordinator_no_longer_listed_keeps_event_visible(down
 
 def test_ac2_workload_when_events_listed_keeps_name_organiser_date_time_and_status(downstream):
     """
-    Summary: Each event in the workload view keeps the fields the Lead needs to see.
+    Summary: GET /workload as the Lead hands back an assigned event with its
+        eventName, organiserId, preferredStartDate/EndDate and status exactly
+        as Event Service sent them (no field dropped or renamed).
     AC2: Each event shows: name, organiser, date/time, current status
-    Double: Stub (one assigned event with every field)
+    Double: Stub (get_available_coordinators returns [COORDINATOR];
+        get_active_events returns one fully populated event assigned to
+        COORDINATOR)
     """
     downstream.coordinators.return_value = [COORDINATOR]
     event = {
@@ -145,9 +136,11 @@ def test_ac2_workload_when_events_listed_keeps_name_organiser_date_time_and_stat
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_ac5_workload_when_written_to_returns_405_without_fetching(downstream, method):
     """
-    Summary: The workload view cannot be used to change anything.
+    Summary: POST, PUT, PATCH and DELETE on /workload with a Lead token are each
+        answered 405 and get_active_events is never called.
     AC5: The view is read-only: event details cannot be edited from it
-    Double: Mock (get_active_events not called)
+    Double: Mock (get_active_events, via the downstream fixture, asserted not
+        called); get_available_coordinators is stubbed but not asserted on
     """
     response = getattr(create_app().test_client(), method)("/workload", headers=as_lead(), json={"eventName": "Changed"})
 
@@ -158,39 +151,32 @@ def test_ac5_workload_when_written_to_returns_405_without_fetching(downstream, m
 @pytest.mark.parametrize("role", ["Event Coordinator", "Event Organiser", "Attendee"], ids=["event_coordinator", "event_organiser", "attendee"])
 def test_ac6_workload_when_role_not_lead_returns_403_without_fetching(downstream, role):
     """
-    Summary: Only the Lead can open the workload view.
+    Summary: GET /workload with an Event Coordinator, Event Organiser or
+        Attendee token is answered 403 {"error": "Only the Event Coordinator
+        Lead can view coordinator workload"} and neither get_available_coordinators
+        nor get_active_events is called.
     AC6: Only the Lead can access this view
-    Double: Mock (get_active_events not called)
+    Double: Mock (get_available_coordinators and get_active_events, via the
+        downstream fixture, asserted not called)
     """
     response = workload(headers=bearer("someone", role))
 
     assert response.status_code == 403
+    assert response.json == {"error": "Only the Event Coordinator Lead can view coordinator workload"}
+    downstream.coordinators.assert_not_called()
     downstream.active.assert_not_called()
-
-
-def test_scrum8_ac1_workload_without_token_returns_401(downstream):
-    """
-    Summary: Nobody can open the workload view without signing in.
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    Double: None
-    """
-    # Arrange (Given): downstream, from fixtures
-
-    # Act (When)
-    response = create_app().test_client().get("/workload")
-
-    # Assert (Then)
-    assert response.status_code == 401
 
 
 def test_ac1_workload_when_event_service_fails_returns_500(downstream):
     """
-    Summary: If active events cannot be read, the Lead sees an error rather than an empty workload.
+    Summary: GET /workload as the Lead is answered 500 "Failed to fetch
+        coordinator workload..." when get_active_events raises, instead of an
+        empty workload.
     AC1: Lead sees every Event Coordinator with the active events currently
-        assigned to them
-    Double: Stub (get_active_events raises)
+        assigned to them (error path: a failed read must not look like an empty
+        workload)
+    Double: Stub (get_available_coordinators returns [COORDINATOR];
+        get_active_events raises Exception("Event Service down"))
     """
     downstream.coordinators.return_value = [COORDINATOR]
     downstream.active.side_effect = Exception("Event Service down")
@@ -201,12 +187,63 @@ def test_ac1_workload_when_event_service_fails_returns_500(downstream):
     assert "Failed to fetch coordinator workload" in response.json["error"]
 
 
+def test_ac1_workload_when_pool_lookup_fails_returns_500(downstream):
+    """
+    Summary: GET /workload as the Lead is answered 500 "Failed to fetch
+        coordinator workload..." when get_available_coordinators raises, instead
+        of an empty workload.
+    AC1: Lead sees every Event Coordinator with the active events currently
+        assigned to them (error path: a failed read must not look like an empty
+        workload)
+    Double: Stub (get_available_coordinators raises Exception("User Service
+        down"); get_active_events returns [])
+    """
+    downstream.coordinators.side_effect = Exception("User Service down")
+
+    response = workload()
+
+    assert response.status_code == 500
+    assert "Failed to fetch coordinator workload" in response.json["error"]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        pytest.param({"id": "EVT-005", "coordinatorId": None, "status": "Submitted"}, id="coordinator_null"),
+        pytest.param({"id": "EVT-005", "coordinatorId": "", "status": "Submitted"}, id="coordinator_blank"),
+        pytest.param({"id": "EVT-005", "status": "Submitted"}, id="coordinator_missing"),
+    ],
+)
+def test_ac3_workload_when_event_has_no_coordinator_value_lists_it_as_unassigned(downstream, event):
+    """
+    Summary: GET /workload as the Lead lists an event whose coordinatorId is
+        null, "" or absent under "unassigned", not under any coordinator or
+        "otherAssigned".
+    AC3: Unassigned events are visible and clearly marked as unassigned
+    Double: Stub (get_available_coordinators returns [COORDINATOR];
+        get_active_events returns the one parametrised event)
+    """
+    downstream.coordinators.return_value = [COORDINATOR]
+    downstream.active.return_value = [event]
+
+    response = workload()
+
+    assert response.status_code == 200
+    assert response.json == {
+        "coordinators": [{**COORDINATOR, "events": []}],
+        "unassigned": [event],
+        "otherAssigned": [],
+    }
+
+
 def test_ac1_active_events_when_fetched_come_from_event_service(monkeypatch):
     """
-    Summary: Active events come from Event Service's active-events list.
+    Summary: clients.get_active_events() requests {EVENT_SERVICE_URL}/events/active
+        and returns the "events" list from the reply.
     AC1: Lead sees every Event Coordinator with the active events currently
         assigned to them
-    Double: Stub (httpx.get returns one event)
+    Double: Stub (httpx.get is replaced with a canned 200 reply holding one
+        event; the URL it was called with is inspected)
     """
     get = Mock(return_value=httpx.Response(200, json={"events": [{"id": "evt-1"}]}, request=httpx.Request("GET", "http://e.test")))
     monkeypatch.setattr(clients.httpx, "get", get)

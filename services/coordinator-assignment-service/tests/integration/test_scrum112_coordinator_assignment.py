@@ -10,8 +10,8 @@ Not proven: User/Event database persistence, Supabase sign-in itself (the Lead i
             signed with a test key, SCRUM-8), or the frontend; those belong to the atomic
             integration and browser/e2e tiers.
 
-AC1  The Lead sees submitted requests with event name, organiser, proposed date, and
-     Assigned/Unassigned state.
+AC1  The Lead sees submitted requests that have no coordinator yet, with event name,
+     organiser and proposed date.
 AC2  Assigning an available coordinator records the Lead, coordinator and timestamp.
 AC3  Reassignment replaces the coordinator and reflects the newly assigned coordinator.
 
@@ -81,25 +81,19 @@ def stub_assignment(router, coordinator_id, payload=None, status_code=200):
 # AC1 ---------------------------------------------------------------------
 
 
-def test_ac1_lead_sees_assigned_and_unassigned_submitted_requests(client):
-    """Normal: one worklist preserves every field needed for assignment decisions."""
-    unassigned = event()
-    assigned = event(
-        id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        eventName="Innovation Expo",
-        status="Under Review",
-        coordinatorId=COORDINATOR_ID,
-    )
+def test_ac1_lead_sees_unassigned_submitted_requests(client):
+    """Normal: the queue lists only unassigned requests and preserves every field needed for assignment decisions."""
+    first = event()
+    second = event(id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", eventName="Innovation Expo")
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         event_route = router.get(
-            f"{service_clients.EVENT_SERVICE_URL}/events/submitted",
-            params={"viewerRole": "Event Coordinator Lead"},
-        ).mock(return_value=Response(200, json={"events": [unassigned, assigned]}))
+            f"{service_clients.EVENT_SERVICE_URL}/events/unassigned",
+        ).mock(return_value=Response(200, json={"events": [first, second]}))
 
         response = client.get("/queue")
 
     assert response.status_code == 200
-    assert response.get_json()["events"] == [unassigned, assigned]
+    assert response.get_json()["events"] == [first, second]
     assert event_route.call_count == 1
 
 
@@ -117,8 +111,7 @@ def test_ac1_event_service_outage_is_not_reported_as_an_empty_worklist(client):
     """Failure: a downstream outage produces an error, never a false empty list."""
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
         router.get(
-            f"{service_clients.EVENT_SERVICE_URL}/events/submitted",
-            params={"viewerRole": "Event Coordinator Lead"},
+            f"{service_clients.EVENT_SERVICE_URL}/events/unassigned",
         ).mock(return_value=Response(503, json={"message": "Event Service unavailable"}))
 
         response = client.get("/queue")

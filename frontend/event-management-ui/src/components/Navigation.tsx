@@ -27,7 +27,7 @@ export function Sidebar({ route, role, onNavigate }: { route: Route; role: Role;
         ) : (
           <>
             {role !== 'Event Organiser' && (
-              <NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon={<CheckIcon size={17} />}>Request review</NavButton>
+              <NavButton active={route === 'review'} onClick={() => onNavigate('review')} icon={<CheckIcon size={17} />}>Event requests</NavButton>
             )}
             {canViewMyEvents(role) && (
               <NavButton active={route === 'myEvents'} onClick={() => onNavigate('myEvents')} icon={<ListIcon size={17} />}>My events</NavButton>
