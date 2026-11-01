@@ -11,10 +11,12 @@ export interface SubmittedEvent extends EventData {
   assignedBy?: string | null
   assignedAt?: string | null
   previousCoordinatorId?: string | null
-  decision: EventDecision | null
-  decisionHistory: EventDecision[]
+  /** The decision fields, organiserId and actionHistory are omitted for staff roles
+   * (Venue Staff, Technical Support, Safety Officer) — SCRUM-9. */
+  decision?: EventDecision | null
+  decisionHistory?: EventDecision[]
   actionDetails: string
-  actionHistory: EventAction[]
+  actionHistory?: EventAction[]
   clarificationHistory?: EventClarification[]
   amendmentHistory?: EventAmendment[]
 }

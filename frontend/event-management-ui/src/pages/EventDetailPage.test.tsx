@@ -305,6 +305,17 @@ test('SCRUM-150 AC3: a Safety Officer sees the Approve panel on a pending event'
   expect(screen.queryByText("This event is waiting for the Safety Officer's decision.")).not.toBeInTheDocument()
 })
 
+test('SCRUM-9: a Safety Officer can open an event even though staff responses omit actionHistory and decisions', async () => {
+  // event-service strips these fields for staff roles (STAFF_HIDDEN_FIELDS).
+  const { actionHistory: _a, decision: _d, decisionHistory: _h, organiserId: _o, ...staffView } = { ...event, status: 'Pending Safety Check' as const }
+  vi.mocked(eventApi).mockResolvedValue(staffView)
+  render(<EventDetailPage eventId={event.id} role="Safety Officer" currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
+  await screen.findByRole('heading', { name: 'Community Workshop' })
+
+  expect(screen.getByRole('heading', { name: 'Operational Safety Check' })).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Action history' })).not.toBeInTheDocument()
+})
+
 test('SCRUM-150 AC3: a Safety Officer sees no Approve panel once the event is Confirmed', async () => {
   vi.mocked(eventApi).mockResolvedValue({ ...event, status: 'Confirmed' })
   render(<EventDetailPage eventId={event.id} role="Safety Officer" currentCoordinatorId="33333333-3333-4333-8333-333333333333" currentCoordinatorName="Nurul Huda" resolveUserName={() => 'Nurul Huda'} backLabel="safety checks" onBack={vi.fn()} />)
