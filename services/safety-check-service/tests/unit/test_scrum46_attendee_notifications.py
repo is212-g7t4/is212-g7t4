@@ -120,13 +120,15 @@ from tests.unit.factories import (
 
 
 @pytest.mark.parametrize(
-    "state", ["final-venue", "lookup-outage", "already-confirmed-history"]
+    "state", ["final-venue", "lookup-outage", "venue-not-required"]
 )
 def test_approval_carries_final_venue_for_current_review_only(
     monkeypatch, state
 ):
     """
-    Summary: An approval passes on the final venue only for the current review cycle.
+    Summary: An approval passes on the final venue only when Event Service says
+        this review cycle needs one. The officer's event view has no
+        actionHistory (SCRUM-9), so the flag is the only signal.
     AC3: Given an event cancellation takes effect, or a change to its date,
         time or venue is approved and applied, all currently registered
         Attendees receive an in-app notification with the event name and
@@ -142,22 +144,19 @@ def test_approval_carries_final_venue_for_current_review_only(
         ("SAFETY_CHECK_RECORD_SERVICE_URL", "record"),
     ]:
         monkeypatch.setattr(clients, key, f"http://{name}.test")
-    history = [
-        dict(status="Approved", attendeeBaseline=dict(venueName="Hall A")),
-        dict(status="Pending Safety Check"),
-    ]
-    if state == "already-confirmed-history":
-        history.append(dict(status="Confirmed"))
+    staff_view = event(
+        "Pending Safety Check",
+        attendeeVenueRequired=state != "venue-not-required",
+    )
+    staff_view.pop("actionHistory", None)
     with respx.mock(assert_all_mocked=True, assert_all_called=True) as http:
         # User app/models.py::serialize, Event app/models.py::serialize and Record app/models.py::serialize.
         http.get(f"http://user.test/users/{OFFICER_ID}").respond(200, json=user())
-        http.get(f"http://event.test/events/{EVENT_ID}").respond(
-            200, json=event("Pending Safety Check", actionHistory=history)
-        )
+        http.get(f"http://event.test/events/{EVENT_ID}").respond(200, json=staff_view)
         http.get("http://record.test/safety-check-records").respond(
             200, json={"safetyChecks": [record()]}
         )
-        if state != "already-confirmed-history":
+        if state != "venue-not-required":
             route = http.get(
                 f"http://availability.test/events/{EVENT_ID}/venue-bookings"
             )
