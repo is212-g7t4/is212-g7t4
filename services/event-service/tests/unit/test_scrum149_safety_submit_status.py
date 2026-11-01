@@ -51,6 +51,8 @@ Not proven
   (-> tests/integration/ against a throwaway postgres:17.6).
 - That the notification outbox rows are delivered (-> Notification Service
   tests and the E2E journeys).
+- AC2 and AC3: which arrangements are pending and the saved notes belong to
+  Safety Check Service, which calls this route (-> Safety Check Service tests).
 """
 import json
 from datetime import UTC, datetime
@@ -145,9 +147,9 @@ def patch_safety_status(client, headers=INTERNAL_HEADERS, **overrides):
 
 
 @pytest.mark.parametrize("source_status", ["Approved", "Safety Changes Requested"])
-def test_approved_or_revised_event_moves_to_pending_safety_check(setup, source_status):
+def test_ac1_an_approved_or_revised_event_moves_to_pending_safety_check(setup, source_status):
     """
-    Summary: 'Approved' -> 'Pending Safety Check' for the assigned coordinator.
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" by the assigned coordinator on an 'Approved' or 'Safety Changes Requested' event answers 200 with status "Pending Safety Check"; three statements ran (lookup, event UPDATE, notification outbox INSERT) and the UPDATE's first parameter is that status.
     AC1: Given an event assigned to the Event Coordinator has at least one
         approved venue booking, and none of its venue bookings or equipment
         requests is still pending, when the Event Coordinator submits it for a
@@ -155,7 +157,8 @@ def test_approved_or_revised_event_moves_to_pending_safety_check(setup, source_s
         submission time is recorded. Rejected, cancelled or expired venue
         bookings and rejected equipment requests are no longer part of the
         event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the event in the parametrised status, then the 'Pending Safety Check' event),
+        Mock (cursor.execute call count asserted to be 3; the UPDATE's status parameter asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -175,9 +178,9 @@ def test_approved_or_revised_event_moves_to_pending_safety_check(setup, source_s
     assert cursor.execute.call_args_list[1].args[1][0] == "Pending Safety Check"
 
 
-def test_submission_is_recorded_in_the_action_history(setup):
+def test_ac1_the_submission_is_recorded_in_the_event_s_action_history_with_its_time(setup):
     """
-    Summary: The event keeps its own note of it.
+    Summary: After submitting round 2, the stored action history ends with an entry whose status is "Pending Safety Check", details "Submitted for Operational Safety Check (round 2).", the coordinator id, the safety check id and a UTC timestamp, and the earlier history entry is still first.
     AC1: Given an event assigned to the Event Coordinator has at least one
         approved venue booking, and none of its venue bookings or equipment
         requests is still pending, when the Event Coordinator submits it for a
@@ -185,7 +188,8 @@ def test_submission_is_recorded_in_the_action_history(setup):
         submission time is recorded. Rejected, cancelled or expired venue
         bookings and rejected equipment requests are no longer part of the
         event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an 'Approved' event with one history entry, then the 'Pending Safety Check' event),
+        Mock (the UPDATE's metadata parameter asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -211,70 +215,41 @@ def test_submission_is_recorded_in_the_action_history(setup):
     assert stored["actionHistory"][0] == {"status": "Approved"}
 
 
-def test_coordinator_decision_is_left_alone(setup):
+# --- AC4: no duplicate safety check -------------------------------------------
+
+
+def test_ac4_submitting_an_event_that_is_already_pending_safety_check_is_a_conflict(setup):
     """
-    Summary: A safety submission is not a coordinator decision: `decision` is untouched.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.side_effect = [
-        event_row("Approved"),
-        event_row("Pending Safety Check"),
-    ]
-
-    patch_safety_status(client)
-
-    # Act (When)
-    stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
-
-    # Assert (Then)
-    assert stored["decision"]["status"] == "Approved"
-    assert stored["actionDetails"] == "Venue booked."
-
-
-def test_move_runs_under_a_row_lock(setup):
-    """
-    Summary: The composite's earlier read can be stale, so the checks repeat in the lock.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" by the assigned coordinator on an event already 'Pending Safety Check' answers 409 SAFETY_CHECK_ALREADY_PENDING and only the lookup read ran, so no second check is created.
+    AC4: Given the event is already 'Pending Safety Check', when the Event
+        Coordinator submits it again, then no duplicate safety check is
+        created.
+    Double: Stub (cursor.fetchone returns a 'Pending Safety Check' event),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, _, cursor = setup
-    cursor.fetchone.side_effect = [
-        event_row("Approved"),
-        event_row("Pending Safety Check"),
-    ]
+    cursor.fetchone.return_value = event_row("Pending Safety Check")
 
     # Act (When)
-    patch_safety_status(client)
+    response = patch_safety_status(client)
 
     # Assert (Then)
-    assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
+    assert response.status_code == 409
+    assert response.json["code"] == "SAFETY_CHECK_ALREADY_PENDING"
+    assert cursor.execute.call_count == 1
 
 
 # --- AC5: only the assigned coordinator -------------------------------------
 
 
-def test_another_coordinator_is_refused(setup):
+def test_ac5_a_coordinator_the_event_is_not_assigned_to_is_refused(setup):
     """
-    Summary: An API call from anyone but the assigned coordinator is rejected.
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" by a coordinator when the event is assigned to a different one answers 403 "This event request is not assigned to the current coordinator." and only the lookup read ran.
     AC5: Given the Event Coordinator is not the assigned coordinator, then the
         submit action is not available and an API call is rejected.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an 'Approved' event assigned to another coordinator),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -294,12 +269,13 @@ def test_another_coordinator_is_refused(setup):
     assert cursor.execute.call_count == 1
 
 
-def test_unassigned_event_is_refused(setup):
+def test_ac5_an_event_with_no_assigned_coordinator_is_refused(setup):
     """
-    Summary: An event with no coordinator has no assigned coordinator.
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" on an 'Approved' event with no coordinator answers 403 and only the lookup read ran.
     AC5: Given the Event Coordinator is not the assigned coordinator, then the
         submit action is not available and an API call is rejected.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an 'Approved' event with no coordinator),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -313,15 +289,12 @@ def test_unassigned_event_is_refused(setup):
     assert cursor.execute.call_count == 1
 
 
-def test_another_coordinator_on_a_pending_event_gets_403_not_409(setup):
+def test_ac5_a_coordinator_who_is_not_assigned_gets_403_rather_than_the_already_pending_conflict(setup):
     """
-    Summary: A stranger learns nothing about the event's stage.
-    AC4: Given the event is already 'Pending Safety Check', when the Event
-        Coordinator submits it again, then no duplicate safety check is
-        created.
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" by a coordinator when the event is already 'Pending Safety Check' but assigned to a different coordinator answers 403 with no code in the body, so a stranger learns nothing about the event's stage.
     AC5: Given the Event Coordinator is not the assigned coordinator, then the
         submit action is not available and an API call is rejected.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a 'Pending Safety Check' event assigned to another coordinator); the 403 status and the absence of a code are the only assertions
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -337,42 +310,66 @@ def test_another_coordinator_on_a_pending_event_gets_403_not_409(setup):
     assert "code" not in response.json
 
 
-# --- AC4 and the lifecycle guard --------------------------------------------
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
 
 
-def test_already_pending_event_is_a_conflict(setup):
+def test_a_safety_submission_leaves_the_coordinators_decision_and_action_details_alone(setup):
     """
-    Summary: A second submission can't re-enter 'Pending Safety Check'.
-    AC4: Given the event is already 'Pending Safety Check', when the Event
-        Coordinator submits it again, then no duplicate safety check is
-        created.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: After submitting for a safety check, the metadata written by the UPDATE still holds the earlier decision status "Approved" and actionDetails "Venue booked.".
+    Supporting design check: a safety submission is not a coordinator decision,
+        so `decision` is untouched
+    Double: Stub (cursor.fetchone returns an 'Approved' event, then the 'Pending Safety Check' event),
+        Mock (the UPDATE's metadata parameter asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Pending Safety Check")
+    cursor.fetchone.side_effect = [
+        event_row("Approved"),
+        event_row("Pending Safety Check"),
+    ]
+
+    patch_safety_status(client)
 
     # Act (When)
-    response = patch_safety_status(client)
+    stored = json.loads(cursor.execute.call_args_list[1].args[1][1])
 
     # Assert (Then)
-    assert response.status_code == 409
-    assert response.json["code"] == "SAFETY_CHECK_ALREADY_PENDING"
-    assert cursor.execute.call_count == 1
+    assert stored["decision"]["status"] == "Approved"
+    assert stored["actionDetails"] == "Venue booked."
+
+
+def test_the_safety_submission_reads_the_event_under_a_row_lock(setup):
+    """
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" runs a first query containing FOR UPDATE.
+    Supporting design check: the composite's earlier read can be stale, so the
+        checks repeat under the row lock
+    Double: Stub (cursor.fetchone returns an 'Approved' event, then the 'Pending Safety Check' event),
+        Mock (the first cursor.execute query asserted to contain FOR UPDATE)
+    """
+    # Arrange (Given)
+    client, _, cursor = setup
+    cursor.fetchone.side_effect = [
+        event_row("Approved"),
+        event_row("Pending Safety Check"),
+    ]
+
+    # Act (When)
+    patch_safety_status(client)
+
+    # Assert (Then)
+    assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
 
 
 @pytest.mark.parametrize("current_status", NON_APPROVED_STATUSES)
-def test_events_outside_submission_stages_cannot_be_submitted(current_status, setup):
+def test_an_event_outside_the_submission_stages_cannot_be_submitted_for_a_safety_check(current_status, setup):
     """
-    Summary: Only initial submission and requested-change resubmission stages are allowed.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" on an event that is Submitted, Under Review, Rejected, Confirmed or Cancelled answers 409 INVALID_SAFETY_TRANSITION with the currentStatus and the message "This event can't move to 'Pending Safety Check' from '<status>'.", and only the lookup read ran.
+    Supporting design check: only initial submission and requested-change
+        resubmission stages may enter a safety check
+    Double: Stub (cursor.fetchone returns the event in the parametrised status),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -391,50 +388,11 @@ def test_events_outside_submission_stages_cannot_be_submitted(current_status, se
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize(
-    "status", ["Safety Changes Requested", "Cancelled"]
-)
-def test_safety_changes_and_rejection_are_only_reachable_from_pending(status, setup):
+def test_a_safety_submission_for_an_event_that_does_not_exist_answers_404(setup):
     """
-    Summary: SCRUM-151's two moves, like SCRUM-150's, only leave 'Pending Safety Check'.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Approved")
-
-    # Act (When)
-    response = patch_safety_status(
-        client,
-        status=status,
-        decidedBy=OFFICER_ID,
-        remarks="Needs another look." if status == "Safety Changes Requested" else "Unsafe.",
-        areas=["venue arrangement"] if status == "Safety Changes Requested" else None,
-    )
-
-    # Assert (Then)
-    assert response.status_code == 409
-    assert response.json["code"] == "INVALID_SAFETY_TRANSITION"
-
-
-def test_missing_event_is_404(setup):
-    """
-    Summary: Missing event is 404.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check" answers 404 "Event request not found." when the database finds no such event.
+    Supporting design check: submitting an event that does not exist is a 404
+    Double: Stub (cursor.fetchone returns None)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -448,21 +406,13 @@ def test_missing_event_is_404(setup):
     assert response.json["message"] == "Event request not found."
 
 
-# --- Input and configuration -------------------------------------------------
-
-
 @pytest.mark.parametrize("status", ["Approved", "Submitted", "Under Review", "Rejected"])
-def test_pre_safety_statuses_are_not_accepted(status, setup):
+def test_the_safety_status_route_refuses_the_statuses_that_belong_to_the_progress_route(status, setup):
     """
-    Summary: This endpoint only sets safety statuses; the rest is PATCH /progress.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with status "Approved", "Submitted", "Under Review" or "Rejected" answers 400 "Status must be one of: ..." and no query is sent.
+    Supporting design check: this route only sets safety statuses; the rest is
+        PATCH /progress
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -484,17 +434,11 @@ def test_pre_safety_statuses_are_not_accepted(status, setup):
     ],
     ids=["safetycheckid_not_a_uuid_a_valid_safety_check_id", "safetycheckid_none_a_valid_safety_check_id_is_re"],
 )
-def test_bad_identifiers_are_rejected(overrides, message, setup):
+def test_a_safety_check_id_that_is_missing_or_not_a_uuid_is_refused_before_any_query(overrides, message, setup):
     """
-    Summary: Bad identifiers are rejected.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with safetyCheckId "not-a-uuid" or null answers 400 "A valid safety check ID is required." and no query is sent.
+    Supporting design check: the round id must be a valid UUID
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -509,17 +453,11 @@ def test_bad_identifiers_are_rejected(overrides, message, setup):
 
 
 @pytest.mark.parametrize("round_number", [0, -1, 1.5, "1", True, None], ids=["0", "1", "1_5", "1_2", "true", "none"])
-def test_bad_round_number_is_rejected(round_number, setup):
+def test_a_round_number_that_is_not_a_positive_whole_number_is_refused_before_any_query(round_number, setup):
     """
-    Summary: Bad round number is rejected.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with roundNumber 0, -1, 1.5, "1", true or null answers 400 "roundNumber must be a positive whole number." and no query is sent.
+    Supporting design check: the round number must be a positive integer
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -533,17 +471,11 @@ def test_bad_round_number_is_rejected(round_number, setup):
     cursor.execute.assert_not_called()
 
 
-def test_non_object_body_is_rejected(setup):
+def test_a_safety_status_body_that_is_not_a_json_object_is_refused_before_any_query(setup):
     """
-    Summary: Non object body is rejected.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with a JSON list as the body answers 400 "Send a JSON object." and no query is sent.
+    Supporting design check: the request body must be a JSON object
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -559,54 +491,12 @@ def test_non_object_body_is_rejected(setup):
     cursor.execute.assert_not_called()
 
 
-# --- Regression: PATCH /progress is still shut out (SCRUM-152) ---------------
-
-
-def test_progress_endpoint_still_cannot_set_pending_safety_check(setup):
+def test_the_safety_status_route_answers_503_when_no_database_is_configured():
     """
-    Summary: The coordinator's own endpoint can't do this.
-    AC1: Given an event assigned to the Event Coordinator has at least one
-        approved venue booking, and none of its venue bookings or equipment
-        requests is still pending, when the Event Coordinator submits it for a
-        safety check, then its status changes to 'Pending Safety Check' and the
-        submission time is recorded. Rejected, cancelled or expired venue
-        bookings and rejected equipment requests are no longer part of the
-        event's arrangements and do not block submission.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Approved")
-
-    # Act (When)
-    response = client.patch(
-        f"/events/{EVENT_ID}/progress",
-        json={
-            "coordinatorId": COORDINATOR_ID,
-            "status": "Pending Safety Check",
-            "actionDetails": "Trying the back door.",
-        },
-    )
-
-    # Assert (Then)
-    assert response.status_code == 409
-    assert response.json["message"] == (
-        "This status change is not allowed for the event's current stage."
-    )
-    assert cursor.execute.call_count == 1
-
-
-# --- Supporting/supplementary design checks ----------------------------------
-# No Jira acceptance criterion covers these. They check design decisions the
-# stories rely on (health check, CORS, configuration and failure handling).
-
-
-def test_without_database_url():
-    """
-    Summary: Without database url.
+    Summary: With no DATABASE_URL set, PATCH /events/<id>/safety-status answers 503 with a message naming DATABASE_URL.
     Supporting design check: an Event Service with no database configured
         answers 503
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub, which verifies the signed token
     """
     client = signed_in(create_app(
         {

@@ -447,44 +447,6 @@ def test_ac3_organiser_cannot_open_an_event_created_by_someone_else(setup):
     assert response.status_code == 403
 
 
-def test_ac3_coordinator_asking_with_their_own_id_cannot_open_an_event_assigned_to_another(setup):
-    """
-    Summary: GET /events/<id>?coordinatorId=<id> as a coordinator answers 403 for an event assigned to OTHER_COORDINATOR_ID. REDUNDANT: test_ac3_coordinator_not_assigned_to_the_event_is_denied above makes the same request with the same stub and assertion.
-    AC3: Given an authenticated user's relationship to an event does not permit
-        them to view that event's information, when they attempt to access the
-        information, then access is denied.
-    Double: Stub (cursor.fetchone returns an event assigned to OTHER_COORDINATOR_ID)
-    """
-    # Arrange (Given)
-    client, cursor = setup
-    cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
-
-    # Act (When)
-    response = signed_in(client).get(f"/events/{EVENT_ID}?coordinatorId={COORDINATOR_ID}")
-
-    # Assert (Then)
-    assert response.status_code == 403
-
-
-def test_ac3_organiser_asking_with_their_own_id_cannot_open_an_event_another_organiser_created(setup):
-    """
-    Summary: GET /events/<id>?organiserId=<id> as an organiser answers 403 for an event created by a different organiser. REDUNDANT: test_ac3_organiser_cannot_open_an_event_created_by_someone_else above makes the same request with the same stub and assertion.
-    AC3: Given an authenticated user's relationship to an event does not permit
-        them to view that event's information, when they attempt to access the
-        information, then access is denied.
-    Double: Stub (cursor.fetchone returns an 'Approved' event created by ORGANISER_ID)
-    """
-    # Arrange (Given)
-    client, cursor = setup
-    cursor.fetchone.return_value = event_row(status="Approved")
-
-    # Act (When)
-    response = signed_in(client).get(f"/events/{EVENT_ID}?organiserId={OTHER_ORGANISER_ID}")
-
-    # Assert (Then)
-    assert response.status_code == 403
-
-
 def test_ac3_coordinator_cannot_open_an_event_nobody_is_assigned_to(setup):
     """
     Summary: GET /events/<id> as an Event Coordinator answers 403 for an event that has no coordinator.

@@ -43,9 +43,9 @@ Not proven
   (-> tests/integration/ against a throwaway postgres:17.6).
 - That the 'Safety Approved' record of AC2 is written: this service only holds
   the event-side history entry (status 'Confirmed').
-- Who may call the endpoint (-> test_safety_status_access.py).
+- Who may call the endpoint (-> test_infra_safety_status_internal_lock.py).
 - That the notification outbox rows are written and delivered
-  (-> test_safety_check_notifications.py, Notification Service tests and the
+  (-> test_scrum168_safety_check_notifications.py, Notification Service tests and the
   E2E journeys).
 """
 import json

@@ -23,25 +23,6 @@ AC4: Given one or more required fields are missing, when the Event Organiser
      attempts to submit, then submission is blocked and a pop-up is shown,
      listing exactly which fields are missing.
 
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
-
 Real
 ----
 - The Event Service routes in app/__init__.py and the rules in app/models.py,
@@ -85,9 +66,9 @@ from tests.unit.factories import (
 )
 
 
-def test_submit_existing_columns_and_return_confirmation_data(setup):
+def test_ac1_ac2_ac3_complete_submission_is_stored_as_submitted_and_returns_name_and_submission_date(setup):
     """
-    Summary: A complete submission is stored as 'Submitted' and returns the name and submission date for the confirmation.
+    Summary: POST /events with all required fields (and a forged status "Approved" and submission_date "fake" in the body) answers 201 with status 'Submitted', submittedAt, purpose and description; the INSERT hard-codes 'Submitted' and now(), binds the dates as Singapore time, the attendance as 25, the purpose inside the stored description metadata and the signed-in organiser's id, and the connection commits and closes.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
@@ -101,7 +82,8 @@ def test_submit_existing_columns_and_return_confirmation_data(setup):
     AC3: Given the submission succeeds, the Event Organiser receives a
         confirmation popup in ConnectSphere referencing the event name and
         submission date.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the saved 'Submitted' row),
+        Mock (the INSERT query and parameters asserted; connection.__exit__ and connection.close each called once)
     """
     # Arrange (Given)
     client, connection, cursor = setup
@@ -135,15 +117,16 @@ def test_submit_existing_columns_and_return_confirmation_data(setup):
     connection.close.assert_called_once()
 
 
-def test_optional_details_roundtrip(setup):
+def test_ac1_optional_equipment_requirements_are_stored_and_returned_as_entered(setup):
     """
-    Summary: Optional details are stored and returned as entered.
+    Summary: POST /events with equipmentRequirements "Projector" answers with equipmentRequirements "Projector", and "Projector" is the ninth INSERT parameter.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a saved row whose equipment_requirements is "Projector"),
+        Mock (the INSERT's ninth parameter asserted)
     """
     client, _, cursor = setup
     row = saved_row()
@@ -156,15 +139,16 @@ def test_optional_details_roundtrip(setup):
     assert cursor.execute.call_args.args[1][8] == "Projector"
 
 
-def test_optional_withdrawal_deadline_roundtrips_as_singapore_local_time(setup):
+def test_ac1_optional_withdrawal_deadline_is_bound_and_returned_as_singapore_local_time(setup):
     """
-    Summary: An optional withdrawal deadline is stored and returned in Singapore time.
+    Summary: POST /events with withdrawalDeadline 2026-10-01T02:00 answers 201 returning "2026-10-01T02:00:00", and the INSERT binds that deadline as 02:00 Singapore time.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a saved row whose withdrawal_deadline is 2026-09-30 18:00 UTC),
+        Mock (the INSERT's eleventh parameter asserted)
     """
     client, _, cursor = setup
     row = saved_row()
@@ -186,15 +170,15 @@ def test_optional_withdrawal_deadline_roundtrips_as_singapore_local_time(setup):
     "deadline",
     ["invalid", "2026-10-01T09:01"],
 )
-def test_withdrawal_deadline_must_be_valid_and_no_later_than_start(setup, deadline):
+def test_ac1_withdrawal_deadline_that_is_invalid_or_after_the_start_is_refused(setup, deadline):
     """
-    Summary: A withdrawal deadline must be a valid time no later than the event start.
+    Summary: POST /events with withdrawalDeadline "invalid" or 2026-10-01T09:01 (after the 09:00 start) answers 400 with a Withdrawal Deadline error, and no query is sent.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called; the first error message checked for "Withdrawal Deadline")
     """
     response = setup[0].post(
         "/events", json={**VALID, "withdrawalDeadline": deadline}
@@ -204,15 +188,15 @@ def test_withdrawal_deadline_must_be_valid_and_no_later_than_start(setup, deadli
     setup[2].execute.assert_not_called()
 
 
-def test_withdrawal_deadline_must_be_text(setup):
+def test_ac1_withdrawal_deadline_that_is_not_text_is_refused(setup):
     """
-    Summary: A withdrawal deadline that is not text is refused.
+    Summary: POST /events with withdrawalDeadline set to the number 123 answers 400 with "withdrawalDeadline must be text".
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None for the database: the request is refused before any query; only the 400 message is asserted
     """
     response = setup[0].post(
         "/events", json={**VALID, "withdrawalDeadline": 123}
@@ -233,13 +217,13 @@ def test_withdrawal_deadline_must_be_text(setup):
     ],
 )
 @pytest.mark.parametrize("value", [None, "", "  "])
-def test_exact_missing_fields_prevent_database_call(setup, field, label, value):
+def test_ac4_a_blank_required_field_blocks_submission_and_is_the_only_field_listed(setup, field, label, value):
     """
-    Summary: Submission is blocked and lists exactly the missing required fields.
+    Summary: For each of the six required fields set to null, "" or whitespace, POST /events answers 400 whose missingFields is exactly that field's label, and no query is sent.
     AC4: Given one or more required fields are missing, when the Event
         Organiser attempts to submit, then submission is blocked and a pop-up
         is shown, listing exactly which fields are missing.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called; missingFields compared with the one label)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -253,13 +237,13 @@ def test_exact_missing_fields_prevent_database_call(setup, field, label, value):
     cursor.execute.assert_not_called()
 
 
-def test_all_required_missing(setup):
+def test_ac4_an_empty_submission_lists_every_required_field_in_form_order(setup):
     """
-    Summary: With every required field missing, all of them are listed.
+    Summary: POST /events with an empty object answers with missingFields listing all six required fields (name, description, purpose, start, end, attendance) in form order.
     AC4: Given one or more required fields are missing, when the Event
         Organiser attempts to submit, then submission is blocked and a pop-up
         is shown, listing exactly which fields are missing.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None for the database: the request is refused before any query; only the missingFields list is asserted
     """
     # Arrange (Given): setup, from fixtures
 
@@ -281,15 +265,15 @@ def test_all_required_missing(setup):
     "value", ["0", "-1", "2.5", "abc", "2147483648", "9" * 5000, "²"],
     ids=["0", "1", "2_5", "abc", "2147483648", "9_5000", "empty"],
 )
-def test_attendance_boundary_validation(setup, value):
+def test_ac1_expected_attendance_that_is_not_a_whole_number_in_range_is_refused(setup, value):
     """
-    Summary: Expected attendance must be a whole number in range.
+    Summary: POST /events with expectedAttendance 0, -1, 2.5, "abc", 2147483648, a 5000-digit number or "²" answers 400 with at least one error.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None for the database: the request is refused before any query; only the 400 status and the presence of errors are asserted
     """
     response = setup[0].post("/events", json={**VALID, "expectedAttendance": value})
     assert response.status_code == 400
@@ -306,15 +290,15 @@ def test_attendance_boundary_validation(setup, value):
         "2026-10-01T17:00+08:00",
     ],
 )
-def test_invalid_period_validation(setup, value):
+def test_ac1_preferred_end_that_is_unparseable_date_only_offset_or_not_after_the_start_is_refused(setup, value):
     """
-    Summary: An end time before the start time is refused.
+    Summary: POST /events with preferredEndDate "invalid", a date without a time, 09:00 (equal to the start), the day before, or a time carrying a +08:00 offset answers 400.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None for the database: the request is refused before any query; only the 400 status is asserted
     """
     assert (
         setup[0].post("/events", json={**VALID, "preferredEndDate": value}).status_code
@@ -322,32 +306,15 @@ def test_invalid_period_validation(setup, value):
     )
 
 
-@pytest.mark.parametrize("body", [None, [], "text"], ids=["none", "empty", "text"])
-def test_invalid_json_body(setup, body):
+def test_ac1_optional_field_that_is_not_text_is_refused(setup):
     """
-    Summary: A body that is not a JSON object is refused.
-    AC2: Given all required fields (Event Name, Description, Purpose, Preferred
-        Date(s) and Time, Expected Attendance) are filled in, when the Event
-        Organiser submits, then the status changes to 'Submitted', the
-        submission date is recorded, and it appears in the queue of submitted
-        requests visible to Event Coordinators.
-    Double: None
-    """
-    # Arrange (Given): setup, body, from fixtures
-
-    # Act + Assert (When / Then)
-    assert setup[0].post("/events", json=body).status_code == 400
-
-
-def test_optional_field_wrong_type(setup):
-    """
-    Summary: An optional field that is not text is refused.
+    Summary: POST /events with venueRequirements set to a list instead of text answers 400.
     AC1: The form contains: Event Name (required), Description (required),
         Purpose (required), Preferred Date(s) and Time (required), Expected
         Attendance (required), Venue Requirements (optional), Accessibility
         Needs (optional), Equipment Requirements (optional), Registration Needs
         (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None for the database: the request is refused before any query; only the 400 status is asserted
     """
     assert (
         setup[0].post("/events", json={**VALID, "venueRequirements": []}).status_code
@@ -355,15 +322,63 @@ def test_optional_field_wrong_type(setup):
     )
 
 
-def test_submit_persists_organiser_id(setup):
+@pytest.mark.parametrize("operation", ["execute", "commit"])
+def test_ac2_a_database_failure_is_never_reported_as_a_successful_submission(setup, operation):
     """
-    Summary: The submitting organiser is recorded so ownership can be checked later.
+    Summary: When the INSERT raises an OperationalError, or the commit does, POST /events answers 503 without echoing the database error text, and the connection is still closed.
     AC2: Given all required fields (Event Name, Description, Purpose, Preferred
         Date(s) and Time, Expected Attendance) are filled in, when the Event
         Organiser submits, then the status changes to 'Submitted', the
         submission date is recorded, and it appears in the queue of submitted
         requests visible to Event Coordinators.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.execute, or connection.__exit__ on commit, raises psycopg2.OperationalError),
+        Mock (connection.close asserted called once)
+    """
+    # Arrange (Given)
+    client, connection, cursor = setup
+    cursor.fetchone.return_value = saved_row()
+    if operation == "execute":
+        cursor.execute.side_effect = psycopg2.OperationalError(
+            "secret connection information"
+        )
+    else:
+        connection.__exit__.side_effect = psycopg2.OperationalError("commit failed")
+
+    # Act (When)
+    response = client.post("/events", json=VALID)
+
+    # Assert (Then)
+    assert response.status_code == 503
+    assert "secret" not in response.text
+    connection.close.assert_called_once()
+
+
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+@pytest.mark.parametrize("body", [None, [], "text"], ids=["none", "empty", "text"])
+def test_a_body_that_is_not_a_json_object_is_refused_with_400(setup, body):
+    """
+    Summary: POST /events with no body, an empty list or a plain string answers 400.
+    Supporting design check: a submission body must be a JSON object of event
+        details
+    Double: None for the database: the request is refused before any query; only the 400 status is asserted
+    """
+    # Arrange (Given): setup, body, from fixtures
+
+    # Act + Assert (When / Then)
+    assert setup[0].post("/events", json=body).status_code == 400
+
+
+def test_submission_records_the_signed_in_organiser_as_the_owner(setup):
+    """
+    Summary: POST /events answers 201 returning organiserId, and the last INSERT parameter is the signed-in organiser's id, so ownership can be checked later.
+    Supporting design check: the submitting organiser is stored as the event's
+        owner
+    Double: Stub (cursor.fetchone returns a saved row owned by the organiser),
+        Mock (the INSERT parameters found in cursor.execute calls asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -390,28 +405,21 @@ def test_submit_persists_organiser_id(setup):
         ("[]", "[]", ""),
     ],
 )
-def test_legacy_descriptions_are_not_rewritten(value, description, purpose):
+def test_descriptions_stored_before_the_metadata_format_are_returned_unchanged(value, description, purpose):
     """
-    Summary: Descriptions stored before the metadata format are returned unchanged.
-    AC1: The form contains: Event Name (required), Description (required),
-        Purpose (required), Preferred Date(s) and Time (required), Expected
-        Attendance (required), Venue Requirements (optional), Accessibility
-        Needs (optional), Equipment Requirements (optional), Registration Needs
-        (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: unpack_description returns plain text, None, a JSON object without the metadata marker and a JSON list unchanged as (description, "", None).
+    Supporting design check: descriptions saved before the metadata format
+        still read back as they were written
+    Double: None; unpack_description is a pure function called directly
     """
     assert unpack_description(value) == (description, purpose, None)
 
 
-def test_nullable_legacy_fields_serialize():
+def test_rows_with_empty_optional_columns_still_serialize():
     """
-    Summary: Older rows with empty optional columns still read back.
-    AC1: The form contains: Event Name (required), Description (required),
-        Purpose (required), Preferred Date(s) and Time (required), Expected
-        Attendance (required), Venue Requirements (optional), Accessibility
-        Needs (optional), Equipment Requirements (optional), Registration Needs
-        (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: serialize on a row whose form columns and submission date are all None returns an empty preferredStartDate, a None submittedAt and an empty purpose.
+    Supporting design check: older rows with empty columns still read back
+    Double: None; serialize is a pure function called directly on a row dict
     """
     row = saved_row()
     for column in FIELDS.values():
@@ -423,15 +431,12 @@ def test_nullable_legacy_fields_serialize():
     assert serialized["purpose"] == ""
 
 
-def test_timestamptz_values_serialize_as_singapore_local():
+def test_stored_timestamps_are_returned_as_singapore_local_time():
     """
-    Summary: Stored timestamps are returned as Singapore local time.
-    AC1: The form contains: Event Name (required), Description (required),
-        Purpose (required), Preferred Date(s) and Time (required), Expected
-        Attendance (required), Venue Requirements (optional), Accessibility
-        Needs (optional), Equipment Requirements (optional), Registration Needs
-        (optional).
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: serialize turns the UTC times 01:00 and 09:00 into "2026-10-01T09:00:00" and "2026-10-01T17:00:00".
+    Supporting design check: stored timestamps are shown to users in Singapore
+        local time
+    Double: None; serialize is a pure function called directly on a row dict
     """
     row = saved_row()
     row["preferred_start_date"] = datetime(2026, 10, 1, 1, tzinfo=UTC)
@@ -443,47 +448,12 @@ def test_timestamptz_values_serialize_as_singapore_local():
     assert serialized["preferredEndDate"] == "2026-10-01T17:00:00"
 
 
-@pytest.mark.parametrize("operation", ["execute", "commit"])
-def test_database_failure_never_reports_success(setup, operation):
+def test_submission_and_submitted_queue_answer_503_when_no_database_is_configured():
     """
-    Summary: A database failure is never reported as a successful submission.
-    AC2: Given all required fields (Event Name, Description, Purpose, Preferred
-        Date(s) and Time, Expected Attendance) are filled in, when the Event
-        Organiser submits, then the status changes to 'Submitted', the
-        submission date is recorded, and it appears in the queue of submitted
-        requests visible to Event Coordinators.
-    Double: Stub (psycopg2.connect raises)
-    """
-    # Arrange (Given)
-    client, connection, cursor = setup
-    cursor.fetchone.return_value = saved_row()
-    if operation == "execute":
-        cursor.execute.side_effect = psycopg2.OperationalError(
-            "secret connection information"
-        )
-    else:
-        connection.__exit__.side_effect = psycopg2.OperationalError("commit failed")
-
-    # Act (When)
-    response = client.post("/events", json=VALID)
-
-    # Assert (Then)
-    assert response.status_code == 503
-    assert "secret" not in response.text
-    connection.close.assert_called_once()
-
-
-# --- Supporting/supplementary design checks ----------------------------------
-# No Jira acceptance criterion covers these. They check design decisions the
-# stories rely on (health check, CORS, configuration and failure handling).
-
-
-def test_missing_database_configuration():
-    """
-    Summary: Missing database configuration.
+    Summary: With no DATABASE_URL set, POST /events and GET /events/submitted each answer 503.
     Supporting design check: an Event Service with no database configured
         answers 503
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub, which verifies the signed token
     """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Event Organiser")
     assert client.post("/events", json=VALID).status_code == 503

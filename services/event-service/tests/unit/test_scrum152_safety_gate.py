@@ -111,16 +111,15 @@ def patch_progress(client, status, action_details="Recording progress."):
 
 
 @pytest.mark.parametrize("current_status", UNCONFIRMED_STATUSES)
-def test_coordinator_cannot_confirm_event(current_status, setup):
+def test_ac1_a_coordinator_cannot_move_an_event_that_is_not_confirmed_to_confirmed(current_status, setup):
     """
-    Summary: Only the safety workflow sets 'Confirmed'.
+    Summary: PATCH /events/<id>/progress asking for "Confirmed" on an event in Submitted, Under Review, Approved, Rejected, Pending Safety Check, Safety Changes Requested or Cancelled answers 409 SAFETY_APPROVAL_REQUIRED with the event's currentStatus and requiredStatus "Confirmed", and only the lookup SELECT ran, so the event was never updated.
     AC1: Given an event's status is not 'Confirmed', when the assigned Event
         Coordinator tries to move it to 'Confirmed' (the preparation stage)
         through either the UI or the API, then the change is blocked and the
         reason is shown.
-    AC2: Given an event has not yet reached the safety check, then the existing
-        status transitions (SCRUM-19) continue to work unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the event in the parametrised status),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -170,14 +169,14 @@ def test_coordinator_cannot_confirm_event(current_status, setup):
         ),
     ],
 )
-def test_block_message_names_the_reason(current_status, message, setup):
+def test_ac1_the_refusal_message_gives_the_reason_for_each_status(current_status, message, setup):
     """
-    Summary: The 409 message explains why, per status.
+    Summary: PATCH /events/<id>/progress asking for "Confirmed" answers 409 with a message specific to the event's status: submit it for safety check (Approved), approve it and pass the check first (Submitted, Under Review), it was rejected, it is waiting for the Safety Officer, changes were requested, or it was cancelled.
     AC1: Given an event's status is not 'Confirmed', when the assigned Event
         Coordinator tries to move it to 'Confirmed' (the preparation stage)
         through either the UI or the API, then the change is blocked and the
         reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the event in the parametrised status); the 409 message text is the only assertion
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -191,59 +190,51 @@ def test_block_message_names_the_reason(current_status, message, setup):
     assert response.json["message"] == message
 
 
-def test_approved_event_tells_the_coordinator_to_submit_for_safety_check(setup):
+def test_ac1_a_coordinator_cannot_confirm_an_event_through_the_safety_status_route_either(monkeypatch):
     """
-    Summary: The actionable case — an approved event's next step is SCRUM-149.
+    Summary: PATCH /events/<id>/safety-status asking for "Confirmed", sent without the internal token while the server has one configured, answers 403 with code INTERNAL_ONLY and no query is sent, so the API path around /progress is closed too.
     AC1: Given an event's status is not 'Confirmed', when the assigned Event
         Coordinator tries to move it to 'Confirmed' (the preparation stage)
         through either the UI or the API, then the change is blocked and the
         reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); psycopg2.connect is patched to a MagicMock connection and INTERNAL_SERVICE_TOKEN is configured
     """
     # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Approved")
+    connection = MagicMock()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
+    client = signed_in(create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "INTERNAL_SERVICE_TOKEN": "test-internal-token",
+    }).test_client())
 
     # Act (When)
-    response = patch_progress(client, "Confirmed")
-
-    # Assert (Then)
-    assert response.status_code == 409
-    assert response.json["message"] == (
-        "Submit this event for safety check for it to progress to Confirmed."
+    response = client.patch(
+        f"/events/{EVENT_ID}/safety-status",
+        json={
+            "status": "Confirmed",
+            "decidedBy": COORDINATOR_ID,
+            "safetyCheckId": "55555555-5555-4555-8555-555555555555",
+            "roundNumber": 1,
+        },
     )
 
-
-def test_cancelled_event_cannot_progress(setup):
-    """
-    Summary: A safety rejection ends the lifecycle.
-    AC1: Given an event's status is not 'Confirmed', when the assigned Event
-        Coordinator tries to move it to 'Confirmed' (the preparation stage)
-        through either the UI or the API, then the change is blocked and the
-        reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Cancelled")
-
-    # Act (When)
-    response = patch_progress(client, "Confirmed")
-
     # Assert (Then)
-    assert response.status_code == 409
-    assert response.json["code"] == "SAFETY_APPROVAL_REQUIRED"
-    assert cursor.execute.call_count == 1
+    assert response.status_code == 403
+    assert response.json["code"] == "INTERNAL_ONLY"
+    cursor.execute.assert_not_called()
 
 
-def test_gate_checks_assignment_first(setup):
+def test_ac1_a_coordinator_who_is_not_assigned_gets_403_without_the_safety_reason(setup):
     """
-    Summary: Others get 403, not the reason.
+    Summary: PATCH /events/<id>/progress asking for "Confirmed" on an 'Approved' event assigned to a different coordinator answers 403 with no code in the body (the safety reason is not shown to someone who is not the assigned coordinator), and only the lookup read ran.
     AC1: Given an event's status is not 'Confirmed', when the assigned Event
         Coordinator tries to move it to 'Confirmed' (the preparation stage)
         through either the UI or the API, then the change is blocked and the
         reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -258,14 +249,15 @@ def test_gate_checks_assignment_first(setup):
     assert cursor.execute.call_count == 1
 
 
-def test_confirmed_event_stays_confirmed_and_records_progress(setup):
+def test_ac1_an_event_that_is_already_confirmed_can_still_record_progress_at_confirmed(setup):
     """
-    Summary: The gate must not over-block.
+    Summary: PATCH /events/<id>/progress keeping a 'Confirmed' event at "Confirmed" with new action details answers 200 with the status and action details, two queries ran (lookup and update), and the stored action history ends with "Confirmed", so the gate does not over-block.
     AC1: Given an event's status is not 'Confirmed', when the assigned Event
         Coordinator tries to move it to 'Confirmed' (the preparation stage)
         through either the UI or the API, then the change is blocked and the
         reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the 'Confirmed' event, then the updated event),
+        Mock (cursor.execute call count asserted to be 2; the UPDATE's metadata parameter asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -287,42 +279,15 @@ def test_confirmed_event_stays_confirmed_and_records_progress(setup):
 
 
 @pytest.mark.parametrize(
-    "status", ["Pending Safety Check", "Safety Changes Requested", "Cancelled"]
-)
-def test_coordinator_cannot_set_other_safety_status(status, setup):
-    """
-    Summary: Guards the safety workflow: only it writes the safety statuses.
-    AC1: Given an event's status is not 'Confirmed', when the assigned Event
-        Coordinator tries to move it to 'Confirmed' (the preparation stage)
-        through either the UI or the API, then the change is blocked and the
-        reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Approved")
-
-    # Act (When)
-    response = patch_progress(client, status)
-
-    # Assert (Then)
-    assert response.status_code == 409
-    assert response.json["message"] == (
-        "This status change is not allowed for the event's current stage."
-    )
-    assert cursor.execute.call_count == 1
-
-
-@pytest.mark.parametrize(
     "status",
     ["Pending Safety Check", "Confirmed", "Safety Changes Requested", "Cancelled"],
 )
-def test_self_save_on_safety_status_keeps_working(status, setup):
+def test_ac2_saving_action_details_without_changing_the_status_keeps_working_for_safety_statuses(status, setup):
     """
-    Summary: Recording action details never changes the status, so it's allowed.
+    Summary: PATCH /events/<id>/progress keeping an event at "Pending Safety Check", "Confirmed", "Safety Changes Requested" or "Cancelled" with new action details answers 200 with the same status and the new action details.
     AC2: Given an event has not yet reached the safety check, then the existing
         status transitions (SCRUM-19) continue to work unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the event in the parametrised status, then the updated event); the 200 status, status and actionDetails are the only assertions
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -340,56 +305,14 @@ def test_self_save_on_safety_status_keeps_working(status, setup):
     assert response.json["actionDetails"] == "Logged the latest progress."
 
 
-@pytest.mark.parametrize("status", ["In Preparation", "Preparing", "SafetyApproved"])
-def test_unknown_status_is_400(status, setup):
+def test_ac1_only_pending_safety_check_leads_into_confirmed_in_the_transition_tables():
     """
-    Summary: Only the documented lifecycle statuses are accepted.
+    Summary: In SAFETY_TRANSITIONS the only status that can lead to "Confirmed" is "Pending Safety Check", and in ALLOWED_TRANSITIONS the only one is "Confirmed" itself (staying put), so a coordinator has no route into it.
     AC1: Given an event's status is not 'Confirmed', when the assigned Event
         Coordinator tries to move it to 'Confirmed' (the preparation stage)
         through either the UI or the API, then the change is blocked and the
         reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-
-    # Act (When)
-    response = patch_progress(client, status)
-
-    # Assert (Then)
-    assert response.status_code == 400
-    assert response.json["message"].startswith("Status must be one of: ")
-    cursor.execute.assert_not_called()
-
-
-def test_gate_runs_under_row_lock(setup):
-    """
-    Summary: A concurrent safety decision can't make the gate act on a stale status.
-    AC1: Given an event's status is not 'Confirmed', when the assigned Event
-        Coordinator tries to move it to 'Confirmed' (the preparation stage)
-        through either the UI or the API, then the change is blocked and the
-        reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Approved")
-
-    # Act (When)
-    patch_progress(client, "Confirmed")
-
-    # Assert (Then)
-    assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]
-
-
-def test_only_pending_safety_check_leads_into_confirmed():
-    """
-    Summary: 'Pending Safety Check' is the only route into 'Confirmed'.
-    AC1: Given an event's status is not 'Confirmed', when the assigned Event
-        Coordinator tries to move it to 'Confirmed' (the preparation stage)
-        through either the UI or the API, then the change is blocked and the
-        reason is shown.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None; the two transition tables are read directly, no route or database is used
     """
     # Act (When)
     sources_in_safety_transitions = {
@@ -409,12 +332,12 @@ def test_only_pending_safety_check_leads_into_confirmed():
     assert sources_in_allowed_transitions == {"Confirmed"}
 
 
-def test_pre_safety_transitions_unchanged():
+def test_ac2_the_status_transitions_before_the_safety_check_are_unchanged():
     """
-    Summary: SCRUM-19's transitions keep working unchanged.
+    Summary: ALLOWED_TRANSITIONS still lets Submitted go to Submitted or Under Review, Under Review go to Under Review, Approved or Rejected, and Approved and Rejected stay where they are.
     AC2: Given an event has not yet reached the safety check, then the existing
         status transitions (SCRUM-19) continue to work unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None; the transition table is read directly, no route or database is used
     """
     # Act + Assert (When / Then)
     assert ALLOWED_TRANSITIONS["Submitted"] == {"Submitted", "Under Review"}
@@ -423,12 +346,81 @@ def test_pre_safety_transitions_unchanged():
     assert ALLOWED_TRANSITIONS["Rejected"] == {"Rejected"}
 
 
-def test_safety_workflow_never_starts_before_approval():
+def test_ac2_the_safety_workflow_cannot_start_from_an_event_that_has_not_reached_the_safety_check():
     """
-    Summary: The safety workflow can't touch an event that hasn't reached the safety check yet.
+    Summary: None of Submitted, Under Review or Rejected is a starting status in SAFETY_TRANSITIONS.
     AC2: Given an event has not yet reached the safety check, then the existing
         status transitions (SCRUM-19) continue to work unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None; the transition table is read directly, no route or database is used
     """
     # Act + Assert (When / Then)
     assert not set(SAFETY_TRANSITIONS) & {"Submitted", "Under Review", "Rejected"}
+
+
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+@pytest.mark.parametrize(
+    "status", ["Pending Safety Check", "Safety Changes Requested", "Cancelled"]
+)
+def test_a_coordinator_cannot_set_the_safety_statuses_through_the_progress_route(status, setup):
+    """
+    Summary: PATCH /events/<id>/progress asking for "Pending Safety Check", "Safety Changes Requested" or "Cancelled" on an 'Approved' event answers 409 "This status change is not allowed for the event's current stage." and only the lookup read ran.
+    Supporting design check: only the safety workflow writes the safety
+        statuses
+    Double: Stub (cursor.fetchone returns an 'Approved' event),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
+    """
+    # Arrange (Given)
+    client, _, cursor = setup
+    cursor.fetchone.return_value = event_row("Approved")
+
+    # Act (When)
+    response = patch_progress(client, status)
+
+    # Assert (Then)
+    assert response.status_code == 409
+    assert response.json["message"] == (
+        "This status change is not allowed for the event's current stage."
+    )
+    assert cursor.execute.call_count == 1
+
+
+@pytest.mark.parametrize("status", ["In Preparation", "Preparing", "SafetyApproved"])
+def test_a_status_outside_the_documented_lifecycle_is_refused_with_400(status, setup):
+    """
+    Summary: PATCH /events/<id>/progress with status "In Preparation", "Preparing" or "SafetyApproved" answers 400 "Status must be one of: ..." and no query is sent.
+    Supporting design check: only the documented lifecycle statuses are
+        accepted
+    Double: Mock (cursor.execute asserted never called)
+    """
+    # Arrange (Given)
+    client, _, cursor = setup
+
+    # Act (When)
+    response = patch_progress(client, status)
+
+    # Assert (Then)
+    assert response.status_code == 400
+    assert response.json["message"].startswith("Status must be one of: ")
+    cursor.execute.assert_not_called()
+
+
+def test_the_progress_lookup_takes_a_row_lock_so_a_concurrent_safety_decision_cannot_leave_it_stale(setup):
+    """
+    Summary: PATCH /events/<id>/progress asking for "Confirmed" runs a first query containing FOR UPDATE.
+    Supporting design check: the gate reads the status under a row lock
+    Double: Stub (cursor.fetchone returns an 'Approved' event),
+        Mock (the first cursor.execute query asserted to contain FOR UPDATE)
+    """
+    # Arrange (Given)
+    client, _, cursor = setup
+    cursor.fetchone.return_value = event_row("Approved")
+
+    # Act (When)
+    patch_progress(client, "Confirmed")
+
+    # Assert (Then)
+    assert "FOR UPDATE" in cursor.execute.call_args_list[0].args[0]

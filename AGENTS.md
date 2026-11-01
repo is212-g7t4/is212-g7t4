@@ -259,7 +259,7 @@ curl -si -H "Origin: http://localhost:5174" localhost:5006/venues | grep -i allo
   equipment, rejected approvals).
 - Tests should be traceable back to a user story / acceptance criterion —
   favor test names and docstrings that make that link obvious. File names are
-  story-based (`test_event_submission.py`, `test_event_progress.py`) rather than
+  story-based (`test_scrum11_event_submission.py`, `test_scrum19_event_progress.py`) rather than
   mirroring `app/` modules, deliberately: that is what traces a test back to
   its Jira story. Don't rename them to match `app/`.
 - Run the whole backend before pushing: `npm run test:backend` from the repo

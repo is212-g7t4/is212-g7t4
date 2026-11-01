@@ -109,9 +109,9 @@ def patch_details(client, changes, headers=None, **extra):
     return client.patch(f"/events/{EVENT_ID}/details", json=body, headers=headers or {})
 
 
-def test_dry_run_classifies_a_change_without_writing(setup):
+def test_ac2_a_dry_run_classifies_the_change_as_high_impact_without_writing(setup):
     """
-    Summary: Dry run classifies a change without writing.
+    Summary: PATCH /events/<id>/details with dryRun true, changing expectedAttendance and eventName, answers 200 listing changedFields [eventName, expectedAttendance], highImpactFields [expectedAttendance], the two labels and the unchanged event (attendance "120"); only the lookup read ran.
     AC2: Given a field being updated is one of the high-impact fields
         (Date/Time, Expected Attendance, Venue Requirements, Equipment
         Requirements, Accessibility Needs), when the assigned Event Coordinator
@@ -119,7 +119,8 @@ def test_dry_run_classifies_a_change_without_writing(setup):
         other arrangements already made for the event (e.g. confirmed venue
         bookings, equipment reservations) for contradictions before the change
         is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the 'Approved' event),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -139,9 +140,9 @@ def test_dry_run_classifies_a_change_without_writing(setup):
     assert cursor.execute.call_count == 1
 
 
-def test_dry_run_on_a_confirmed_event_reports_instead_of_gating(setup):
+def test_ac2_a_dry_run_on_a_confirmed_event_reports_the_high_impact_field_instead_of_blocking(setup):
     """
-    Summary: Dry run on a confirmed event reports instead of gating.
+    Summary: PATCH /events/<id>/details with dryRun true, changing expectedAttendance on a 'Confirmed' event, answers 200 with highImpactFields [expectedAttendance].
     AC2: Given a field being updated is one of the high-impact fields
         (Date/Time, Expected Attendance, Venue Requirements, Equipment
         Requirements, Accessibility Needs), when the assigned Event Coordinator
@@ -149,7 +150,7 @@ def test_dry_run_on_a_confirmed_event_reports_instead_of_gating(setup):
         other arrangements already made for the event (e.g. confirmed venue
         bookings, equipment reservations) for contradictions before the change
         is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a 'Confirmed' event); the 200 status and highImpactFields are the only assertions
     """
     # Arrange (Given)
     client, cursor = setup
@@ -163,9 +164,9 @@ def test_dry_run_on_a_confirmed_event_reports_instead_of_gating(setup):
     assert response.json["highImpactFields"] == ["expectedAttendance"]
 
 
-def test_dry_run_refuses_a_high_impact_change_while_under_safety_review(setup):
+def test_ac2_a_dry_run_of_a_high_impact_change_is_refused_while_the_event_is_under_safety_review(setup):
     """
-    Summary: Dry run refuses a high impact change while under safety review.
+    Summary: PATCH /events/<id>/details with dryRun true, changing expectedAttendance on a 'Pending Safety Check' event, answers 409 EVENT_UNDER_SAFETY_REVIEW.
     AC2: Given a field being updated is one of the high-impact fields
         (Date/Time, Expected Attendance, Venue Requirements, Equipment
         Requirements, Accessibility Needs), when the assigned Event Coordinator
@@ -173,7 +174,7 @@ def test_dry_run_refuses_a_high_impact_change_while_under_safety_review(setup):
         other arrangements already made for the event (e.g. confirmed venue
         bookings, equipment reservations) for contradictions before the change
         is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a 'Pending Safety Check' event); the 409 status and code are the only assertions
     """
     # Arrange (Given)
     client, cursor = setup
@@ -187,9 +188,9 @@ def test_dry_run_refuses_a_high_impact_change_while_under_safety_review(setup):
     assert response.json["code"] == "EVENT_UNDER_SAFETY_REVIEW"
 
 
-def test_dry_run_still_requires_the_assigned_coordinator(setup):
+def test_ac2_a_dry_run_is_refused_for_a_coordinator_the_event_is_not_assigned_to(setup):
     """
-    Summary: Dry run still requires the assigned coordinator.
+    Summary: PATCH /events/<id>/details with dryRun true by the coordinator when the event is assigned to a different coordinator answers 403.
     AC2: Given a field being updated is one of the high-impact fields
         (Date/Time, Expected Attendance, Venue Requirements, Equipment
         Requirements, Accessibility Needs), when the assigned Event Coordinator
@@ -197,7 +198,7 @@ def test_dry_run_still_requires_the_assigned_coordinator(setup):
         other arrangements already made for the event (e.g. confirmed venue
         bookings, equipment reservations) for contradictions before the change
         is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator); the 403 status is the only assertion
     """
     # Arrange (Given)
     client, cursor = setup
@@ -210,17 +211,16 @@ def test_dry_run_still_requires_the_assigned_coordinator(setup):
     assert response.status_code == 403
 
 
-def test_dry_run_must_be_a_boolean(setup):
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_a_dry_run_flag_that_is_not_a_boolean_is_refused_before_any_query(setup):
     """
-    Summary: Dry run must be a boolean.
-    AC2: Given a field being updated is one of the high-impact fields
-        (Date/Time, Expected Attendance, Venue Requirements, Equipment
-        Requirements, Accessibility Needs), when the assigned Event Coordinator
-        attempts to save the change, then the system checks the update against
-        other arrangements already made for the event (e.g. confirmed venue
-        bookings, equipment reservations) for contradictions before the change
-        is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/details with dryRun "yes" answers 400 and no query is sent.
+    Supporting design check: the dryRun flag must be a real boolean
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -233,17 +233,12 @@ def test_dry_run_must_be_a_boolean(setup):
     cursor.execute.assert_not_called()
 
 
-def test_dry_run_lead_can_edit_an_event_with_no_assigned_coordinator(setup):
+def test_a_lead_acting_through_the_workflow_service_can_edit_an_event_with_no_assigned_coordinator(setup):
     """
-    Summary: Dry run lead can edit an event with no assigned coordinator.
-    AC2: Given a field being updated is one of the high-impact fields
-        (Date/Time, Expected Attendance, Venue Requirements, Equipment
-        Requirements, Accessibility Needs), when the assigned Event Coordinator
-        attempts to save the change, then the system checks the update against
-        other arrangements already made for the event (e.g. confirmed venue
-        bookings, equipment reservations) for contradictions before the change
-        is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/details (a real edit, not a dry run) with the internal token and actorRole "Event Coordinator Lead" on an event with no coordinator answers 200.
+    Supporting design check: when nobody is assigned, the Lead may edit on the
+        workflow service's behalf
+    Double: Stub (cursor.fetchone returns an event with no coordinator, then the updated event); the 200 status is the only assertion
     """
     # Arrange (Given)
     client, cursor = setup
@@ -262,17 +257,12 @@ def test_dry_run_lead_can_edit_an_event_with_no_assigned_coordinator(setup):
     assert response.status_code == 200
 
 
-def test_dry_run_lead_cannot_edit_an_event_assigned_to_someone_else(setup):
+def test_a_lead_cannot_edit_an_event_assigned_to_another_coordinator_through_the_workflow_service(setup):
     """
-    Summary: Dry run lead cannot edit an event assigned to someone else.
-    AC2: Given a field being updated is one of the high-impact fields
-        (Date/Time, Expected Attendance, Venue Requirements, Equipment
-        Requirements, Accessibility Needs), when the assigned Event Coordinator
-        attempts to save the change, then the system checks the update against
-        other arrangements already made for the event (e.g. confirmed venue
-        bookings, equipment reservations) for contradictions before the change
-        is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/details (a real edit) with the internal token and actorRole "Event Coordinator Lead" on an event assigned to a different coordinator answers 403.
+    Supporting design check: the Lead's edit right applies only while no
+        coordinator is assigned
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator); the 403 status is the only assertion
     """
     # Arrange (Given)
     client, cursor = setup
@@ -291,17 +281,12 @@ def test_dry_run_lead_cannot_edit_an_event_assigned_to_someone_else(setup):
     assert response.status_code == 403
 
 
-def test_dry_run_lead_role_is_ignored_without_the_internal_token(setup):
+def test_a_claimed_lead_role_is_ignored_when_the_internal_token_is_missing(setup):
     """
-    Summary: Dry run lead role is ignored without the internal token.
-    AC2: Given a field being updated is one of the high-impact fields
-        (Date/Time, Expected Attendance, Venue Requirements, Equipment
-        Requirements, Accessibility Needs), when the assigned Event Coordinator
-        attempts to save the change, then the system checks the update against
-        other arrangements already made for the event (e.g. confirmed venue
-        bookings, equipment reservations) for contradictions before the change
-        is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/details with actorRole "Event Coordinator Lead" but no X-Internal-Token, on an event with no coordinator, answers 403, so the claimed role grants nothing.
+    Supporting design check: only the workflow service (holding the internal
+        token) may say the caller is the Lead
+    Double: Stub (cursor.fetchone returns an event with no coordinator); the 403 status is the only assertion
     """
     # Arrange (Given)
     client, cursor = setup
@@ -316,17 +301,11 @@ def test_dry_run_lead_role_is_ignored_without_the_internal_token(setup):
     assert response.status_code == 403
 
 
-def test_dry_run_other_roles_do_not_bypass_the_assignment_check(setup):
+def test_an_actor_role_other_than_lead_does_not_bypass_the_assignment_check(setup):
     """
-    Summary: Dry run other roles do not bypass the assignment check.
-    AC2: Given a field being updated is one of the high-impact fields
-        (Date/Time, Expected Attendance, Venue Requirements, Equipment
-        Requirements, Accessibility Needs), when the assigned Event Coordinator
-        attempts to save the change, then the system checks the update against
-        other arrangements already made for the event (e.g. confirmed venue
-        bookings, equipment reservations) for contradictions before the change
-        is applied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/details with the internal token and actorRole "Event Coordinator" (not the Lead) on an event with no coordinator answers 403.
+    Supporting design check: only the Lead role may edit an unassigned event
+    Double: Stub (cursor.fetchone returns an event with no coordinator); the 403 status is the only assertion
     """
     # Arrange (Given)
     client, cursor = setup

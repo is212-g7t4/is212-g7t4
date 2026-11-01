@@ -78,7 +78,7 @@ Each file's header copies the story and lists every AC, including those it does 
 
 | Service | Unit | Integration |
 |---|---|---|
-| event | `tests/unit/test_event_modification_access.py` | `tests/integration/test_event_modification_access.py` |
+| event | `tests/unit/test_scrum10_event_modification_access.py` | `tests/integration/test_event_modification_access.py` |
 | venue | `tests/unit/test_scrum10_venue_modification_access.py` | `tests/integration/test_venue_modification_access.py` |
 | venue-availability | `tests/unit/test_scrum10_booking_modification_access.py` | `tests/integration/test_booking_modification_access.py` |
 | venue-booking | `tests/unit/test_scrum10_booking_request_modification_access.py` | |
@@ -89,7 +89,7 @@ Each file's header copies the story and lists every AC, including those it does 
 | event-workflow | `tests/unit/test_event_details_modification_access.py` | |
 | equipment-request | `tests/unit/test_scrum10_equipment_safety_reset_access.py` | `tests/integration/test_scrum48_equipment_notification_transactions.py` (`safety-reset` called as a Safety Officer) |
 
-The lock changes are covered in Event Service by `test_safety_status_access.py`, `test_event_details_recheck.py` and `test_change_requests.py`. Nine services (attendee-registration, coordinator-assignment, equipment, notification, safety-check-record, safety-check, venue-booking, equipment-reservation, event-workflow) carry two tests in their SCRUM-8 authentication modules: an internal token alone is refused, and a token without a subject is refused.
+The lock changes are covered in Event Service by `test_infra_safety_status_internal_lock.py`, `test_scrum153_recheck_safety_after_high_impact_changes.py` and `test_scrum10_event_modification_access.py`. Nine services (attendee-registration, coordinator-assignment, equipment, notification, safety-check-record, safety-check, venue-booking, equipment-reservation, event-workflow) carry two tests in their SCRUM-8 authentication modules: an internal token alone is refused, and a token without a subject is refused.
 
 Where it matters, the integration tests give the refused user the relationship (for example the named coordinator) so that only the role can stop them, and assert the stored row is unchanged afterwards.
 

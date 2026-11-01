@@ -33,7 +33,7 @@ Doubled
 Not proven
 ----------
 - That the SQL works on the real Postgres tables (-> tests/integration/).
-- That non-coordinators are blocked by role (-> test_event_modification_access.py).
+- That non-coordinators are blocked by role (-> test_scrum10_event_modification_access.py).
 """
 
 import json

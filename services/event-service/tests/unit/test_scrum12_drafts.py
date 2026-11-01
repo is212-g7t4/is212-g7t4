@@ -23,26 +23,7 @@ AC5: Given an Event Organiser has opened one of their drafts, when they choose
      from 'Draft' to 'Submitted', its submission time is recorded, and it no
      longer appears in their draft list. If any required details are missing or
      invalid, the submission is refused, the missing or invalid fields are
-     listed, and the request stays a 'Draft' with its saved details unchanged.
-
-SCRUM-8: User Authentication and Authorization
-
-User Story
-----------
-As a system user, I want to securely access the system, so that I can use the
-information and functionality available to me.
-
-Acceptance Criteria
--------------------
-AC1: Given a system user has not been successfully authenticated, when they
-     attempt to access protected information or functionality, then access is
-     denied.
-AC2: Given a system user successfully authenticates, when they access protected
-     information or functionality, then their access is evaluated according to
-     their role and relationship to the relevant event.
-AC3: Given a system user's authentication attempt is unsuccessful, when the
-     authentication attempt is completed, then they remain unable to access
-     protected information or functionality.
+     listed, and the request stays a 'Draft' with its      saved details unchanged.
 
 Real
 ----
@@ -127,13 +108,14 @@ def draft_row(**overrides):
 # AC1 ---------------------------------------------------------------------
 
 
-def test_save_as_draft_stores_partial_details_with_status_draft(setup):
+def test_ac1_save_as_draft_stores_partial_details_with_status_draft_and_no_submission_time(setup):
     """
-    Summary: Only a name is entered; the request is stored as 'Draft' with no submission time.
+    Summary: POST /events/drafts with only an eventName and a blank expectedAttendance answers 201 with status 'Draft' and submittedAt null; the SQL is an INSERT of status 'Draft' with a NULL submission time, the unfilled typed columns are NULL and the organiser id is the last parameter.
     AC1: Given an Event Organiser has entered some (not necessarily all) event
         details, when they choose "Save as Draft," then the request is stored
         with status 'Draft' and is not visible to any Event Coordinator.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the saved 'Draft' row),
+        Mock (cursor.execute's INSERT query and parameters asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -178,13 +160,13 @@ def test_save_as_draft_stores_partial_details_with_status_draft(setup):
     ],
     ids=["event_name", "eventname_5_event_name_must_be_text", "eventname_workshop_expectedattendance_0_expected", "eventname_workshop_preferredstartdate_2026_12_01", "eventname_workshop_preferredstartdate_tomorrow_p", "eventname_workshop_withdrawaldeadline_tomorrow_w", "eventname_workshop_preferredstartdate_2026_12_01_2"],
 )
-def test_save_as_draft_rejects_missing_name_or_malformed_fields(setup, details, problem):
+def test_ac1_save_as_draft_rejects_a_missing_name_or_malformed_field_without_writing(setup, details, problem):
     """
-    Summary: A draft needs a name, and any detail it does have must be well formed.
+    Summary: POST /events/drafts with no eventName, a non-text name, attendance 0, an end before the start, an unparseable date or a bad withdrawalDeadline answers 400 naming that problem, and nothing is written.
     AC1: Given an Event Organiser has entered some (not necessarily all) event
         details, when they choose "Save as Draft," then the request is stored
         with status 'Draft' and is not visible to any Event Coordinator.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called; the 400 body is checked for the named problem)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -198,13 +180,13 @@ def test_save_as_draft_rejects_missing_name_or_malformed_fields(setup, details, 
     cursor.execute.assert_not_called()
 
 
-def test_save_as_draft_rejects_a_body_that_is_not_an_object(setup):
+def test_ac1_save_as_draft_rejects_a_body_that_is_not_an_object_without_writing(setup):
     """
-    Summary: Nothing is stored from a request that isn't a set of event details.
+    Summary: POST /events/drafts with a JSON list instead of an object answers 400 and nothing is written.
     AC1: Given an Event Organiser has entered some (not necessarily all) event
         details, when they choose "Save as Draft," then the request is stored
         with status 'Draft' and is not visible to any Event Coordinator.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -226,13 +208,14 @@ def test_save_as_draft_rejects_a_body_that_is_not_an_object(setup):
     ],
     ids=["f_events_coordinatorid_coordinator_id_viewerrole", "events_active", "f_events_summaries_ids_draft_id"],
 )
-def test_coordinator_event_lists_exclude_drafts(setup, path):
+def test_ac1_coordinator_event_lists_exclude_drafts(setup, path):
     """
-    Summary: The coordinator-facing lists that aren't already status-filtered leave drafts out.
+    Summary: As an Event Coordinator Lead, GET /events?viewerRole=Event Coordinator Lead, /events/active and /events/summaries?ids=<draft> answer 200 and each SQL contains the NOT_DRAFT condition, so drafts are left out.
     AC1: Given an Event Organiser has entered some (not necessarily all) event
         details, when they choose "Save as Draft," then the request is stored
         with status 'Draft' and is not visible to any Event Coordinator.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchall returns no rows),
+        Mock (the last cursor.execute SQL contains NOT_DRAFT)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -248,13 +231,13 @@ def test_coordinator_event_lists_exclude_drafts(setup, path):
     assert NOT_DRAFT in query
 
 
-def test_coordinator_cannot_open_a_draft_by_id(setup):
+def test_ac1_coordinator_lead_cannot_open_a_draft_by_id(setup):
     """
-    Summary: Even a view-all role gets 404 for a draft's ID.
+    Summary: GET /events/<draft id> as an Event Coordinator Lead (a view-all role) answers 404 even though the database returns the draft row.
     AC1: Given an Event Organiser has entered some (not necessarily all) event
         details, when they choose "Save as Draft," then the request is stored
         with status 'Draft' and is not visible to any Event Coordinator.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a 'Draft' row owned by an organiser); the response status is the only assertion
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -272,12 +255,13 @@ def test_coordinator_cannot_open_a_draft_by_id(setup):
 # AC2 ---------------------------------------------------------------------
 
 
-def test_draft_list_returns_only_the_organisers_drafts(setup):
+def test_ac2_draft_list_returns_each_of_the_organisers_drafts_as_a_separate_entry(setup):
     """
-    Summary: Every draft the organiser owns is listed separately.
+    Summary: GET /events/drafts?organiserId=O answers 200 with the two drafts the database returned as two separate entries (in the order given), and the SQL selects only status 'Draft' for that organiser.
     AC2: Given an Event Organiser has multiple existing drafts, each draft can
         be opened and edited independently of the others.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchall returns two 'Draft' rows),
+        Mock (cursor.execute SQL contains organiser_id = %s AND status = 'Draft' and its parameters are [organiser id])
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -294,12 +278,13 @@ def test_draft_list_returns_only_the_organisers_drafts(setup):
     assert params == [ORGANISER_ID]
 
 
-def test_editing_a_draft_updates_only_that_draft(setup):
+def test_ac2_editing_a_draft_updates_only_that_draft_and_keeps_it_a_draft(setup):
     """
-    Summary: Saving one draft writes that draft's row alone and keeps it a 'Draft'.
+    Summary: PATCH /events/drafts/<id> with a new eventName and attendance answers 200 with the renamed draft still 'Draft'; the UPDATE clears the submission time, targets WHERE event_id = %s, and its last two parameters are 'Draft' and that draft's id.
     AC2: Given an Event Organiser has multiple existing drafts, each draft can
         be opened and edited independently of the others.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the existing draft, then the updated draft),
+        Mock (the UPDATE query and parameters of the last cursor.execute asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -324,12 +309,13 @@ def test_editing_a_draft_updates_only_that_draft(setup):
     assert params[-2:] == ["Draft", DRAFT_ID]
 
 
-def test_cannot_edit_a_request_that_is_no_longer_a_draft(setup):
+def test_ac2_a_request_that_is_no_longer_a_draft_cannot_be_edited_through_the_draft_route(setup):
     """
-    Summary: Once submitted, the request is out of the draft flow.
+    Summary: PATCH /events/drafts/<id> on a row whose status is 'Submitted' answers 409 EVENT_NOT_DRAFT and only the locking read ran, so no update was sent.
     AC2: Given an Event Organiser has multiple existing drafts, each draft can
         be opened and edited independently of the others.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a 'Submitted' row),
+        Mock (cursor.execute call count asserted to be 1, the locking read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -349,12 +335,13 @@ def test_cannot_edit_a_request_that_is_no_longer_a_draft(setup):
 # AC3 ---------------------------------------------------------------------
 
 
-def test_deleting_a_draft_permanently_removes_it(setup):
+def test_ac3_deleting_a_draft_permanently_removes_its_row(setup):
     """
-    Summary: The row is deleted, so it can no longer appear in the draft list.
+    Summary: DELETE /events/drafts/<id>?organiserId=O answers 204; the SQL is a DELETE FROM public."Event" restricted to status 'Draft' with the draft id as its only parameter, and the transaction block exits (commit path).
     AC3: Given an Event Organiser owns a draft, when they delete it, it is
         permanently removed and no longer appears in their draft list.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the draft row),
+        Mock (the DELETE query and parameters asserted; connection.__exit__ called once)
     """
     # Arrange (Given)
     client, connection, cursor = setup
@@ -372,12 +359,12 @@ def test_deleting_a_draft_permanently_removes_it(setup):
     connection.__exit__.assert_called_once()
 
 
-def test_deleting_a_missing_draft_returns_404(setup):
+def test_ac3_deleting_a_draft_that_is_already_gone_answers_404(setup):
     """
-    Summary: A draft that's already gone can't be deleted twice.
+    Summary: DELETE /events/drafts/<id> answers 404 when the database finds no such row, so a second delete of the same draft fails.
     AC3: Given an Event Organiser owns a draft, when they delete it, it is
         permanently removed and no longer appears in their draft list.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns None); the response status is the only assertion
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -390,12 +377,13 @@ def test_deleting_a_missing_draft_returns_404(setup):
     assert response.status_code == 404
 
 
-def test_draft_delete_cannot_remove_a_submitted_request(setup):
+def test_ac3_the_draft_delete_route_refuses_to_remove_a_submitted_request(setup):
     """
-    Summary: Deleting is for drafts only; a submitted request is never removed this way.
+    Summary: DELETE /events/drafts/<id> on a row whose status is 'Submitted' answers 409 and only the locking read ran, so nothing is deleted.
     AC3: Given an Event Organiser owns a draft, when they delete it, it is
         permanently removed and no longer appears in their draft list.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a 'Submitted' row),
+        Mock (cursor.execute call count asserted to be 1, the locking read)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -422,12 +410,13 @@ def test_draft_delete_cannot_remove_a_submitted_request(setup):
     ],
     ids=["get_f_events_draft_id_organiserid_other_organise", "patch_f_events_drafts_draft_id_organiserid_other", "delete_f_events_drafts_draft_id_organiserid_othe", "post_f_events_drafts_draft_id_submit_organiserid"],
 )
-def test_another_organiser_cannot_view_edit_delete_or_submit_a_draft(setup, method, path, body):
+def test_ac4_another_organiser_cannot_view_edit_delete_or_submit_a_draft(setup, method, path, body):
     """
-    Summary: Someone else's draft is refused before anything is written.
+    Summary: With a different organiser's id, GET /events/<draft id>, PATCH, DELETE and POST .../submit on the draft each answer 403 and only the lookup read ran.
     AC4: Drafts are visible only to the Event Organiser who created them; no
         other role can view or edit someone else's draft.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns a draft owned by a different organiser),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     client, _, cursor = setup
     cursor.fetchone.return_value = draft_row()
@@ -438,43 +427,13 @@ def test_another_organiser_cannot_view_edit_delete_or_submit_a_draft(setup, meth
     assert cursor.execute.call_count == 1
 
 
-@pytest.mark.parametrize(
-    "method, path",
-    [
-        ("post", "/events/drafts"),
-        ("get", "/events/drafts"),
-        ("patch", f"/events/drafts/{DRAFT_ID}"),
-        ("post", f"/events/drafts/{DRAFT_ID}/submit"),
-        ("delete", f"/events/drafts/{DRAFT_ID}"),
-    ],
-    ids=["post_events_drafts", "get_events_drafts", "patch_f_events_drafts_draft_id", "post_f_events_drafts_draft_id_submit", "delete_f_events_drafts_draft_id"],
-)
-def test_draft_requests_without_a_signed_in_organiser_are_refused(setup, method, path):
+def test_ac4_a_coordinator_lead_cannot_assign_a_coordinator_to_a_draft(setup):
     """
-    Summary: A draft is only ever reached as a signed-in organiser's own (SCRUM-8).
-    SCRUM-8 AC1: Given a system user has not been successfully authenticated,
-        when they attempt to access protected information or functionality,
-        then access is denied.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    _, _, cursor = setup
-    client = setup[0].application.test_client()
-
-    # Act (When)
-    response = getattr(client, method)(path, json={"organiserId": ORGANISER_ID, **COMPLETE})
-
-    # Assert (Then)
-    assert response.status_code == 401
-    cursor.execute.assert_not_called()
-
-
-def test_lead_cannot_assign_a_coordinator_to_a_draft(setup):
-    """
-    Summary: A Lead can't reach a draft through assignment either.
+    Summary: PATCH /events/<draft id> naming an assignedCoordinatorId answers 404 (the draft is hidden from assignment) and only the lookup read ran.
     AC4: Drafts are visible only to the Event Organiser who created them; no
         other role can view or edit someone else's draft.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the 'Draft' row with no coordinator),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     client, _, cursor = setup
     cursor.fetchone.return_value = {"coordinator_id": None, "status": "Draft"}
@@ -491,9 +450,9 @@ def test_lead_cannot_assign_a_coordinator_to_a_draft(setup):
 # AC5 ---------------------------------------------------------------------
 
 
-def test_submitting_a_complete_draft_moves_it_to_submitted(setup):
+def test_ac5_submitting_a_complete_draft_changes_it_to_submitted_and_records_the_submission_time(setup):
     """
-    Summary: The draft becomes 'Submitted' with a submission time, which takes it out of the draft list (that list only selects status 'Draft').
+    Summary: POST /events/drafts/<id>/submit with all required details answers 200 with status 'Submitted' and the submission time; the UPDATE sets submission_date = now() and its last two parameters are 'Submitted' and the draft id (the draft list only selects status 'Draft', so it drops out).
     AC5: Given an Event Organiser has opened one of their drafts, when they
         choose "Submit Request", then the request is checked against the
         required-field and format rules as a new submission. If it passes, its
@@ -502,7 +461,8 @@ def test_submitting_a_complete_draft_moves_it_to_submitted(setup):
         details are missing or invalid, the submission is refused, the missing
         or invalid fields are listed, and the request stays a 'Draft' with its
         saved details unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the draft, then the 'Submitted' row with its submission time),
+        Mock (the UPDATE query and parameters found in cursor.execute calls asserted)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -527,9 +487,9 @@ def test_submitting_a_complete_draft_moves_it_to_submitted(setup):
     assert params[-2:] == ["Submitted", DRAFT_ID]
 
 
-def test_submitting_an_incomplete_draft_lists_missing_fields_and_keeps_it_a_draft(setup):
+def test_ac5_submitting_an_incomplete_draft_lists_the_missing_fields_and_writes_nothing(setup):
     """
-    Summary: The same required-field rules as a new submission; nothing is written.
+    Summary: POST /events/drafts/<id>/submit with only an eventName answers 400 listing Description and Expected Attendance among the missing fields, and no query is sent, so the draft is unchanged.
     AC5: Given an Event Organiser has opened one of their drafts, when they
         choose "Submit Request", then the request is checked against the
         required-field and format rules as a new submission. If it passes, its
@@ -538,7 +498,7 @@ def test_submitting_an_incomplete_draft_lists_missing_fields_and_keeps_it_a_draf
         details are missing or invalid, the submission is refused, the missing
         or invalid fields are listed, and the request stays a 'Draft' with its
         saved details unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called; the 400 body's missingFields checked)
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -572,12 +532,12 @@ def test_submitting_an_incomplete_draft_lists_missing_fields_and_keeps_it_a_draf
     ],
     ids=["post_events_drafts", "get_f_events_drafts_organiserid_organiser_id", "patch_f_events_drafts_draft_id", "post_f_events_drafts_draft_id_submit", "delete_f_events_drafts_draft_id_organiserid_orga"],
 )
-def test_draft_requests_fail_loudly_without_a_database(method, path):
+def test_every_draft_route_answers_503_when_no_database_is_configured(method, path):
     """
-    Summary: A draft is never reported as saved when there is nowhere to store it.
+    Summary: With no DATABASE_URL set, save, list, edit, submit and delete on the draft routes each answer 503 as a signed-in organiser, so a draft is never reported as saved with nowhere to store it.
     Supporting design check: an Event Service with no database configured
         answers 503
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub, which verifies the signed token
     """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client(), role="Event Organiser")
 

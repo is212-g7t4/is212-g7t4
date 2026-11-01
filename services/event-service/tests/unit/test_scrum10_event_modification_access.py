@@ -128,13 +128,13 @@ def send(client, method, path, role, user_id=STAFF_ID):
 
 # AC1 ----
 
-def test_assigned_coordinator_updates_progress(setup):
+def test_ac1_assigned_coordinator_changes_event_progress_and_the_change_is_allowed(setup):
     """
-    Summary: The coordinator role plus the assignment lets a valid change through.
+    Summary: PATCH /events/<id>/progress to "Approved" with action details, signed in as the Event Coordinator the event is assigned to, answers 200 with status "Approved".
     AC1: Given an authenticated user is permitted to modify information based
         on their role and relationship to the event, when they make a valid
         change to that information, then the change is allowed.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the 'Under Review' event assigned to that coordinator, then the 'Approved' event); the status code and body are the only assertions
     """
     # Arrange (Given)
     client, cursor = setup
@@ -158,14 +158,14 @@ def test_assigned_coordinator_updates_progress(setup):
     + [(m, p, COORDINATOR) for m, p in LEAD_ROUTES]
     + [(m, p, "Venue Staff") for m, p in COORDINATOR_ROUTES],
 )
-def test_a_role_outside_the_routes_allowlist_cannot_change_anything(setup, method, path, role):
+def test_ac2_a_role_outside_the_routes_allowlist_cannot_change_anything(setup, method, path, role):
     """
-    Summary: Every write route refuses the wrong role before reading the body or the database.
+    Summary: Each organiser-only route and the Lead-only route called as an Event Coordinator, and each coordinator route called as Venue Staff, answers 403 "Your role cannot change this information." and no query is sent.
     AC2: Given an authenticated user's role does not permit them to modify
         particular information, when they attempt to change that information,
         then the modification is prevented and the existing information remains
         unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role gate refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -180,14 +180,14 @@ def test_a_role_outside_the_routes_allowlist_cannot_change_anything(setup, metho
 
 
 @pytest.mark.parametrize("method, path", ORGANISER_ROUTES + LEAD_ROUTES + COORDINATOR_ROUTES)
-def test_an_attendee_cannot_change_any_event_information(setup, method, path):
+def test_ac2_an_attendee_cannot_change_any_event_information(setup, method, path):
     """
-    Summary: Attendee is a registered role with no modification rights at all.
+    Summary: Each organiser, Lead and coordinator write route called as an Attendee answers 403 and no query is sent.
     AC2: Given an authenticated user's role does not permit them to modify
         particular information, when they attempt to change that information,
         then the modification is prevented and the existing information remains
         unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role gate refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -200,14 +200,14 @@ def test_an_attendee_cannot_change_any_event_information(setup, method, path):
     cursor.execute.assert_not_called()
 
 
-def test_the_lead_role_does_not_grant_organiser_rights(setup):
+def test_ac2_the_lead_role_does_not_grant_organiser_rights(setup):
     """
-    Summary: The Lead is a coordinator, not an organiser, so it cannot create events.
+    Summary: POST /events as an Event Coordinator Lead answers 403 and no query is sent, because the Lead is a coordinator role, not an organiser.
     AC2: Given an authenticated user's role does not permit them to modify
         particular information, when they attempt to change that information,
         then the modification is prevented and the existing information remains
         unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role gate refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -222,14 +222,15 @@ def test_the_lead_role_does_not_grant_organiser_rights(setup):
 
 # AC3 ----
 
-def test_coordinator_assigned_to_another_coordinator_cannot_change_the_event(setup):
+def test_ac3_a_coordinator_cannot_change_an_event_assigned_to_another_coordinator(setup):
     """
-    Summary: The right role is not enough without the assignment.
+    Summary: PATCH /events/<id>/progress as a coordinator when the event is assigned to a different coordinator answers 403 and no UPDATE or INSERT is sent.
     AC3: Given an authenticated user's relationship to an event does not permit
         them to modify that event's information, when they attempt to make a
         change, then the modification is prevented and the existing information
         remains unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator),
+        Mock (no cursor.execute call starts with UPDATE or INSERT)
     """
     # Arrange (Given)
     client, cursor = setup
@@ -246,14 +247,14 @@ def test_coordinator_assigned_to_another_coordinator_cannot_change_the_event(set
     assert writes == []
 
 
-def test_lead_cannot_edit_details_of_an_event_assigned_to_someone_else(setup):
+def test_ac3_the_lead_cannot_edit_details_of_an_event_assigned_to_another_coordinator(setup):
     """
-    Summary: The Lead may only edit an event that has no coordinator.
+    Summary: PATCH /events/<id>/details as an Event Coordinator Lead when the event is assigned to another coordinator answers 403.
     AC3: Given an authenticated user's relationship to an event does not permit
         them to modify that event's information, when they attempt to make a
         change, then the modification is prevented and the existing information
         remains unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator); the 403 status is the only assertion
     """
     # Arrange (Given)
     client, cursor = setup
@@ -270,14 +271,14 @@ def test_lead_cannot_edit_details_of_an_event_assigned_to_someone_else(setup):
 
 # AC4 ----
 
-def test_venue_staff_keep_their_view_when_their_change_is_refused(setup):
+def test_ac4_venue_staff_keep_their_view_when_their_change_is_refused(setup):
     """
-    Summary: The refused PATCH does not disturb the read access the role still has.
+    Summary: As Venue Staff, GET /events/<id> answers 200, PATCH /events/<id>/progress answers 403, and a second GET answers 200 with the same body as the first.
     AC4: Given a user is permitted to view particular information but is not
         permitted to modify it, when they attempt to change that information,
         then the modification is prevented while their permitted viewing access
         remains unaffected.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the same event for every read); the three status codes and the equality of the two GET bodies are asserted
     """
     # Arrange (Given)
     client, cursor = setup
@@ -298,14 +299,14 @@ def test_venue_staff_keep_their_view_when_their_change_is_refused(setup):
 
 # AC5 ----
 
-def test_coordinator_changes_only_the_event_they_are_assigned_to(setup):
+def test_ac5_a_coordinator_can_change_the_event_assigned_to_them_but_not_another_coordinators(setup):
     """
-    Summary: Changing both events succeeds for one and is refused for the other.
+    Summary: PATCH /events/<id>/progress for the coordinator's own event answers 200, and the same change for an event assigned to a different coordinator answers 403.
     AC5: Given a user is permitted to modify information for one event but does
         not have the required access to another event, when they attempt to
         modify information for both events, then only modifications to
         information for which they have the required access are allowed.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the coordinator's event, its updated copy, then another coordinator's event); the two status codes are the only assertions
     """
     # Arrange (Given)
     client, cursor = setup
@@ -341,14 +342,14 @@ def move(client, status, role, **extra):
 
 @pytest.mark.parametrize("status", ["Confirmed", "Safety Changes Requested", "Cancelled"])
 @pytest.mark.parametrize("role", [COORDINATOR, LEAD, ORGANISER, "Venue Staff", "Attendee"], ids=["coordinator", "lead", "organiser", "venue_staff", "attendee"])
-def test_only_a_safety_officer_may_decide_a_safety_check(setup, status, role):
+def test_ac2_only_a_safety_officer_may_decide_a_safety_check(setup, status, role):
     """
-    Summary: A coordinator cannot approve their own event, nor can any other role.
+    Summary: PATCH /events/<id>/safety-status to Confirmed, Safety Changes Requested or Cancelled, sent with the service token as a coordinator, Lead, organiser, Venue Staff or Attendee, answers 403 "Your role cannot change this information." and no query is sent.
     AC2: Given an authenticated user's role does not permit them to modify
         particular information, when they attempt to change that information,
         then the modification is prevented and the existing information remains
         unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role gate refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -363,14 +364,14 @@ def test_only_a_safety_officer_may_decide_a_safety_check(setup, status, role):
 
 
 @pytest.mark.parametrize("role", ["Safety Officer", ORGANISER, "Venue Staff", "Attendee"], ids=["safety_officer", "organiser", "venue_staff", "attendee"])
-def test_only_coordinators_may_submit_an_event_for_a_safety_check(setup, role):
+def test_ac2_only_coordinators_may_submit_an_event_for_a_safety_check(setup, role):
     """
-    Summary: Submitting is the coordinator's step; the Safety Officer decides but does not submit.
+    Summary: PATCH /events/<id>/safety-status to "Pending Safety Check", sent with the service token as a Safety Officer, organiser, Venue Staff or Attendee, answers 403 and no query is sent.
     AC2: Given an authenticated user's role does not permit them to modify
         particular information, when they attempt to change that information,
         then the modification is prevented and the existing information remains
         unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role gate refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -385,14 +386,14 @@ def test_only_coordinators_may_submit_an_event_for_a_safety_check(setup, role):
 
 @pytest.mark.parametrize("marker", [{"withdrawnSafetyCheckId": SAFETY_ROUND, "reason": "venue changed"},
                                     {"restoredSafetyCheckId": SAFETY_ROUND}], ids=["withdrawnsafetycheckid_safety_round_reason_venue", "restoredsafetycheckid_safety_round"])
-def test_a_safety_officer_cannot_withdraw_or_restore_an_approval_for_a_venue_change(setup, marker):
+def test_ac2_a_safety_officer_cannot_withdraw_or_restore_an_approval_for_a_venue_change(setup, marker):
     """
-    Summary: Withdrawing or restoring after a booking change is the coordinator's step.
+    Summary: PATCH /events/<id>/safety-status carrying a withdrawnSafetyCheckId (status "Approved") or a restoredSafetyCheckId (status "Confirmed"), sent with the service token as a Safety Officer, answers 403 and no query is sent.
     AC2: Given an authenticated user's role does not permit them to modify
         particular information, when they attempt to change that information,
         then the modification is prevented and the existing information remains
         unchanged.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called); no rows are stubbed because the role gate refuses first
     """
     # Arrange (Given)
     client, cursor = setup
@@ -407,13 +408,13 @@ def test_a_safety_officer_cannot_withdraw_or_restore_an_approval_for_a_venue_cha
 
 
 @pytest.mark.parametrize("role", [COORDINATOR, LEAD, "Safety Officer"], ids=["coordinator", "lead", "safety_officer"])
-def test_each_permitted_role_gets_past_the_safety_status_gate(setup, role):
+def test_ac1_each_permitted_role_gets_past_the_safety_status_gate(setup, role):
     """
-    Summary: The three roles Safety Check Service acts for reach the handler's own validation.
+    Summary: PATCH /events/<id>/safety-status with an empty body, sent with the service token as a coordinator, Lead or Safety Officer, answers 400 "Status must be one of ...", which shows the role gate let the request through to the handler's own validation.
     AC1: Given an authenticated user is permitted to modify information based
         on their role and relationship to the event, when they make a valid
         change to that information, then the change is allowed.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: None for the database: the request is refused by body validation before any query; only the 400 status and message are asserted
     """
     # Arrange (Given)
     client, _ = setup
@@ -427,3 +428,71 @@ def test_each_permitted_role_gets_past_the_safety_status_gate(setup, role):
     # Assert (Then)
     assert response.status_code == 400
     assert "Status must be one of" in response.json["message"]
+
+
+# AC2: the change-request review routes are for Event Workflow Service only ----
+
+
+def test_ac2_review_routes_refuse_a_caller_that_does_not_present_the_configured_service_token(monkeypatch):
+    """
+    Summary: GET /change-requests, GET /change-requests/<id> and PATCH /change-requests/<id>/decision from a signed-in user without the matching X-Internal-Token each answer 403, and no database cursor is opened.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (psycopg2.connect returns a MagicMock connection; connection.cursor asserted never called)
+    """
+    # Arrange (Given)
+    connection = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
+    client = signed_in(create_app({
+        "TESTING": True,
+        "DATABASE_URL": "unused-test-url",
+        "INTERNAL_SERVICE_TOKEN": "secret",
+    }).test_client())
+
+    # Act (When)
+    responses = [
+        client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}"),
+        client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"),
+        client.patch(
+            f"/change-requests/{CHANGE_ID}/decision",
+            json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+        ),
+    ]
+
+    # Assert (Then)
+    assert [response.status_code for response in responses] == [403, 403, 403]
+    connection.cursor.assert_not_called()
+
+
+def test_ac2_review_routes_stay_closed_with_503_when_no_service_token_is_configured(monkeypatch):
+    """
+    Summary: With INTERNAL_SERVICE_TOKEN unset, GET /change-requests, GET /change-requests/<id> and PATCH /change-requests/<id>/decision each answer 503 with code INTERNAL_AUTH_NOT_CONFIGURED, and no database cursor is opened.
+    AC2: Given an authenticated user's role does not permit them to modify
+        particular information, when they attempt to change that information,
+        then the modification is prevented and the existing information remains
+        unchanged.
+    Double: Mock (psycopg2.connect returns a MagicMock connection; connection.cursor asserted never called)
+    """
+    # Arrange (Given)
+    connection = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", lambda *args, **kwargs: connection)
+    client = signed_in(create_app({
+        "TESTING": True, "DATABASE_URL": "unused-test-url", "INTERNAL_SERVICE_TOKEN": None,
+    }).test_client())
+
+    # Act (When)
+    responses = [
+        client.get(f"/change-requests?coordinatorId={COORDINATOR_ID}"),
+        client.get(f"/change-requests/{CHANGE_ID}?coordinatorId={COORDINATOR_ID}"),
+        client.patch(
+            f"/change-requests/{CHANGE_ID}/decision",
+            json={"coordinatorId": COORDINATOR_ID, "decision": "Approved"},
+        ),
+    ]
+
+    # Assert (Then)
+    assert [response.status_code for response in responses] == [503, 503, 503]
+    assert {response.json["code"] for response in responses} == {"INTERNAL_AUTH_NOT_CONFIGURED"}
+    connection.cursor.assert_not_called()

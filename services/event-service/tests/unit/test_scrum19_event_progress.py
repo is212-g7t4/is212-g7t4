@@ -89,12 +89,15 @@ def event_row(status="Submitted", coordinator_id=COORDINATOR_ID, action_details=
     return row
 
 
-def test_progress_assigned_coordinator_updates_status_and_records_action(setup):
+def test_ac3_ac4_assigned_coordinator_changes_the_status_and_the_action_taken_is_recorded(setup):
     """
-    Summary: Progress assigned coordinator updates status and records action.
+    Summary: PATCH /events/<id>/progress by the assigned coordinator, moving an 'Under Review' event to "Approved" with padded action details, answers 200 with status "Approved", the trimmed actionDetails, an action-history entry carrying the coordinator id and the decision; the UPDATE (after a FOR UPDATE lookup) sets status and the description metadata with the same action history and the event id.
     AC3: Event Coordinator should be able to update and edit the status of an
         Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    AC4: Event Coordinator should be able to add and update the details of the
+        actions done for the Event
+    Double: Stub (cursor.fetchone returns the 'Under Review' event, then the updated 'Approved' event),
+        Mock (the lookup and UPDATE queries and parameters asserted; connection.__exit__ called once)
     """
     client, connection, cursor = setup
     updated = event_row("Approved", action_details="Venue and equipment confirmed.")
@@ -142,12 +145,13 @@ def test_progress_assigned_coordinator_updates_status_and_records_action(setup):
     connection.__exit__.assert_called_once()
 
 
-def test_progress_same_status_updates_action_details_without_duplicate_decision(setup):
+def test_ac4_saving_the_same_status_with_new_action_details_adds_an_action_without_a_duplicate_decision(setup):
     """
-    Summary: Progress same status updates action details without duplicate decision.
-    AC3: Event Coordinator should be able to update and edit the status of an
-        Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/progress keeping an 'Approved' event at "Approved" with new action details answers 200; the stored metadata keeps the earlier decision history unchanged and appends the new details as the latest action.
+    AC4: Event Coordinator should be able to add and update the details of the
+        actions done for the Event
+    Double: Stub (cursor.fetchone returns the 'Approved' event with one decision, then the updated event),
+        Mock (the UPDATE's metadata parameter asserted)
     """
     client, _, cursor = setup
     current = event_row("Approved", action_details="Venue confirmed.")
@@ -180,19 +184,20 @@ def test_progress_same_status_updates_action_details_without_duplicate_decision(
 
 @pytest.mark.parametrize(
     ("current_status", "requested_status"),
-    # ("Under Review", "Confirmed") moved to test_safety_gate.py — it now
+    # ("Under Review", "Confirmed") moved to test_scrum152_safety_gate.py — it now
     # returns the safety reason instead of this generic message (SCRUM-152).
     [("Submitted", "Approved"), ("Submitted", "Rejected"),
      ("Approved", "Submitted"),
      ("Approved", "Rejected"), ("Confirmed", "Approved"),
      ("Rejected", "Submitted"), ("Rejected", "Approved")],
 )
-def test_progress_invalid_status_transition_is_rejected(current_status, requested_status, setup):
+def test_ac3_a_status_change_that_is_not_allowed_from_the_current_stage_is_refused(current_status, requested_status, setup):
     """
-    Summary: Progress invalid status transition is rejected.
+    Summary: PATCH /events/<id>/progress asking for Submitted to Approved or Rejected, Approved to Submitted or Rejected, Confirmed to Approved, or Rejected to Submitted or Approved answers 409 "This status change is not allowed for the event's current stage." and only the lookup read ran.
     AC3: Event Coordinator should be able to update and edit the status of an
         Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns the event in the current status),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(current_status)
@@ -213,43 +218,18 @@ def test_progress_invalid_status_transition_is_rejected(current_status, requeste
     assert cursor.execute.call_count == 1
 
 
-def test_progress_approved_event_cannot_be_confirmed_by_coordinator(setup):
-    """
-    Summary: 'Confirmed' now means "passed the safety check", so only the safety workflow sets it.
-    AC3: Event Coordinator should be able to update and edit the status of an
-        Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    client, _, cursor = setup
-    cursor.fetchone.return_value = event_row("Approved")
-
-    response = client.patch(
-        f"/events/{EVENT_ID}/progress",
-        json={
-            "coordinatorId": COORDINATOR_ID,
-            "status": "Confirmed",
-            "actionDetails": "All arrangements confirmed.",
-        },
-    )
-
-    assert response.status_code == 409
-    assert response.json["code"] == "SAFETY_APPROVAL_REQUIRED"
-    assert response.json["currentStatus"] == "Approved"
-    assert response.json["requiredStatus"] == "Confirmed"
-    assert cursor.execute.call_count == 1
-
-
 @pytest.mark.parametrize(
     ("current_status", "requested_status"),
     [("Submitted", "Under Review"), ("Under Review", "Approved"),
      ("Under Review", "Rejected")],
 )
-def test_progress_pre_safety_transitions_still_work(current_status, requested_status, setup):
+def test_ac3_the_status_changes_before_the_safety_check_are_allowed_and_recorded(current_status, requested_status, setup):
     """
-    Summary: Transitions before the safety check are unchanged.
-    AC2: Event Coordinator should be able to view the details of an Event and
-        its status
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/progress moving Submitted to Under Review, or Under Review to Approved or Rejected, answers 200 with the new status, and the stored action history ends with that status.
+    AC3: Event Coordinator should be able to update and edit the status of an
+        Event
+    Double: Stub (cursor.fetchone returns the event in the current status, then the event in the new status),
+        Mock (the UPDATE's metadata parameter asserted)
     """
     client, _, cursor = setup
     cursor.fetchone.side_effect = [
@@ -272,12 +252,13 @@ def test_progress_pre_safety_transitions_still_work(current_status, requested_st
     assert stored["actionHistory"][-1]["status"] == requested_status
 
 
-def test_progress_update_is_forbidden_for_another_coordinators_event(setup):
+def test_ac3_an_update_is_forbidden_for_an_event_assigned_to_another_coordinator(setup):
     """
-    Summary: Progress update is forbidden for another coordinators event.
+    Summary: PATCH /events/<id>/progress by a coordinator when the event is assigned to a different coordinator answers 403 and only the lookup read ran.
     AC3: Event Coordinator should be able to update and edit the status of an
         Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Stub (cursor.fetchone returns an event assigned to another coordinator),
+        Mock (cursor.execute call count asserted to be 1, the lookup read)
     """
     client, _, cursor = setup
     cursor.fetchone.return_value = event_row(coordinator_id=OTHER_COORDINATOR_ID)
@@ -296,12 +277,12 @@ def test_progress_update_is_forbidden_for_another_coordinators_event(setup):
 
 
 @pytest.mark.parametrize("status", ["", "Pending", "approved", "Preparing", None])
-def test_progress_update_requires_supported_status(status, setup):
+def test_ac3_a_status_value_the_service_does_not_support_is_refused_before_any_query(status, setup):
     """
-    Summary: Progress update requires supported status.
+    Summary: PATCH /events/<id>/progress with status "", "Pending", "approved" (wrong case), "Preparing" or null answers 400 and no query is sent.
     AC3: Event Coordinator should be able to update and edit the status of an
         Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Double: Mock (cursor.execute asserted never called)
     """
     response = setup[0].patch(
         f"/events/{EVENT_ID}/progress",
@@ -316,12 +297,12 @@ def test_progress_update_requires_supported_status(status, setup):
 
 
 @pytest.mark.parametrize("details", ["", "   ", None, [], "x" * 1001], ids=["empty", "empty_2", "none", "empty_3", "x_1001"])
-def test_progress_update_requires_valid_action_details(details, setup):
+def test_ac4_action_details_that_are_missing_blank_not_text_or_too_long_are_refused_before_any_query(details, setup):
     """
-    Summary: Progress update requires valid action details.
-    AC3: Event Coordinator should be able to update and edit the status of an
-        Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/progress with actionDetails empty, whitespace, null, a list or 1001 characters answers 400 and no query is sent.
+    AC4: Event Coordinator should be able to add and update the details of the
+        actions done for the Event
+    Double: Mock (cursor.execute asserted never called)
     """
     response = setup[0].patch(
         f"/events/{EVENT_ID}/progress",
@@ -335,25 +316,28 @@ def test_progress_update_requires_valid_action_details(details, setup):
     setup[2].execute.assert_not_called()
 
 
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
 @pytest.mark.parametrize("body", [{}, None, {"coordinatorId": "not-a-uuid"}], ids=["empty", "none", "coordinatorid_not_a_uuid"])
-def test_progress_update_requires_valid_coordinator(body, setup):
+def test_a_progress_update_without_a_valid_coordinator_id_is_refused_before_any_query(body, setup):
     """
-    Summary: Progress update requires valid coordinator.
-    AC3: Event Coordinator should be able to update and edit the status of an
-        Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/progress with an empty body, no JSON, or a coordinatorId that is not a UUID answers 400 and no query is sent.
+    Supporting design check: the coordinator id in the body must be a valid UUID
+    Double: Mock (cursor.execute asserted never called)
     """
     response = setup[0].patch(f"/events/{EVENT_ID}/progress", json=body)
     assert response.status_code == 400
     setup[2].execute.assert_not_called()
 
 
-def test_progress_update_returns_not_found(setup):
+def test_a_progress_update_for_an_unknown_event_answers_404(setup):
     """
-    Summary: Progress update returns not found.
-    AC3: Event Coordinator should be able to update and edit the status of an
-        Event
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/progress answers 404 when the database finds no such event.
+    Supporting design check: updating an event that does not exist is a 404
+    Double: Stub (cursor.fetchone returns None)
     """
     client, _, cursor = setup
     cursor.fetchone.return_value = None
@@ -368,17 +352,12 @@ def test_progress_update_returns_not_found(setup):
     assert response.status_code == 404
 
 
-# --- Supporting/supplementary design checks ----------------------------------
-# No Jira acceptance criterion covers these. They check design decisions the
-# stories rely on (health check, CORS, configuration and failure handling).
-
-
-def test_progress_update_requires_database_configuration():
+def test_progress_update_answers_503_when_no_database_is_configured():
     """
-    Summary: Progress update requires database configuration.
+    Summary: With no DATABASE_URL set, PATCH /events/<id>/progress answers 503.
     Supporting design check: an Event Service with no database configured
         answers 503
-    Double: None
+    Double: None for the database, since the app has none configured; only the Supabase JWKS Stub, which verifies the signed token
     """
     client = signed_in(create_app({"TESTING": True, "DATABASE_URL": None}).test_client())
     response = client.patch(
