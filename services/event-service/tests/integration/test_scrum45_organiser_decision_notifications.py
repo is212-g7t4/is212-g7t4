@@ -237,7 +237,7 @@ def test_ac4_initial_and_reassignment_record_separate_saved_coordinators(client,
         assert row["source"]["eventName"] == "Spring Fair"
         assert row["source"]["eventId"] == event_id
     assert str(db.event(event_id)["coordinator_id"]) == LEAD_ID
-    # Repeating the same coordinator is a no-op; see test_scrum166-coordinator_assignment_notifications.py.
+    # Repeating the same coordinator is a no-op; see test_scrum166_coordinator_assignment_notifications.py.
 
 
 # Supporting DR1/DR2/DR3/DR4/DR5/DR6/DR8 — owner transaction, recovery and identity
@@ -259,7 +259,7 @@ def test_ac1_dr_approval_and_assignment_are_distinct_intents(client, db):
 def test_ac4_dr_intent_insert_failure_rolls_back_entire_mutation(client, db, change):
     """Failure: a PostgreSQL trigger rejects the intent INSERT for each change; HTTP fails and
     fresh SQL reads show unchanged event state and no outbox row, proving atomic rollback (DR2).
-    Reassignment rollback is covered in test_scrum166-coordinator_assignment_notifications.py.
+    Reassignment rollback is covered in test_scrum166_coordinator_assignment_notifications.py.
     """
     event_id = make_event(db, status="Submitted" if change == "initial" else "Under Review",
                           coordinator_id=None if change == "initial" else COORDINATOR_ID)
