@@ -41,7 +41,7 @@ const passwordEnv: Record<string, string> = {
   [users.attendeeTwo.id]: 'E2E_PASSWORD_ATTENDEE_TWO',
 }
 
-const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, safety: 5012, attendeeRegistration: 5009 }
+const ports = { user: 5001, event: 5003, assignment: 5004, reservation: 5010, venue: 5006, venueBooking: 5007, venueAvailability: 5008, safety: 5012, attendeeRegistration: 5009 }
 const url = (service: keyof typeof ports, path: string) => journeyServiceUrl(ports[service], path)
 
 type Login = { accessToken: string; expiresAt: number; user: Record<string, string> }

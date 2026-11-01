@@ -87,7 +87,7 @@ def review_event_requests(event_id, status, rejection_reason=None, *, approval_c
 def create_event_requests(event_id, items):
     context = notification_snapshot(event_id, submission=True)
     body = _call("POST", _request_service(f"/events/{event_id}/equipment-requests"),
-                 json={"items": items, "notificationContext": context})
+                 json={"items": items, "notificationContext": context}, headers=_internal_read_headers())
     return body["requests"]
 
 

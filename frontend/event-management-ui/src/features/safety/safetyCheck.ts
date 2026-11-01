@@ -309,7 +309,7 @@ export async function recheckSafety(
  * the event detail page has this already and needs no extra call (AC1).
  */
 export function submittedForSafetyCheckAt(event: SubmittedEvent): string | null {
-  const submissions = event.actionHistory.filter(
+  const submissions = (event.actionHistory ?? []).filter(
     (action) => action.status === 'Pending Safety Check',
   )
   return submissions.length > 0 ? submissions[submissions.length - 1].recordedAt : null

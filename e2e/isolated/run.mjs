@@ -183,6 +183,8 @@ try {
 } catch (error) {
   console.error(error.message)
   process.exitCode = 1
+  // The stack is torn down next, so CI would otherwise lose the service logs.
+  if (active && process.env.CI) await compose(['logs', '--no-color', '--tail', '80']).catch(() => {})
 } finally {
   if (frontend && frontend.exitCode === null && frontend.signalCode === null) {
     await new Promise(accept => { frontend.once('close', accept); frontend.kill() })
