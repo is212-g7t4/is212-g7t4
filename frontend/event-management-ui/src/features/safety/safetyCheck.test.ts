@@ -287,3 +287,7 @@ test('an event never submitted has no submission time', () => {
 
   expect(submittedForSafetyCheckAt(event)).toBeNull()
 })
+
+test('SCRUM-9: a staff view of the event, without actionHistory, has no submission time', () => {
+  expect(submittedForSafetyCheckAt({} as SubmittedEvent)).toBeNull()
+})

@@ -793,17 +793,14 @@ def _decide(
             409,
         )
 
+    # Event Service derives attendeeVenueRequired because the officer's view of
+    # the event omits actionHistory (SCRUM-9).
     attendee_venue = None
-    if event_status == CONFIRMED:
-        for entry in reversed(event.get("actionHistory", [])):
-            if entry.get("status") == CONFIRMED:
-                break
-            if "venueName" in entry.get("attendeeBaseline", {}):
-                try:
-                    attendee_venue = clients.attendee_venue_name(event_id)
-                except (clients.DownstreamTimeout, clients.DownstreamError) as error:
-                    return None, None, _decide_failure(error, verb)
-                break
+    if event_status == CONFIRMED and event.get("attendeeVenueRequired"):
+        try:
+            attendee_venue = clients.attendee_venue_name(event_id)
+        except (clients.DownstreamTimeout, clients.DownstreamError) as error:
+            return None, None, _decide_failure(error, verb)
 
     booking_ids = []
     venue_flags = [flag for flag in flags or [] if flag["area"] == "venue arrangement"]

@@ -406,6 +406,10 @@ def serialize(row):
         actionHistory=action_history,
         clarificationHistory=clarification_history,
         amendmentHistory=unpack_amendments(row["description"]),
+        # SCRUM-46: whether confirming now needs the final venue name — the
+        # same baseline _record_attendee_update checks. Derived, so it survives
+        # the SCRUM-9 staff view that drops actionHistory itself.
+        attendeeVenueRequired="venueName" in (attendee_baseline(action_history) or {}),
     )
     return result
 
