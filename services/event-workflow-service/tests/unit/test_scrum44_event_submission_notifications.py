@@ -37,6 +37,9 @@ Not proven
 ----------
 - That the owner freezes the envelope in the same transaction as the change (->
   the owning service's notification tests and integration tests).
+- AC3 (saving a draft sends no submission notification): this worker only
+  delivers jobs the owner queued, and has no notion of drafts. Whether a draft
+  save queues a job is Event Service's decision (-> event-service drafts tests).
 - That Notification Service stores and shows the inbox item (->
   notification-service consumer tests and frontend NotificationCenter tests).
 """
@@ -68,13 +71,24 @@ JOB = dict(id=ID, type='event.submission-fanout', source=SOURCE, envelope=None,
     (503, None, True),
 ], ids=['two-valid-leads', 'no-leads', 'malformed-user-list', 'wrong-role',
         'blank-organiser-name', 'malformed-organiser', 'user-service-unavailable'])
-def test_submission_alert_expands_to_leads_or_retries(monkeypatch, caplog, users, name, failed):
+def test_ac1_submission_alert_expands_to_leads_or_retries(monkeypatch, caplog, users, name, failed):
     """
-    Summary: A submission alert goes to every Lead found, or is retried if the lookup is bad.
+    Summary: dispatch_once on one claimed submission fan-out job asks User
+        Service for the Event Coordinator Leads and the organiser's name; with
+        two valid Leads it posts an expand call listing both Lead ids and the
+        organiser name "Synthetic Organiser"; with no Leads it expands to an
+        empty list, organiser name "No recipients" and logs "no Event
+        Coordinator Lead"; with a malformed list, a non-Lead user, a blank or
+        malformed organiser name, or a 503 it posts a retry instead. Nothing is
+        published to the broker in any case.
     AC1: Given an Event Organiser submits a new event request, the Lead
         Coordinator receives an in-app notification that a new request requires
         review.
-    Double: Stub (user lookup results)
+    Double: Stub (httpx.request routed to an in-memory transport: claim
+        returns the fan-out job; GET /users?role=Event Coordinator Lead returns
+        the parametrized users or 503; GET /users/<id> returns the
+        parametrized organiser name), Mock (broker not called; the last
+        recorded request is /expand or /retry)
     """
     # Arrange (Given)
     monkeypatch.setenv('EVENT_SERVICE_URL', 'http://event.test')
@@ -117,15 +131,25 @@ def test_submission_alert_expands_to_leads_or_retries(monkeypatch, caplog, users
 # AC2 — Save the message before sending.
 
 @pytest.mark.parametrize('freeze_fails', [False, True], ids=['freeze-succeeds', 'freeze-fails'])
-def test_submission_alert_freezes_before_publish(freeze_fails):
+def test_ac1_ac2_submission_alert_freezes_before_publish(freeze_fails):
     """
-    Summary: A submission alert is frozen by the owner before it is sent, and nothing is sent if that fails.
+    Summary: dispatch_once on one claimed submission job for a Lead builds the
+        envelope with the message "Synthetic Organiser submitted Workshop.
+        Review required.", an event-details link and the event name, organiser
+        name and start/end times, and asks the owner to freeze it first; when
+        freeze succeeds only the owner's returned envelope is published and the
+        job is marked published; when freeze raises, nothing is published and
+        a retry is recorded with "RuntimeError".
     AC1: Given an Event Organiser submits a new event request, the Lead
         Coordinator receives an in-app notification that a new request requires
         review.
     AC2: The notification includes the event name, Event Organiser name,
         proposed event date/time, and a link to review the event request.
-    Double: Stub (freeze succeeds or fails), Mock (publish)
+    Double: Stub (api.claim returns the submission job; api.freeze asserts the
+        exact draft envelope, then returns an owner envelope or raises
+        RuntimeError("temporary failure")), Mock (publish asserts freeze came
+        first and receives the owner envelope; published and retry calls
+        asserted)
     """
     api = Mock()
     job = {**JOB, 'type': 'event.submission', 'source': {**SOURCE, 'recipientId': SECOND_LEAD, 'organiserName': 'Synthetic Organiser'}}

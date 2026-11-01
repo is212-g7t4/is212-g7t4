@@ -59,13 +59,23 @@ JOB = dict(id=ID, type='safety.review-fanout', source=SOURCE, envelope=None,
            createdAt='2026-10-28T00:00:00+00:00', leaseToken=ID, attempts=1)
 
 
-def test_safety_review_alert_goes_to_every_safety_officer(monkeypatch):
+def test_ac1_safety_review_alert_goes_to_every_safety_officer(monkeypatch):
     """
-    Summary: A safety review alert goes to every Safety Officer.
+    Summary: dispatch_once on a safety.review-fanout job asks User Service for
+        the Safety Officers and posts an /expand call listing both officer ids;
+        a second dispatch of the expanded safety.review-submitted job for the
+        first officer freezes and publishes "Workshop requires safety review
+        (round 1). Proposed: 01 Mar 2030, 09:00 SGT – 01 Mar 2030, 17:00 SGT."
+        with an event-details link, then marks the job published.
     AC1: Given an event is submitted or resubmitted for a safety check, then
         Safety Officers receive an in-app notification with the event name,
         date and a link to the review.
-    Double: Stub (user lookup returns officers), Mock (publish)
+    Double: Stub (httpx.request routed to an in-memory transport: claim
+        returns the fan-out job and then the expanded job; GET /users?role=
+        Safety Officer returns two officers; freeze echoes the expected
+        envelope; expand and published answer 200), Mock (broker not called
+        after the first dispatch; called once with the expected envelope after
+        the second)
     """
     # Arrange (Given)
     monkeypatch.setenv('EVENT_SERVICE_URL', 'http://event.test')
@@ -122,11 +132,17 @@ def test_safety_review_alert_goes_to_every_safety_officer(monkeypatch):
 ], ids=['malformed-user-list', 'wrong-role-after-valid-officer'])
 def test_safety_review_alert_with_bad_officer_lookup_retries(safety_outbox_http, caplog, users):
     """
-    Summary: A bad Safety Officer lookup is retried rather than alerting only some officers.
-    AC1: Given an event is submitted or resubmitted for a safety check, then
-        Safety Officers receive an in-app notification with the event name,
-        date and a link to the review.
-    Double: Stub (user lookup invalid), Mock (no publish)
+    Summary: When User Service returns a non-list body, or a list containing a
+        non-Safety-Officer after a valid officer, dispatch_once makes exactly
+        claim, users and retry calls, posts the retry with error "ValueError"
+        and the internal token, publishes nothing, and logs one "Dispatch retry"
+        line.
+    Supporting design check: a bad Safety Officer lookup is retried rather than
+        alerting only some officers
+    Double: Stub (claim returns the fan-out job; GET /users?role=Safety Officer
+        returns the parametrized malformed users; strict respx routes with no
+        expand, freeze or published route), Mock (broker not called; the
+        recorded request order is asserted)
     """
     # Arrange (Given)
     # Arrange: malformed responses deliberately violate User's /users contract
@@ -156,11 +172,16 @@ def test_safety_review_alert_with_bad_officer_lookup_retries(safety_outbox_http,
 
 def test_safety_review_alert_with_no_officers_completes_with_warning(safety_outbox_http, caplog):
     """
-    Summary: With no Safety Officers, the job completes with a warning and sends nothing.
-    AC1: Given an event is submitted or resubmitted for a safety check, then
-        Safety Officers receive an in-app notification with the event name,
-        date and a link to the review.
-    Double: Stub (user lookup returns none)
+    Summary: When User Service returns no Safety Officers, dispatch_once makes
+        exactly claim, users and expand calls, expands to an empty recipient
+        list, publishes nothing, and logs the warning "Safety review skipped:
+        no Safety Officer".
+    Supporting design check: a review with no Safety Officer completes with a
+        warning instead of retrying forever
+    Double: Stub (claim returns the fan-out job; GET /users?role=Safety Officer
+        returns []; expand answers 200 with 0 recipients; strict respx routes),
+        Mock (broker not called; the expand body {"recipientIds": []} is
+        asserted)
     """
     # Arrange (Given)
     # Arrange: User's /users returns an empty list when its role filter has no
@@ -195,15 +216,25 @@ def test_safety_review_alert_with_no_officers_completes_with_warning(safety_outb
     ('Changes Requested', 'Revise the plan.', ['venue arrangement', 'event details'],
      'Workshop safety review: Changes Requested (round 1). Revise the plan. Affected areas: venue arrangement, event details.'),
 ], ids=['approval-remarks', 'approval-no-remarks', 'rejection-reason', 'changes-reason-areas'])
-def test_safety_decision_alert_freezes_then_retries_failed_delivery(decision, reason, areas, message):
+def test_ac2_safety_decision_alert_freezes_then_retries_failed_delivery(decision, reason, areas, message):
     """
-    Summary: A decision alert is frozen before sending, and a failed send is retried.
+    Summary: dispatch_once on a safety.review-decision job for the coordinator
+        sends the draft envelope (message such as "Workshop safety review:
+        Rejected (round 1). Unsafe exits." with the reason and affected areas
+        where given, event-details link) to the owner to freeze, then publishes
+        only the owner's frozen envelope. In the approval-with-remarks case the
+        first publish raises, a retry is recorded, and the next claim publishes
+        the same frozen envelope and marks it published; the other cases
+        publish and mark published at once.
     AC2: Given a decision is recorded, then the assigned Event Coordinator
         receives an in-app notification with the event name, the decision and,
         for rejection or requested changes, the reason and affected areas.
-    AC3: Given notification delivery fails, then the decision remains recorded
-        and is not rolled back.
-    Double: Stub (owner outbox), Mock (publish fails then succeeds)
+    Double: Stub (api.claim returns the decision job, later with the frozen
+        envelope; api.freeze asserts the exact draft and returns the frozen
+        envelope), Mock (publish asserts freeze came first; it raises
+        RuntimeError once in the approval-remarks case; freeze called once;
+        published called once; retry called once with "RuntimeError" in that
+        case)
     """
     # Arrange (Given)
     source = dict(eventId=ID, eventName='Workshop', round=1, recipientId=OTHER,
@@ -244,3 +275,74 @@ def test_safety_decision_alert_freezes_then_retries_failed_delivery(decision, re
     # Assert (Then)
     api.freeze.assert_called_once()
     api.published.assert_called_once()
+
+
+def test_ac3_safety_decision_alert_delivery_failure_only_retries_the_alert():
+    """
+    Summary: When the broker publish raises for a claimed safety.review-decision
+        job, dispatch_once does not raise and does not mark the job published;
+        its only effects on the outbox are claim, freeze (the alert is saved)
+        and one retry with "RuntimeError". The worker has no call that could
+        change or undo the recorded decision.
+    AC3: Given notification delivery fails, then the decision remains recorded
+        and is not rolled back.
+    Double: Stub (api.claim returns the decision job; api.freeze returns the
+        frozen envelope), Mock (publish raises RuntimeError("broker down");
+        the api's recorded calls are exactly claim, freeze, retry)
+    """
+    # Arrange (Given)
+    source = dict(eventId=ID, eventName='Workshop', round=1, recipientId=OTHER,
+                  decision='Rejected', reason='Unsafe exits.', areas=[])
+    job = {**JOB, 'type': 'safety.review-decision', 'source': source}
+    api = Mock()
+    api.claim.return_value = [job]
+    api.freeze.side_effect = lambda received, envelope: envelope
+    publish = Mock(side_effect=RuntimeError('broker down'))
+
+    # Act (When)
+    count = dispatch_once(api, publish)
+
+    # Assert (Then)
+    assert count == 1
+    publish.assert_called_once()
+    assert [call[0] for call in api.method_calls] == ['claim', 'freeze', 'retry']
+    api.retry.assert_called_once_with(job, 'RuntimeError')
+    api.published.assert_not_called()
+
+
+@pytest.mark.parametrize('kind,source', [
+    ('safety.review-submitted',
+     dict(eventId=ID, eventName='Workshop', round=1, recipientId=OFFICER,
+          startDateTime='2030-03-01T09:00:00+08:00', endDateTime='2030-03-01T17:00:00+08:00')),
+    ('safety.review-decision',
+     dict(eventId=ID, eventName='Workshop', round=1, recipientId=OTHER,
+          decision='Approved', reason=None, areas=[])),
+], ids=['review-submitted', 'review-decision'])
+def test_ac4_safety_notification_records_event_recipient_type_and_timestamp(kind, source):
+    """
+    Summary: dispatch_once on a claimed safety.review-submitted job for a
+        Safety Officer, and on a safety.review-decision job for the
+        coordinator, publishes an envelope that records the event id (in its
+        details and link), the recipient id, the notification type and the
+        createdAt timestamp of the job.
+    AC4: Given a notification is sent, then it records the event, recipient,
+        type and timestamp.
+    Double: Stub (api.claim returns the job; api.freeze echoes the draft),
+        Mock (publish called once; its envelope fields are asserted)
+    """
+    # Arrange (Given)
+    job = {**JOB, 'type': kind, 'source': source}
+    api, publish = Mock(), Mock()
+    api.claim.return_value = [job]
+    api.freeze.side_effect = lambda received, envelope: envelope
+
+    # Act (When)
+    dispatch_once(api, publish)
+
+    # Assert (Then)
+    envelope = publish.call_args.args[0]
+    assert envelope['type'] == kind
+    assert envelope['recipientId'] == source['recipientId']
+    assert envelope['createdAt'] == JOB['createdAt']
+    assert envelope['details']['eventId'] == ID
+    assert envelope['destination'] == dict(kind='event-details', eventId=ID)

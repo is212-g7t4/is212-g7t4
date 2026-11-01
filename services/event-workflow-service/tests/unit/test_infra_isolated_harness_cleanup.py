@@ -38,9 +38,9 @@ from scripts.test_support.process_lifecycle import cleanup_owned_resources, wait
 
 def test_wait_for_group_absence_retries_transient_permission_error(mocker):
     """
-    Summary: A passing permission error while waiting for a process group is retried, not taken as success.
+    Summary: wait_group_gone retries after one PermissionError from os.killpg and returns True once the group raises ProcessLookupError (gone).
     Supporting design check: the integration harness cleans up after itself
-    Double: Stub (killpg raises PermissionError once)
+    Double: Stub (os.killpg raises PermissionError, then ProcessLookupError); no processes or containers touched
     """
     mocker.patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=[PermissionError(), ProcessLookupError()])
     assert wait_group_gone(905, seconds=1)
@@ -48,9 +48,9 @@ def test_wait_for_group_absence_retries_transient_permission_error(mocker):
 
 def test_wait_for_group_absence_with_persistent_permission_error_never_succeeds(mocker):
     """
-    Summary: A lasting permission error is never taken as the process group being gone.
+    Summary: wait_group_gone with a zero-second wait returns False when os.killpg keeps raising PermissionError, so the group is not assumed gone.
     Supporting design check: the integration harness cleans up after itself
-    Double: Stub (killpg always raises PermissionError)
+    Double: Stub (os.killpg always raises PermissionError); no processes or containers touched
     """
     mocker.patch("scripts.test_support.process_lifecycle.os.killpg", side_effect=PermissionError())
     assert not wait_group_gone(905, seconds=0)
@@ -58,9 +58,9 @@ def test_wait_for_group_absence_with_persistent_permission_error_never_succeeds(
 
 def test_cleanup_when_some_steps_fail_still_tries_every_resource(mocker):
     """
-    Summary: Cleanup tries every resource even when some steps fail.
+    Summary: cleanup_owned_resources kills both process groups, closes both logs and removes both containers although one process wait raises, one log close raises and one docker removal is refused; it returns exactly those 3 failures.
     Supporting design check: the integration harness cleans up after itself
-    Double: Stub (steps raise), Mock (each cleanup called)
+    Double: Stub (second process wait raises RuntimeError; first log close raises OSError; docker rm of owned-two exits 1; wait_group_gone returns True), Mock (os.killpg called for 902 then 901; each log closed once; docker rm called for owned-two then owned-one)
     """
     processes = [Mock(pid=901), Mock(pid=902)]
     processes[1].wait.side_effect = RuntimeError("wait failed")
@@ -88,9 +88,9 @@ def test_cleanup_when_some_steps_fail_still_tries_every_resource(mocker):
 
 def test_cleanup_reports_container_still_present_after_removal(mocker):
     """
-    Summary: A container still present after a "removed" answer is reported.
+    Summary: cleanup_owned_resources reports one failure ("absence unverified owned") when the follow-up docker listing still shows the container after docker rm succeeded.
     Supporting design check: the integration harness cleans up after itself
-    Double: Stub (docker reports the container still exists)
+    Double: Stub (docker rm succeeds; docker container ls then still lists "owned"); no real docker
     """
     results = [subprocess.CompletedProcess([], 0, "owned", ""),
                subprocess.CompletedProcess([], 0, "owned\n", "")]
@@ -102,9 +102,9 @@ def test_cleanup_reports_container_still_present_after_removal(mocker):
 
 def test_cleanup_kills_timed_out_group_and_continues(mocker):
     """
-    Summary: A process group that does not stop in time is killed and cleanup continues.
+    Summary: When the first process times out waiting, cleanup_owned_resources kills its group again (904, 903, 903), still handles the second process and the container, and returns no failures.
     Supporting design check: the integration harness cleans up after itself
-    Double: Stub (wait times out; group already gone)
+    Double: Stub (first process wait raises TimeoutExpired then returns; wait_group_gone returns True, False, True; os.killpg raises ProcessLookupError once; docker run succeeds), Mock (killpg call order; docker called twice)
     """
     processes = [Mock(pid=903), Mock(pid=904)]
     processes[0].wait.side_effect = [subprocess.TimeoutExpired("owned", 10), 0]
@@ -120,9 +120,9 @@ def test_cleanup_kills_timed_out_group_and_continues(mocker):
 
 def test_cleanup_removes_child_that_ignores_term(tmp_path):
     """
-    Summary: A child process that ignores the stop signal is still removed.
+    Summary: Spawns a real process group whose forked child ignores SIGTERM; cleanup_owned_resources ends the leader with SIGTERM and leaves no process in the group.
     Supporting design check: the integration harness cleans up after itself
-    Double: None
+    Double: None (real child processes and process group; no docker, no mocker)
     """
     import os
     import signal

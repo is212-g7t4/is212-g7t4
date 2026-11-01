@@ -33,9 +33,9 @@ from app import clients, create_app
 
 def test_create_app_without_internal_token_logs_warning(monkeypatch, caplog):
     """
-    Summary: Starting without the internal token logs a warning, since the Lead's edits need it.
+    Summary: create_app() with clients.INTERNAL_SERVICE_TOKEN unset logs a warning containing "INTERNAL_SERVICE_TOKEN is not set".
     Supporting design check: a misconfigured service warns at startup
-    Double: None
+    Double: Stub (clients.INTERNAL_SERVICE_TOKEN set to None via monkeypatch); no downstream service called
     """
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", None)
     with caplog.at_level(logging.WARNING):
@@ -45,9 +45,9 @@ def test_create_app_without_internal_token_logs_warning(monkeypatch, caplog):
 
 def test_create_app_with_internal_token_logs_nothing(monkeypatch, caplog):
     """
-    Summary: Starting with the internal token logs no warning.
+    Summary: create_app() with clients.INTERNAL_SERVICE_TOKEN set logs no warning mentioning INTERNAL_SERVICE_TOKEN.
     Supporting design check: a misconfigured service warns at startup
-    Double: None
+    Double: Stub (clients.INTERNAL_SERVICE_TOKEN set to "secret" via monkeypatch); no downstream service called
     """
     monkeypatch.setattr(clients, "INTERNAL_SERVICE_TOKEN", "secret")
     with caplog.at_level(logging.WARNING):

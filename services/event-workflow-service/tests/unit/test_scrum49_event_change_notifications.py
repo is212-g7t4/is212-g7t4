@@ -59,13 +59,21 @@ from tests.unit.factories import (
     ("2030-03-01T09:00:00", "2030-03-01T17:00:00"),
     ("2030-03-01T01:00:00+00:00", "2030-03-01T11:00:00+02:00"),
 ], ids=["naive-is-singapore", "aware-converted-to-singapore"])
-def test_change_request_alert_shows_proposed_times_in_singapore_time(prepare_change, start, end):
+def test_ac1_change_request_alert_shows_proposed_times_in_singapore_time(prepare_change, start, end):
     """
-    Summary: Proposed changes in a change-request alert are shown readably in Singapore time.
+    Summary: dispatch_once on one claimed change-request-submitted job for the
+        assigned coordinator, with every proposable field changed, freezes and
+        publishes a message "Change requested for Workshop. Proposed changes:
+        ..." that lists the fields in display order and shows the start/end
+        times in Singapore time (01 Mar 2030, 09:00 SGT / 17:00 SGT) for both
+        offset and naive input times.
     AC1: Given an Event Organiser submits a change request, the system sends an
         in-app notification to the Event Coordinator with the event name,
         proposed changes, and a link to review the request.
-    Double: Stub (owner outbox)
+    Double: Stub (Event notification-context returns coordinator and organiser
+        ids; owner freeze returns an owner-revised envelope; published
+        accepted; strict respx routes), Mock (broker called once with the
+        owner-frozen envelope, after freeze)
     """
     # Arrange (Given)
     # Arrange: reverse input order to check display order, not JSON insertion order.
@@ -92,13 +100,18 @@ def test_change_request_alert_shows_proposed_times_in_singapore_time(prepare_cha
     assert broker.call_args_list == [((frozen,), {})]
 
 
-def test_change_request_alert_lists_only_changed_fields(prepare_change):
+def test_ac1_change_request_alert_lists_only_changed_fields(prepare_change):
     """
-    Summary: Only the fields actually proposed are listed.
+    Summary: dispatch_once on one claimed change-request-submitted job whose
+        proposed changes contain only expectedAttendance "40" publishes
+        "Change requested for Workshop. Proposed changes: Expected Attendance:
+        40." and no other field.
     AC1: Given an Event Organiser submits a change request, the system sends an
         in-app notification to the Event Coordinator with the event name,
         proposed changes, and a link to review the request.
-    Double: Stub (owner outbox)
+    Double: Stub (Event notification-context returns the assigned coordinator;
+        owner freeze returns an owner-revised envelope; strict respx routes),
+        Mock (broker called once with the owner-frozen envelope)
     """
     # Arrange (Given)
     # Arrange
@@ -125,13 +138,20 @@ def test_change_request_alert_lists_only_changed_fields(prepare_change):
     ("event.change-request-rejected", True, "Keep transport.",
      "Change request for New Workshop (formerly Workshop) was rejected: Keep transport."),
 ], ids=["approval-unchanged-name", "approval-renamed", "rejection-verbatim-reason", "rejection-historical-name"])
-def test_change_decision_alert_reaches_current_organiser_with_saved_content(prepare_change, kind, renamed, reason, message):
+def test_ac2_change_decision_alert_reaches_current_organiser_with_saved_content(prepare_change, kind, renamed, reason, message):
     """
-    Summary: A decision alert reaches the current organiser with the event name, decision and any reason.
+    Summary: dispatch_once on one claimed approved or rejected change-request
+        job, whose saved source names an obsolete recipient, publishes to the
+        current organiser from the Event context: "Change request for Workshop
+        was approved." (or "... for New Workshop (formerly Workshop) ..." when
+        renamed) and, for a rejection, "... was rejected: <reason>" with the
+        reason kept verbatim.
     AC2: Given an approval or rejection of a change request is successfully
         recorded, the Event Organiser receives an in-app notification with the
         event name, decision, and reason if rejected.
-    Double: Stub (owner outbox, current organiser), Mock (publish)
+    Double: Stub (Event notification-context returns the current organiser id;
+        owner freeze returns an owner-revised envelope; strict respx routes),
+        Mock (broker called once with the owner-frozen envelope)
     """
     # Arrange (Given)
     # Arrange: an obsolete source recipient must not override the current Event context.
@@ -154,14 +174,21 @@ def test_change_decision_alert_reaches_current_organiser_with_saved_content(prep
 
 
 @pytest.mark.parametrize("role,recipient", [("coordinator", COORDINATOR), ("organiser", ORGANISER)], ids=["coordinator", "organiser"])
-def test_cancellation_alert_reaches_coordinator_and_organiser(prepare_change, role, recipient):
+def test_ac3_cancellation_alert_reaches_coordinator_and_organiser(prepare_change, role, recipient):
     """
-    Summary: A cancellation alert reaches both the coordinator and the organiser with the event name.
+    Summary: dispatch_once on one claimed event.cancelled job for the
+        coordinator role, and one for the organiser role, publishes
+        "Workshop was cancelled." to the coordinator and to the organiser
+        respectively, taken from the Event context rather than the job's saved
+        recipient.
     AC3: Given an event is cancelled or rejected, the system sends an in-app
         notification to both the Event Coordinator and Event Organiser
         confirming the cancellation or rejection, respectively, with the event
         name.
-    Double: Stub (owner outbox), Mock (publish)
+    Double: Stub (Event notification-context returns the coordinator and
+        organiser ids; owner freeze returns an owner-revised envelope; strict
+        respx routes), Mock (broker called once with the owner-frozen
+        envelope)
     """
     # Arrange (Given)
     # Arrange
@@ -182,13 +209,24 @@ def test_cancellation_alert_reaches_coordinator_and_organiser(prepare_change, ro
     ("event.change-request-submitted", "Change requested for Workshop. Proposed changes: Expected Attendance: 40."),
     ("event.cancelled", "Workshop was cancelled."),
 ], ids=["change-request", "cancellation"])
-def test_change_request_alert_without_coordinator_goes_to_the_lead(prepare_change, event_change_http, kind, message):
+def test_ac1_ac3_change_request_alert_without_coordinator_goes_to_the_lead(prepare_change, event_change_http, kind, message):
     """
-    Summary: With no assigned coordinator, the alert goes to the Lead.
+    Summary: When the Event context has no assigned coordinator,
+        dispatch_once on a change-request-submitted job or an event.cancelled
+        job looks up the single Event Coordinator Lead in User Service and
+        publishes the alert to that Lead; only claim, context, Lead lookup,
+        freeze and published calls are made.
     AC1: Given an Event Organiser submits a change request, the system sends an
         in-app notification to the Event Coordinator with the event name,
         proposed changes, and a link to review the request.
-    Double: Stub (user lookup returns one Lead), Mock (publish)
+    AC3: Given an event is cancelled or rejected, the system sends an in-app
+        notification to both the Event Coordinator and Event Organiser
+        confirming the cancellation or rejection, respectively, with the event
+        name.
+    Double: Stub (Event notification-context returns coordinatorId None; User
+        Service GET /users?role=Event Coordinator Lead returns exactly one
+        Lead; owner freeze returns an owner-revised envelope; strict respx
+        routes), Mock (broker called once with the owner-frozen envelope)
     """
     # Arrange (Given)
     # Arrange: User app/__init__.py::users and app/models.py::serialize define this role response.
@@ -221,11 +259,16 @@ def test_change_request_alert_without_coordinator_goes_to_the_lead(prepare_chang
 ], ids=["no-lead", "multiple-leads", "non-list", "wrong-role-after-valid-lead", "invalid-lead-id"])
 def test_change_request_alert_with_unclear_lead_retries_without_publishing(event_change_http, users):
     """
-    Summary: If the Lead cannot be identified, the alert is retried rather than sent to the wrong person.
-    AC1: Given an Event Organiser submits a change request, the system sends an
-        in-app notification to the Event Coordinator with the event name,
-        proposed changes, and a link to review the request.
-    Double: Stub (user lookup returns none or several Leads), Mock (no publish)
+    Summary: With no assigned coordinator, when User Service returns no Lead,
+        several Leads, a non-list body, a non-Lead user after a valid Lead, or
+        a Lead with an invalid id, dispatch_once records one retry with
+        "ValueError" and makes only claim, context, users and retry calls;
+        nothing is frozen or published.
+    Supporting design check: an alert whose Lead cannot be identified is
+        retried rather than sent to the wrong person
+    Double: Stub (Event notification-context returns coordinatorId None; User
+        Service GET /users?role=Event Coordinator Lead returns the
+        parametrized users; strict respx routes), Mock (broker not called)
     """
     # Arrange (Given)
     # Arrange: intentionally invalid responses at Event notification_context / User users boundaries.
@@ -257,11 +300,15 @@ def test_change_request_alert_with_unclear_lead_retries_without_publishing(event
 ], ids=["invalid-current-owner", "invalid-assigned-coordinator"])
 def test_change_alert_with_invalid_current_recipient_retries(event_change_http, role, context):
     """
-    Summary: An invalid current recipient leads to a retry, not delivery to an old one.
-    AC2: Given an approval or rejection of a change request is successfully
-        recorded, the Event Organiser receives an in-app notification with the
-        event name, decision, and reason if rejected.
-    Double: Stub (recipient lookup invalid), Mock (no publish)
+    Summary: For an event.cancelled job, when the Event context returns an
+        invalid organiser id (organiser role) or an invalid coordinator id
+        (coordinator role), dispatch_once records one retry with "ValueError"
+        and publishes nothing.
+    Supporting design check: an invalid current recipient is retried, not
+        delivered to an old or malformed recipient
+    Double: Stub (Event notification-context returns the parametrized invalid
+        id; the job's saved recipient is another Lead; strict respx routes),
+        Mock (broker not called)
     """
     # Arrange (Given)
     # Arrange: Event notification_context response contains an intentionally invalid UUID.
@@ -286,11 +333,15 @@ def test_change_alert_with_invalid_current_recipient_retries(event_change_http, 
 @pytest.mark.parametrize("failure", ["503", "timeout"], ids=["service_unavailable", "timeout"])
 def test_change_alert_when_lookup_down_retries_without_freezing(event_change_http, failure):
     """
-    Summary: A lookup outage retries without freezing or sending anything.
-    AC2: Given an approval or rejection of a change request is successfully
-        recorded, the Event Organiser receives an in-app notification with the
-        event name, decision, and reason if rejected.
-    Double: Stub (lookup answers 503 or times out), Mock (no freeze or publish)
+    Summary: For an event.cancelled job, when the Event context answers 503 or
+        times out, dispatch_once records one retry with "HTTPStatusError" or
+        "ReadTimeout"; no freeze or published call is made and nothing is
+        published.
+    Supporting design check: a lookup outage retries without freezing or
+        sending anything
+    Double: Stub (Event notification-context answers 503 or raises
+        ReadTimeout; strict respx routes, so freeze/published routes are not
+        registered), Mock (broker not called)
     """
     # Arrange (Given)
     # Arrange: Event app/__init__.py::notification_context is unavailable.
@@ -336,11 +387,16 @@ DELIVERIES = [
                          ids=["submission", "approval", "rejection", "cancellation"])
 def test_change_alert_when_freeze_fails_publishes_nothing(event_change_http, kind, role, recipient, facts, message):
     """
-    Summary: If the owner cannot freeze the alert, the local draft is never published.
-    AC2: Given an approval or rejection of a change request is successfully
-        recorded, the Event Organiser receives an in-app notification with the
-        event name, decision, and reason if rejected.
-    Double: Stub (freeze fails), Mock (no publish)
+    Summary: For a submission, approval, rejection or cancellation job, when
+        the owner's freeze call answers 503, dispatch_once sends the expected
+        draft envelope to freeze, then records one retry with
+        "HTTPStatusError"; the broker is never called and no published call is
+        made.
+    Supporting design check: if the owner cannot freeze the alert, the local
+        draft is never published
+    Double: Stub (Event notification-context returns coordinator and organiser;
+        owner freeze answers 503; strict respx routes), Mock (broker not
+        called; the freeze request body equals the expected envelope)
     """
     # Arrange (Given)
     # Arrange: Event app/outbox.py::operate owns claim/freeze/retry responses.
@@ -372,11 +428,17 @@ def test_change_alert_when_freeze_fails_publishes_nothing(event_change_http, kin
                          ids=["submission", "approval", "rejection", "cancellation"])
 def test_change_alert_retry_reuses_frozen_envelope(event_change_http, kind, role, recipient, facts, message):
     """
-    Summary: A retry after a broker failure resends the frozen alert without looking up recipients again.
-    AC2: Given an approval or rejection of a change request is successfully
-        recorded, the Event Organiser receives an in-app notification with the
-        event name, decision, and reason if rejected.
-    Double: Stub (frozen envelope), Mock (publish; no lookups)
+    Summary: For a submission, approval, rejection or cancellation job, the
+        first attempt freezes the alert and records a retry when the broker
+        raises; the second claim returns the job with the frozen envelope and
+        changed source facts, and the same frozen envelope is published and
+        marked published without another context lookup or freeze.
+    Supporting design check: a retry after a broker failure resends the frozen
+        alert without looking up recipients again
+    Double: Stub (Event notification-context returns coordinator and organiser;
+        owner freeze returns the frozen envelope; strict respx routes), Mock
+        (broker raises RuntimeError first then succeeds; claim called twice,
+        context and freeze once each, published once with the new lease)
     """
     # Arrange (Given)
     # Arrange: owner wire shapes from Event app/outbox.py::serialize/operate;

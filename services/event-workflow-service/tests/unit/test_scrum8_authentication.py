@@ -80,13 +80,16 @@ def client():
     ],
     ids=["edit_details", "list_change_requests", "decide_change_request"],
 )
-def test_internal_token_when_coordinator_action_requested_returns_401(client, method, path, body):
+def test_ac1_internal_token_when_coordinator_action_requested_returns_401(client, method, path, body):
     """
-    Summary: A background worker's internal token cannot edit an event or review change requests.
+    Summary: PATCH /events/<id>/details, GET /change-requests and PATCH
+        /change-requests/<id> sent with only a valid X-Internal-Token (no
+        user token) are each answered 401 {"message": "Sign in to continue."}.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (Supabase signing key via conftest; INTERNAL_SERVICE_TOKEN set
+        to internal-test-token); no downstream client is reached
     """
     # Arrange (Given): client, method, path, body, from fixtures
 
@@ -98,13 +101,16 @@ def test_internal_token_when_coordinator_action_requested_returns_401(client, me
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_update_details_with_editor_in_body_uses_signed_in_user(client, monkeypatch):
+def test_ac2_update_details_with_editor_in_body_uses_signed_in_user(client, monkeypatch):
     """
-    Summary: The editor is always the signed-in user; an id in the body is ignored.
+    Summary: PATCH /events/<id>/details with a coordinatorId of "someone-else"
+        in the body and a token for USER_ID makes the service look up USER_ID
+        (the token's user) in User Service, never the id from the body.
     AC2: Given a system user successfully authenticates, when they access
         protected information or functionality, then their access is evaluated
         according to their role and relationship to the relevant event.
-    Double: Mock (get_user records which user is looked up)
+    Double: Stub (get_user raises UserNotFoundError; Supabase signing key via
+        conftest), Mock (get_user records the user id it was called with)
     """
     # Arrange (Given)
     from app import clients
@@ -128,13 +134,15 @@ def test_update_details_with_editor_in_body_uses_signed_in_user(client, monkeypa
     assert looked_up == [USER_ID]
 
 
-def test_authenticate_without_token_returns_401_sign_in_message(client):
+def test_ac1_authenticate_without_token_returns_401_sign_in_message(client):
     """
-    Summary: A request with no sign-in token is turned away with a sign-in prompt.
+    Summary: GET /change-requests with no Authorization header is answered
+        401 {"message": "Sign in to continue."}.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (Supabase signing key via conftest, unused because there is
+        no token); no downstream client is reached
     """
     # Arrange (Given): client, from fixtures
 
@@ -146,13 +154,15 @@ def test_authenticate_without_token_returns_401_sign_in_message(client):
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_authenticate_with_non_bearer_scheme_returns_401(client):
+def test_ac3_authenticate_with_non_bearer_scheme_returns_401(client):
     """
-    Summary: Credentials sent in any form other than a bearer token are refused.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: GET /change-requests with "Authorization: Basic abc" is answered
+        401.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (Supabase signing key via conftest, unused because the scheme
+        is rejected first); no downstream client is reached
     """
     # Arrange (Given): client, from fixtures
 
@@ -169,13 +179,18 @@ def test_authenticate_with_non_bearer_scheme_returns_401(client):
         pytest.param({"Authorization": "Bearer not-a-jwt"}, id="malformed"),
     ],
 )
-def test_authenticate_with_invalid_token_returns_401_session_expired(client, headers):
+def test_ac3_authenticate_with_invalid_token_returns_401_session_expired(client, headers):
     """
-    Summary: Forged, expired, wrong-audience or malformed tokens are all refused.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: GET /change-requests with a bearer token signed by a different
+        key, already expired, issued for audience "anon", or not a token at
+        all is answered 401 "Your session is invalid or has expired. Sign in
+        again."
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (Supabase signing key via conftest returns the test public
+        key, so the forged-signature token fails verification); no downstream
+        client is reached
     """
     # Arrange (Given): client, headers, from fixtures
 
@@ -187,13 +202,15 @@ def test_authenticate_with_invalid_token_returns_401_session_expired(client, hea
     assert response.json == {"message": "Your session is invalid or has expired. Sign in again."}
 
 
-def test_authenticate_with_token_missing_subject_returns_401(client):
+def test_ac3_authenticate_with_token_missing_subject_returns_401(client):
     """
-    Summary: A token that names no user is refused.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: GET /change-requests with a correctly signed, unexpired token
+        that has no "sub" claim is answered 401.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (Supabase signing key via conftest accepts the test key);
+        no downstream client is reached
     """
     # Arrange (Given)
     token = jwt.encode({"aud": "authenticated", "exp": int(time.time()) + 60}, TEST_SIGNING_KEY, algorithm="ES256")
@@ -202,13 +219,15 @@ def test_authenticate_with_token_missing_subject_returns_401(client):
     assert client.get("/change-requests", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
-def test_authenticate_with_dev_identity_headers_returns_401(client):
+def test_ac1_authenticate_with_dev_identity_headers_returns_401(client):
     """
-    Summary: Old developer identity headers cannot be used to impersonate a user.
+    Summary: GET /change-requests with only X-Dev-User-Id and X-Dev-Role
+        headers (no token) is answered 401.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (Supabase signing key via conftest, unused because there is
+        no token); no downstream client is reached
     """
     # Arrange (Given)
     headers = {"X-Dev-User-Id": USER_ID, "X-Dev-Role": "Event Coordinator"}
@@ -217,13 +236,15 @@ def test_authenticate_with_dev_identity_headers_returns_401(client):
     assert client.get("/change-requests", headers=headers).status_code == 401
 
 
-def test_authenticate_with_internal_token_cannot_act_as_a_user(client):
+def test_ac1_authenticate_with_internal_token_cannot_act_as_a_user(client):
     """
-    Summary: A background worker's internal token cannot perform an action that needs a signed-in user.
+    Summary: GET /change-requests with only a valid X-Internal-Token is
+        answered 401 {"message": "Sign in to continue."}.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: Stub (INTERNAL_SERVICE_TOKEN set to internal-test-token; Supabase
+        signing key via conftest); no downstream client is reached
     """
     # Arrange (Given): client, from fixtures
 
@@ -235,13 +256,16 @@ def test_authenticate_with_internal_token_cannot_act_as_a_user(client):
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client):
+def test_ac3_authenticate_with_bad_user_token_and_internal_token_returns_401(client):
     """
-    Summary: A bad user token is refused even when an internal token is also sent.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: GET /change-requests with a valid X-Internal-Token and a
+        malformed Authorization header is answered 401, so the internal token
+        does not rescue a failed user sign-in.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (INTERNAL_SERVICE_TOKEN set to internal-test-token; Supabase
+        signing key via conftest); no downstream client is reached
     """
     # Arrange (Given)
     headers = {"X-Internal-Token": "internal-test-token", "Authorization": "Bearer not-a-jwt"}
@@ -250,13 +274,15 @@ def test_authenticate_with_bad_user_token_and_internal_token_returns_401(client)
     assert client.get("/change-requests", headers=headers).status_code == 401
 
 
-def test_authenticate_with_wrong_internal_token_returns_401(client):
+def test_ac3_authenticate_with_wrong_internal_token_returns_401(client):
     """
-    Summary: Guessing the internal token does not get a caller in.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: GET /change-requests with X-Internal-Token "guess" (not the
+        configured token) is answered 401.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (INTERNAL_SERVICE_TOKEN set to internal-test-token; Supabase
+        signing key via conftest); no downstream client is reached
     """
     # Arrange (Given): client, from fixtures
 
@@ -264,13 +290,16 @@ def test_authenticate_with_wrong_internal_token_returns_401(client):
     assert client.get("/change-requests", headers={"X-Internal-Token": "guess"}).status_code == 401
 
 
-def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch):
+def test_ac3_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch):
     """
-    Summary: When sign-in checking is not configured, protected endpoints stay closed.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: With SUPABASE_URL removed from the environment, GET
+        /change-requests with an otherwise valid coordinator token is
+        answered 503, not allowed through.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (Supabase signing key via conftest; SUPABASE_URL deleted with
+        monkeypatch); no downstream client is reached
     """
     # Arrange (Given)
     monkeypatch.delenv("SUPABASE_URL")
@@ -279,13 +308,16 @@ def test_authenticate_when_supabase_url_missing_returns_503(client, monkeypatch)
     assert client.get("/change-requests", headers=bearer(USER_ID, "Event Coordinator")).status_code == 503
 
 
-def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
+def test_ac3_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
     """
-    Summary: When Supabase's signing keys cannot be fetched, protected endpoints stay closed.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: Stub (signing_key raises PyJWKClientConnectionError)
+    Summary: When fetching Supabase's signing key raises
+        PyJWKClientConnectionError, GET /change-requests with an otherwise
+        valid coordinator token is answered 503, not allowed through.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (app.auth.signing_key raises PyJWKClientConnectionError,
+        replacing the conftest key stub); no downstream client is reached
     """
     # Arrange (Given)
     def unreachable(token):
@@ -299,9 +331,15 @@ def test_authenticate_when_jwks_unreachable_returns_503(client, monkeypatch):
 
 def test_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch):
     """
-    Summary: Tokens are verified against the Supabase project's published signing keys.
-    AC1: tokens are checked against Supabase's keys before access is granted
-    Double: Mock (jwt.PyJWKClient records the JWKS URL and returns a key)
+    Summary: signing_key("token") builds a PyJWKClient for the JWKS URL
+        derived from SUPABASE_URL (https://project.supabase.test/auth/v1/.well-known/jwks.json)
+        and returns the key for that token.
+    Supporting design check: tokens are verified against the Supabase
+        project's published signing keys
+    Double: Mock (jwt.PyJWKClient replaced by a recorder that captures the URL
+        and returns a MagicMock whose get_signing_key_from_jwt is asserted
+        called once with "token"); the conftest key stub is bypassed by calling
+        the real signing_key
     """
     jwks = MagicMock()
     created = []
@@ -315,13 +353,17 @@ def test_signing_key_fetches_key_from_supabase_jwks_url(monkeypatch):
     assert key is jwks.get_signing_key_from_jwt.return_value.key
 
 
-def test_authenticate_with_internal_token_alone_returns_401():
+def test_ac1_authenticate_with_internal_token_alone_returns_401():
     """
-    Summary: An internal token on its own is not a way into this service.
+    Summary: Calling app.auth.authenticate() directly inside a request that has
+        only a valid X-Internal-Token returns status 401 and {"message": "Sign
+        in to continue."}.
     AC1: Given a system user has not been successfully authenticated, when they
         attempt to access protected information or functionality, then access
         is denied.
-    Double: None
+    Double: None (a bare Flask request context calls authenticate(); the
+        autouse Supabase key stub is in place but unused, and the internal
+        token is set by the module's autouse fixture)
     """
     from flask import Flask
 
@@ -334,13 +376,15 @@ def test_authenticate_with_internal_token_alone_returns_401():
     assert response.json == {"message": "Sign in to continue."}
 
 
-def test_authenticate_with_blank_subject_returns_401():
+def test_ac3_authenticate_with_blank_subject_returns_401():
     """
-    Summary: A token naming an empty user is refused, so every handler can rely on a signed-in user.
-    AC1: Given a system user has not been successfully authenticated, when they
-        attempt to access protected information or functionality, then access
-        is denied.
-    Double: None
+    Summary: Calling app.auth.authenticate() directly with a valid token whose
+        "sub" claim is an empty string returns status 401.
+    AC3: Given a system user's authentication attempt is unsuccessful, when
+        the authentication attempt is completed, then they remain unable to
+        access protected information or functionality.
+    Double: Stub (Supabase signing key via conftest accepts the test key); a
+        bare Flask request context, no downstream client
     """
     from flask import Flask
 
@@ -350,18 +394,3 @@ def test_authenticate_with_blank_subject_returns_401():
         response, status = authenticate()
 
     assert status == 401
-
-
-# --- Supporting/supplementary design checks ----------------------------------
-# No Jira acceptance criterion covers these. They check design decisions the
-# stories rely on (health check, CORS, configuration and failure handling).
-
-
-def test_health_and_preflight_without_token_are_answered(client):
-    """
-    Summary: Health checks and browser preflights need no sign-in.
-    Supporting design check: /health and CORS preflight answer without a token
-    Double: None
-    """
-    assert client.get("/health").status_code == 200
-    assert client.options("/change-requests").status_code == 200

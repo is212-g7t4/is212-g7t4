@@ -70,18 +70,26 @@ from tests.unit.factories import (
     ],
     ids=["registration_confirmed", "registration_withdrawn"],
 )
-def test_registration_alert_targets_attendee_with_required_content(
+def test_ac1_ac2_registration_alert_targets_attendee_with_required_content(
     kind, message
 ):
     """
-    Summary: Registration and withdrawal alerts go to the attendee with their required content and link.
+    Summary: dispatch_once on one claimed registration.confirmed job publishes
+        "Registration confirmed for Workshop. Date/time: 01 Mar 2030, 09:00 SGT
+        – 01 Mar 2030, 17:00 SGT. Venue: Hall A. Registration reference: <ref>."
+        and on a registration.withdrawn job publishes "Registration withdrawn
+        for Workshop."; each envelope links to the attendee-registration page
+        for the registration id and the job is marked published.
     AC1: Given an Attendee successfully registers for an event, the system
         sends an in-app notification confirming their registration with the
         event name, date, time, venue, and registration reference number.
     AC2: Given an Attendee successfully withdraws their registration, the
         system sends an in-app notification confirming the withdrawal with the
         event name.
-    Double: Stub (owner outbox), Mock (publish)
+    Double: Stub (api.claim returns the registration job; api.registration_details
+        returns Workshop, 01 Mar 2030 01:00-09:00 UTC, Hall A; api.freeze echoes
+        the draft), Mock (broker called once with the envelope; published
+        called once)
     """
     # Arrange (Given)
     api = Mock()
@@ -113,14 +121,20 @@ def test_registration_alert_targets_attendee_with_required_content(
     "kind", ["attendee.cancelled-fanout", "attendee.updated-fanout"],
     ids=["cancelled_fanout", "updated_fanout"],
 )
-def test_change_fanout_freezes_first_attendee_list(kind):
+def test_ac3_change_fanout_freezes_first_attendee_list(kind):
     """
-    Summary: A cancellation or change notice goes to the attendee list as first prepared, not a later one.
+    Summary: dispatch_once on one claimed attendee.cancelled-fanout or
+        attendee.updated-fanout job looks up the attendee recipients once for
+        the event and sends them to the owner in a single "expand" operation;
+        nothing is published to the broker at this stage.
     AC3: Given an event cancellation takes effect, or a change to its date,
         time or venue is approved and applied, all currently registered
         Attendees receive an in-app notification with the event name and
         cancellation status or updated details, as applicable.
-    Double: Stub (owner outbox; attendee list changes later), Mock (publish)
+    Double: Stub (api.claim returns the fan-out job; api.attendee_recipients
+        returns one recipient), Mock (attendee_recipients called once with the
+        event id; operation called once with "expand" and those recipients;
+        broker not called)
     """
     # Arrange (Given)
     api = Mock()
@@ -162,16 +176,22 @@ def test_change_fanout_freezes_first_attendee_list(kind):
     ],
     ids=["cancelled", "venue_changed", "schedule_changed"],
 )
-def test_change_alert_publishes_saved_details_without_rereading_event(
+def test_ac3_change_alert_publishes_saved_details_without_rereading_event(
     kind, changes, message
 ):
     """
-    Summary: A change notice carries the saved details, not whatever the event says later.
+    Summary: dispatch_once on one claimed attendee.event-cancelled or
+        attendee.event-updated job publishes "Workshop was cancelled." or
+        "Workshop was updated. " followed by the venue and/or start/end
+        changes from the saved details (shown in Singapore time), with a link to
+        the attendee-registration page, without looking the event up again.
     AC3: Given an event cancellation takes effect, or a change to its date,
         time or venue is approved and applied, all currently registered
         Attendees receive an in-app notification with the event name and
         cancellation status or updated details, as applicable.
-    Double: Stub (owner outbox), Mock (publish; no event lookup)
+    Double: Stub (api.claim returns the job carrying its saved eventName and
+        changes; api.freeze echoes the draft), Mock (broker receives the
+        message and destination; registration_details not called)
     """
     # Arrange (Given)
     item = job(kind)
@@ -195,15 +215,26 @@ def test_change_alert_publishes_saved_details_without_rereading_event(
 
 
 @pytest.mark.parametrize("state", ["confirmed", "withdrawn", "no-approved"], ids=["confirmed", "withdrawn", "no_approved_booking"])
-def test_registration_alert_names_approved_booking_venue(
+def test_ac1_ac2_registration_alert_names_approved_booking_venue(
     attendee_http, state
 ):
     """
-    Summary: A registration alert names the venue from the event's approved booking.
+    Summary: api.registration_details for a confirmed registration returns the
+        event name, start/end times and the venue name "Hall A" taken from the
+        earliest Approved venue booking (ignoring a later Approved and a
+        Pending Review booking); for a withdrawal it returns only the event
+        name and reads no booking; with no Approved booking it raises
+        ValueError.
     AC1: Given an Attendee successfully registers for an event, the system
         sends an in-app notification confirming their registration with the
         event name, date, time, venue, and registration reference number.
-    Double: Stub (venue booking lookup)
+    AC2: Given an Attendee successfully withdraws their registration, the
+        system sends an in-app notification confirming the withdrawal with the
+        event name.
+    Double: Stub (Event Service notification-context returns Workshop with
+        its times; Venue Availability returns the parametrized bookings; Venue
+        Service returns {"venue": {"name": "Hall A"}}; the withdrawn case
+        stubs no booking or venue route)
     """
     api, http = attendee_http
     # Event app/__init__.py::notification_context includeSchedule opt-in.
@@ -275,16 +306,21 @@ def test_registration_alert_names_approved_booking_venue(
     "state", ["two-confirmed", "empty", "invalid-list", "wrong-event"],
     ids=["two_confirmed", "empty", "invalid_list", "wrong_event"],
 )
-def test_attendee_lookup_skips_withdrawn_and_refuses_bad_responses(
+def test_ac3_attendee_lookup_skips_withdrawn_and_refuses_bad_responses(
     attendee_http, state
 ):
     """
-    Summary: Change notices skip withdrawn attendees and refuse malformed attendee lists.
+    Summary: api.attendee_recipients for an event returns only the Confirmed
+        registrations (two recipients, the Withdrawn one skipped); an empty
+        registration list returns []; a non-list body, or a registration
+        belonging to another event, raises ValueError.
     AC3: Given an event cancellation takes effect, or a change to its date,
         time or venue is approved and applied, all currently registered
         Attendees receive an in-app notification with the event name and
         cancellation status or updated details, as applicable.
-    Double: Stub (registration lookup replies)
+    Double: Stub (Registration Service GET /registrations?eventId=<id> returns
+        three rows (two Confirmed, one Withdrawn), an empty list, {} or a row
+        for another event); no other service is stubbed
     """
     api, http = attendee_http
     rows = [
@@ -320,14 +356,14 @@ def test_attendee_lookup_skips_withdrawn_and_refuses_bad_responses(
 
 def test_registration_worker_uses_registration_outbox(monkeypatch):
     """
-    Summary: Registration alerts are claimed from Registration Service's own outbox.
-    AC1: Given an Attendee successfully registers for an event, the system
-        sends an in-app notification confirming their registration with the
-        event name, date, time, venue, and registration reference number.
-    AC2: Given an Attendee successfully withdraws their registration, the
-        system sends an in-app notification confirming the withdrawal with the
-        event name.
-    Double: Stub (environment), Mock (outbox URL)
+    Summary: With OUTBOX_OWNER set to registration, OutboxAPI().base is
+        http://registration.test (trailing slash removed), so registration
+        alerts are claimed from Registration Service's outbox.
+    Supporting design check: registration and withdrawal alerts are claimed
+        from Registration Service's own outbox, not Event Service's
+    Double: Stub (OUTBOX_OWNER, REGISTRATION_SERVICE_URL and
+        INTERNAL_SERVICE_TOKEN set with monkeypatch); no HTTP request is made
+        and the base URL is asserted
     """
     # Arrange (Given)
     from app.dispatcher import OutboxAPI
@@ -340,13 +376,19 @@ def test_registration_worker_uses_registration_outbox(monkeypatch):
     assert OutboxAPI().base == "http://registration.test"
 
 
-def test_registration_alert_uses_saved_snapshot_not_later_event():
+def test_ac1_registration_alert_uses_saved_snapshot_not_later_event():
     """
-    Summary: A confirmation uses the details saved at registration, not later event changes.
+    Summary: dispatch_once on a claimed registration.confirmed job that carries
+        its saved event name, times and venue publishes an envelope whose
+        details equal that saved source; the event is never re-read
+        (registration_details would raise if called).
     AC1: Given an Attendee successfully registers for an event, the system
         sends an in-app notification confirming their registration with the
         event name, date, time, venue, and registration reference number.
-    Double: Stub (owner outbox)
+    Double: Stub (api.claim returns the job with the saved snapshot;
+        api.registration_details raises RuntimeError if called; api.freeze
+        echoes the draft), Mock (broker called once; registration_details not
+        called)
     """
     # Arrange (Given)
     item = job("registration.confirmed")
