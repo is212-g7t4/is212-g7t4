@@ -149,5 +149,4 @@ Frontend lint is inside its own job, not a prerequisite for backend tests. Real-
 
 - [INDEX.md](INDEX.md) — service directory, ownership and local commands.
 - [AGENTS.md](AGENTS.md) — repository rules, service boundaries and testing conventions.
-- [GLOSSARY.md](GLOSSARY.md) — shared domain terms.
 - [Architecture diagrams](c4_diagram/) — C4 sources and exported diagrams; older artwork may retain historical design choices.

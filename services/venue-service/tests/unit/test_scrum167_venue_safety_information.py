@@ -59,7 +59,7 @@ Doubled
 Not proven
 ----------
 - That the details page shows "Not provided" (AC2, UI half) (-> frontend venue
-  detail tests and docs/test-scripts/scrum-167 manual script).
+  detail tests).
 - That the Safety Officer's review shows these fields (-> safety-check- service
   unit tests for SCRUM-163).
 - That the real User foreign key rejects unknown editors (->

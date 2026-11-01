@@ -119,8 +119,7 @@ needs `X-Internal-Token` matching `INTERNAL_SERVICE_TOKEN`; if that token is not
 configured here the action is refused with `503` before anything is saved. The create and
 review calls supply notification context; approvals also supply catalogue/event
 inputs and exact checked request IDs. The owner transaction protects its allocation
-reads and approval writes, not external input provenance (see
-[access-control documentation](../../docs/scrum-10-role-based-modification-control.md)).
+reads and approval writes, not external input provenance.
 Existing browser callers continue using this composite, without sending internal tokens.
 Configure the same token in Event, Equipment Request (its outbox routes) and Equipment
 Reservation services. Cross-service reads remain outside the atomic. An unavailable context service refuses the action before saving;

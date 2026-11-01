@@ -77,7 +77,7 @@ transaction, only selected `Approved` requests become `Pending`; their reviewer
 and rejection reason are cleared. Existing `Pending` and `Rejected` requests,
 including their recorded reviewer and rejection reason, stay unchanged. Requests
 outside the selection are unchanged. Repeating the same reset before staff review
-has the same result; see [the equipment regression map](../../docs/testing/equipment-regressions.md#current-post-main-verification-and-evidence-limits).
+has the same result.
 
 
 ### SCRUM-48 transactional notification ownership
@@ -86,8 +86,7 @@ Create and individual/bulk review also take a `notificationContext` built by
 Equipment Reservation Service. Create needs the `Event Coordinator` or
 `Event Coordinator Lead` role and review needs `Technical Support`, both checked on the
 forwarded user's token. The composite supplies notification context; the owner
-validates its shape, which does not establish external input provenance. See
-[docs/scrum-10-role-based-modification-control.md](../../docs/scrum-10-role-based-modification-control.md).
+validates its shape, which does not establish external input provenance.
 The atomic never fetches Event/User/Equipment data or calls RabbitMQ. Browser callers
 should use the composite. Context includes event identity/name, equipment names,
 and submission recipient IDs or the decision-time coordinator ID. The owner
