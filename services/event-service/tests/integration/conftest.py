@@ -111,7 +111,7 @@ def database_url():
 @pytest.fixture(autouse=True)
 def empty_tables(request):
     # Migration infrastructure deliberately owns independent clean/upgrade databases.
-    if request.module.__name__.endswith(("test_infra_migrations", "test_safety_check_notifications")):
+    if request.module.__name__.endswith(("test_infra_migrations", "test_scrum168-safety_check_notifications")):
         yield
         return
     database_url = request.getfixturevalue("database_url")

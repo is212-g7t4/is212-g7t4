@@ -318,22 +318,21 @@ services/<name>-service/tests/integration/
 ├── __init__.py
 ├── conftest.py                  # fixtures only
 ├── factories.py                 # inserting builders only
-├── test_drafts.py               # one feature (story) per file
-├── test_submission.py
+├── test_scrum12-drafts.py       # one feature (story) per file
+├── test_scrum11-submission.py
 └── test_infra_db_connection.py  # not tied to a story
 ```
 
 **File names**
 
-- **`test_<feature>.py`**, naming the feature in words. **Never put the Jira
-  key in the file name** (no `test_scrum12_drafts.py`). *Why:* it matches the
-  unit-test convention in AGENTS.md; the key goes in the module header.
-- **If the feature already has a unit-test file, use the same name**
-  (`tests/unit/test_drafts.py` ↔ `tests/integration/test_drafts.py`). *Why:*
-  one name finds both tiers. Both folders are packages, so identical file names
-  don't clash.
+- **`test_scrum<N>-<feature>.py`**, the Jira number of the story it tests
+  followed by the feature in words (`test_scrum12-drafts.py`). *Why:* you can
+  find a story's integration tests with `ls *scrum12*`. The full key and story
+  also go in the module header.
+- **Use the same `<feature>` wording as the unit-test file where there is one**
+  (`tests/unit/test_scrum12_drafts.py` ↔ `tests/integration/test_scrum12-drafts.py`).
 - **When a story touches several services, give each service's file the same
-  feature name.** Each file still tests only its own service (§1.1).
+  name.** Each file still tests only its own service (§1.1).
 - **One feature per file.** Don't add a different story's tests to an
   existing file. If it's unclear which feature a test belongs to, ask.
 - **Tests not tied to a story** (database connectivity, migrations loading,

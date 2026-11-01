@@ -74,12 +74,13 @@ From this service directory, with dotenv disabled and no shared database credent
 env -i HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" PYTHON_DOTENV_DISABLED=1 FLASK_SKIP_DOTENV=1 \
   uv run python -m pytest
 env -i HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" PYTHON_DOTENV_DISABLED=1 FLASK_SKIP_DOTENV=1 \
-  uv run python -m pytest tests/integration/test_scrum45_notifications.py -m integration --no-cov
+  uv run python -m pytest tests/integration/test_scrum45-organiser_decision_notifications.py -m integration --no-cov
 ```
 
 The story unit module is `tests/unit/test_scrum45_notifications.py` in Event,
-Event Workflow and Notification; the integration module has the same name in
-each service. Event/Notification use their own disposable PostgreSQL 17.6 with
+Event Workflow and Notification; the integration module is
+`tests/integration/test_scrum45-organiser_decision_notifications.py` in Event and Event
+Workflow (Notification's is `test_scrum45_event_organiser_notifications.py`). Event/Notification use their own disposable PostgreSQL 17.6 with
 full migrations (Docker required); Workflow uses strict HTTP stubs and a recording
 publisher, without a database or broker. Event's separate
 `tests/integration/test_infra_migrations.py` preserves full-chain install/upgrade
@@ -113,6 +114,6 @@ same historical change eligible again. This does not alter assignment or
 substitute the current coordinator. Held work is never deleted or automatically
 published with an ID-only placeholder.
 
-`tests/integration/test_scrum45_notifications.py` checks saved-ID lookup,
+`tests/integration/test_scrum45-organiser_decision_notifications.py` checks saved-ID lookup,
 missing-name hold, transient lookup retry and independent job progress with strict
 Event/User HTTP stubs; owner transaction/storage is tested in the owning services.

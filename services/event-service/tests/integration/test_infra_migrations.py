@@ -1,6 +1,6 @@
 """Infra: full-chain clean install and upgrades: Event Service integration tests.
 
-Why: SCRUM-45 and SCRUM-166 schema changes must preserve installed rows, constraints and RLS.
+Why: SCRUM-44, SCRUM-45, SCRUM-46, SCRUM-49 and SCRUM-166 schema changes must preserve installed rows, constraints and RLS.
 Real: disposable postgres:17.6 and complete unmodified migrations.
 Doubled: synthetic NOLOGIN SQL API roles; optional default grants, not hosted Supabase.
 Not proven: service delivery, hosted-role parity or shared migration state.
@@ -8,7 +8,10 @@ Upgrade baselines are pinned below; SCRUM-166 uses main f0cd2c16ef56b5a4e15bc7d7
 import pytest
 import psycopg2
 import json
+import re
 from pathlib import Path
+from uuid import uuid4
+from psycopg2.extras import Json
 from tests.integration.factories import seed_existing_data
 
 pytestmark = [pytest.mark.integration, pytest.mark.enable_socket]
@@ -193,3 +196,101 @@ def test_event_change_upgrade_preserves_existing_outbox_rows_and_types(migration
             db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s::jsonb)', [kind, '{}'])
         with pytest.raises(psycopg2.errors.CheckViolation):
             db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s::jsonb)', ["event.invalid", '{}'])
+
+
+def test_submission_migration_upgrades_current_main_without_changing_existing_rows(migration_database):
+    """Normal: the submission migration preserves existing rows and notification types.
+    Both new submission types can be saved without changing the existing schema."""
+    paths = sorted(MIGRATIONS.glob('*.sql'))
+    pending = [path for path in paths if path.name == '20261025000000_event_submission_notifications.sql']
+    assert len(pending) == 1
+    with migration_database() as db:
+        db.apply([path for path in paths if path not in pending])
+        seed_existing_data(db)
+        for kind in TYPES:
+            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)', (kind, '{"preserved":true}'))
+        before = db.snapshot()
+        db.apply(pending)
+        assert db.snapshot() == before
+        assert_schema_and_types(db)
+        for kind in ('event.submission-fanout', 'event.submission'):
+            db.query('INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)', (kind, '{"new":true}'))
+        assert len(db.query('SELECT * FROM public."EventNotificationOutbox" WHERE type LIKE %s', ('event.submission%',))) == 2
+
+
+@pytest.mark.parametrize("installation", ["clean", "upgrade-with-existing-data"])
+def test_attendee_migration_preserves_existing_rows_and_prior_notification_types(
+    migration_database, installation
+):
+    """Normal: install the full schema cleanly or add only the attendee migration after seeded older ones.
+    In upgrade-with-existing-data, every existing table and prior Event type has data;
+    expect all rows unchanged. Both cases require the empty RLS-enabled Registration
+    outbox, revoked API-role grants, acceptance of new types and rejection of unknowns.
+    These unmodified migrations run in owned PostgreSQL with synthetic roles, not
+    hosted Supabase role parity.
+    """
+    paths = sorted(MIGRATIONS.glob("*.sql"))
+    pending = [
+        p for p in paths if p.name == "20261028000300_attendee_notifications.sql"
+    ]
+    assert len(pending) == 1
+    # The fixture explicitly creates synthetic SQL roles; this is not hosted-permission parity.
+    with migration_database(bootstrap=True) as db:
+        if installation == "clean":
+            db.apply(paths)
+        else:
+            db.apply([p for p in paths if p not in pending])
+            seed_existing_data(db)
+            db.query(
+                'INSERT INTO public."EquipmentNotificationOutbox"(source_id,type,source,envelope) VALUES (%s,%s,%s,%s)',
+                [
+                    str(uuid4()),
+                    "equipment.request-submission",
+                    Json({"synthetic": True}),
+                    Json({"frozen": True}),
+                ],
+            )
+            # Save a row for each prior allowlisted type, including types added by stacked dependencies.
+            expression = db.query(
+                "SELECT pg_get_expr(conbin,conrelid) FROM pg_constraint WHERE conrelid='public.\"EventNotificationOutbox\"'::regclass AND conname='EventNotificationOutbox_type_check'"
+            )[0][0]
+            prior_types = set(re.findall(r"'([^']+)'::", expression))
+            assert "event.rejection" in prior_types and "event.cancelled" in prior_types
+            for kind in prior_types:
+                db.query(
+                    'INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)',
+                    [kind, Json({"synthetic": kind})],
+                )
+            before = db.snapshot()
+            assert before and all(before.values()), (
+                "Seed every existing table before upgrade"
+            )
+            db.apply(pending)
+            after = db.snapshot()
+            assert {table: after[table] for table in before} == before
+        assert db.query(
+            'SELECT count(*) FROM public."RegistrationNotificationOutbox"'
+        ) == [(0,)]
+        assert db.query(
+            "SELECT relrowsecurity FROM pg_class WHERE oid='public.\"RegistrationNotificationOutbox\"'::regclass"
+        ) == [(True,)]
+        for role in ("anon", "authenticated", "service_role"):
+            assert db.query(
+                "SELECT has_table_privilege(%s, 'public.\"RegistrationNotificationOutbox\"', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')",
+                [role],
+            ) == [(False,)]
+        for kind in (
+            "attendee.cancelled-fanout",
+            "attendee.updated-fanout",
+            "attendee.event-cancelled",
+            "attendee.event-updated",
+        ):
+            db.query(
+                'INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)',
+                [kind, Json({"synthetic": True})],
+            )
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            db.query(
+                'INSERT INTO public."EventNotificationOutbox"(type,source) VALUES (%s,%s)',
+                ["unknown-type", Json({})],
+            )

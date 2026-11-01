@@ -136,7 +136,7 @@ def test_ac5_cancelled_recheck_shows_approved_details_and_cancellation(event_cha
 
 
 # SCRUM-150 AC4 ----
-def test_scrum150_ac4_approving_the_recheck_releases_new_time_to_attendees(event_change_notification_owner):
+def test_ac4_approving_the_recheck_releases_new_time_to_attendees(event_change_notification_owner):
     """Normal: the Safety Officer approves round 2. Attendees now get the new window and
     no venue override, and SCRUM-46's update fanout carries the same before/after pair.
     """

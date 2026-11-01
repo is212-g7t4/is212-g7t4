@@ -79,6 +79,6 @@ probe results and resource inventories are under
 `uv run --locked pytest` in the allowlisted environment and captures reports;
 `unit-green` used normal pytest defaults and `integration-green` added
 `-m integration --no-cov -s`. Focused verification selected
-`tests/integration/test_infra_migrations.py` plus
-`tests/integration/test_scrum_44_event_submission_notifications.py::test_submission_migration_upgrades_current_main_without_changing_existing_rows`.
+`tests/integration/test_infra_migrations.py`, including
+`test_submission_migration_upgrades_current_main_without_changing_existing_rows`.
 These automated runs did not migrate any shared development database.
