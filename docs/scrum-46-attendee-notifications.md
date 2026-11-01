@@ -150,7 +150,7 @@ A small external AST/source-contract inspection passed: it checks the current-on
 
 Actual RED->GREEN logs were retained outside Git for registration intent, dispatcher content, cancellation, fan-out, effective updates, consumer acceptance, original venue, historical visibility, UI destination, registration snapshot, legacy schedule, target switching and private-outbox grants. Intermediate unsuccessful files labelled `green` were retained as failures; later successful reruns are identified separately. Other additions characterize existing behavior rather than manufacturing RED.
 
-Existing generic worker tests are reused for freeze-before-publish, freeze failure, owner-returned envelope, broker confirmation/NACK, per-job failure isolation and ambiguous publish/completion replay: `test_scrum45_notifications.py`, `test_event_change_notifications.py` and their service-integration counterparts. Existing Notification persistence/dedup tests and the real E2E cover inbox replay/read preservation. Reuse is not a new attendee-specific fault-injection claim.
+Existing generic worker tests are reused for freeze-before-publish, freeze failure, owner-returned envelope, broker confirmation/NACK, per-job failure isolation and ambiguous publish/completion replay: `test_scrum45_notifications.py`, `test_scrum49_event_change_notifications.py` and their service-integration counterparts. Existing Notification persistence/dedup tests and the real E2E cover inbox replay/read preservation. Reuse is not a new attendee-specific fault-injection claim.
 
 Remaining limits:
 

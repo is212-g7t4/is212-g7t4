@@ -56,7 +56,7 @@ Not proven
 ----------
 - That Event Service's /events/active excludes Confirmed, Cancelled and
   Rejected events and carries organiser, date/time and status (AC2, AC4) (->
-  event-service/tests/unit/test_active_events.py). This file only proves that
+  event-service/tests/unit/test_scrum161_active_events.py). This file only proves that
   /workload passes through whatever events it is given.
 - That the page itself shows no edit controls (AC5 in the UI) (-> frontend
   CoordinatorWorkloadPage.test.tsx). Here AC5 is only that the endpoint accepts

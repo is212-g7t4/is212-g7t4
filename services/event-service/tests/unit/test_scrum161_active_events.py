@@ -18,7 +18,7 @@ AC5: The view is read-only: event details cannot be edited from it
 AC6: Only the Lead can access this view
 
 Scope of this file
-------------------
+------------------∏∏
 The view itself is GET /workload in coordinator-assignment-service; its tests
 are in that service (test_coordinator_workload.py). That route calls
 this service's GET /events/active for the events, so this file covers only what

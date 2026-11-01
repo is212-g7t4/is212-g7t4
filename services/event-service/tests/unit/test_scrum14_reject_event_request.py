@@ -44,8 +44,9 @@ Not proven
 """
 
 import pytest
+from datetime import UTC, datetime
 
-from app.models import RejectionReasonError, reject_event
+from app.models import RejectionReasonError, _aware, decide_event, reject_event
 from tests.unit.factories import (
     COORDINATOR_ID,
     OTHER_COORDINATOR_ID,
@@ -205,6 +206,19 @@ def test_ac3_model_refuses_a_whitespace_reason_itself_and_rolls_back_without_wri
     assert cursor.execute.call_args.args[0].lstrip().startswith("SELECT")
     assert connection.__exit__.call_args.args[0] is RejectionReasonError
     connection.close.assert_called_once()
+
+
+def test_ac3_decide_event_refuses_a_rejection_with_no_reason_before_opening_a_connection():
+    """
+    Summary: Calling decide_event(..., "Rejected", None) directly expects RejectionReasonError (no database is configured, so none is opened), and checks that _aware returns an already time-zone-aware datetime as it is. This is the only test that reaches that refusal in app/models.py, so it is kept although the route-level reason test is similar.
+    AC3: When rejecting, the Event Coordinator must provide a reason, which is
+        stored with the request.
+    Double: None; decide_event and _aware are called directly, and the unused database URL is never connected to
+    """
+    aware = datetime(2026, 10, 20, tzinfo=UTC)
+    assert _aware(aware) is aware
+    with pytest.raises(RejectionReasonError):
+        decide_event("unused-test-url", "00000000-0000-0000-0000-000000000001", COORDINATOR_ID, "Rejected", None)
 
 
 # --- Supporting/supplementary design checks ----------------------------------

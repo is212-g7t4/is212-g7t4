@@ -8,20 +8,20 @@ Not proven: the Safety Check composite's venue lookup, the Attendee Registration
 
 SCRUM-153
 AC1  Given an event is 'Confirmed', when its date/time, expected attendance, venue requirements, equipment requirements or accessibility needs change, then its status returns to 'Pending Safety Check' and the coordinator is told why.
-     Not covered here: owned by test_event_details_recheck.py.
+     Not covered here: owned by test_scrum153_recheck_safety_after_high_impact_changes.py.
 AC2  Given only a low-impact field changes (name, description, purpose, registration needs), then the event stays 'Confirmed'.
-     Not covered here: owned by test_event_details_recheck.py.
+     Not covered here: owned by test_scrum153_recheck_safety_after_high_impact_changes.py.
 AC3  Given a safety approval is withdrawn, then it stays visible in the event's safety history.
-     Not covered here: owned by test_event_details_recheck.py.
+     Not covered here: owned by test_scrum153_recheck_safety_after_high_impact_changes.py.
 AC4  Given a high-impact change to a 'Confirmed' event is waiting for its new safety check, when a registered Attendee views the event, then they still see the previously approved details, and the changed details are shown to them only after the Safety Officer approves the new safety check.
 AC5  Given the new safety check ends without approval (changes requested or the event is cancelled), then registered Attendees are never shown the unapproved change, and they continue to see the last approved details or the cancellation.
 SCRUM-150
 AC1  Given an event is 'Pending Safety Check', when I approve it, then its status changes to 'Confirmed'.
-     Not covered here: owned by test_safety_approve_status.py.
+     Not covered here: owned by test_scrum150_safety_approve_status.py.
 AC2  Given I approve an event, then the safety check is recorded with the status 'Safety Approved', together with my identity, the approval timestamp and any optional remarks, in the event's history.
-     Not covered here: owned by test_safety_approve_status.py.
+     Not covered here: owned by test_scrum150_safety_approve_status.py.
 AC3  Given an event is not 'Pending Safety Check', then the approve action is not available and an API call is rejected without changing the event.
-     Not covered here: owned by test_safety_approve_status.py.
+     Not covered here: owned by test_scrum150_safety_approve_status.py.
 AC4  Given the safety check I approve follows a high-impact change, when I approve it, then the changed details become visible to registered Attendees.
 AC = acceptance criterion; DR = supporting design rule.
 """

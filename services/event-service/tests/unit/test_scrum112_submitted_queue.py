@@ -27,7 +27,8 @@ AC3: Given an event request already has an assigned Event Coordinator, when the
      - Updates the event's assignment to reflect the new Event Coordinator
 
 This file covers AC1 only, the list. AC2 and AC3 (assigning and reassigning) are
-in test_coordinator_assignment.py and test_coordinator_reassignment.py.
+in test_scrum159_coordinator_assignment.py and
+test_scrum160_coordinator_reassignment.py.
 
 Real
 ----
@@ -108,22 +109,6 @@ def test_ac1_lead_sees_every_submitted_request_even_when_a_coordinator_id_is_sen
     query, params = cursor.execute.call_args.args
     assert "coordinator_id = %s" not in query
     assert params == []
-
-
-def test_submitted_queue_returns_an_empty_list_when_no_submitted_events_match(setup):
-    """
-    Summary: GET /events/submitted?coordinatorId=<id> returns {"events": []} when the database has no rows. REDUNDANT: the coordinator-limited test above stubs no rows and asserts the same body for the same request.
-    Supporting design check: an empty queue is an empty list, not an error
-    Double: Stub (cursor.fetchall returns no rows)
-    """
-    # Arrange (Given)
-    setup[2].fetchall.return_value = []
-
-    # Act (When)
-    response = setup[0].get(f"/events/submitted?coordinatorId={OTHER_COORDINATOR_ID}")
-
-    # Assert (Then)
-    assert response.json == {"events": []}
 
 
 def test_submitted_queue_ignores_the_retired_ismanager_flag(setup):

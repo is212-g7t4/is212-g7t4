@@ -42,7 +42,7 @@ Doubled
 Not proven
 ----------
 - That the coordinator is the event's assigned one (AC3): Event Service decides
-  (-> event-service test_event_modification_access.py).
+  (-> event-service test_scrum10_event_modification_access.py).
 """
 import pytest
 

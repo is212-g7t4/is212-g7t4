@@ -1,38 +1,27 @@
 """
-SCRUM-150: Approve Operational Safety Check
+SUPPORTING DESIGN CHECKS: service-to-service lock on PATCH /events/<id>/safety-status
 
 User Story
 ----------
-As a Safety Officer, I want to approve an event's operational safety
-arrangements, so that the event can proceed to preparation.
-
-Acceptance Criteria
--------------------
-AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-     status changes to 'Confirmed'.
-AC2: Given I approve an event, then the safety check is recorded with the
-     status 'Safety Approved', together with my identity, the approval
-     timestamp and any optional remarks, in the event's history.
-AC3: Given an event is not 'Pending Safety Check', then the approve action is
-     not available and an API call is rejected without changing the event.
-AC4: Given the safety check I approve follows a high-impact change, when I
-     approve it, then the changed details become visible to registered
-     Attendees.
+Supporting/supplementary design checks. No story or acceptance
+criterion describes the behaviour these tests check; it is plumbing
+that the safety stories (SCRUM-149, SCRUM-150, SCRUM-151) rely on. Only Safety
+Check Service may move an event through the safety statuses, and it proves
+that with the X-Internal-Token header.
 
 Real
 ----
 - The Event Service routes in app/__init__.py and the rules in app/models.py,
-  run through a real create_app(): request validation, the caller's role and
-  ownership checks from the signed token, the status rules, and the SQL and
-  parameters sent to the database (including notification outbox rows).
-- Assertions are on the HTTP status, the response body and the queries and
-  parameters the cursor received.
+  run through a real create_app(): the internal-token check in front of
+  PATCH /events/<id>/safety-status, the CORS headers, and the startup warning.
+- Assertions are on the HTTP status, the response body and code, the CORS
+  headers, the log text, and whether the cursor was used.
 
 Doubled
 -------
 - psycopg2.connect: Stub (fixture) - a MagicMock connection whose cursor
   returns canned rows; Mock - its execute calls are asserted to prove what was
-  (or was not) written.
+  (or was not) read or written.
 - Supabase JWKS: Stub (tests/conftest.py) - tokens are signed with a throwaway
   ES256 key.
 
@@ -40,8 +29,9 @@ Not proven
 ----------
 - That the SQL runs against the real Postgres schema, constraints and row locks
   (-> tests/integration/ against a throwaway postgres:17.6).
-- That the notification outbox rows are delivered (-> Notification Service
-  tests and the E2E journeys).
+- Which roles may call the endpoint with the token (->
+  test_scrum10_event_modification_access.py).
+- The approval itself (-> test_scrum150_safety_approve_status.py).
 """
 from unittest.mock import MagicMock
 
@@ -100,12 +90,17 @@ def body():
     }
 
 
-def test_no_header_is_refused_when_the_lock_is_configured(setup):
+# --- Supporting/supplementary design checks ----------------------------------
+# No Jira acceptance criterion covers these. They check design decisions the
+# stories rely on (health check, CORS, configuration and failure handling).
+
+
+def test_safety_status_without_the_internal_token_header_is_refused_when_the_lock_is_configured(setup):
     """
-    Summary: No header is refused when the lock is configured.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with a signed-in user but no X-Internal-Token header answers 403 with code INTERNAL_ONLY and no query is sent.
+    Supporting design check: the safety-status route is only for the service
+        that holds the internal token
+    Double: Mock (cursor.execute asserted never called); the server's INTERNAL_SERVICE_TOKEN is configured
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -119,12 +114,12 @@ def test_no_header_is_refused_when_the_lock_is_configured(setup):
     cursor.execute.assert_not_called()
 
 
-def test_wrong_header_is_refused_when_the_lock_is_configured(setup):
+def test_safety_status_with_the_wrong_internal_token_is_refused_when_the_lock_is_configured(setup):
     """
-    Summary: Wrong header is refused when the lock is configured.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with X-Internal-Token "not-the-token" answers 403 with code INTERNAL_ONLY and no query is sent.
+    Supporting design check: a wrong internal token is refused like a missing
+        one
+    Double: Mock (cursor.execute asserted never called); the server's INTERNAL_SERVICE_TOKEN is configured
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -142,12 +137,11 @@ def test_wrong_header_is_refused_when_the_lock_is_configured(setup):
     cursor.execute.assert_not_called()
 
 
-def test_token_unconfigured_fails_closed(unconfigured):
+def test_safety_status_stays_closed_with_503_when_no_internal_token_is_configured(unconfigured):
     """
-    Summary: No INTERNAL_SERVICE_TOKEN means the route is refused with 503, not left open.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: With INTERNAL_SERVICE_TOKEN unset, PATCH /events/<id>/safety-status answers 503 with code INTERNAL_AUTH_NOT_CONFIGURED and no query is sent, so the route is not left open.
+    Supporting design check: an unconfigured lock fails closed
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = unconfigured
@@ -161,12 +155,12 @@ def test_token_unconfigured_fails_closed(unconfigured):
     cursor.execute.assert_not_called()
 
 
-def test_token_unconfigured_ignores_any_header_sent(unconfigured):
+def test_an_internal_token_header_does_not_open_the_route_when_the_server_has_no_token_configured(unconfigured):
     """
-    Summary: A header sent anyway doesn't open an unconfigured route.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: With INTERNAL_SERVICE_TOKEN unset, PATCH /events/<id>/safety-status carrying X-Internal-Token "anything" still answers 503 and no query is sent.
+    Supporting design check: sending a header does not open an unconfigured
+        lock
+    Double: Mock (cursor.execute asserted never called)
     """
     # Arrange (Given)
     client, _, cursor = unconfigured
@@ -183,12 +177,11 @@ def test_token_unconfigured_ignores_any_header_sent(unconfigured):
     cursor.execute.assert_not_called()
 
 
-def test_right_header_passes_the_lock(setup):
+def test_safety_status_with_the_right_internal_token_gets_past_the_lock(setup):
     """
-    Summary: Right header passes the lock.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: PATCH /events/<id>/safety-status with the configured X-Internal-Token reaches the model and answers 404 for an event the database does not have, not 403.
+    Supporting design check: the right token passes the lock
+    Double: Stub (cursor.fetchone returns None); only the 404 status is asserted
     """
     # Arrange (Given)
     client, _, cursor = setup
@@ -206,12 +199,12 @@ def test_right_header_passes_the_lock(setup):
     assert response.status_code == 404
 
 
-def test_cors_does_not_allow_the_internal_header(setup):
+def test_cors_preflight_does_not_allow_the_internal_token_header(setup):
     """
-    Summary: A browser must not be able to send this header (it isn't in CORS).
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: An OPTIONS request to /events/<id>/safety-status from the frontend origin returns Access-Control-Allow-Headers without X-Internal-Token.
+    Supporting design check: a browser must not be able to send the internal
+        token header
+    Double: None for the database; only the CORS response headers are asserted
     """
     # Arrange (Given)
     client, _, _ = setup
@@ -227,12 +220,11 @@ def test_cors_does_not_allow_the_internal_header(setup):
     )
 
 
-def test_startup_warns_when_lock_is_off(monkeypatch, caplog):
+def test_startup_warns_when_the_internal_token_lock_is_off(monkeypatch, caplog):
     """
-    Summary: Make it visible when the stack is running unlocked.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: Creating the app with an empty INTERNAL_SERVICE_TOKEN logs a WARNING containing "INTERNAL_SERVICE_TOKEN is not set".
+    Supporting design check: running with the lock off is made visible
+    Double: Stub (psycopg2.connect returns a MagicMock connection); the log text is the only assertion
     """
     # Arrange (Given)
     connection = MagicMock()
@@ -248,12 +240,11 @@ def test_startup_warns_when_lock_is_off(monkeypatch, caplog):
     assert "INTERNAL_SERVICE_TOKEN is not set" in caplog.text
 
 
-def test_startup_does_not_warn_when_lock_is_on(monkeypatch, caplog):
+def test_startup_does_not_warn_when_the_internal_token_lock_is_on(monkeypatch, caplog):
     """
-    Summary: Startup does not warn when lock is on.
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
+    Summary: Creating the app with INTERNAL_SERVICE_TOKEN set logs no "INTERNAL_SERVICE_TOKEN is not set" warning.
+    Supporting design check: no warning when the lock is configured
+    Double: Stub (psycopg2.connect returns a MagicMock connection); the log text is the only assertion
     """
     # Arrange (Given)
     connection = MagicMock()
@@ -267,30 +258,3 @@ def test_startup_does_not_warn_when_lock_is_on(monkeypatch, caplog):
 
     # Assert (Then)
     assert "INTERNAL_SERVICE_TOKEN is not set" not in caplog.text
-
-
-def test_coordinator_cannot_confirm_through_safety_status_when_locked(setup):
-    """
-    Summary: SCRUM-152 AC1, API path via /safety-status (not just /progress).
-    AC1: Given an event is 'Pending Safety Check', when I approve it, then its
-        status changes to 'Confirmed'.
-    Double: Stub (cursor returns canned rows), Mock (execute calls asserted)
-    """
-    # Arrange (Given)
-    client, _, cursor = setup
-
-    # Act (When)
-    response = client.patch(
-        f"/events/{EVENT_ID}/safety-status",
-        json={
-            "status": "Confirmed",
-            "decidedBy": COORDINATOR_ID,
-            "safetyCheckId": SAFETY_CHECK_ID,
-            "roundNumber": 1,
-        },
-    )
-
-    # Assert (Then)
-    assert response.status_code == 403
-    assert response.json["code"] == "INTERNAL_ONLY"
-    cursor.execute.assert_not_called()

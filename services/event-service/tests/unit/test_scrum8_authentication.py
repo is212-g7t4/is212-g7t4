@@ -391,6 +391,60 @@ def test_ac1_event_reads_naming_a_user_in_the_query_but_sending_no_token_are_ref
     connect.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "method, path",
+    [
+        ("post", "/events/drafts"),
+        ("get", "/events/drafts"),
+        ("patch", f"/events/drafts/{EVENT}"),
+        ("post", f"/events/drafts/{EVENT}/submit"),
+        ("delete", f"/events/drafts/{EVENT}"),
+    ],
+    ids=["save_draft", "list_drafts", "edit_draft", "submit_draft", "delete_draft"],
+)
+def test_ac1_draft_routes_with_no_token_are_refused_before_any_query(client, monkeypatch, method, path):
+    """
+    Summary: POST/GET/PATCH/DELETE on the draft routes (save, list, edit, submit, delete) with no Authorization header answer 401, even when the body names an organiserId, and no database connection is opened.
+    AC1: Given a system user has not been successfully authenticated, when they
+        attempt to access protected information or functionality, then access
+        is denied.
+    Double: Mock (the psycopg2.connect patch is asserted never called); no token is sent, so the JWKS key is unused
+    """
+    # Arrange (Given)
+    connect = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", connect)
+
+    # Act (When)
+    response = getattr(client, method)(path, json={"organiserId": OTHER})
+
+    # Assert (Then)
+    assert response.status_code == 401
+    connect.assert_not_called()
+
+
+def test_ac1_event_details_edit_with_no_token_is_refused_even_when_the_body_names_a_coordinator(client, monkeypatch):
+    """
+    Summary: PATCH /events/<id>/details with no Authorization header answers 401 and no database connection is opened, even though the body names a coordinatorId; the editor is the signed-in user, never an id in the body.
+    AC1: Given a system user has not been successfully authenticated, when they
+        attempt to access protected information or functionality, then access
+        is denied.
+    Double: Mock (the psycopg2.connect patch is asserted never called); no token is sent, so the JWKS key is unused
+    """
+    # Arrange (Given)
+    connect = MagicMock()
+    monkeypatch.setattr("app.models.psycopg2.connect", connect)
+
+    # Act (When)
+    response = client.patch(
+        f"/events/{EVENT}/details",
+        json={"coordinatorId": USER_ID, "changes": {"eventName": "Renamed"}},
+    )
+
+    # Assert (Then)
+    assert response.status_code == 401
+    connect.assert_not_called()
+
+
 # --- Supporting/supplementary design checks ----------------------------------
 # No Jira acceptance criterion covers these. They check design decisions the
 # stories rely on (health check, CORS, configuration and failure handling).
