@@ -152,6 +152,28 @@ scripts/
 
 `.github/workflows/ci.yml` runs on pull requests, pushes to `main`, nightly at 02:00 Singapore time and on demand. It checks changes; it does not deploy. Jobs form a dependency graph, **not** a lint → unit → integration pipeline:
 
+```text
+Test branches (frontend starts independently):
+
+discover-services -+--> dependency-audit ------------------> [final gate]
+                   |
+                   +--> unit-tests ---------+
+                   |                        |
+                   `--> integration-tests --+--> journeys (E2E) --> [final gate]
+                                            |
+frontend -----------------------------------+
+
+Parallel checks (not E2E prerequisites):
+
+changes --+--> docker-build (if docker filter matches) ------> [final gate]
+          `------------------------------------------------> [final gate]
+gitleaks --------------------------------------------------> [final gate]
+
+[final gate] = ci-passed (always())
+```
+
+Only successful unit, integration and frontend results unlock E2E. All `[final gate]` arrows refer to the same `ci-passed` job, which directly waits for **all nine** other jobs: discovery, unit, integration, dependency audit, frontend, journeys, changes, conditional Docker build and Gitleaks. Audit, secret scanning and Docker build do not gate E2E.
+
 | Jobs | Inputs/dependencies | Checks and output |
 |---|---|---|
 | `changes`, `discover-services` | Start independently on checkout | Classify changed paths; discover unit/audit services from `services/*/pyproject.toml` and integration services from `tests/integration/`. Empty matrices fail discovery. |
