@@ -40,6 +40,21 @@ docker compose down
 
 Do not add `-v` (it deletes named data volumes). Use `docker compose ps` to inspect backend status.
 
+## Login accounts
+
+| Email | Role |
+|---|---|
+| wei.chen@connectsphere.example | Technical Support |
+| siti.aminah@connectsphere.example | Venue Staff |
+| attendee@example.com | Attendee |
+| priya.nair@connectsphere.example | Event Coordinator |
+| nurul.huda@connectsphere.example | Safety Officer |
+| michaellee@connect.com | Event Organiser |
+| marcus.lim@connectsphere.example | Event Coordinator |
+| jon.tan@example.com | Attendee |
+| danielkoh@connect.com | Event Organiser |
+| alice.tan@connectsphere.example | Event Coordinator Lead |
+
 ## Tests
 
 ### Backend
@@ -103,11 +118,13 @@ npm run build
 
 The mocked frontend browser suite and unused lifecycle-helper tests were retired, not replaced. Unit/component tests do not replace that browser coverage. Real-stack journeys (`e2e/journeys/`) are opt-in locally: read `e2e/journeys/TRACEABILITY.md` before `npm run test:journeys` from the root; against your own stack they write shared test data, and they do not yet replace all retired coverage.
 
-**Journeys in CI.** The `journeys` job in `.github/workflows/ci.yml` runs J1 (A and B), J3 (a, b, c), J5a, J5b and J7 on every pull request, push to `main` and nightly run. It uses the isolated runner (`npm run test:journeys:isolated`), which starts a throwaway database, local Supabase Auth, RabbitMQ, every service and Vite with no secrets and no shared Supabase, and retries a failed test once. J2, J4, J5c, J6b and J8 are not in CI; J5c is excluded because it waits about 8 minutes for a real hold to expire. Reproduce the CI run locally with Docker running:
+**Journeys in CI.** The `journeys` job in `.github/workflows/ci.yml` runs J1 (A and B), J3 (a, b, c), J5a, J5b and J7 after `unit-tests`, `integration-tests` and `frontend` all succeed, on every workflow trigger including manual runs. If any prerequisite fails, is cancelled or is skipped, journeys are skipped and `ci-passed` fails. These are real-stack Chromium journeys, not mocked browser tests. The isolated runner (`e2e/isolated/run.mjs`) provisions a throwaway PostgreSQL database from migrations/seed data, local Supabase Auth with ES256/JWKS and a role hook, RabbitMQ, services/workers and Vite. It uses generated credentials and dynamic loopback ports, not development `.env` files or shared Supabase. J2, J4, J5c, J6a/b and J8 are outside CI's grep selection; J5c waits about 8 minutes for a real hold to expire. With Docker running, root/frontend dependencies installed and Playwright Chromium installed (`npx playwright install --with-deps chromium`), reproduce CI from the repository root:
 
+```bash
+npm run test:journeys:isolated -- --grep "J1|J3|J5a|J5b|J7" --retries=1
 ```
-npm run test:journeys:isolated -- --grep "J1|J3|J5a|J5b|J7"
-```
+
+Playwright uses one worker; CI overrides the default zero retries with one retry per failed test. The runner tears down its own containers/volumes on exit or failure; interrupted cleanup may require the printed recovery command. Reports include HTML, traces, failure screenshots and retained failure videos under `e2e/journeys/report/` and `e2e/journeys/test-results/` (run-specific subfolders). CI attempts to upload these even after failure; missing reports are ignored. See `e2e/journeys/TRACEABILITY.md` for recovery and coverage limits.
 
 ### Test locations
 
@@ -140,10 +157,13 @@ scripts/
 | `changes`, `discover-services` | Start independently on checkout | Classify changed paths; discover unit/audit services from `services/*/pyproject.toml` and integration services from `tests/integration/`. Empty matrices fail discovery. |
 | `unit-tests`, `integration-tests`, `dependency-audit` | Each needs only `discover-services`; their service matrices can run in parallel | Locked dependencies; unit tests with coverage floors/reports; integration tests with disposable PostgreSQL images and JUnit reports; `pip-audit` of locked dependencies. All maintained backend CI tiers run regardless of changed paths. |
 | `frontend`, `gitleaks` | Independent of discovery and backend tests; not path-filtered | Frontend runs **in order**: `npm ci` → `npm audit --audit-level=high` → `npm run lint` (oxlint) → `npm run test:coverage` (Vitest) → `npm run build` (`tsc -b` + Vite). Gitleaks separately scans full Git history. |
+| `journeys` | Needs `unit-tests`, `integration-tests` and `frontend`; starts only after all three succeed; not path-filtered; 60-minute timeout | Installs root/frontend dependencies and Chromium, then runs `npm run test:journeys:isolated -- --grep "J1\|J3\|J5a\|J5b\|J7" --retries=1` on the disposable real stack described above. |
 | `docker-build` | Needs `changes`; runs only when its `docker` filter matches `services/**`, `docker-compose.yml` or the workflow | Copies example environment files and runs `docker compose build`; it does not start services. |
-| `ci-passed` | `always()` join of all eight preceding jobs | Fails on any failure/cancellation, and requires unit, integration and dependency-audit results to be `success`. A conditional Docker skip is allowed; the gate does not explicitly require success from every other job. Intended single required branch-protection check. |
+| `ci-passed` | `always()` join of all preceding jobs, including `journeys` | Fails on any failure/cancellation, and explicitly requires unit, integration, dependency-audit **and journeys** results to be `success` (skips fail these checks). A conditional Docker skip is allowed; the gate does not explicitly require success from every other job. Intended single required branch-protection check; actual protection settings are not established by this file. |
 
-Frontend lint is inside its own job, not a prerequisite for backend tests. Real-stack browser journeys are not run by CI.
+Backend unit and integration jobs and the frontend job can run in parallel (backend jobs wait only for service discovery); journeys wait for all three to succeed and are skipped otherwise. Frontend lint is inside its own job, so it gates journeys through the frontend result but does not gate backend tests. Unit (`test-reports-<service>`), integration (`integration-reports-<service>`) and browser (`journey-reports`) artifacts are uploaded with `always()`, retained for 14 days and ignored if absent. Unit reports include JUnit and coverage XML; integration reports include JUnit. Journey failures also print service logs before teardown in CI.
+
+This describes the configured workflow, not a guarantee that the latest run passed. CI needs no team Supabase credentials; the isolated runner generates its own temporary credentials. Python lint/formatting, frontend formatting, journeys outside the selected subset and opt-in live Supabase tests are not included.
 
 ## Further documentation
 
