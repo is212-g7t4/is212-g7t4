@@ -118,6 +118,8 @@ npm run build
 
 The mocked frontend browser suite and unused lifecycle-helper tests were retired, not replaced. Unit/component tests do not replace that browser coverage. Real-stack journeys (`e2e/journeys/`) are opt-in locally: read `e2e/journeys/TRACEABILITY.md` before `npm run test:journeys` from the root; against your own stack they write shared test data, and they do not yet replace all retired coverage.
 
+### E2E
+
 **Journeys in CI.** The `journeys` job in `.github/workflows/ci.yml` runs J1 (A and B), J3 (a, b, c), J5a, J5b and J7 after `unit-tests`, `integration-tests` and `frontend` all succeed, on every workflow trigger including manual runs. If any prerequisite fails, is cancelled or is skipped, journeys are skipped and `ci-passed` fails. These are real-stack Chromium journeys, not mocked browser tests. The isolated runner (`e2e/isolated/run.mjs`) provisions a throwaway PostgreSQL database from migrations/seed data, local Supabase Auth with ES256/JWKS and a role hook, RabbitMQ, services/workers and Vite. It uses generated credentials and dynamic loopback ports, not development `.env` files or shared Supabase. J2, J4, J5c, J6a/b and J8 are outside CI's grep selection; J5c waits about 8 minutes for a real hold to expire. With Docker running, root/frontend dependencies installed and Playwright Chromium installed (`npx playwright install --with-deps chromium`), reproduce CI from the repository root:
 
 ```bash
