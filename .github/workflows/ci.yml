@@ -236,6 +236,7 @@ jobs:
   # Supabase Auth, RabbitMQ, every service and Vite, all started by the runner.
   # No secrets and no shared Supabase. One retry absorbs a service cold-start blip.
   journeys:
+    needs: [unit-tests, integration-tests, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
