@@ -55,6 +55,8 @@ Do not add `-v` (it deletes named data volumes). Use `docker compose ps` to insp
 | danielkoh@connect.com | Event Organiser |
 | alice.tan@connectsphere.example | Event Coordinator Lead |
 
+Password for all accounts: IS212G7T4
+
 ## Tests
 
 ### Backend
